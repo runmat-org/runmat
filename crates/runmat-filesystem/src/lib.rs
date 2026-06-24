@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod memory;
+#[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
@@ -17,6 +19,8 @@ pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -677,9 +681,19 @@ pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     provider.read(&resolved).await
 }
 
+pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_async(path).await })
+}
+
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
     let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
+}
+
+pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_to_string_async(path).await })
 }
 
 pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
@@ -688,16 +702,32 @@ pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::
     provider.write(&resolved, data.as_ref()).await
 }
 
+pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    let data = data.as_ref().to_vec();
+    wait_for_fs(move || async move { write_async(path, data).await })
+}
+
 pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.remove_file(&resolved).await
 }
 
+pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { remove_file_async(path).await })
+}
+
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.metadata(&resolved).await
+}
+
+pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { metadata_async(path).await })
 }
 
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
@@ -710,6 +740,11 @@ pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>>
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.read_dir(&resolved).await
+}
+
+pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_dir_async(path).await })
 }
 
 pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -730,6 +765,11 @@ pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     provider.create_dir_all(&resolved).await
 }
 
+pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { create_dir_all_async(path).await })
+}
+
 pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
@@ -747,6 +787,12 @@ pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::R
     let resolved_to = resolve_path(to.as_ref());
     let provider = current_provider();
     provider.rename(&resolved_from, &resolved_to).await
+}
+
+pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    let from = from.as_ref().to_path_buf();
+    let to = to.as_ref().to_path_buf();
+    wait_for_fs(move || async move { rename_async(from, to).await })
 }
 
 pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
@@ -798,6 +844,27 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
         .truncate(true)
         .open(to.as_ref())?;
     io::copy(&mut reader, &mut writer)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = io::Result<T>> + 'static,
+{
+    std::thread::spawn(move || futures::executor::block_on(factory()))
+        .join()
+        .map_err(|_| io::Error::other("filesystem worker thread panicked"))?
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = io::Result<T>>,
+{
+    futures::executor::block_on(factory())
 }
 
 fn default_provider() -> Arc<dyn FsProvider> {
@@ -1267,6 +1334,24 @@ mod tests {
         futures::executor::block_on(set_readonly_async(&path, false)).expect("unset readonly");
         let meta = futures::executor::block_on(metadata_async(&path)).expect("metadata");
         assert!(!meta.is_readonly());
+    }
+
+    #[test]
+    fn sync_helpers_work_inside_async_executor() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("file.txt");
+        let parent = path.parent().unwrap().to_path_buf();
+
+        futures::executor::block_on(async {
+            create_dir_all(&parent).expect("create dir");
+            write(&path, b"hello").expect("write");
+            assert_eq!(read(&path).expect("read"), b"hello");
+            assert_eq!(read_to_string(&path).expect("read string"), "hello");
+            assert!(metadata(&path).expect("metadata").is_file());
+            assert_eq!(read_dir(&parent).expect("read dir").len(), 1);
+            remove_file(&path).expect("remove");
+        });
     }
 
     #[test]

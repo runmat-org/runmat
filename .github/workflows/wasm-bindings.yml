@@ -9,13 +9,9 @@ on:
       - "crates/runmat-wasm/**"
       - "crates/runmat-runtime/**"
       - "crates/runmat-lsp/**"
-      - "scripts/chrome-headless.sh"
       - "scripts/regenerate-wasm-registry.sh"
-      - "scripts/resolve-chromedriver.sh"
       - "scripts/test-wasm-headless.sh"
-      - "scripts/test-wasm-regression-suite.sh"
-      - "scripts/test-wasm-replay-smoke.sh"
-      - "scripts/test-wasm-symptom-closure.sh"
+      - "scripts/runtime/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/wasm-bindings.yml"
@@ -158,7 +154,7 @@ jobs:
       - name: Run wasm symptom regression suite
         env:
           WASM_BINDGEN_TEST_TIMEOUT: "300"
-        run: scripts/test-wasm-regression-suite.sh symptom-closure
+        run: scripts/runtime/test-wasm-regression-suite.sh symptom-closure
 
       - name: Determine publish settings
         id: publish_settings

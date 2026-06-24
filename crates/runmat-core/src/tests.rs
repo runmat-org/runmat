@@ -1,9 +1,7 @@
 use crate::*;
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 struct CwdGuard {
@@ -12,6 +10,10 @@ struct CwdGuard {
 
 struct PathStateGuard {
     previous: String,
+}
+
+fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+    runmat_filesystem::provider_override_lock()
 }
 
 impl Drop for CwdGuard {
@@ -1479,7 +1481,7 @@ fn execute_text_request_supports_dynamic_arity_check_helpers() {
 
 #[test]
 fn execute_path_request_supports_mfilename_name_and_fullpath() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let source_path = tmp.path().join("named_source.m");
     std::fs::write(
@@ -1516,7 +1518,7 @@ fn execute_path_request_supports_mfilename_name_and_fullpath() {
 
 #[test]
 fn execute_path_request_supports_mfilename_class_option_for_static_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -1558,7 +1560,7 @@ end
 
 #[test]
 fn execute_path_request_supports_mfilename_for_private_package_and_class_folder_helpers() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
@@ -1765,7 +1767,7 @@ fn execute_text_request_supports_inputname_builtin() {
 
 #[test]
 fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -2549,6 +2551,55 @@ fn execute_request_path_error_returns_resolved_source_context() {
 }
 
 #[test]
+fn execute_request_path_source_context_is_relative_to_cwd() {
+    let _guard = cwd_lock();
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("nested")).expect("create nested dir");
+    let source_path = dir.path().join("nested/runtime-relative.m");
+    let source_text = "x = [1];\ny = x(2);\n";
+    std::fs::write(&source_path, source_text).expect("write test source");
+    let _cwd = push_cwd(dir.path());
+
+    let response = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Path("nested/runtime-relative".to_string()),
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(125)),
+    }));
+
+    assert_eq!(
+        response.source_context.source_name(),
+        "nested/runtime-relative.m"
+    );
+    let outcome = response
+        .result
+        .expect("runtime failures are returned as outcome diagnostics");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == abi::DiagnosticSeverity::Error)
+        .expect("runtime error diagnostic");
+    assert!(
+        diagnostic
+            .callstack
+            .iter()
+            .any(|frame| frame.contains("nested/runtime-relative.m")),
+        "runtime callstack should include cwd-relative source name: {:?}",
+        diagnostic.callstack
+    );
+    assert!(
+        diagnostic
+            .callstack
+            .iter()
+            .all(|frame| !frame.contains(&dir.path().to_string_lossy().to_string())),
+        "runtime callstack should not include tempdir absolute path: {:?}",
+        diagnostic.callstack
+    );
+}
+
+#[test]
 fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "x = [1];\ny = x(2);\n";
@@ -2677,7 +2728,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_loads_sibling_classdef_sources_without_manifest() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("Vec2.m"),
@@ -2727,7 +2778,7 @@ end
 
 #[test]
 fn execute_path_request_loads_package_classdef_sources_without_manifest() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+geom")).expect("create package dir");
     std::fs::write(
@@ -2771,7 +2822,7 @@ end
 
 #[test]
 fn execute_path_request_loads_dependency_package_classdef_sources_via_project_composition() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/geombase");
     std::fs::create_dir_all(dep_root.join("+geom")).expect("create dependency package dir");
@@ -2844,7 +2895,7 @@ fn execute_path_request_source_authoring_oop_smoke() {
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             std::fs::write(
                 tmp.path().join("Vec2.m"),
@@ -2955,7 +3006,7 @@ amt = c.amount;
 
 #[test]
 fn execute_path_request_source_authoring_one_file_oop_smoke() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let source = tmp.path().join("main.m");
     std::fs::write(
@@ -3023,7 +3074,7 @@ fn execute_path_request_source_authoring_one_file_operator_overload_plus() {
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             let source = tmp.path().join("main.m");
             std::fs::write(
@@ -3082,7 +3133,7 @@ v = c.amount;
 
 #[test]
 fn execute_path_request_preserves_handle_alias_semantics_for_sibling_classdef() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3114,7 +3165,7 @@ end
 
 #[test]
 fn execute_path_request_delete_invalidates_all_handle_aliases() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3157,7 +3208,7 @@ end
 
 #[test]
 fn execute_path_request_calls_handle_delete_method_before_invalidation() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3200,7 +3251,7 @@ end
 
 #[test]
 fn execute_path_request_delete_listener_disables_future_notifications() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3254,7 +3305,7 @@ end
 
 #[test]
 fn execute_path_request_supports_listener_member_access_via_dot_syntax() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3304,7 +3355,7 @@ end
 
 #[test]
 fn execute_path_request_supports_addlistener_char_callback_name_without_at_prefix() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3405,7 +3456,7 @@ fn compile_local_function_global_decl_emits_named_global_workspace_effect() {
 
 #[test]
 fn execute_path_request_reports_undefined_function_for_missing_event_callback() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3438,7 +3489,7 @@ end
 
 #[test]
 fn execute_path_request_reports_undefined_function_for_uncaught_missing_event_callback() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3473,7 +3524,7 @@ end
 
 #[test]
 fn execute_path_request_supports_enumeration_member_static_access() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("Color.m"),
@@ -3504,7 +3555,7 @@ end
 
 #[test]
 fn execute_path_request_supports_call_method_subsasgn_dot_without_custom_subsasgn() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3537,7 +3588,7 @@ end
 
 #[test]
 fn execute_path_request_supports_call_method_subsref_dot_without_custom_subsref() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("H.m"),
@@ -3570,7 +3621,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_subclassing_sealed_class() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3622,7 +3673,7 @@ end
 
 #[test]
 fn execute_path_request_reports_class_sealed_for_uncaught_subclassing() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3658,7 +3709,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_instantiating_abstract_class() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3691,7 +3742,7 @@ end
 
 #[test]
 fn execute_path_request_reports_abstract_method_missing_for_uncaught_abstract_instantiation() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3725,7 +3776,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_concrete_subclass_missing_abstract_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3780,7 +3831,7 @@ end
 
 #[test]
 fn execute_path_request_reports_abstract_method_missing_for_uncaught_partial_implementation() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3819,7 +3870,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_overriding_sealed_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3881,7 +3932,7 @@ end
 
 #[test]
 fn execute_path_request_reports_method_sealed_for_uncaught_override() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3927,7 +3978,7 @@ end
 
 #[test]
 fn execute_path_request_enforces_private_constructor_access() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -3971,7 +4022,7 @@ end
 
 #[test]
 fn execute_path_request_enforces_protected_constructor_access() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -4024,7 +4075,7 @@ end
 
 #[test]
 fn execute_path_request_treats_constant_property_as_static_readonly() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4062,7 +4113,7 @@ end
 
 #[test]
 fn execute_path_request_supports_dependent_getter_setter_methods() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("D.m"),
@@ -4114,7 +4165,7 @@ end
 
 #[test]
 fn execute_path_request_applies_property_default_initializers() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -4163,7 +4214,7 @@ end
 
 #[test]
 fn execute_path_request_applies_constant_expression_property_defaults_and_empty_fallback() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("E.m"),
@@ -4205,7 +4256,7 @@ end
 
 #[test]
 fn execute_path_request_allows_private_property_access_within_class_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4251,7 +4302,7 @@ end
 
 #[test]
 fn execute_path_request_supports_superclass_constructor_syntax() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -4315,7 +4366,7 @@ end
 
 #[test]
 fn execute_path_request_supports_qualified_superclass_constructor_syntax() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
     std::fs::create_dir_all(root.join("+pkg1")).expect("create package");
@@ -4421,7 +4472,7 @@ b = B(3);
 
 #[test]
 fn execute_path_request_supports_superclass_method_syntax() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -4515,7 +4566,7 @@ y = B().f(4);
 
 #[test]
 fn execute_path_request_supports_qualified_superclass_method_syntax() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg1")).expect("create package dir");
     std::fs::write(
@@ -4560,7 +4611,7 @@ end
 
 #[test]
 fn execute_path_request_supports_nested_package_qualified_superclass_syntax() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg").join("+sub")).expect("create package dir");
     std::fs::write(
@@ -4633,7 +4684,7 @@ end
 
 #[test]
 fn execute_path_request_supports_function_style_instance_method_dispatch() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("P.m"),
@@ -4679,7 +4730,7 @@ end
 
 #[test]
 fn execute_path_request_supports_function_style_protected_method_inside_subclass() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -4732,7 +4783,7 @@ end
 
 #[test]
 fn execute_path_request_supports_function_style_private_method_inside_class_only() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4777,7 +4828,7 @@ end
 
 #[test]
 fn execute_path_request_reports_method_private_for_uncaught_function_style_private_call() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4810,7 +4861,7 @@ end
 
 #[test]
 fn execute_path_request_allows_private_method_calls_within_class() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4855,7 +4906,7 @@ end
 
 #[test]
 fn execute_path_request_supports_static_method_calls() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -4892,7 +4943,7 @@ fn execute_path_request_supports_source_class_operator_overload_plus() {
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             std::fs::write(
                 tmp.path().join("Money.m"),
@@ -4949,7 +5000,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_unqualified_static_method_name_in_script_scope() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -4989,7 +5040,7 @@ end
 
 #[test]
 fn execute_path_request_reports_undefined_function_for_uncaught_unqualified_static_method_name() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5023,7 +5074,7 @@ end
 
 #[test]
 fn execute_path_request_supports_unqualified_static_method_name_via_wildcard_import() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5055,7 +5106,7 @@ end
 
 #[test]
 fn execute_path_request_supports_unqualified_static_property_via_wildcard_import() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5098,7 +5149,7 @@ end
 
 #[test]
 fn execute_path_request_local_variable_shadows_imported_static_property() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5141,7 +5192,7 @@ end
 
 #[test]
 fn execute_path_request_supports_unqualified_static_method_handle_via_wildcard_import() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5173,7 +5224,7 @@ end
 
 #[test]
 fn execute_path_request_supports_unqualified_static_method_handle_via_specific_import() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5205,7 +5256,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_ambiguous_unqualified_static_method_handle_via_wildcard_imports() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -5248,7 +5299,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_ambiguous_unqualified_static_method_via_wildcard_imports() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -5294,7 +5345,7 @@ end
 
 #[test]
 fn execute_path_request_enforces_private_static_property_access_identifier() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("P.m"),
@@ -5340,7 +5391,7 @@ end
 
 #[test]
 fn execute_path_request_allows_private_static_calls_within_class_only() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -5385,7 +5436,7 @@ end
 
 #[test]
 fn execute_path_request_enforces_protected_property_and_method_access() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -5465,7 +5516,7 @@ fn execute_path_request_supports_multilevel_super_constructor_chain_for_handle_c
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             std::fs::write(
                 tmp.path().join("A.m"),
@@ -5546,7 +5597,7 @@ end
 
 #[test]
 fn execute_path_request_supports_static_property_read_write_via_class_name() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -5599,7 +5650,7 @@ end
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -5648,7 +5699,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsasgn_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -5706,7 +5757,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_and_member_index_chains() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -5769,7 +5820,7 @@ fn execute_path_request_supports_idiomatic_classdef_source_layout_end_to_end() {
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             std::fs::write(
                 tmp.path().join("Vec2.m"),
@@ -5869,7 +5920,7 @@ total = c.amount;
 
 #[test]
 fn execute_path_request_supports_package_qualified_classdef_source_layout_end_to_end() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -5940,7 +5991,7 @@ ux = u.x;
 
 #[test]
 fn execute_path_request_supports_nested_package_classdef_source_layout_end_to_end() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg").join("+sub")).expect("create nested package");
     std::fs::write(
@@ -6008,7 +6059,7 @@ ok = isa(o,'pkg.sub.C');
 
 #[test]
 fn execute_path_request_supports_package_source_class_subsref_subsasgn_dispatch() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6070,7 +6121,7 @@ end
 
 #[test]
 fn execute_path_request_supports_package_static_property_reference_inside_methods() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6130,7 +6181,7 @@ end
 
 #[test]
 fn execute_path_request_supports_import_wildcard_unqualified_package_class_constructor_calls() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6190,7 +6241,7 @@ end
 
 #[test]
 fn execute_path_request_supports_import_specific_unqualified_package_class_constructor_calls() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6250,7 +6301,7 @@ end
 
 #[test]
 fn execute_path_request_reports_import_ambiguous_for_unqualified_class_constructor_wildcards() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6282,7 +6333,7 @@ fn execute_path_request_reports_import_ambiguous_for_unqualified_class_construct
 
 #[test]
 fn execute_path_request_bare_non_loader_identifier_does_not_probe_constructor_wildcards() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6311,7 +6362,7 @@ fn execute_path_request_bare_non_loader_identifier_does_not_probe_constructor_wi
 
 #[test]
 fn execute_path_request_specific_import_precedes_wildcard_for_unqualified_class_name() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6363,7 +6414,7 @@ end
 
 #[test]
 fn execute_path_request_supports_imported_class_static_function_handle_resolution() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6399,7 +6450,7 @@ end
 
 #[test]
 fn execute_path_request_supports_import_wildcard_class_constructor_function_handle() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6438,7 +6489,7 @@ end
 
 #[test]
 fn execute_path_request_reports_import_ambiguous_for_constructor_function_handle_wildcards() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6470,7 +6521,7 @@ fn execute_path_request_reports_import_ambiguous_for_constructor_function_handle
 
 #[test]
 fn execute_path_request_specific_import_precedes_wildcard_for_constructor_function_handle() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6515,7 +6566,7 @@ end
 
 #[test]
 fn execute_path_request_specific_import_precedes_wildcard_for_static_method_handle() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
@@ -6565,7 +6616,7 @@ end
 
 #[test]
 fn execute_path_request_supports_imported_static_listener_callback_dispatch() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -6601,7 +6652,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_getmethod_for_private_method_from_outside_class() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("C.m"),
@@ -6650,7 +6701,7 @@ fn execute_path_request_allows_getmethod_for_protected_method_inside_subclass_on
         .name("protected-getmethod-subclass".to_string())
         .stack_size(64 * 1024 * 1024)
         .spawn(|| {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let _guard = cwd_lock();
             let tmp = tempfile::TempDir::new().expect("tempdir");
             std::fs::write(
                 tmp.path().join("A.m"),
@@ -6712,7 +6763,7 @@ end
 
 #[test]
 fn execute_path_request_supports_getmethod_on_classref_for_public_static_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -6747,7 +6798,7 @@ end
 
 #[test]
 fn execute_path_request_supports_getmethod_on_classref_for_inherited_static_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("A.m"),
@@ -6790,7 +6841,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_getmethod_on_classref_for_private_static_method() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -6825,7 +6876,7 @@ end
 
 #[test]
 fn execute_path_request_supports_single_file_classdef_with_trailing_script() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("main.m"),
@@ -6874,7 +6925,7 @@ p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
 
 #[test]
 fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("main.m"),
@@ -6901,7 +6952,7 @@ fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
 
 #[test]
 fn execute_path_request_custom_subsref_intercepts_dot_member_access() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -6959,7 +7010,7 @@ b = d.getx();
 
 #[test]
 fn execute_path_request_custom_subsasgn_intercepts_dot_member_assignment() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -7009,7 +7060,7 @@ y = d.x;
 
 #[test]
 fn execute_path_request_builtin_subsref_dot_falls_back_to_method_dispatch() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -7044,7 +7095,7 @@ end
 
 #[test]
 fn execute_path_request_builtin_subsasgn_dot_falls_back_to_setfield() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -7082,7 +7133,7 @@ end
 
 #[test]
 fn execute_path_request_rejects_static_property_access_via_instance_with_identifier() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("S.m"),
@@ -7150,7 +7201,7 @@ fn compile_input_reports_duplicate_import_identifier() {
 
 #[test]
 fn execute_outcome_resolves_wildcard_import_from_project_package_function() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -7185,7 +7236,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_wildcard_import_package_function_call_with_manifest() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -7227,7 +7278,7 @@ roots = ["."]
 #[test]
 fn execute_path_request_resolves_wildcard_import_package_function_call_with_manifest_relative_path()
 {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -7267,7 +7318,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_subdir_helper_function_with_manifest_relative_path() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
     std::fs::write(
@@ -7306,7 +7357,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_private_function_for_parent_source() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::write(
@@ -7349,7 +7400,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_private_function_without_manifest_for_parent_source() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::write(
@@ -7377,7 +7428,7 @@ fn execute_path_request_resolves_private_function_without_manifest_for_parent_so
 
 #[test]
 fn execute_path_request_does_not_resolve_private_function_for_sibling_source() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::create_dir_all(tmp.path().join("sub")).expect("create sub dir");
@@ -7431,7 +7482,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_private_function_does_not_persist_into_session_registry() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::create_dir_all(tmp.path().join("sub")).expect("create sub dir");
@@ -7483,7 +7534,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_local_function_shadows_private_function() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::write(
@@ -7522,7 +7573,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_private_function_shadows_public_sibling_function() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::write(
@@ -7562,7 +7613,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_private_function_shadows_imported_and_builtin_names() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
@@ -7612,7 +7663,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_private_function_shadows_dependency_alias_import() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");
     std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
@@ -7672,7 +7723,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_package_private_function_for_active_package_source() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
     std::fs::write(
@@ -7708,7 +7759,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_class_folder_private_function_for_active_class_folder_source() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
     std::fs::write(
@@ -7745,7 +7796,7 @@ roots = ["."]
 #[test]
 fn execute_path_request_resolves_package_private_function_for_package_callee_only() {
     run_deep_semantic_test(|| {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("+pkg/private"))
             .expect("create package private dir");
@@ -7803,7 +7854,7 @@ roots = ["."]
 #[test]
 fn execute_path_request_resolves_package_private_string_routes_for_package_callee() {
     run_deep_semantic_test(|| {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
         std::fs::create_dir_all(tmp.path().join("+pkg/private"))
@@ -7863,7 +7914,7 @@ roots = ["."]
 #[test]
 fn execute_path_request_package_private_function_precedes_root_private_for_package_callee() {
     run_deep_semantic_test(|| {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
         std::fs::create_dir_all(tmp.path().join("+pkg/private"))
@@ -7923,7 +7974,7 @@ roots = ["."]
 #[test]
 fn execute_path_request_resolves_class_folder_private_function_for_class_folder_callee() {
     run_deep_semantic_test(|| {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
         std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
@@ -7981,7 +8032,7 @@ roots = ["."]
 
 #[test]
 fn execute_outcome_qualified_package_function_call_resolves_from_source_roots() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -8021,7 +8072,7 @@ roots = ["."]
 
 #[test]
 fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -8048,7 +8099,7 @@ fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function(
 
 #[test]
 fn execute_outcome_unqualified_helper_from_source_tree_requires_registered_symbol() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
     std::fs::write(
@@ -8083,7 +8134,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_sibling_function_file() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("outer.m"),
@@ -8106,7 +8157,7 @@ fn execute_path_request_resolves_sibling_function_file() {
 
 #[test]
 fn execute_path_request_resolves_sibling_function_with_arguments_block_validation() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         tmp.path().join("typed.m"),
@@ -8142,7 +8193,7 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
 
 #[test]
 fn execute_path_request_resolves_package_function_with_arguments_block_validation() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -8198,7 +8249,7 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_rejects_package_function_with_advanced_arguments_block() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -8556,7 +8607,7 @@ roots = ["."]
 
 #[test]
 fn compile_input_does_not_leak_local_project_symbols_for_remote_source_names() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
     std::fs::write(
@@ -8595,7 +8646,7 @@ roots = ["."]
 
 #[test]
 fn compile_input_does_not_leak_local_project_symbols_for_colon_remote_name() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
     std::fs::write(
@@ -9995,7 +10046,7 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
 
 #[test]
 fn run_executes_script_file_in_current_workspace() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("worker.m"),
@@ -10034,7 +10085,7 @@ fn run_executes_script_file_in_current_workspace() {
 
 #[test]
 fn run_exposes_script_variables_to_following_call_syntax() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("workspace_call_worker.m"),
@@ -10107,7 +10158,7 @@ fn run_exposes_script_variables_to_following_call_syntax() {
 
 #[test]
 fn run_script_variables_shadow_builtin_constants() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("constant_worker.m"), "pi = 4;\n").expect("write worker");
     let _cwd = push_cwd(temp.path());
@@ -10130,7 +10181,7 @@ fn run_script_variables_shadow_builtin_constants() {
 
 #[test]
 fn run_script_variables_shadow_imported_static_properties() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("RunStaticShadowFixture.m"),
@@ -10172,7 +10223,7 @@ shadowed_static_value = runStaticShadowValue;
 
 #[test]
 fn run_keeps_imported_static_property_fallback_after_external_visibility() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("RunStaticFallbackFixture.m"),
@@ -10211,7 +10262,7 @@ fallback_static_value = runStaticFallbackValue;
 
 #[test]
 fn run_replays_script_stdout_to_request_streams() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("display_worker.m"),
@@ -10242,7 +10293,7 @@ fn run_replays_script_stdout_to_request_streams() {
 
 #[test]
 fn run_command_syntax_resolves_scripts_on_search_path() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let scripts = temp.path().join("scripts");
     std::fs::create_dir_all(&scripts).expect("create scripts dir");
@@ -10275,7 +10326,7 @@ fn run_command_syntax_resolves_scripts_on_search_path() {
 
 #[test]
 fn addpath_command_syntax_resolves_scripts_on_search_path() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let source_dir = temp.path().join("SourceCode");
     std::fs::create_dir_all(&source_dir).expect("create source dir");
@@ -10307,7 +10358,7 @@ fn addpath_command_syntax_resolves_scripts_on_search_path() {
 
 #[test]
 fn filesystem_command_syntax_executes_path_word_builtins() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("seed.txt"), "provider text").expect("write seed file");
     let _cwd = push_cwd(temp.path());
@@ -10343,7 +10394,7 @@ fn filesystem_command_syntax_executes_path_word_builtins() {
 
 #[test]
 fn run_preserves_script_source_context() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let source_path = temp.path().join("context_worker.m");
     std::fs::write(
@@ -10388,7 +10439,7 @@ fn run_preserves_script_source_context() {
 
 #[test]
 fn run_error_commits_script_mutations_before_the_error() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("failing_worker.m"),
@@ -10433,7 +10484,7 @@ fn run_error_commits_script_mutations_before_the_error() {
 
 #[test]
 fn run_missing_file_and_output_errors_are_catchable() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("ok_worker.m"), "ok_value = 1;\n").expect("write worker");
     std::fs::write(temp.path().join("empty_worker.m"), "% no assignments\n")
@@ -10491,7 +10542,7 @@ fn run_missing_file_and_output_errors_are_catchable() {
 
 #[test]
 fn run_respects_dynamic_eval_host_policy() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
         temp.path().join("policy_worker.m"),

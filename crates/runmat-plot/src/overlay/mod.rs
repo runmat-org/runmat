@@ -5,3 +5,9 @@
 
 #[path = "../gui/plot_overlay.rs"]
 pub mod plot_overlay;
+
+#[path = "../gui/cad_overlay.rs"]
+pub(crate) mod cad_overlay;
+
+#[path = "../gui/product_ui.rs"]
+pub(crate) mod product_ui;

@@ -1,0 +1,465 @@
+use runmat_analysis_core::AnalysisStepKind;
+use runmat_analysis_fea::{
+    ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+};
+use runmat_runtime::analysis::{
+    analysis_create_model_op, analysis_run_nonlinear_with_options_op,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisNonlinearRunOptions,
+};
+use runmat_runtime::geometry::{
+    geometry_load_op, geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec,
+};
+use runmat_runtime::operations::OperationContext;
+
+const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+
+#[test]
+fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality() {
+    let geometry = geometry_load_op(
+        "/fixtures/prep_solve_tri.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-prep-solve-load".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let prep = geometry_prep_for_analysis_op(
+        &geometry.data,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some("trace-prep-solve-prep".to_string()), None),
+    )
+    .expect("geometry prep should succeed");
+
+    let created = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "prep_solve_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-prep-solve-create".to_string()), None),
+    )
+    .expect("create model should succeed");
+    let mut model = created.data;
+    model.steps[0].kind = AnalysisStepKind::Nonlinear;
+
+    let baseline = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::production_recommended(),
+        OperationContext::new(Some("trace-prep-solve-base".to_string()), None),
+    )
+    .expect("baseline nonlinear run should succeed");
+
+    let prep_enhanced = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(Some("trace-prep-solve-enhanced".to_string()), None),
+    )
+    .expect("prep-enhanced nonlinear run should succeed");
+    let prep_enhanced_replay = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(Some("trace-prep-solve-enhanced-replay".to_string()), None),
+    )
+    .expect("prep-enhanced replay nonlinear run should succeed");
+
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_TOPOLOGY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_OPERATOR_TOPOLOGY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_REGION_TOPOLOGY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_ELEMENT_ASSEMBLY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_ELEMENT_CONNECTIVITY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_GRAPH_ASSEMBLY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_GRAPH_SOLVER"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_CALIBRATION"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_ACCEPTANCE"));
+
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_CONTEXT"
+            && diag.message.contains("element_geometry_node_count=")
+            && diag.message.contains("element_geometry_edge_count=")
+            && diag.message.contains("mean_element_edge_length_m=")
+            && diag.message.contains("mean_element_area_m2=")
+            && diag.message.contains("element_geometry_coverage_ratio=")));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_TOPOLOGY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ELEMENT_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_CALIBRATION"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ACCEPTANCE"));
+
+    let base_nonlinear = baseline
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("baseline nonlinear payload present");
+    let prep_nonlinear = prep_enhanced
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("prep nonlinear payload present");
+
+    let base_max_iters = base_nonlinear
+        .iteration_counts
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let prep_max_iters = prep_nonlinear
+        .iteration_counts
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    assert!(base_max_iters.abs_diff(prep_max_iters) <= 16);
+    assert!(
+        base_max_iters != prep_max_iters
+            || base_nonlinear.failed_increments != prep_nonlinear.failed_increments
+    );
+
+    let prep_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_TOPOLOGY")
+        .expect("prep topology diagnostic should be present");
+    let replay_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_TOPOLOGY")
+        .expect("prep topology diagnostic should be present in replay");
+    assert_eq!(prep_topology_diag.message, replay_topology_diag.message);
+
+    let prep_operator_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY")
+        .expect("prep operator topology diagnostic should be present");
+    let replay_operator_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY")
+        .expect("prep operator topology diagnostic should be present in replay");
+    assert_eq!(
+        prep_operator_topology_diag.message,
+        replay_operator_topology_diag.message
+    );
+
+    let prep_region_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY")
+        .expect("prep region topology diagnostic should be present");
+    let replay_region_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY")
+        .expect("prep region topology diagnostic should be present in replay");
+    assert_eq!(
+        prep_region_topology_diag.message,
+        replay_region_topology_diag.message
+    );
+
+    let prep_element_assembly_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_ASSEMBLY")
+        .expect("prep element assembly diagnostic should be present");
+    let replay_element_assembly_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_ASSEMBLY")
+        .expect("prep element assembly diagnostic should be present in replay");
+    assert_eq!(
+        prep_element_assembly_diag.message,
+        replay_element_assembly_diag.message
+    );
+
+    let prep_element_connectivity_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY")
+        .expect("prep element connectivity diagnostic should be present");
+    let replay_element_connectivity_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY")
+        .expect("prep element connectivity diagnostic should be present in replay");
+    assert_eq!(
+        prep_element_connectivity_diag.message,
+        replay_element_connectivity_diag.message
+    );
+
+    let prep_graph_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY")
+        .expect("prep graph assembly diagnostic should be present");
+    let replay_graph_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY")
+        .expect("prep graph assembly diagnostic should be present in replay");
+    assert_eq!(prep_graph_diag.message, replay_graph_diag.message);
+
+    let edge_count = metric_usize(&prep_graph_diag.message, "edge_count");
+    let node_count = metric_usize(&prep_graph_diag.message, "node_count");
+    assert!(edge_count > 0);
+    assert!(edge_count <= node_count.saturating_mul(node_count.saturating_sub(1)) / 2);
+
+    let prep_graph_solver_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER")
+        .expect("prep graph solver diagnostic should be present");
+    let replay_graph_solver_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER")
+        .expect("prep graph solver diagnostic should be present in replay");
+    assert_eq!(
+        prep_graph_solver_diag.message,
+        replay_graph_solver_diag.message
+    );
+
+    let prep_calibration_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_CALIBRATION")
+        .expect("prep calibration diagnostic should be present");
+    let replay_calibration_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_CALIBRATION")
+        .expect("prep calibration diagnostic should be present in replay");
+    assert_eq!(
+        prep_calibration_diag.message,
+        replay_calibration_diag.message
+    );
+
+    let prep_acceptance_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ACCEPTANCE")
+        .expect("prep acceptance diagnostic should be present");
+    let replay_acceptance_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ACCEPTANCE")
+        .expect("prep acceptance diagnostic should be present in replay");
+    assert_eq!(prep_acceptance_diag.message, replay_acceptance_diag.message);
+    let acceptance_score = metric_f64(&prep_acceptance_diag.message, "acceptance_score");
+    assert!(acceptance_score > 0.0);
+
+    let base_peak_displacement = baseline
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("baseline displacement field should be present")
+        .as_host_f64()
+        .expect("baseline displacement should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let prep_peak_displacement = prep_enhanced
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("prep displacement field should be present")
+        .as_host_f64()
+        .expect("prep displacement should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let displacement_delta_ratio = (prep_peak_displacement - base_peak_displacement).abs()
+        / base_peak_displacement
+            .max(prep_peak_displacement)
+            .max(1.0e-9);
+    assert!(displacement_delta_ratio > 1.0e-4);
+    assert!(displacement_delta_ratio < 0.95);
+
+    let base_peak_stress = baseline
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("baseline von Mises field should be present")
+        .as_host_f64()
+        .expect("baseline stress should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let prep_peak_stress = prep_enhanced
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("prep von Mises field should be present")
+        .as_host_f64()
+        .expect("prep stress should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let stress_delta_ratio = (prep_peak_stress - base_peak_stress).abs()
+        / base_peak_stress.max(prep_peak_stress).max(1.0e-9);
+    assert!(stress_delta_ratio > 1.0e-4);
+    assert!(stress_delta_ratio < 0.95);
+}
+
+fn metric_usize(message: &str, key: &str) -> usize {
+    message
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn metric_f64(message: &str, key: &str) -> f64 {
+    message
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}

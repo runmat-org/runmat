@@ -213,9 +213,20 @@ pub enum Commands {
     Run {
         /// Script file to execute
         file: PathBuf,
+        /// Emit structured JSON for .fea studies and sweeps
+        #[arg(long)]
+        json: bool,
         /// Arguments to pass to script
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Check a MATLAB script or FEA document without running it
+    Check {
+        /// .m or .fea file to check
+        file: PathBuf,
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Show version information
     Version {

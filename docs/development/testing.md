@@ -89,16 +89,24 @@ scripts/test-wasm-headless.sh
 RUNMAT_WASM_INCLUDE_RUNTIME=1 scripts/test-wasm-headless.sh
 ```
 
-Focused WASM regression suites are available for symptom and replay coverage:
+Focused WASM regression suites are available through the runtime dispatcher:
 
 ```bash
-scripts/test-wasm-regression-suite.sh symptom-closure
-scripts/test-wasm-regression-suite.sh replay-smoke
+scripts/runtime/test-wasm-regression-suite.sh symptom-closure
+scripts/runtime/test-wasm-regression-suite.sh replay-smoke
 ```
 
 Those wrappers run the appropriate `wasm-pack test --node` and `wasm-pack test --chrome --headless` targets under `crates/runmat-wasm/tests`.
 They also regenerate the WASM builtin registry before running tests, so focused
 regressions exercise the same builtin catalog as packaged browser builds.
+
+## FEA Script Tests
+
+FEA governance, calibration, reporting, and artifact scripts use stdlib `unittest` tests:
+
+```bash
+scripts/test-fea-scripts.sh
+```
 
 ## Macro UI Tests
 

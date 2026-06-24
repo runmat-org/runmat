@@ -376,6 +376,13 @@ async fn try_call_registered_instance_method(
     {
         return result.map(Some);
     }
+    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+        && method.function_name != method_name
+    {
+        return call_builtin_async_impl(&method.function_name, args, output_count)
+            .await
+            .map(Some);
+    }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
         if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -386,6 +393,13 @@ async fn try_call_registered_instance_method(
         .await
         {
             return result.map(Some);
+        }
+        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+            && owner_qualified != method_name
+        {
+            return call_builtin_async_impl(&owner_qualified, args, output_count)
+                .await
+                .map(Some);
         }
     }
     Ok(None)
@@ -420,6 +434,13 @@ async fn try_call_registered_static_method(
     {
         return result.map(Some);
     }
+    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+        && method.function_name != qualified_name
+    {
+        return call_builtin_async_impl(&method.function_name, args, output_count)
+            .await
+            .map(Some);
+    }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
         if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -430,6 +451,13 @@ async fn try_call_registered_static_method(
         .await
         {
             return result.map(Some);
+        }
+        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+            && owner_qualified != qualified_name
+        {
+            return call_builtin_async_impl(&owner_qualified, args, output_count)
+                .await
+                .map(Some);
         }
     }
     Ok(None)
@@ -472,6 +500,12 @@ async fn call_registered_class_constructor(
     )
     .await
     else {
+        if runmat_builtins::builtin_function_by_name(&ctor.function_name).is_some()
+            && ctor.function_name != class_name
+        {
+            let result = call_builtin_async_impl(&ctor.function_name, args, output_count).await?;
+            return normalize_constructor_result(default_object, result, requested_outputs);
+        }
         let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
             &owner_qualified,
             args,
@@ -479,6 +513,12 @@ async fn call_registered_class_constructor(
         )
         .await
         else {
+            if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+                && owner_qualified != class_name
+            {
+                let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
+                return normalize_constructor_result(default_object, result, requested_outputs);
+            }
             return Ok(default_object);
         };
         return normalize_constructor_result(default_object, result?, requested_outputs);
@@ -731,7 +771,7 @@ mod tests {
                 is_abstract: false,
                 is_sealed: false,
                 access: Access::Public,
-                function_name: "Point.origin".to_string(),
+                function_name: unique_class_name("runtime_ctor_missing_body"),
                 implicit_class_argument: None,
             },
         );

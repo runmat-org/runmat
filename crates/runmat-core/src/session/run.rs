@@ -51,8 +51,11 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let source_lookup_name = self
+            .current_source_fullpath_name()
+            .unwrap_or_else(|| self.current_source_name());
         let companion = super::compile::discover_companion_source_statements_async(
-            self.current_source_name(),
+            source_lookup_name,
             self.compat_mode,
         )
         .await;
@@ -91,7 +94,7 @@ impl RunMatSession {
     ) -> crate::abi::ExecutionResponse {
         let requested_outputs = request.requested_outputs.clone();
         let source_input = request.source.clone();
-        let (source_name, source_text) = match source_input_text(request.source).await {
+        let source_resolution = match source_input_text(request.source).await {
             Ok(resolved) => resolved,
             Err(err) => {
                 return crate::abi::ExecutionResponse {
@@ -100,11 +103,15 @@ impl RunMatSession {
                 };
             }
         };
+        let source_name = source_resolution.display_name;
+        let source_fullpath_name = source_resolution.fullpath_name;
+        let source_text = source_resolution.text;
         let source_identity = resolve_source_identity(&source_input, &source_text);
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
         let previous_dynamic_eval_enabled = self.dynamic_eval_enabled;
         let previous_source_name = self.active_source_name.clone();
+        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
         let previous_source_identity = self.active_source_identity.clone();
 
@@ -112,6 +119,7 @@ impl RunMatSession {
         self.top_level_await_enabled = request.host_policy.top_level_await;
         self.dynamic_eval_enabled = request.host_policy.dynamic_eval;
         self.active_source_name = source_name.clone();
+        self.active_source_fullpath_name = source_fullpath_name.clone();
         self.abi_workspace_handle = request.workspace;
         self.active_source_identity = source_identity.clone();
 
@@ -121,6 +129,7 @@ impl RunMatSession {
         self.top_level_await_enabled = previous_top_level_await_enabled;
         self.dynamic_eval_enabled = previous_dynamic_eval_enabled;
         self.active_source_name = previous_source_name;
+        self.active_source_fullpath_name = previous_source_fullpath_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
         self.pending_companion_source_discovery = None;
@@ -396,11 +405,18 @@ impl RunMatSession {
             .source_pool
             .entries()
             .map(|(source_id, source)| {
-                (source_id, source.name.to_string(), source.text.to_string())
+                (
+                    source_id,
+                    source.name.to_string(),
+                    source.fullpath_name.as_ref().map(ToString::to_string),
+                    source.text.to_string(),
+                )
             })
             .collect::<Vec<_>>();
         let _source_catalog_guard =
-            runmat_runtime::source_context::replace_source_catalog(source_catalog_entries);
+            runmat_runtime::source_context::replace_source_catalog_with_fullpaths(
+                source_catalog_entries,
+            );
         let _source_id_guard =
             runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
         #[cfg(target_arch = "wasm32")]
@@ -1331,13 +1347,26 @@ struct SessionExecution {
     workspace_snapshot: WorkspaceSnapshot,
 }
 
+#[derive(Debug)]
+struct ResolvedSourceInput {
+    display_name: String,
+    fullpath_name: Option<String>,
+    text: String,
+}
+
 async fn source_input_text(
     source: crate::abi::SourceInput,
-) -> std::result::Result<(String, String), RunError> {
+) -> std::result::Result<ResolvedSourceInput, RunError> {
     match source {
-        crate::abi::SourceInput::Text { name, text } => Ok((name, text)),
+        crate::abi::SourceInput::Text { name, text } => Ok(ResolvedSourceInput {
+            display_name: name,
+            fullpath_name: None,
+            text,
+        }),
         crate::abi::SourceInput::Path(path) => {
             let source_path = resolve_path_source_input(&path).await?;
+            let source_name = crate::diagnostic_path::display_path_for_current_cwd(&source_path);
+            let source_fullpath_name = source_path.to_string_lossy().to_string();
 
             let text = runmat_filesystem::read_to_string_async(&source_path)
                 .await
@@ -1351,7 +1380,11 @@ async fn source_input_text(
                         .build(),
                     )
                 })?;
-            Ok((source_path.to_string_lossy().to_string(), text))
+            Ok(ResolvedSourceInput {
+                display_name: source_name,
+                fullpath_name: Some(source_fullpath_name),
+                text,
+            })
         }
     }
 }
@@ -1365,14 +1398,32 @@ async fn resolve_path_source_input(
         use std::path::Path;
 
         let cwd = runmat_filesystem::current_dir().map_err(|err| {
-        RunError::Runtime(
-            build_runtime_error(format!(
-                "failed to resolve current working directory while resolving source path '{path}': {err}"
-            ))
-            .with_identifier("RunMat:SourceResolveFailed")
-            .build(),
-        )
-    })?;
+            RunError::Runtime(
+                build_runtime_error(format!(
+                    "failed to resolve current working directory while resolving source path '{path}': {err}"
+                ))
+                .with_identifier("RunMat:SourceResolveFailed")
+                .build(),
+            )
+        })?;
+
+        let source_path = std::path::PathBuf::from(path);
+        let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
+
+        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
+            if metadata.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        if source_path.extension().is_none() {
+            let with_ext = candidate.with_extension("m");
+            if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
+                if metadata.is_file() {
+                    return Ok(with_ext);
+                }
+            }
+        }
 
         let resolved = resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
             RunError::Runtime(
@@ -1407,11 +1458,7 @@ async fn resolve_path_source_input(
             )
         })?;
         let source_path = PathBuf::from(path);
-        let candidate = if source_path.is_absolute() {
-            source_path.clone()
-        } else {
-            cwd.join(&source_path)
-        };
+        let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
         if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
             if metadata.is_file() {
@@ -1447,14 +1494,16 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::path::{Path, PathBuf};
     #[cfg(not(target_arch = "wasm32"))]
-    use std::sync::Mutex;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::Arc;
 
     #[cfg(not(target_arch = "wasm32"))]
     struct CwdGuard {
         original: PathBuf,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+        runmat_filesystem::provider_override_lock()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1474,7 +1523,7 @@ mod tests {
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_resolves_named_manifest_entrypoint() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
@@ -1493,42 +1542,66 @@ path = "src/main"
         )
         .unwrap();
         let _cwd = push_cwd(tmp.path());
-        let (source_name, source_text) =
+        let resolved =
             futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
                 .expect("named entrypoint should resolve");
-        let resolved = std::path::PathBuf::from(source_name)
-            .canonicalize()
-            .unwrap();
+        assert_eq!(resolved.display_name, "src/main.m");
+        let resolved_path = std::path::PathBuf::from(
+            resolved
+                .fullpath_name
+                .as_deref()
+                .expect("path source should carry fullpath name"),
+        )
+        .canonicalize()
+        .unwrap();
         let expected = tmp.path().join("src/main.m").canonicalize().unwrap();
         assert_eq!(
-            resolved, expected,
+            resolved_path, expected,
             "resolved source path should match manifest entrypoint target"
         );
-        assert_eq!(source_text, "x = 1;");
+        assert_eq!(resolved.text, "x = 1;");
     }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_infers_m_extension_for_relative_path() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
         let _cwd = push_cwd(tmp.path());
 
-        let (source_name, source_text) = futures::executor::block_on(source_input_text(
-            SourceInput::Path("src/main".to_string()),
-        ))
+        let resolved = futures::executor::block_on(source_input_text(SourceInput::Path(
+            "src/main".to_string(),
+        )))
         .expect("path without extension should infer .m");
 
-        assert!(source_name.ends_with("src/main.m"));
-        assert_eq!(source_text.trim(), "x = 1;");
+        assert_eq!(resolved.display_name, "src/main.m");
+        assert_eq!(resolved.text.trim(), "x = 1;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_infers_m_extension_from_memory_provider() {
+        let _guard = cwd_lock();
+        let provider = runmat_filesystem::MemoryFsProvider::new();
+        provider.write_project_path("/main.m", b"x = 1;").unwrap();
+
+        runmat_filesystem::with_provider_override(Arc::new(provider), || {
+            let resolved = futures::executor::block_on(source_input_text(SourceInput::Path(
+                "main".to_string(),
+            )))
+            .expect("memory provider should resolve path without extension");
+
+            assert_eq!(resolved.display_name, "main.m");
+            assert_eq!(resolved.text, "x = 1;");
+        });
     }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_errors_for_invalid_named_entrypoint_target() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(
@@ -1562,7 +1635,7 @@ function = "main"
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn discover_known_project_symbols_reads_manifest_source_context() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("+stats")).unwrap();
         fs::write(
@@ -1596,7 +1669,7 @@ roots = ["."]
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn discover_known_project_symbols_includes_dependency_alias_qualified_names() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         let dep_root = tmp.path().join("deps/statslib");
         fs::create_dir_all(&dep_root).unwrap();

@@ -49,10 +49,10 @@ jobs:
           $cargo = Join-Path $cargoBin 'cargo.exe'
 
           if (-not (Test-Path $rustup)) {
-            throw "Missing rustup at $rustup. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing rustup at $rustup. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Test-Path $cargo)) {
-            throw "Missing cargo at $cargo. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing cargo at $cargo. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           $unexpectedCargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME', 'Machine')
           if ($unexpectedCargoHome -and $unexpectedCargoHome -ne $cargoHome) {
@@ -75,7 +75,7 @@ jobs:
           foreach ($component in $components) {
             $componentPattern = '^{0}-' -f [regex]::Escape($component)
             if (-not ($installedComponents | Select-String -Pattern $componentPattern -Quiet)) {
-              throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+              throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
             }
           }
           & $cargo -V
@@ -90,12 +90,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $triplet = 'x64-windows'
-          $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { 'C:\vcpkg' }
+          $userProfile = [Environment]::GetFolderPath('UserProfile')
+          $profileVcpkgRoot = Join-Path $userProfile 'vcpkg-runmat'
+          $vcpkgRoot = if ($env:VCPKG_ROOT) {
+            $env:VCPKG_ROOT
+          } elseif (Test-Path (Join-Path $profileVcpkgRoot 'vcpkg.exe')) {
+            $profileVcpkgRoot
+          } else {
+            'C:\vcpkg'
+          }
           $prefix = Join-Path $vcpkgRoot "installed\$triplet"
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
           if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe was not found. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "vswhere.exe was not found. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           $vsInstall = & $vswhere `
             -latest `
@@ -103,30 +111,32 @@ jobs:
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath
           if (-not $vsInstall) {
-            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
-            throw "pkg-config was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "pkg-config was not found on PATH. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
-            throw "Perl was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Perl was not found on PATH. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
 
           $required = @(
             (Join-Path $vcpkgRoot 'vcpkg.exe'),
             (Join-Path $prefix 'include\zmq.h'),
+            (Join-Path $prefix 'include\opencascade'),
             (Join-Path $prefix 'lib\openblas.lib'),
             (Join-Path $prefix 'lib\lapack.lib'),
+            (Join-Path $prefix 'lib\TKBRep.lib'),
             (Join-Path $prefix 'lib\pkgconfig\libzmq.pc')
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) {
-              throw "Missing required Windows dependency artifact: $path. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+              throw "Missing required Windows dependency artifact: $path. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
             }
           }
           $zmqImportLibs = Get-ChildItem -Path (Join-Path $prefix 'lib') -Filter '*zmq*.lib' -ErrorAction SilentlyContinue
           if (-not $zmqImportLibs) {
-            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
 
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
@@ -146,6 +156,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$prefix\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$prefix"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$prefix"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$prefix\include\opencascade"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$prefix\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
 
       - name: Format
         run: cargo fmt -- --check
@@ -246,19 +261,20 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+          sudo apt-get install -y cmake libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
         run: |
           brew update
+          brew list cmake >/dev/null 2>&1 || brew install cmake
           brew install zeromq
 
       - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
-          choco install -y pkgconfiglite
+          choco install -y pkgconfiglite strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
           Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
           curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
@@ -270,10 +286,54 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
           Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK/OpenCASCADE"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
-          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          git clone --depth 1 --branch 2026.06.01 https://github.com/microsoft/vcpkg.git $vcpkgRoot
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
+
+          $finder = Join-Path $vcpkgRoot "scripts\cmake\vcpkg_find_fortran.cmake"
+          $content = Get-Content -LiteralPath $finder -Raw
+          $needle = "    include(CMakeDetermineFortranCompiler)"
+          $replacement = @'
+              include(CMakeDetermineFortranCompiler)
+
+              if(CMAKE_HOST_WIN32 AND "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" STREQUAL "" AND
+                 ("${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x86" OR "${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x64"))
+                  if(CMAKE_Fortran_COMPILER)
+                      message(STATUS "Ignoring ambient Fortran compiler '${CMAKE_Fortran_COMPILER}' so vcpkg uses internal MinGW gfortran")
+                      unset(CMAKE_Fortran_COMPILER)
+                      unset(CMAKE_Fortran_COMPILER CACHE)
+                  endif()
+              endif()
+          '@
+          if (-not $content.Contains($replacement)) {
+            if (-not $content.Contains($needle)) {
+              throw "Could not find expected CMakeDetermineFortranCompiler hook in $finder"
+            }
+            Set-Content -LiteralPath $finder -Value $content.Replace($needle, $replacement) -NoNewline
+          }
+
+          $keptPath = [System.Collections.Generic.List[string]]::new()
+          foreach ($entry in ($env:Path -split ";")) {
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+              continue
+            }
+            $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim('"'))
+            $hasFortran = $false
+            foreach ($compiler in @("flang.exe", "flang-new.exe", "gfortran.exe", "ifort.exe", "ifx.exe")) {
+              if (Test-Path -LiteralPath (Join-Path $expanded $compiler)) {
+                $hasFortran = $true
+                break
+              }
+            }
+            if (-not $hasFortran) {
+              $keptPath.Add($entry)
+            }
+          }
+          Remove-Item Env:FC -ErrorAction SilentlyContinue
+          Remove-Item Env:F77 -ErrorAction SilentlyContinue
+          Remove-Item Env:F90 -ErrorAction SilentlyContinue
+          $env:Path = [string]::Join(";", $keptPath)
 
           # Compute vcpkg triplet based on target
           $target = "${{ matrix.platform.target }}"
@@ -288,12 +348,12 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS and LAPACK provider; on arm64-windows allow unsupported gfortran
-          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          # Install OpenBLAS, LAPACK, and OpenCASCADE. LAPACK must use vcpkg's
+          # bundled MinGW gfortran runtime; Visual Studio flang fails this build.
           if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
+            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet" --allow-unsupported
           } else {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet"
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
@@ -304,15 +364,22 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$vcpkgRoot\installed\$triplet\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
+        env:
+          RUNMAT_OCCT_LINK_MODE: static
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Use system OpenSSL via pkg-config; libssl-dev installed above
-          args: "--locked --release --bin runmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack,occt-native"
           strip: true
 
       - name: Cross build (other targets)
@@ -321,11 +388,12 @@ jobs:
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
+          RUNMAT_OCCT_LINK_MODE: ${{ runner.os == 'Windows' && 'dylib' || 'static' }}
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with vendored OpenSSL and full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
+          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl,occt-native"
           strip: true
 
       - name: Import signing cert and codesign (macOS)
@@ -506,20 +574,19 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for d in crates/*; do
-            if [ -d "$d" ]; then
-              if [ -f LICENSE ] || [ -f LICENSE.md ]; then
-                cp -f LICENSE* "$d/" || true
-                if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
-              fi
+          while IFS= read -r toml; do
+            d="${toml%/*}"
+            if [ -f LICENSE ] || [ -f LICENSE.md ]; then
+              cp -f LICENSE* "$d/" || true
+              if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
             fi
-          done
+          done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Normalize Cargo.toml license metadata
         shell: bash
         run: |
           set -euxo pipefail
-          for toml in crates/*/Cargo.toml; do
+          while IFS= read -r toml; do
             if grep -Eq '^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE' "$toml"; then
               sed -E -i.bak 's#^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
               rm -f "$toml.bak"
@@ -527,7 +594,7 @@ jobs:
             if ! grep -Eq '^license[[:space:]]*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
               awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
             fi
-          done
+          done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Verify published crate assets
         shell: bash

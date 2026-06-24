@@ -115,6 +115,7 @@ impl RunMatSession {
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
             active_source_name: "<repl>".to_string(),
+            active_source_fullpath_name: None,
             telemetry_consent: true,
             telemetry_client_id: None,
             telemetry_platform: TelemetryPlatformInfo::default(),
@@ -148,6 +149,10 @@ impl RunMatSession {
 
     pub(crate) fn current_source_name(&self) -> &str {
         &self.active_source_name
+    }
+
+    pub(crate) fn current_source_fullpath_name(&self) -> Option<&str> {
+        self.active_source_fullpath_name.as_deref()
     }
 
     #[cfg(target_arch = "wasm32")]

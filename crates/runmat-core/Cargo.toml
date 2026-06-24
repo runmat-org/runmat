@@ -36,6 +36,8 @@ default-features = false
 [features]
 default = ["jit"]
 jit = ["dep:runmat-turbine"]
+occt-native = ["runmat-runtime/occt-native"]
+occt-wasm-host = ["runmat-runtime/occt-wasm-host"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-core"] }

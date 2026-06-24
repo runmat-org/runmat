@@ -3,6 +3,8 @@ use runmat_plot::plots::Figure;
 #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use super::state::{clone_figure, FigureHandle};
+#[cfg(feature = "plot-core")]
+use crate::builtins::plotting::clone_geometry_scene;
 use thiserror::Error;
 
 #[cfg(feature = "plot-core")]
@@ -428,6 +430,140 @@ pub async fn render_figure_snapshot_with_camera_state(
         axes_cameras.len()
     );
     Ok(bytes)
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn render_geometry_scene_snapshot(
+    handle: u32,
+    width: u32,
+    height: u32,
+    view: Option<String>,
+) -> BuiltinResult<Vec<u8>> {
+    const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+
+    log::debug!(
+        "runmat-runtime: render_geometry_scene_snapshot.start handle={} width={} height={} view={}",
+        handle,
+        width,
+        height,
+        view.as_deref().unwrap_or("")
+    );
+    let scene = clone_geometry_scene(handle).ok_or_else(|| {
+        map_control_flow_with_builtin(
+            engine_error(format!("geometry scene handle {handle} does not exist")),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+    let camera = geometry_scene_snapshot_camera(
+        scene.bounds,
+        settings.width,
+        settings.height,
+        parse_camera_view_preset(view.as_deref()),
+    );
+    let mut exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            map_control_flow_with_builtin(
+                engine_error_with_source(
+                    "Geometry export initialization failed.",
+                    PlottingBackendError::ImageExportInit(err),
+                ),
+                SNAPSHOT_CONTEXT,
+            )
+        })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
+
+    let bytes = exporter
+        .render_geometry_scene_png_bytes_with_camera(&scene, &camera)
+        .await
+        .map_err(|err| {
+            log::warn!(
+                "runmat-runtime: render_geometry_scene_snapshot.failed handle={} error={}",
+                handle,
+                err
+            );
+            map_control_flow_with_builtin(
+                engine_error_with_source(
+                    format!("Geometry export failed: {err}"),
+                    PlottingBackendError::ImageExport(err),
+                ),
+                SNAPSHOT_CONTEXT,
+            )
+        })?;
+    log::debug!(
+        "runmat-runtime: render_geometry_scene_snapshot.ok handle={} bytes={}",
+        handle,
+        bytes.len()
+    );
+    Ok(bytes)
+}
+
+#[cfg(feature = "plot-core")]
+fn parse_camera_view_preset(value: Option<&str>) -> runmat_plot::core::CameraViewPreset {
+    use runmat_plot::core::CameraViewPreset;
+
+    let Some(value) = value else {
+        return CameraViewPreset::Perspective;
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "perspective" | "iso" | "isometric" => CameraViewPreset::Perspective,
+        "top" | "xy" => CameraViewPreset::Top,
+        "bottom" => CameraViewPreset::Bottom,
+        "front" | "xz" => CameraViewPreset::Front,
+        "back" => CameraViewPreset::Back,
+        "left" | "yz" => CameraViewPreset::Left,
+        "right" => CameraViewPreset::Right,
+        _ => CameraViewPreset::Perspective,
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_snapshot_camera(
+    bounds: runmat_plot::core::BoundingBox,
+    width: u32,
+    height: u32,
+    preset: runmat_plot::core::CameraViewPreset,
+) -> runmat_plot::core::Camera {
+    use glam::Vec3;
+    use runmat_plot::core::{BoundingBox, Camera, CameraViewPreset};
+
+    let mut camera = Camera::new();
+    camera.update_aspect_ratio(width.max(1) as f32 / height.max(1) as f32);
+    let bounds = if bounds.min.is_finite()
+        && bounds.max.is_finite()
+        && (bounds.max - bounds.min).length() > 1.0e-6
+    {
+        bounds
+    } else {
+        BoundingBox {
+            min: Vec3::splat(-1.0),
+            max: Vec3::splat(1.0),
+        }
+    };
+    let (direction, up) = match preset {
+        CameraViewPreset::Perspective => (Vec3::new(1.0, -1.0, 1.0).normalize(), Vec3::Z),
+        CameraViewPreset::Top => (Vec3::Z, Vec3::Y),
+        CameraViewPreset::Bottom => (-Vec3::Z, Vec3::Y),
+        CameraViewPreset::Front => (-Vec3::Y, Vec3::Z),
+        CameraViewPreset::Back => (Vec3::Y, Vec3::Z),
+        CameraViewPreset::Left => (-Vec3::X, Vec3::Z),
+        CameraViewPreset::Right => (Vec3::X, Vec3::Z),
+    };
+    let center = (bounds.min + bounds.max) * 0.5;
+    camera.up = up;
+    camera.target = center;
+    camera.position = center + direction;
+    camera.fit_bounds(bounds.min, bounds.max);
+    camera
 }
 
 #[cfg(feature = "plot-core")]
