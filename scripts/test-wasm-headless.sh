@@ -15,8 +15,8 @@ export RUSTFLAGS="${RUSTFLAGS:--Copt-level=1}"
 echo "==> regenerating wasm registry"
 "${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
 echo "==> wasm-bindgen timeout: ${WASM_BINDGEN_TEST_TIMEOUT}s"
-echo "==> cargo check runmat-core (wasm32 compatibility)"
-cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features
+echo "==> cargo check runmat-core (wasm32 compatibility with OCCT wasm host)"
+cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features --features occt-wasm-host
 
 "${WASM_SUITE}" symptom-closure
 "${WASM_SUITE}" replay-smoke
