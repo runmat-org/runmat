@@ -78,6 +78,16 @@ cargo build
 cargo build -p runmat
 ```
 
+The default CLI feature set includes `occt-native` for STEP, IGES, and BREP CAD topology import. If `RUNMAT_OCCT_ROOT` or `RUNMAT_OCCT_INCLUDE_DIR`/`RUNMAT_OCCT_LIB_DIR` do not point to an existing OCCT installation, the build uses bundled OCCT and requires CMake on `PATH` or through Cargo's `CMAKE` environment overrides. On macOS, install it with `brew install cmake`.
+
+Developers without CMake or OCCT can build the CLI with the default local feature set minus OCCT CAD topology import:
+
+```bash
+cargo build-no-occt
+```
+
+This alias enables `gui`, `blas-lapack`, `wgpu`, and `jit`, but excludes `occt-native`.
+
 Use release mode when checking CLI performance or benchmark behavior:
 
 ```bash
