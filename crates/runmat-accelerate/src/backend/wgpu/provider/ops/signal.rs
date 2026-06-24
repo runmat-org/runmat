@@ -24,17 +24,17 @@ impl WgpuProvider {
             "uniform_spectral_estimate: invalid request"
         );
 
-        let window_shape = [request.window.len(), 1usize];
-        let window = self.upload_exec(&HostTensorView {
-            data: request.window,
-            shape: &window_shape,
-        })?;
-
         let framed_len = request
             .nfft
             .checked_mul(request.frame_count)
             .and_then(|len| len.checked_mul(2))
             .ok_or_else(|| anyhow!("uniform_spectral_estimate: frame too large"))?;
+
+        let window_shape = [request.window.len(), 1usize];
+        let window = self.upload_exec(&HostTensorView {
+            data: request.window,
+            shape: &window_shape,
+        })?;
         let frame_shader = spectral_frame_shader(
             &SpectralFrameShaderConfig {
                 input_complex: request.input_complex,
@@ -79,7 +79,10 @@ impl WgpuProvider {
             let selected_len = rows
                 .checked_mul(request.frame_count)
                 .and_then(|len| len.checked_mul(2))
-                .ok_or_else(|| anyhow!("uniform_spectral_estimate: output too large"))?;
+                .ok_or_else(|| {
+                    self.free_exec(&spectrum).ok();
+                    anyhow!("uniform_spectral_estimate: output too large")
+                })?;
             let shader = spectral_select_shader(request.nfft, rows, range, self.precision);
             let handle = match self.fused_elementwise_with_telemetry_exec(
                 &shader,
@@ -101,9 +104,10 @@ impl WgpuProvider {
             handle
         };
 
-        let ps_len = rows
-            .checked_mul(request.frame_count)
-            .ok_or_else(|| anyhow!("uniform_spectral_estimate: power output too large"))?;
+        let ps_len = rows.checked_mul(request.frame_count).ok_or_else(|| {
+            self.free_exec(&selected).ok();
+            anyhow!("uniform_spectral_estimate: power output too large")
+        })?;
         let ps_shader = spectral_power_shader(
             rows,
             range,

@@ -148,12 +148,24 @@ pub(crate) fn ensure_same_directory(
     expected: &str,
     invalid_selection: ErrorMapper,
 ) -> BuiltinResult<()> {
+    let expected = normalized_directory_key(expected);
     for path in paths.iter().skip(1) {
-        if selected_path_parts(path, invalid_selection)?.directory != expected {
+        let actual = selected_path_parts(path, invalid_selection)?.directory;
+        if normalized_directory_key(&actual) != expected {
             return Err(invalid_selection(
                 "multiple selected files must be in the same directory".to_string(),
             ));
         }
     }
     Ok(())
+}
+
+fn normalized_directory_key(directory: &str) -> String {
+    let mut key = directory.replace('\\', "/");
+    while key.len() > 1 && key.ends_with('/') {
+        key.pop();
+    }
+    #[cfg(windows)]
+    key.make_ascii_lowercase();
+    key
 }

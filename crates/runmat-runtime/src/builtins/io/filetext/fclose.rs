@@ -742,7 +742,7 @@ pub(crate) mod tests {
         assert_eq!(first.status(), -1.0);
         assert!(first.message().contains("flush failed"));
         assert!(registry::info_for(fid as i32).is_some());
-        let handle = registry::take_handle(fid as i32).expect("handle remains registered");
+        let handle = registry::shared_handle(fid as i32).expect("handle remains registered");
         assert!(handle.lock().expect("handle lock").is_some());
 
         fail_flush.store(false, Ordering::SeqCst);

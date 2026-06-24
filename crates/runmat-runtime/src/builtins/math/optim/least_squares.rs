@@ -45,10 +45,15 @@ impl LeastSquaresBounds {
             ));
         }
         for i in 0..n {
-            if self.lower[i].is_nan() || self.upper[i].is_nan() || self.lower[i] > self.upper[i] {
+            if self.lower[i].is_nan()
+                || self.upper[i].is_nan()
+                || self.lower[i] > self.upper[i]
+                || self.lower[i] == f64::INFINITY
+                || self.upper[i] == f64::NEG_INFINITY
+            {
                 return Err(optim_error(
                     name,
-                    format!("{name}: lower bounds must be <= upper bounds"),
+                    format!("{name}: bounds must define a finite feasible iterate"),
                 ));
             }
         }
@@ -127,6 +132,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
             options.max_fun_evals,
         )
         .await
+        .map(|jacobian| jacobian.values)
         .unwrap_or_else(|_| vec![0.0; m * n]);
         let optimality = first_order_optimality(&jacobian, &residual, n);
         return final_result(
@@ -161,7 +167,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
             ));
         }
 
-        let jacobian = finite_difference_jacobian(
+        let jacobian_eval = finite_difference_jacobian(
             name,
             evaluator,
             &x,
@@ -171,9 +177,22 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
             options.max_fun_evals,
         )
         .await?;
+        let jacobian = jacobian_eval.values;
         let optimality = first_order_optimality(&jacobian, &residual, n);
         last_jacobian = jacobian.clone();
         last_optimality = optimality;
+        if jacobian_eval.exhausted_budget {
+            return Ok(result(
+                x,
+                residual,
+                jacobian,
+                0,
+                iterations,
+                func_count,
+                optimality,
+                "Exceeded maximum function evaluations.",
+            ));
+        }
         if optimality <= options.tol_fun {
             return Ok(result(
                 x,
@@ -194,6 +213,18 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         let mut accepted = false;
 
         for _ in 0..12 {
+            if func_count >= options.max_fun_evals {
+                return Ok(result(
+                    x,
+                    residual,
+                    jacobian,
+                    0,
+                    iterations,
+                    func_count,
+                    optimality,
+                    "Exceeded maximum function evaluations.",
+                ));
+            }
             let normal = j.transpose() * &j + DMatrix::<f64>::identity(n, n) * lambda;
             let rhs = -&gradient;
             let Some(delta) = normal.lu().solve(&rhs) else {
@@ -323,6 +354,11 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
     ))
 }
 
+struct FiniteDifferenceJacobian {
+    values: Vec<f64>,
+    exhausted_budget: bool,
+}
+
 async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
     name: &str,
     evaluator: &mut E,
@@ -331,16 +367,16 @@ async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
     residual: &[f64],
     func_count: &mut usize,
     max_fun_evals: usize,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<FiniteDifferenceJacobian> {
     let m = residual.len();
     let n = x.len();
     let mut jacobian = vec![0.0; m * n];
     for col in 0..n {
         if *func_count >= max_fun_evals {
-            return Err(optim_error(
-                name,
-                format!("{name}: exceeded maximum function evaluations"),
-            ));
+            return Ok(FiniteDifferenceJacobian {
+                values: jacobian,
+                exhausted_budget: true,
+            });
         }
         let mut perturbed = x.to_vec();
         let forward_step = f64::EPSILON.sqrt() * (x[col].abs() + 1.0);
@@ -365,7 +401,10 @@ async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
             jacobian[row * n + col] = (next[row] - residual[row]) / actual_step;
         }
     }
-    Ok(jacobian)
+    Ok(FiniteDifferenceJacobian {
+        values: jacobian,
+        exhausted_budget: false,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -397,7 +436,7 @@ async fn final_result<E: LeastSquaresEvaluator>(
     }
 
     let mut final_func_count = func_count;
-    let jacobian = finite_difference_jacobian(
+    let jacobian_eval = finite_difference_jacobian(
         name,
         evaluator,
         &x,
@@ -407,6 +446,7 @@ async fn final_result<E: LeastSquaresEvaluator>(
         options.max_fun_evals,
     )
     .await?;
+    let jacobian = jacobian_eval.values;
     let optimality = first_order_optimality(&jacobian, &residual, x.len());
     Ok(result(
         x,
@@ -473,4 +513,62 @@ fn max_abs_difference(lhs: &[f64], rhs: &[f64]) -> f64 {
     lhs.iter()
         .zip(rhs.iter())
         .fold(0.0_f64, |acc, (a, b)| acc.max((a - b).abs()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    struct CountingEvaluator {
+        calls: usize,
+    }
+
+    impl LeastSquaresEvaluator for CountingEvaluator {
+        fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a> {
+            self.calls += 1;
+            let residual = vec![x[0] - 1.0];
+            Box::pin(async move { Ok(residual) })
+        }
+    }
+
+    fn options(max_fun_evals: usize) -> LeastSquaresOptions {
+        LeastSquaresOptions {
+            tol_x: 1.0e-12,
+            tol_fun: 1.0e-12,
+            max_iter: 10,
+            max_fun_evals,
+            final_jacobian: false,
+        }
+    }
+
+    #[test]
+    fn bounds_reject_infinite_projected_iterates() {
+        let bounds = LeastSquaresBounds {
+            lower: vec![f64::INFINITY],
+            upper: vec![f64::INFINITY],
+        };
+        let err = bounds
+            .validate("lsqcurvefit", 1)
+            .expect_err("invalid bounds");
+        assert!(err.message().contains("finite feasible iterate"));
+    }
+
+    #[test]
+    fn solve_stops_before_extra_callback_after_budget_exhausted() {
+        let mut evaluator = CountingEvaluator { calls: 0 };
+        let bounds = LeastSquaresBounds::unbounded(2);
+        let result = block_on(solve_least_squares(
+            "lsqcurvefit",
+            &mut evaluator,
+            vec![0.0, 0.0],
+            &bounds,
+            &options(2),
+        ))
+        .expect("result");
+
+        assert_eq!(result.func_count, 2);
+        assert_eq!(evaluator.calls, 2);
+        assert_eq!(result.exitflag, 0);
+    }
 }

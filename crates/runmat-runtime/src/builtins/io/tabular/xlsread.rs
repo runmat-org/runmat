@@ -23,6 +23,10 @@ const BUILTIN_NAME: &str = "xlsread";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
 const MAX_XLSREAD_SELECTED_CELLS: usize = 5_000_000;
+const MAX_XLSREAD_WORKBOOK_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_ENTRIES: usize = 65_536;
 
 const XLSREAD_OUTPUT_NUM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "num",
@@ -481,7 +485,9 @@ fn normalize_spreadsheet_path(text: &str) -> BuiltinResult<String> {
 }
 
 async fn read_spreadsheet(path: &Path, request: &XlsReadRequest) -> BuiltinResult<XlsReadResult> {
+    let outputs = XlsReadOutputs::requested()?;
     let bytes = read_file_bytes(path).await?;
+    preflight_zip_workbook(&bytes)?;
     let cursor = Cursor::new(bytes);
     let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
         xlsread_error_with(
@@ -524,26 +530,230 @@ async fn read_spreadsheet(path: &Path, request: &XlsReadRequest) -> BuiltinResul
             })?,
     };
     let cells = selected_cells(&range, request.range)?;
-    XlsReadResult::from_cells(cells)
+    XlsReadResult::from_cells(cells, outputs)
 }
 
 async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
-    let mut file = File::open_async(path).await.map_err(|err| {
+    let file = File::open_async(path).await.map_err(|err| {
         xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!("xlsread: unable to open '{}': {err}", path.display()),
             err,
         )
     })?;
+    let mut limited = file.take(MAX_XLSREAD_WORKBOOK_BYTES + 1);
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    limited.read_to_end(&mut bytes).map_err(|err| {
         xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!("xlsread: unable to read '{}': {err}", path.display()),
             err,
         )
     })?;
+    if bytes.len() as u64 > MAX_XLSREAD_WORKBOOK_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: workbook exceeds maximum supported size of {MAX_XLSREAD_WORKBOOK_BYTES} bytes"
+            ),
+        ));
+    }
     Ok(bytes)
+}
+
+fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
+    if !looks_like_zip(bytes) {
+        return Ok(());
+    }
+    validate_zip_entry_count_from_raw(bytes)?;
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!("xlsread: invalid ZIP workbook: {err}"),
+        )
+    })?;
+    validate_zip_entry_count(archive.len())?;
+    let mut total = 0u64;
+    for idx in 0..archive.len() {
+        let entry = archive.by_index(idx).map_err(|err| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                format!("xlsread: unable to inspect ZIP workbook entry {idx}: {err}"),
+            )
+        })?;
+        validate_zip_uncompressed_entry(entry.size(), &mut total)?;
+    }
+    Ok(())
+}
+
+fn looks_like_zip(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"PK\x05\x06")
+        || bytes.starts_with(b"PK\x07\x08")
+}
+
+fn validate_zip_entry_count(entry_count: usize) -> BuiltinResult<()> {
+    if entry_count > MAX_XLSREAD_ZIP_ENTRIES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!("xlsread: ZIP workbook contains more than {MAX_XLSREAD_ZIP_ENTRIES} entries"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_zip_entry_count_from_raw(bytes: &[u8]) -> BuiltinResult<()> {
+    let eocd_offset = find_zip_eocd(bytes).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: missing end of central directory",
+        )
+    })?;
+    let total_entries = read_le_u16(bytes, eocd_offset + 10)? as usize;
+    if total_entries == u16::MAX as usize {
+        validate_zip64_entry_count_from_raw(bytes, eocd_offset)
+    } else {
+        validate_zip_entry_count(total_entries)
+    }
+}
+
+fn validate_zip64_entry_count_from_raw(bytes: &[u8], eocd_offset: usize) -> BuiltinResult<()> {
+    let locator_offset = eocd_offset.checked_sub(20).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing locator",
+        )
+    })?;
+    if checked_zip_slice(bytes, locator_offset, 4)? != b"PK\x06\x07" {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing locator",
+        ));
+    }
+    let zip64_locator_record_offset = locator_offset.checked_add(8).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    let zip64_eocd_offset = read_le_u64(bytes, zip64_locator_record_offset)?;
+    let zip64_eocd_offset = usize::try_from(zip64_eocd_offset).map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP64 workbook directory offset exceeds supported bounds",
+        )
+    })?;
+    if checked_zip_slice(bytes, zip64_eocd_offset, 4)? != b"PK\x06\x06" {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing end of central directory",
+        ));
+    }
+    let total_entries_offset = zip64_eocd_offset.checked_add(32).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    let total_entries = read_le_u64(bytes, total_entries_offset)?;
+    let total_entries = usize::try_from(total_entries).map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP workbook entry count exceeds supported bounds",
+        )
+    })?;
+    validate_zip_entry_count(total_entries)
+}
+
+fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
+    const EOCD_LEN: usize = 22;
+    const MAX_COMMENT_LEN: usize = u16::MAX as usize;
+    if bytes.len() < EOCD_LEN {
+        return None;
+    }
+    let min_offset = bytes.len().saturating_sub(EOCD_LEN + MAX_COMMENT_LEN);
+    let max_offset = bytes.len() - EOCD_LEN;
+    (min_offset..=max_offset).rev().find(|&offset| {
+        if bytes.get(offset..offset + 4) != Some(b"PK\x05\x06") {
+            return false;
+        }
+        let comment_len = u16::from_le_bytes([bytes[offset + 20], bytes[offset + 21]]) as usize;
+        offset + EOCD_LEN + comment_len == bytes.len()
+    })
+}
+
+fn checked_zip_slice(bytes: &[u8], offset: usize, len: usize) -> BuiltinResult<&[u8]> {
+    let end = offset.checked_add(len).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    bytes.get(offset..end).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })
+}
+
+fn read_le_u16(bytes: &[u8], offset: usize) -> BuiltinResult<u16> {
+    let slice = checked_zip_slice(bytes, offset, 2)?;
+    Ok(u16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn read_le_u64(bytes: &[u8], offset: usize) -> BuiltinResult<u64> {
+    let slice = checked_zip_slice(bytes, offset, 8)?;
+    Ok(u64::from_le_bytes([
+        slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+    ]))
+}
+
+#[cfg(test)]
+fn validate_zip_uncompressed_limits<I>(sizes: I) -> BuiltinResult<()>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let mut total = 0u64;
+    let mut entry_count = 0usize;
+    for size in sizes {
+        entry_count = entry_count.checked_add(1).ok_or_else(|| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                "xlsread: ZIP workbook entry count overflows supported bounds",
+            )
+        })?;
+        validate_zip_entry_count(entry_count)?;
+        validate_zip_uncompressed_entry(size, &mut total)?;
+    }
+    Ok(())
+}
+
+fn validate_zip_uncompressed_entry(size: u64, total: &mut u64) -> BuiltinResult<()> {
+    if size > MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: ZIP workbook entry exceeds maximum expanded size of {MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES} bytes"
+            ),
+        ));
+    }
+    *total = total.checked_add(size).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP workbook expanded size overflows supported bounds",
+        )
+    })?;
+    if *total > MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: ZIP workbook expanded size exceeds maximum of {MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -724,15 +934,28 @@ struct CellReference {
 }
 
 fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
+    let trimmed = token.trim();
+    let stripped = trimmed.chars().filter(|&ch| ch != '$').collect::<String>();
+    if let Some(reference) = parse_r1c1_reference(&stripped)? {
+        return Ok(reference);
+    }
     let mut letters = String::new();
     let mut digits = String::new();
-    for ch in token.trim().chars() {
+    let mut saw_digit = false;
+    for ch in trimmed.chars() {
         if ch == '$' {
             continue;
         }
         if ch.is_ascii_alphabetic() {
+            if saw_digit {
+                return Err(xlsread_error_with(
+                    &XLSREAD_ERROR_RANGE,
+                    format!("xlsread: invalid range component '{token}'"),
+                ));
+            }
             letters.push(ch.to_ascii_uppercase());
         } else if ch.is_ascii_digit() {
+            saw_digit = true;
             digits.push(ch);
         } else {
             return Err(xlsread_error_with(
@@ -770,6 +993,49 @@ fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
         Some(parsed - 1)
     };
     Ok(CellReference { row, col })
+}
+
+fn parse_r1c1_reference(token: &str) -> BuiltinResult<Option<CellReference>> {
+    let upper = token.to_ascii_uppercase();
+    let Some(rest) = upper.strip_prefix('R') else {
+        return Ok(None);
+    };
+    let Some(split) = rest.find('C') else {
+        return Ok(None);
+    };
+    let (row_text, col_with_marker) = rest.split_at(split);
+    let col_text = &col_with_marker[1..];
+    if rest[split + 1..].contains('C') {
+        return Ok(None);
+    }
+    if row_text.is_empty()
+        || col_text.is_empty()
+        || !row_text.chars().all(|ch| ch.is_ascii_digit())
+        || !col_text.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Ok(None);
+    }
+    let row = parse_one_based_r1c1_index(row_text, "row", token)?;
+    let col = parse_one_based_r1c1_index(col_text, "column", token)?;
+    Ok(Some(CellReference {
+        row: Some(row),
+        col: Some(col),
+    }))
+}
+
+fn parse_one_based_r1c1_index(text: &str, label: &str, token: &str) -> BuiltinResult<usize> {
+    let parsed = text.parse::<usize>().map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: invalid {label} index in '{token}'"),
+        )
+    })?;
+    parsed.checked_sub(1).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: {label} index in '{token}' must be one-based"),
+        )
+    })
 }
 
 fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
@@ -942,30 +1208,87 @@ fn trim_empty_edges(rows: Vec<Vec<SpreadsheetData>>) -> BuiltinResult<Vec<Vec<Sp
 
 #[derive(Clone)]
 struct XlsReadResult {
-    num: Value,
-    txt: Value,
-    raw: Value,
+    num: Option<Value>,
+    txt: Option<Value>,
+    raw: Option<Value>,
+}
+
+#[derive(Clone, Copy)]
+struct XlsReadOutputs {
+    num: bool,
+    txt: bool,
+    raw: bool,
+}
+
+impl XlsReadOutputs {
+    fn requested() -> BuiltinResult<Self> {
+        match crate::output_count::current_output_count() {
+            Some(0) => Ok(Self {
+                num: false,
+                txt: false,
+                raw: false,
+            }),
+            Some(1) | None => Ok(Self {
+                num: true,
+                txt: false,
+                raw: false,
+            }),
+            Some(2) => Ok(Self {
+                num: true,
+                txt: true,
+                raw: false,
+            }),
+            Some(3) => Ok(Self {
+                num: true,
+                txt: true,
+                raw: true,
+            }),
+            Some(n) => Err(xlsread_error_with(
+                &XLSREAD_ERROR_OUTPUT_COUNT,
+                format!("xlsread: expected at most 3 outputs, got {n}"),
+            )),
+        }
+    }
 }
 
 impl XlsReadResult {
-    fn from_cells(rows: Vec<Vec<SpreadsheetData>>) -> BuiltinResult<Self> {
-        let num = build_numeric_output(&rows)?;
-        let txt = build_text_output(&rows)?;
-        let raw = build_raw_output(&rows)?;
+    fn from_cells(rows: Vec<Vec<SpreadsheetData>>, outputs: XlsReadOutputs) -> BuiltinResult<Self> {
+        let num = if outputs.num {
+            Some(build_numeric_output(&rows)?)
+        } else {
+            None
+        };
+        let txt = if outputs.txt {
+            Some(build_text_output(&rows)?)
+        } else {
+            None
+        };
+        let raw = if outputs.raw {
+            Some(build_raw_output(&rows)?)
+        } else {
+            None
+        };
         Ok(Self { num, txt, raw })
     }
 
     fn into_requested_value(self) -> BuiltinResult<Value> {
         match crate::output_count::current_output_count() {
             Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![self.num])),
-            Some(2) => Ok(Value::OutputList(vec![self.num, self.txt])),
-            Some(3) => Ok(Value::OutputList(vec![self.num, self.txt, self.raw])),
+            Some(1) => Ok(Value::OutputList(vec![self.num.expect("num output")])),
+            Some(2) => Ok(Value::OutputList(vec![
+                self.num.expect("num output"),
+                self.txt.expect("txt output"),
+            ])),
+            Some(3) => Ok(Value::OutputList(vec![
+                self.num.expect("num output"),
+                self.txt.expect("txt output"),
+                self.raw.expect("raw output"),
+            ])),
             Some(n) => Err(xlsread_error_with(
                 &XLSREAD_ERROR_OUTPUT_COUNT,
                 format!("xlsread: expected at most 3 outputs, got {n}"),
             )),
-            None => Ok(self.num),
+            None => Ok(self.num.expect("num output")),
         }
     }
 }
@@ -1300,6 +1623,161 @@ mod tests {
         assert_eq!(spec.start_col, 1);
         assert_eq!(spec.end_row, Some(2));
         assert_eq!(spec.end_col, Some(1));
+    }
+
+    #[test]
+    fn r1c1_range_is_parsed_explicitly() {
+        let spec = parse_range_string("R2C3:R4C5").expect("r1c1 range");
+        assert_eq!(spec.start_row, 1);
+        assert_eq!(spec.start_col, 2);
+        assert_eq!(spec.end_row, Some(3));
+        assert_eq!(spec.end_col, Some(4));
+    }
+
+    #[test]
+    fn a1_columns_starting_with_r_and_c_do_not_parse_as_r1c1() {
+        let spec = parse_range_string("RC1:RBC10").expect("a1 range");
+        assert_eq!(spec.start_row, 0);
+        assert_eq!(spec.start_col, column_index_from_letters("RC").unwrap());
+        assert_eq!(spec.end_row, Some(9));
+        assert_eq!(
+            spec.end_col,
+            Some(column_index_from_letters("RBC").unwrap())
+        );
+    }
+
+    #[test]
+    fn invalid_strict_r1c1_indices_are_rejected() {
+        let err = parse_range_string("R0C1").expect_err("zero r1c1 row");
+        assert!(err.message().contains("must be one-based"));
+    }
+
+    #[test]
+    fn interleaved_a1_tokens_are_rejected() {
+        let err = parse_range_string("A1B2").expect_err("invalid token");
+        assert!(err.message().contains("invalid range component"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_oversized_entry() {
+        let err = validate_zip_uncompressed_limits([MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1])
+            .expect_err("oversized entry");
+        assert!(err.message().contains("entry exceeds"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_oversized_total() {
+        let part = MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES;
+        let err = validate_zip_uncompressed_limits([part, part, part, part, 1])
+            .expect_err("oversized total");
+        assert!(err.message().contains("expanded size exceeds"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_excessive_entry_count() {
+        let err =
+            validate_zip_entry_count(MAX_XLSREAD_ZIP_ENTRIES + 1).expect_err("too many entries");
+        assert!(err.message().contains("more than"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_raw_zip64_excessive_entry_count() {
+        let bytes = zip64_entry_count_fixture((MAX_XLSREAD_ZIP_ENTRIES + 1) as u64);
+        let err = preflight_zip_workbook(&bytes).expect_err("too many zip64 entries");
+        assert!(err.message().contains("more than"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_missing_zip64_locator() {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("missing zip64 locator");
+        assert!(err.message().contains("missing locator"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_out_of_bounds_zip64_eocd_offset() {
+        let mut bytes = zip64_entry_count_fixture(1);
+        let eocd_offset = find_zip_eocd(&bytes).expect("eocd");
+        let locator_record_offset = eocd_offset - 20 + 8;
+        bytes[locator_record_offset..locator_record_offset + 8]
+            .copy_from_slice(&u64::MAX.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("out-of-bounds zip64 eocd");
+        assert!(err.message().contains("truncated directory"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_truncated_zip64_eocd_offset() {
+        let mut bytes = zip64_entry_count_fixture(1);
+        let eocd_offset = find_zip_eocd(&bytes).expect("eocd");
+        let locator_record_offset = eocd_offset - 20 + 8;
+        let truncated_offset = (bytes.len() - 2) as u64;
+        bytes[locator_record_offset..locator_record_offset + 8]
+            .copy_from_slice(&truncated_offset.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("truncated zip64 eocd");
+        assert!(err.message().contains("truncated directory"));
+    }
+
+    #[test]
+    fn xlsread_zip_eocd_scan_ignores_signature_inside_comment() {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        let eocd_offset = bytes.len();
+        let comment = b"comment with PK\x05\x06 marker";
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&(comment.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(comment);
+
+        assert_eq!(find_zip_eocd(&bytes), Some(eocd_offset));
+    }
+
+    #[test]
+    fn xlsread_zip_checked_slice_rejects_offset_overflow() {
+        let err = checked_zip_slice(b"PK\x03\x04", usize::MAX, 4).expect_err("overflowing offset");
+        assert!(err.message().contains("truncated directory"));
+    }
+
+    fn zip64_entry_count_fixture(entry_count: u64) -> Vec<u8> {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        let zip64_eocd_offset = bytes.len() as u64;
+        bytes.extend_from_slice(b"PK\x06\x06");
+        bytes.extend_from_slice(&44u64.to_le_bytes());
+        bytes.extend_from_slice(&45u16.to_le_bytes());
+        bytes.extend_from_slice(&45u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&entry_count.to_le_bytes());
+        bytes.extend_from_slice(&entry_count.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(b"PK\x06\x07");
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes
     }
 
     #[test]

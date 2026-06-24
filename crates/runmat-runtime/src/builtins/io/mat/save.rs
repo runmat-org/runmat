@@ -11,7 +11,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, NumericDType, StructValue, Value,
 };
-use runmat_filesystem::write_async;
+use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
 
 use super::format::{
@@ -544,13 +544,22 @@ async fn append_existing_entries(
 }
 
 async fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
+    match metadata_async(path).await {
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(save_error_with_source(
+                &SAVE_ERROR_IO,
+                format!(
+                    "save: failed to inspect existing MAT-file '{}': {err}",
+                    path.display()
+                ),
+                err,
+            ));
+        }
+    }
     match read_mat_file(path).await {
         Ok(entries) => Ok(entries),
-        Err(err)
-            if err.message().contains("No such file") || err.message().contains("not found") =>
-        {
-            Ok(Vec::new())
-        }
         Err(err) => Err(save_error_with_source(
             &SAVE_ERROR_IO,
             format!(

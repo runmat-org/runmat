@@ -665,8 +665,13 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         ));
     }
 
-    let pixels = rows * cols;
-    let mut data = vec![0u8; pixels * 3];
+    let pixels = rows.checked_mul(cols).ok_or_else(|| {
+        imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
+    })?;
+    let byte_len = pixels.checked_mul(3).ok_or_else(|| {
+        imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
+    })?;
+    let mut data = vec![0u8; byte_len];
     for row in 0..rows {
         for col in 0..cols {
             let pixel = row + rows * col;
@@ -983,6 +988,8 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
     let mut frames = Vec::new();
     let mut existing_repeat = None;
     if invocation.options.write_mode == WriteMode::Append {
+        // GIF append is inherently read-modify-write with the current filesystem
+        // abstraction; providers do not expose a portable advisory/exclusive lock.
         let existing = runmat_filesystem::read_async(&invocation.path)
             .await
             .map_err(|err| {

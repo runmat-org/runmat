@@ -775,10 +775,19 @@ fn lapack_ratio_to_eigenvalue(alpha: &lapack::c64, beta: &lapack::c64) -> Comple
         if alpha.norm() <= REAL_EPS {
             Complex64::new(f64::NAN, f64::NAN)
         } else {
-            Complex64::new(f64::INFINITY, 0.0)
+            Complex64::new(infinite_component(alpha.re), infinite_component(alpha.im))
         }
     } else {
         alpha / beta
+    }
+}
+
+#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+fn infinite_component(value: f64) -> f64 {
+    if value == 0.0 {
+        value
+    } else {
+        value.signum() * f64::INFINITY
     }
 }
 
@@ -1185,8 +1194,8 @@ pub(crate) mod tests {
     }
 
     fn assert_values_close_unordered(mut actual: Vec<Complex64>, mut expected: Vec<Complex64>) {
-        actual.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
-        expected.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        actual.sort_by(|a, b| a.re.total_cmp(&b.re));
+        expected.sort_by(|a, b| a.re.total_cmp(&b.re));
         assert_eq!(actual.len(), expected.len());
         for (lhs, rhs) in actual.iter().zip(expected.iter()) {
             assert!(

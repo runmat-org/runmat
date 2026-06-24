@@ -291,7 +291,6 @@ fn import_text_data(
     if imported.textdata.is_empty()
         && imported.colheaders.is_empty()
         && imported.rowheaders.is_empty()
-        && header_lines.is_none()
     {
         return Ok(Value::Tensor(tensor));
     }
@@ -336,10 +335,16 @@ fn parse_numeric_records(
     let mut rows = Vec::with_capacity(data_records.len());
     let mut rowheaders = Vec::new();
     for (line_idx, record) in data_records {
-        if record.len() < row_header_cols + numeric_cols {
+        let expected_cols = row_header_cols + numeric_cols;
+        if record.len() != expected_cols {
             return Err(importdata_error_with(
                 &IMPORTDATA_ERROR_PARSE,
-                format!("importdata: row {} has too few columns", line_idx + 1),
+                format!(
+                    "importdata: row {} has {} columns, expected {}",
+                    line_idx + 1,
+                    record.len(),
+                    expected_cols
+                ),
             ));
         }
         if row_header_cols > 0 {
@@ -729,6 +734,21 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn importdata_headerlines_zero_numeric_input_returns_tensor() {
+        let path = write_fixture("txt", "1 2\n3 4\n");
+        let out = block_on(importdata_builtin(
+            Value::from(path.to_string_lossy().into_owned()),
+            vec![Value::from(" "), Value::Num(0.0)],
+        ))
+        .expect("importdata");
+        let (data, shape) = tensor_data(&out);
+        assert_eq!(shape, &[2, 2]);
+        assert_eq!(data, &[1.0, 3.0, 2.0, 4.0]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn importdata_detects_csv_header_and_colheaders() {
         let path = write_fixture("csv", "time,value\n0,1.5\n1,2.5\n");
         let out = block_on(importdata_builtin(
@@ -791,6 +811,19 @@ mod tests {
         ))
         .expect_err("parse error");
         assert!(err.message().contains("nonnumeric token"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn importdata_rejects_rows_with_extra_numeric_columns() {
+        let path = write_fixture("txt", "1 2\n3 4 5\n");
+        let err = block_on(importdata_builtin(
+            Value::from(path.to_string_lossy().into_owned()),
+            Vec::new(),
+        ))
+        .expect_err("width mismatch");
+        assert!(err.message().contains("expected 2"));
         let _ = fs::remove_file(path);
     }
 }
