@@ -298,6 +298,8 @@ pub(super) struct PolyderParams {
 pub(super) struct PolyintParamsF64 {
     pub(super) input_len: u32,
     pub(super) output_len: u32,
+    pub(super) storage_factor: u32,
+    pub(super) _pad0: u32,
     pub(super) constant: f64,
 }
 
@@ -306,8 +308,12 @@ pub(super) struct PolyintParamsF64 {
 pub(super) struct PolyintParamsF32 {
     pub(super) input_len: u32,
     pub(super) output_len: u32,
+    pub(super) storage_factor: u32,
+    pub(super) _pad0: u32,
     pub(super) constant: f32,
-    pub(super) _pad0: f32,
+    pub(super) _pad1: f32,
+    pub(super) _pad2: f32,
+    pub(super) _pad3: f32,
 }
 
 pub(super) fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {

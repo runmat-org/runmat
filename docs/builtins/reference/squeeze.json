@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Remove singleton dimensions while preserving MATLAB-compatible vector orientation semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

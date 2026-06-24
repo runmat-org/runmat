@@ -10,9 +10,6 @@
     "gpu"
   ],
   "summary": "Apply IIR/FIR digital filters in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB filter documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

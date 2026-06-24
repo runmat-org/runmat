@@ -10,7 +10,6 @@
     "gpu"
   ],
   "summary": "Return maximum elements in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

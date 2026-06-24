@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Compute eigenvalue decompositions in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

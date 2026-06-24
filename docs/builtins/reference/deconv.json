@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Compute one-dimensional deconvolution in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB deconv documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

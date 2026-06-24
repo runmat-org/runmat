@@ -9,7 +9,6 @@
     "append plots"
   ],
   "summary": "Control plot replacement versus appending in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

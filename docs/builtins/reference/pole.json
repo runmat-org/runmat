@@ -6,18 +6,16 @@
     "poles",
     "stability",
     "control system",
-    "tf"
+    "tf",
+    "ss"
   ],
-  "summary": "Return poles of SISO transfer-function models.",
-  "references": [
-    "title: \"MATLAB pole documentation\""
-  ],
+  "summary": "Return poles of transfer-function and state-space control models.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`pole` computes roots from host-side denominator metadata."
+    "notes": "`pole` computes roots or state-matrix eigenvalues from host-side model metadata."
   },
   "fusion": {
     "elementwise": false,
@@ -31,9 +29,10 @@
     "unit": "builtins::control::pole::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`pole(sys)` returns the roots of the denominator polynomial for a supported SISO `tf` model.",
+  "description": "`pole(sys)` returns the roots of the denominator polynomial for a supported SISO `tf` model, or the eigenvalues of the state matrix for an `ss` model.",
   "behaviors": [
     "Supports SISO `tf` objects.",
+    "Supports `ss` state-space objects by computing eigenvalues of `A`.",
     "Returns an `N x 1` real vector when all poles are real.",
     "Returns an `N x 1` complex vector when any pole has a nonzero imaginary part.",
     "Static-gain models return an empty pole vector."
@@ -57,6 +56,18 @@
       "url": "./roots"
     },
     {
+      "label": "zero",
+      "url": "./zero"
+    },
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "ss",
+      "url": "./ss"
+    },
+    {
       "label": "isstable",
       "url": "./isstable"
     }
@@ -72,11 +83,11 @@
       "output": "p is a column vector."
     },
     "points": [
-      "`sys` must be a SISO `tf` object."
+      "`sys` must be a SISO `tf` object or an `ss` object."
     ]
   },
   "validation": {
-    "summary": "`pole` validates the input model and computes denominator roots through the shared control polynomial root path. Tests cover real poles and VM integration.",
+    "summary": "`pole` validates the input model and computes denominator roots or state-matrix eigenvalues through shared control model helpers. Tests cover real, repeated, complex-conjugate, and state-space poles plus VM integration.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/pole.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/pole.rs"

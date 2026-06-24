@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Extract imaginary components in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,
@@ -18,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host when the active provider lacks unary_imag or when inputs require host-only conversions (complex tensors, characters)."
+    "notes": "Uses unary_imag to keep GPU tensors resident, materialising zeros for real inputs and extracting imaginary lanes from complex-interleaved GPU tensors. Falls back to the host only when the active provider lacks the hook or when inputs require host-only conversions such as characters."
   },
   "fusion": {
     "elementwise": true,
@@ -208,6 +207,6 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is profitable. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (for example, when integrating with custom CUDA or OpenCL kernels).",
   "gpu_behavior": [
     "**Hook available:** The provider materialises a zero-filled tensor directly on the GPU without any host transfers.",
-    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including the conversions for logical and character inputs), and resumes execution. Downstream fusion can still re-upload the result when profitable.\n\nComplex GPU tensors are currently gathered to the host because GPU-side complex storage is not yet available; providers can add fused support later without changing this builtin."
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including the conversions for logical and character inputs), and resumes execution. Downstream fusion can still re-upload the result when profitable.\n\nWhen a provider supports complex-interleaved storage, `imag` extracts the imaginary lane on the device and returns a real GPU tensor with the original shape."
   ]
 }

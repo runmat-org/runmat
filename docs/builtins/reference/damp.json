@@ -11,9 +11,6 @@
     "ss"
   ],
   "summary": "Return natural frequencies, damping ratios, and poles for control models.",
-  "references": [
-    "title: \"MATLAB damp documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

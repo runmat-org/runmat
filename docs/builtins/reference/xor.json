@@ -9,7 +9,6 @@
     "gpuArray xor"
   ],
   "summary": "Compute element-wise logical XOR across scalar or array inputs with MATLAB-compatible expansion.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

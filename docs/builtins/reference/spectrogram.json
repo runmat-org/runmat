@@ -11,9 +11,6 @@
     "signal processing"
   ],
   "summary": "Compute a short-time Fourier transform spectrogram.",
-  "references": [
-    "title: \"MATLAB spectrogram documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

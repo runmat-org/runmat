@@ -197,10 +197,6 @@ Write-Host 'Installing vcpkg packages used by Windows CI'
 if ($LASTEXITCODE -ne 0) {
     throw "vcpkg install openblas failed with exit code $LASTEXITCODE"
 }
-& (Join-Path $VcpkgRoot 'vcpkg.exe') install "lapack-reference:$Triplet"
-if ($LASTEXITCODE -ne 0) {
-    throw "vcpkg install lapack-reference failed with exit code $LASTEXITCODE"
-}
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "zeromq:$Triplet"
 if ($LASTEXITCODE -ne 0) {
     throw "vcpkg install zeromq failed with exit code $LASTEXITCODE"
@@ -215,7 +211,7 @@ Write-Host 'Writing machine-wide environment variables'
 [Environment]::SetEnvironmentVariable('BLAS_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
 [Environment]::SetEnvironmentVariable('BLAS_LIBS', 'openblas', 'Machine')
 [Environment]::SetEnvironmentVariable('LAPACK_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
-[Environment]::SetEnvironmentVariable('LAPACK_LIBS', 'lapack;openblas', 'Machine')
+[Environment]::SetEnvironmentVariable('LAPACK_LIBS', 'openblas', 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_PATH', $vcpkgInstalled, 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_INCLUDE_DIR', (Join-Path $vcpkgInstalled 'include'), 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
@@ -265,7 +261,6 @@ if (-not [string]::Equals($resolvedCargo, $expectedCargo, [System.StringComparis
 $requiredPaths = @(
     (Join-Path $vcpkgInstalled 'include\zmq.h'),
     (Join-Path $vcpkgInstalled 'lib\openblas.lib'),
-    (Join-Path $vcpkgInstalled 'lib\lapack.lib'),
     (Join-Path $vcpkgInstalled 'lib\pkgconfig\libzmq.pc')
 )
 foreach ($path in $requiredPaths) {

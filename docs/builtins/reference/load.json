@@ -10,7 +10,6 @@
     "regex load"
   ],
   "summary": "Load variables from MAT-files in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

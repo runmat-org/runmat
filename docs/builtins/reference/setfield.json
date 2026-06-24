@@ -9,7 +9,6 @@
     "object property"
   ],
   "summary": "Assign values into struct fields, nested fields, or struct-array elements with MATLAB-compatible path syntax.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

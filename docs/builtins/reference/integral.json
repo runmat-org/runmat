@@ -9,7 +9,6 @@
     "function handle"
   ],
   "summary": "Approximate finite scalar definite integrals in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

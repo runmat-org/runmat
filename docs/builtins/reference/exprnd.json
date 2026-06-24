@@ -11,7 +11,6 @@
     "poisson"
   ],
   "summary": "Generate exponentially distributed random samples with mean `mu` and MATLAB-compatible size handling.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Compute MATLAB remainder values using `A - B .* fix(A ./ B)` across real or complex arrays.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

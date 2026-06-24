@@ -11,7 +11,6 @@
     "decimal separator"
   ],
   "summary": "Write numeric or string matrices to delimited text files with MATLAB-compatible option defaults.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "struct array"
   ],
   "summary": "Create scalar structs or struct arrays from field/value inputs with MATLAB-compatible construction rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "networking"
   ],
   "summary": "Accept pending TCP client connections with MATLAB-compatible socket semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

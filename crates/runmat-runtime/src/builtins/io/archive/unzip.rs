@@ -10,7 +10,6 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
-#[cfg(target_arch = "wasm32")]
 use runmat_filesystem::File;
 use runmat_filesystem::{self as vfs};
 use runmat_macros::runtime_builtin;
@@ -167,7 +166,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Archive extraction runs on the host filesystem and gathers path arguments before I/O.",
+    notes: "Archive extraction runs through the active filesystem provider and gathers path arguments before I/O.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::archive::unzip")]
@@ -298,7 +297,8 @@ async fn extract_remote_archive(
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn extract_local_archive(path: &Path, output_folder: &Path) -> BuiltinResult<Vec<String>> {
-    extract_archive_file_on_worker(path.to_path_buf(), output_folder.to_path_buf()).await
+    let temp = local_archive_to_temp_file(path).await?;
+    extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf()).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -334,6 +334,61 @@ async fn download_archive_to_temp_file_async(url_text: String) -> BuiltinResult<
             "unzip: download worker terminated before returning a result",
         )
     })?
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
+    let mut input = File::open_async(path).await.map_err(|err| {
+        unzip_error_with_source(
+            &UNZIP_ERROR_IO,
+            format!("unzip: unable to open '{}': {err}", path.display()),
+            err,
+        )
+    })?;
+    if let Ok(metadata) = input.metadata_async().await {
+        ensure_compressed_size_within_limit(metadata.len())?;
+    }
+
+    let (temp_path, mut out) = create_unique_temp_archive()?;
+    let mut copied = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = input.read(&mut buffer).map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!("unzip: unable to read '{}': {err}", path.display()),
+                err,
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        copied = copied.checked_add(read as u64).ok_or_else(|| {
+            unzip_error_with(&UNZIP_ERROR_IO, "unzip: archive is too large")
+        })?;
+        ensure_compressed_size_within_limit(copied)?;
+        out.write_all(&buffer[..read]).map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!(
+                    "unzip: unable to write temporary archive '{}': {err}",
+                    temp_path.display()
+                ),
+                err,
+            )
+        })?;
+    }
+    out.flush().map_err(|err| {
+        unzip_error_with_source(
+            &UNZIP_ERROR_IO,
+            format!(
+                "unzip: unable to flush temporary archive '{}': {err}",
+                temp_path.display()
+            ),
+            err,
+        )
+    })?;
+    Ok(TempArchive { path: temp_path })
 }
 
 fn value_to_string_scalar(
@@ -492,6 +547,16 @@ fn download_archive_to_temp_file(url_text: &str) -> BuiltinResult<TempArchive> {
             )
         })?;
     }
+    out.flush().map_err(|err| {
+        unzip_error_with_source(
+            &UNZIP_ERROR_IO,
+            format!(
+                "unzip: unable to flush temporary archive '{}': {err}",
+                temp_path.display()
+            ),
+            err,
+        )
+    })?;
     Ok(TempArchive { path: temp_path })
 }
 

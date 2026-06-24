@@ -13,7 +13,6 @@
     "quote strings"
   ],
   "summary": "Write heterogeneous cell arrays to delimited text or spreadsheet files.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

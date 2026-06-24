@@ -10,9 +10,6 @@
     "control system"
   ],
   "summary": "Compute step-response metrics from SISO models or sampled responses.",
-  "references": [
-    "title: \"MATLAB stepinfo documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

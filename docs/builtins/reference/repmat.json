@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Tile arrays across one or more dimensions using MATLAB-compatible `repmat` rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

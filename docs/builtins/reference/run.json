@@ -9,7 +9,6 @@
     "path"
   ],
   "summary": "Execute a MATLAB script file in the caller workspace.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

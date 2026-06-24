@@ -56,6 +56,8 @@ use std::sync::{Arc, Mutex};
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
+#[path = "ops/comms.rs"]
+mod comms;
 #[path = "ops/constructors.rs"]
 mod constructors;
 #[path = "ops/context.rs"]

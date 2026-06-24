@@ -9,7 +9,6 @@
     "provider"
   ],
   "summary": "Query active GPU device metadata in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

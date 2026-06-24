@@ -10,10 +10,6 @@
     "step response"
   ],
   "summary": "Create and combine SISO transfer-function model objects.",
-  "references": [
-    "title: \"MATLAB tf documentation\"",
-    "title: \"Octave control package tf documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

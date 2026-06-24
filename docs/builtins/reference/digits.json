@@ -1,0 +1,60 @@
+{
+  "title": "digits",
+  "category": "math/symbolic",
+  "keywords": [
+    "digits",
+    "vpa",
+    "symbolic",
+    "precision"
+  ],
+  "summary": "Get or set the default variable-precision digit count.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The precision setting is host runtime state for symbolic variable-precision formatting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::digits::tests"
+  },
+  "description": "`digits` returns the current default precision for `vpa`. `digits(d)` sets the precision and returns the previous value. `digits('default')` resets the setting to 32.",
+  "behaviors": [
+    "The default value is 32 significant digits.",
+    "Accepted digit counts are positive integer scalar values in the supported range.",
+    "The setting affects later `vpa(x)` calls that omit an explicit precision."
+  ],
+  "examples": [
+    {
+      "description": "Set and reset precision",
+      "input": "old = digits(50)\nx = vpa(sym('1/3'))\ndigits('default')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `digits` change ordinary double precision arithmetic?",
+      "answer": "No. It only controls the default significant-digit count used by symbolic variable-precision operations such as `vpa`."
+    }
+  ],
+  "links": [
+    {
+      "label": "vpa",
+      "url": "./vpa"
+    },
+    {
+      "label": "sym",
+      "url": "./sym"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/digits.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/digits.rs"
+  }
+}

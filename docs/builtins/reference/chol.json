@@ -10,7 +10,6 @@
     "upper"
   ],
   "summary": "Compute Cholesky factorizations in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

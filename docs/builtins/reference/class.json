@@ -9,7 +9,6 @@
     "isa"
   ],
   "summary": "Return class names for values in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

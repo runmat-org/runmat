@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Compute inverse discrete Fourier transforms in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB ifft documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,7 +10,6 @@
     "gpu"
   ],
   "summary": "Return minimum elements in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

@@ -65,6 +65,22 @@ fn axis_image_command_form_enables_equal_aspect() {
 }
 
 #[test]
+fn polarplot_dispatches_and_sets_equal_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        theta = linspace(0, 2*pi, 16); \
+        rho = abs(sin(theta)); \
+        h = polarplot(theta, rho, 'r--', 'LineWidth', 2); \
+        if ~ishandle(h); \
+            error('polarplot did not return a line handle'); \
+        end; \
+        if ~get(gca, 'AxisEqual'); \
+            error('polarplot did not enable equal axes'); \
+        end;";
+    execute_source(input).expect("execute polarplot script");
+}
+
+#[test]
 fn bare_gca_can_set_axes_font_size() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

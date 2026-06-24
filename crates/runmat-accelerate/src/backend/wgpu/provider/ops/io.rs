@@ -128,11 +128,18 @@ impl WgpuProvider {
                 handle.buffer_id
             );
         }
+        let storage = if runmat_accelerate_api::handle_storage(handle)
+            == GpuTensorStorage::ComplexInterleaved
+        {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            entry.storage.clone()
+        };
         if entry.len == 0 {
             return Ok(HostTensorOwned {
                 data: Vec::new(),
                 shape: handle.shape.clone(),
-                storage: runmat_accelerate_api::handle_storage(handle),
+                storage,
             });
         }
 
@@ -162,11 +169,18 @@ impl WgpuProvider {
             log::trace!("wgpu download finished copy id={}", handle.buffer_id);
             self.telemetry.record_download_bytes(size_bytes);
 
+            let lane_factor = match storage {
+                GpuTensorStorage::Real => 1usize,
+                GpuTensorStorage::ComplexInterleaved => 2usize,
+            };
             let mut shape = handle.shape.clone();
             if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
                 let base_rows = info.base_rows;
                 let base_cols = info.base_cols;
-                if base_rows * base_cols != out.len() {
+                let logical_len = out.len() / lane_factor;
+                if out.len() % lane_factor != 0
+                    || base_rows.checked_mul(base_cols) != Some(logical_len)
+                {
                     return Err(anyhow!(
                         "download: transpose metadata mismatch for buffer {}",
                         handle.buffer_id
@@ -178,9 +192,10 @@ impl WgpuProvider {
                     let mut transposed = vec![0.0f64; out.len()];
                     for col in 0..base_cols {
                         for row in 0..base_rows {
-                            let src_idx = row + col * base_rows;
-                            let dst_idx = col + row * base_cols;
-                            transposed[dst_idx] = out[src_idx];
+                            let src_idx = (row + col * base_rows) * lane_factor;
+                            let dst_idx = (col + row * base_cols) * lane_factor;
+                            transposed[dst_idx..dst_idx + lane_factor]
+                                .copy_from_slice(&out[src_idx..src_idx + lane_factor]);
                         }
                     }
                     out = transposed;
@@ -198,7 +213,7 @@ impl WgpuProvider {
             Ok(HostTensorOwned {
                 data: out,
                 shape,
-                storage: runmat_accelerate_api::handle_storage(handle),
+                storage,
             })
         };
 

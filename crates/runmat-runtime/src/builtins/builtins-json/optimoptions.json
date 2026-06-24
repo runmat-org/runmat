@@ -15,7 +15,6 @@
     "OptimalityTolerance"
   ],
   "summary": "Create or update solver-specific optimization options for fminbnd, fzero, fsolve, and lsqcurvefit.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

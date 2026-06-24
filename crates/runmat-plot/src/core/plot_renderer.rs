@@ -8,7 +8,7 @@ use crate::core::renderer::Vertex;
 use crate::core::{BoundingBox, Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
 use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
-use crate::plots::Figure;
+use crate::plots::{AxesKind, Figure};
 use glam::{Mat4, Vec3, Vec4};
 use runmat_time::Instant;
 use std::cell::RefCell;
@@ -36,6 +36,7 @@ struct AxesViewContract {
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
     has_3d_content: bool,
+    axes_kind: AxesKind,
     x_limits: Option<(f64, f64)>,
     y_limits: Option<(f64, f64)>,
     z_limits: Option<(f64, f64)>,
@@ -361,6 +362,7 @@ impl PlotRenderer {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
                     has_3d_content: has_3d_content[axes_index],
+                    axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),
                     x_limits: meta.and_then(|m| m.x_limits),
                     y_limits: meta.and_then(|m| m.y_limits),
                     z_limits: meta.and_then(|m| m.z_limits),
@@ -2230,7 +2232,14 @@ impl PlotRenderer {
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
         if is_2d && (show_major_grid || show_minor_grid) {
-            if let Some((l, r, b, t)) = self.view_bounds_for_axes(axes_index) {
+            if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
+                if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
+                    let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
+                    l = -radius;
+                    r = radius;
+                    b = -radius;
+                    t = radius;
+                }
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
@@ -2250,47 +2259,61 @@ impl PlotRenderer {
                 let g = 80.0_f32 / 255.0_f32;
                 let major_col = Vec4::new(g, g, g, 1.0);
                 let minor_col = Vec4::new(g, g, g, 0.42);
-                if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
-                    let minor_step = (x_step / 5.0).max(f64::EPSILON);
-                    Self::push_vertical_grid_lines(
+                if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
+                    let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
+                    let step = plot_utils::calculate_tick_interval(radius);
+                    Self::push_polar_grid_lines(
                         &mut grid_vertices,
-                        (l, r),
-                        (b, t),
-                        minor_step,
-                        minor_col,
-                        Some((x_step, minor_step * 0.25)),
-                    );
-                }
-                if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
-                    let minor_step = (y_step / 5.0).max(f64::EPSILON);
-                    Self::push_horizontal_grid_lines(
-                        &mut grid_vertices,
-                        (b, t),
-                        (l, r),
-                        minor_step,
-                        minor_col,
-                        Some((y_step, minor_step * 0.25)),
-                    );
-                }
-                if show_major_grid && x_step.is_finite() && x_step > 0.0 {
-                    Self::push_vertical_grid_lines(
-                        &mut grid_vertices,
-                        (l, r),
-                        (b, t),
-                        x_step,
+                        radius,
+                        step,
+                        show_major_grid,
+                        show_minor_grid,
                         major_col,
-                        None,
+                        minor_col,
                     );
-                }
-                if show_major_grid && y_step.is_finite() && y_step > 0.0 {
-                    Self::push_horizontal_grid_lines(
-                        &mut grid_vertices,
-                        (b, t),
-                        (l, r),
-                        y_step,
-                        major_col,
-                        None,
-                    );
+                } else {
+                    if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
+                        let minor_step = (x_step / 5.0).max(f64::EPSILON);
+                        Self::push_vertical_grid_lines(
+                            &mut grid_vertices,
+                            (l, r),
+                            (b, t),
+                            minor_step,
+                            minor_col,
+                            Some((x_step, minor_step * 0.25)),
+                        );
+                    }
+                    if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
+                        let minor_step = (y_step / 5.0).max(f64::EPSILON);
+                        Self::push_horizontal_grid_lines(
+                            &mut grid_vertices,
+                            (b, t),
+                            (l, r),
+                            minor_step,
+                            minor_col,
+                            Some((y_step, minor_step * 0.25)),
+                        );
+                    }
+                    if show_major_grid && x_step.is_finite() && x_step > 0.0 {
+                        Self::push_vertical_grid_lines(
+                            &mut grid_vertices,
+                            (l, r),
+                            (b, t),
+                            x_step,
+                            major_col,
+                            None,
+                        );
+                    }
+                    if show_major_grid && y_step.is_finite() && y_step > 0.0 {
+                        Self::push_horizontal_grid_lines(
+                            &mut grid_vertices,
+                            (b, t),
+                            (l, r),
+                            y_step,
+                            major_col,
+                            None,
+                        );
+                    }
                 }
                 if !grid_vertices.is_empty() {
                     grid_vb_opt = Some(self.wgpu_renderer.create_vertex_buffer(&grid_vertices));
@@ -2916,6 +2939,13 @@ impl PlotRenderer {
         )
     }
 
+    pub fn overlay_axes_kind_for_axes(&self, axes_index: usize) -> AxesKind {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_kind(axes_index))
+            .unwrap_or(AxesKind::Cartesian)
+    }
+
     fn minor_grid_for_axes(
         last_figure: Option<&crate::plots::Figure>,
         figure_show_minor_grid: bool,
@@ -2962,6 +2992,72 @@ impl PlotRenderer {
                 vertices.push(Vertex::new(Vec3::new(x1, y, 0.0), color));
             }
         });
+    }
+
+    fn push_polar_grid_lines(
+        vertices: &mut Vec<Vertex>,
+        radius: f64,
+        major_step: f64,
+        show_major: bool,
+        show_minor: bool,
+        major_color: Vec4,
+        minor_color: Vec4,
+    ) {
+        if !radius.is_finite() || radius <= 0.0 || !major_step.is_finite() || major_step <= 0.0 {
+            return;
+        }
+
+        if show_minor {
+            let minor_step = (major_step / 5.0).max(f64::EPSILON);
+            Self::for_each_grid_position(
+                minor_step,
+                radius,
+                minor_step,
+                Some((major_step, minor_step * 0.25)),
+                |r| {
+                    Self::push_circle_grid_line(vertices, r, minor_color);
+                },
+            );
+        }
+        if show_major {
+            Self::for_each_grid_position(major_step, radius, major_step, None, |r| {
+                Self::push_circle_grid_line(vertices, r, major_color);
+            });
+            for i in 0..12 {
+                let theta = i as f64 * std::f64::consts::TAU / 12.0;
+                let x = (theta.cos() * radius) as f32;
+                let y = (theta.sin() * radius) as f32;
+                if x.is_finite() && y.is_finite() {
+                    vertices.push(Vertex::new(Vec3::ZERO, major_color));
+                    vertices.push(Vertex::new(Vec3::new(x, y, 0.0), major_color));
+                }
+            }
+        }
+    }
+
+    fn push_circle_grid_line(vertices: &mut Vec<Vertex>, radius: f64, color: Vec4) {
+        if !radius.is_finite() || radius <= 0.0 {
+            return;
+        }
+        const SEGMENTS: usize = 96;
+        for i in 0..SEGMENTS {
+            let theta0 = i as f64 * std::f64::consts::TAU / SEGMENTS as f64;
+            let theta1 = (i + 1) as f64 * std::f64::consts::TAU / SEGMENTS as f64;
+            let p0 = Vec3::new(
+                (theta0.cos() * radius) as f32,
+                (theta0.sin() * radius) as f32,
+                0.0,
+            );
+            let p1 = Vec3::new(
+                (theta1.cos() * radius) as f32,
+                (theta1.sin() * radius) as f32,
+                0.0,
+            );
+            if p0.is_finite() && p1.is_finite() {
+                vertices.push(Vertex::new(p0, color));
+                vertices.push(Vertex::new(p1, color));
+            }
+        }
     }
 
     fn for_each_grid_position(

@@ -1,5 +1,5 @@
-use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_builtins::{ComplexTensor, Tensor, Value};
 
 use crate::build_runtime_error;
 
@@ -46,6 +46,30 @@ pub async fn gather_value_async(value: &Value) -> crate::BuiltinResult<Value> {
     crate::dispatcher::gather_if_needed_async(value).await
 }
 
+/// Upload a host complex tensor as an interleaved GPU buffer and record complex
+/// storage metadata on the returned handle.
+pub fn upload_complex_tensor(
+    provider: &dyn AccelProvider,
+    tensor: &ComplexTensor,
+) -> crate::BuiltinResult<GpuTensorHandle> {
+    let mut interleaved = Vec::with_capacity(tensor.data.len() * 2);
+    for &(re, im) in &tensor.data {
+        interleaved.push(re);
+        interleaved.push(im);
+    }
+    let view = HostTensorView {
+        data: &interleaved,
+        shape: &tensor.shape,
+    };
+    let handle = provider
+        .upload(&view)
+        .map_err(|e| build_runtime_error(format!("gpu upload: {e}")).build())?;
+    runmat_accelerate_api::set_handle_logical(&handle, false);
+    runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+    runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
+    Ok(handle)
+}
+
 /// Wrap a GPU tensor handle, marking it as resident for downstream fusion-aware
 /// consumers and tests.
 pub fn resident_gpu_value(handle: GpuTensorHandle) -> Value {
@@ -57,5 +81,12 @@ pub fn resident_gpu_value(handle: GpuTensorHandle) -> Value {
 /// predicates like `islogical` can inspect the handle without downloading it.
 pub fn logical_gpu_value(handle: GpuTensorHandle) -> Value {
     runmat_accelerate_api::set_handle_logical(&handle, true);
+    resident_gpu_value(handle)
+}
+
+/// Wrap a GPU tensor handle as a complex gpuArray value.
+pub fn complex_gpu_value(handle: GpuTensorHandle) -> Value {
+    runmat_accelerate_api::set_handle_logical(&handle, false);
+    runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
     resident_gpu_value(handle)
 }

@@ -9,7 +9,6 @@
     "string array"
   ],
   "summary": "Test whether text inputs contain patterns in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

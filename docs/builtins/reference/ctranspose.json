@@ -9,7 +9,6 @@
     "matrix transpose"
   ],
   "summary": "Conjugate-transpose arrays in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -91,7 +90,7 @@
     },
     {
       "question": "How are complex tensors handled on the GPU today?",
-      "answer": "Complex gpuArray support is still in flight. When complex data appears, RunMat gathers to the host, applies the conjugate transpose, and re-uploads if needed."
+      "answer": "Complex gpuArray values use interleaved real/imaginary storage. Providers with `transpose`/`permute` and `unary_conj` hooks keep the conjugate transpose resident; fallback gathers and re-uploads through the same complex storage metadata."
     },
     {
       "question": "Will `ctranspose` fuse with neighbouring kernels?",
@@ -152,10 +151,10 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs"
   },
-  "gpu_residency": "No additional residency management is required. If the planner keeps your data on the GPU, `ctranspose` honours that residency and either executes on the device (when hooks are present) or performs a gather/transpose/upload round-trip automatically.",
+  "gpu_residency": "No additional residency management is required. If the planner keeps real or complex data on the GPU, `ctranspose` honours that residency and either executes on the device (when hooks are present) or performs a storage-preserving gather/transpose/upload round-trip automatically.",
   "gpu_behavior": [
-    "**Provider support:** If the backend exposes both `transpose` (or `permute`) and `unary_conj`, the entire operation happens on the device without a gather.",
+    "**Provider support:** If the backend exposes both `transpose` (or `permute`) and `unary_conj`, real and complex-interleaved tensors complete on the device without a gather.",
     "**Partial hooks:** If the transpose succeeds but conjugation fails, RunMat falls back to the host path while logging a warning so users know their backend is incomplete.",
-    "**No hooks:** RunMat gathers the tensor, applies the conjugate transpose on the CPU, and re-uploads the result when possible so downstream kernels can keep running on the GPU.\n\nCurrent providers operate on real double-precision tensors; complex GPU tensors will gather to the host until native complex layouts are implemented."
+    "**No hooks:** RunMat gathers the tensor, applies the conjugate transpose on the CPU, and re-uploads the result when possible so downstream kernels can keep running on the GPU. Complex fallback preserves interleaved GPU storage metadata when the result remains complex."
   ]
 }

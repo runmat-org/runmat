@@ -9,7 +9,6 @@
     "sample time"
   ],
   "summary": "Create continuous-time state-space model objects from A, B, C, and D matrices.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,6 @@
     "tf"
   ],
   "summary": "Form SISO feedback interconnections for transfer-function models.",
-  "references": [
-    "title: \"MATLAB feedback documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

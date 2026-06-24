@@ -10,7 +10,6 @@
     "include delimiters"
   ],
   "summary": "Split text values into substrings using delimiter rules with MATLAB-compatible container behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

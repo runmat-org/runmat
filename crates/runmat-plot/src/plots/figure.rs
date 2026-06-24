@@ -129,6 +129,7 @@ impl Default for LegendStyle {
 
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    pub axes_kind: AxesKind,
     pub title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
@@ -159,6 +160,13 @@ pub struct AxesMetadata {
     pub z_label_style: TextStyle,
     pub legend_style: LegendStyle,
     pub world_text_annotations: Vec<TextAnnotation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AxesKind {
+    #[default]
+    Cartesian,
+    Polar,
 }
 
 #[derive(Debug, Clone)]
@@ -258,6 +266,7 @@ impl Figure {
             plot_axes_indices: Vec::new(),
             active_axes_index: 0,
             axes_metadata: vec![AxesMetadata {
+                axes_kind: AxesKind::Cartesian,
                 x_limits: None,
                 y_limits: None,
                 z_limits: None,
@@ -278,6 +287,7 @@ impl Figure {
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
             self.axes_metadata.push(AxesMetadata {
+                axes_kind: AxesKind::Cartesian,
                 x_limits: None,
                 y_limits: None,
                 z_limits: None,
@@ -688,6 +698,23 @@ impl Figure {
             self.sync_legacy_fields_from_active_axes();
         }
         self.dirty = true;
+    }
+
+    pub fn set_axes_kind(&mut self, axes_index: usize, axes_kind: AxesKind) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axes_kind = axes_kind;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn axes_kind(&self, axes_index: usize) -> AxesKind {
+        self.axes_metadata(axes_index)
+            .map(|meta| meta.axes_kind)
+            .unwrap_or(AxesKind::Cartesian)
     }
 
     pub fn with_minor_grid(mut self, enabled: bool) -> Self {

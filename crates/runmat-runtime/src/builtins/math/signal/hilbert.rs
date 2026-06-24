@@ -3,6 +3,7 @@
 use std::mem::size_of;
 
 use num_complex::Complex;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderHilbertRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -13,7 +14,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::common::{
@@ -31,14 +32,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("analytic-signal"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("signal_hilbert")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Computes the analytic signal using FFT-domain one-sided spectrum weighting. GPU inputs gather through the active provider until a dedicated analytic-signal provider hook lands.",
+    notes: "Computes the analytic signal using FFT-domain one-sided spectrum weighting. Providers can implement `signal_hilbert` for resident real GPU tensors; the runtime gathers to host when unavailable.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::hilbert")]
@@ -188,18 +189,7 @@ fn hilbert_error_with_message(
 async fn hilbert_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let length = parse_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|source| {
-                    hilbert_error_with_source(
-                        &HILBERT_ERROR_INVALID_INPUT,
-                        "gpu gather failed",
-                        source,
-                    )
-                })?;
-            hilbert_tensor(tensor, length)
-        }
+        Value::GpuTensor(handle) => hilbert_gpu_tensor(handle, length).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(hilbert_error_with_detail(
             &HILBERT_ERROR_INVALID_INPUT,
             "input must be real-valued",
@@ -211,6 +201,61 @@ async fn hilbert_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             hilbert_tensor(tensor, length)
         }
     }
+}
+
+async fn hilbert_gpu_tensor(
+    handle: GpuTensorHandle,
+    length: Option<usize>,
+) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
+        return Err(hilbert_error_with_detail(
+            &HILBERT_ERROR_INVALID_INPUT,
+            "input must be real-valued",
+        ));
+    }
+
+    let mut shape = handle.shape.clone();
+    if crate::builtins::common::shape::is_scalar_shape(&shape) {
+        shape = crate::builtins::common::shape::normalize_scalar_shape(&shape);
+    }
+    let dim_one_based = default_dimension(&shape);
+    let dim_index = dim_one_based - 1;
+    validate_transform_allocation(&shape, dim_index, length)?;
+
+    let current_len = shape.get(dim_index).copied().unwrap_or(1);
+    let target_len = length.unwrap_or(current_len);
+    if target_len != 0 {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+            let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            match provider
+                .signal_hilbert(&ProviderHilbertRequest {
+                    input: &handle,
+                    length,
+                    dim: dim_index,
+                })
+                .await
+            {
+                Ok(out) => return Ok(gpu_helpers::complex_gpu_value(out)),
+                Err(err) => {
+                    let message = err.to_string();
+                    if !message.contains("not supported") {
+                        return Err(hilbert_error_with_source(
+                            &HILBERT_ERROR_INTERNAL,
+                            "gpu hilbert failed",
+                            build_runtime_error(message).build(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|source| {
+            hilbert_error_with_source(&HILBERT_ERROR_INVALID_INPUT, "gpu gather failed", source)
+        })?;
+    hilbert_tensor(tensor, length)
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<usize>> {
@@ -528,5 +573,109 @@ pub(crate) mod tests {
                 assert_complex_close(actual, expected);
             }
         });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn hilbert_wgpu_input_returns_resident_complex_gpu_tensor() {
+        use crate::builtins::common::test_support;
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        use runmat_accelerate_api::AccelProvider;
+
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &input.data,
+            shape: &input.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let out = hilbert_call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap();
+        let Value::GpuTensor(out_handle) = out else {
+            panic!("expected resident GPU output");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+
+        let gathered = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(
+                &out_handle,
+                BUILTIN_NAME,
+            ),
+        )
+        .expect("gather complex output");
+        assert_eq!(gathered.shape, vec![1, 4]);
+        let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+        for (actual, expected) in gathered.data.iter().copied().zip(expected) {
+            assert!((actual.0 - expected.0).abs() <= 1.0e-5);
+            assert!((actual.1 - expected.1).abs() <= 1.0e-5);
+        }
+        provider.free(&handle).ok();
+        provider.free(&out_handle).ok();
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn hilbert_wgpu_length_argument_matches_cpu_and_stays_resident() {
+        use crate::builtins::common::test_support;
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        use runmat_accelerate_api::AccelProvider;
+
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
+        let expected = as_complex_tensor(
+            hilbert_call(Value::Tensor(input.clone()), vec![Value::Num(6.0)]).unwrap(),
+        );
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &input.data,
+            shape: &input.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let out = hilbert_call(Value::GpuTensor(handle.clone()), vec![Value::Num(6.0)]).unwrap();
+        let Value::GpuTensor(out_handle) = out else {
+            panic!("expected resident GPU output");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+
+        let gathered = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(
+                &out_handle,
+                BUILTIN_NAME,
+            ),
+        )
+        .expect("gather complex output");
+        assert_eq!(gathered.shape, expected.shape);
+        for (idx, (actual, expected)) in
+            gathered.data.iter().copied().zip(expected.data).enumerate()
+        {
+            assert!(
+                (actual.0 - expected.0).abs() <= 1.0e-5,
+                "real mismatch at {idx}: actual={} expected={}",
+                actual.0,
+                expected.0
+            );
+            assert!(
+                (actual.1 - expected.1).abs() <= 1.0e-5,
+                "imag mismatch at {idx}: actual={} expected={}",
+                actual.1,
+                expected.1
+            );
+        }
+        provider.free(&handle).ok();
+        provider.free(&out_handle).ok();
     }
 }

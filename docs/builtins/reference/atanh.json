@@ -10,7 +10,6 @@
     "complex"
   ],
   "summary": "Element-wise inverse hyperbolic tangent in MATLAB and RunMat, with complex promotion for |x| > 1.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

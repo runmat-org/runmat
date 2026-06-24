@@ -9,7 +9,6 @@
     "image"
   ],
   "summary": "Convert RGB image data to grayscale intensity values using MATLAB-compatible luminance weighting.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

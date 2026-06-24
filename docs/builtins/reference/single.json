@@ -9,7 +9,6 @@
     "gpuArray single"
   ],
   "summary": "Convert values to IEEE single-precision (`float32`) with MATLAB-compatible type conversion rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

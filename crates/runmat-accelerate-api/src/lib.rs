@@ -229,8 +229,17 @@ pub enum ProviderSpectralRange {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderSpectralFrameMode {
-    Sliding { hop: usize },
-    FoldedColumns { input_rows: usize },
+    Sliding {
+        hop: usize,
+    },
+    ColumnSliding {
+        hop: usize,
+        input_rows: usize,
+        frames_per_column: usize,
+    },
+    FoldedColumns {
+        input_rows: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -254,6 +263,55 @@ pub struct ProviderSpectralResult {
     pub cols: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderEnvelopeMethod {
+    Analytic,
+    AnalyticFir { filter_len: usize },
+    Rms { window_len: usize },
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderEnvelopeRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub channel_len: usize,
+    pub channel_count: usize,
+    pub output_shape: &'a [usize],
+    pub method: ProviderEnvelopeMethod,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderEnvelopeResult {
+    pub upper: GpuTensorHandle,
+    pub lower: GpuTensorHandle,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderHilbertRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// Optional FFT length along `dim`.
+    pub length: Option<usize>,
+    /// Zero-based transform dimension.
+    pub dim: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderModulationRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// `(real, imag)` pairs interleaved by symbol index.
+    pub constellation: &'a [f64],
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderBitModulationRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// Number of bit rows in the input before grouping.
+    pub input_rows: usize,
+    /// Number of input bits that form one output symbol.
+    pub bits_per_symbol: usize,
+    /// `(real, imag)` pairs interleaved by symbol index.
+    pub constellation: &'a [f64],
+}
+
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
@@ -268,6 +326,10 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
     let invalid_frame_mode = matches!(
         request.frame_mode,
         ProviderSpectralFrameMode::Sliding { hop: 0 }
+            | ProviderSpectralFrameMode::ColumnSliding {
+                hop: 0,
+                ..
+            }
     );
     let invalid_input_coverage = match request.frame_mode {
         ProviderSpectralFrameMode::Sliding { hop } => {
@@ -277,6 +339,24 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
                 .and_then(|frames| frames.checked_mul(hop))
                 .and_then(|offset| offset.checked_add(request.window.len()));
             required.is_none_or(|required| required > request.input_len)
+        }
+        ProviderSpectralFrameMode::ColumnSliding {
+            hop,
+            input_rows,
+            frames_per_column,
+        } => {
+            if input_rows == 0 || frames_per_column == 0 {
+                true
+            } else {
+                let last_frame = request.frame_count - 1;
+                let source_col = last_frame / frames_per_column;
+                let segment = last_frame % frames_per_column;
+                source_col
+                    .checked_mul(input_rows)
+                    .and_then(|base| segment.checked_mul(hop).and_then(|step| base.checked_add(step)))
+                    .and_then(|offset| offset.checked_add(request.window.len()))
+                    .is_none_or(|required| required > request.input_len)
+            }
         }
         ProviderSpectralFrameMode::FoldedColumns { input_rows } => {
             input_rows == 0
@@ -297,6 +377,83 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
     }
 
     Ok(())
+}
+
+pub async fn signal_envelope(
+    request: ProviderEnvelopeRequest<'_>,
+) -> anyhow::Result<ProviderEnvelopeResult> {
+    let expected_len = request
+        .channel_len
+        .checked_mul(request.channel_count)
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+    let output_len = request
+        .output_shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+    let input_len = request
+        .input
+        .shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+    if request.channel_len == 0
+        || request.channel_count == 0
+        || request.output_shape.is_empty()
+        || output_len != expected_len
+        || input_len != expected_len
+        || !provider_envelope_input_shape_matches(
+            &request.input.shape,
+            request.channel_len,
+            request.channel_count,
+        )
+    {
+        return Err(anyhow!("signal_envelope: invalid request"));
+    }
+
+    match request.method {
+        ProviderEnvelopeMethod::AnalyticFir { filter_len }
+        | ProviderEnvelopeMethod::Rms {
+            window_len: filter_len,
+        } if filter_len == 0 => return Err(anyhow!("signal_envelope: invalid request")),
+        _ => {}
+    }
+
+    let provider =
+        provider().ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
+    provider.signal_envelope(&request).await
+}
+
+fn provider_envelope_input_shape_matches(
+    shape: &[usize],
+    channel_len: usize,
+    channel_count: usize,
+) -> bool {
+    if channel_count == 1 {
+        return match shape {
+            [len] => *len == channel_len,
+            [rows, cols] => {
+                (*rows == channel_len && *cols == 1) || (*rows == 1 && *cols == channel_len)
+            }
+            _ => false,
+        };
+    }
+
+    matches!(shape, [rows, cols] if *rows == channel_len && *cols == channel_count)
+}
+
+pub async fn signal_hilbert(
+    request: ProviderHilbertRequest<'_>,
+) -> anyhow::Result<GpuTensorHandle> {
+    if request.length == Some(0) {
+        return Err(anyhow!("signal_hilbert: invalid request"));
+    }
+    if request.dim >= request.input.shape.len() {
+        return Err(anyhow!("signal_hilbert: invalid request"));
+    }
+
+    let provider = provider().ok_or_else(|| anyhow!("signal_hilbert: GPU provider unavailable"))?;
+    provider.signal_hilbert(&request).await
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1521,6 +1678,45 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("elem_pow not supported by provider")
     }
 
+    /// Construct complex-interleaved GPU storage from a real-valued tensor,
+    /// using zero for the imaginary lane.
+    fn complex_from_real<'a>(
+        &'a self,
+        _real: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("complex_from_real not supported by provider")
+    }
+
+    /// Construct complex-interleaved GPU storage from real and imaginary tensors.
+    ///
+    /// Implementations should support equal shapes and scalar expansion for either
+    /// operand, matching MATLAB's `complex(real, imag)` size rules.
+    fn complex_from_real_imag<'a>(
+        &'a self,
+        _real: &'a GpuTensorHandle,
+        _imag: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("complex_from_real_imag not supported by provider")
+    }
+
+    /// Map a resident real-valued symbol tensor through a complex constellation
+    /// table and return complex-interleaved GPU storage.
+    fn modulate_constellation<'a>(
+        &'a self,
+        _request: ProviderModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("modulate_constellation not supported by provider")
+    }
+
+    /// Group a resident real/logical bit tensor into symbols, map through a complex
+    /// constellation table, and return complex-interleaved GPU storage.
+    fn modulate_bits_constellation<'a>(
+        &'a self,
+        _request: ProviderBitModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("modulate_bits_constellation not supported by provider")
+    }
+
     fn elem_hypot<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -2075,6 +2271,18 @@ pub trait AccelProvider: Send + Sync {
         _request: &'a ProviderSpectralRequest<'a>,
     ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
         unsupported_future("uniform_spectral_estimate not supported by provider")
+    }
+    fn signal_envelope<'a>(
+        &'a self,
+        _request: &'a ProviderEnvelopeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
+        unsupported_future("signal_envelope not supported by provider")
+    }
+    fn signal_hilbert<'a>(
+        &'a self,
+        _request: &'a ProviderHilbertRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("signal_hilbert not supported by provider")
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(
@@ -3020,6 +3228,18 @@ mod tests {
             range: ProviderSpectralRange::Onesided,
             denominator: 1.0,
         }
+    }
+
+    #[test]
+    fn provider_envelope_shape_guard_rejects_equal_len_layout_spoofing() {
+        assert!(provider_envelope_input_shape_matches(&[2, 3], 2, 3));
+        assert!(provider_envelope_input_shape_matches(&[6, 1], 6, 1));
+        assert!(provider_envelope_input_shape_matches(&[1, 6], 6, 1));
+        assert!(provider_envelope_input_shape_matches(&[6], 6, 1));
+
+        assert!(!provider_envelope_input_shape_matches(&[3, 2], 2, 3));
+        assert!(!provider_envelope_input_shape_matches(&[6], 2, 3));
+        assert!(!provider_envelope_input_shape_matches(&[2, 1, 3], 2, 3));
     }
 
     #[test]
