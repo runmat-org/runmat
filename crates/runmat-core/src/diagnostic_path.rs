@@ -27,21 +27,22 @@ fn path_to_string(path: &Path) -> String {
 }
 
 fn relative_display_path(path: &Path, base: &Path) -> Option<PathBuf> {
-    path.strip_prefix(base)
+    let relative = path
+        .strip_prefix(base)
         .ok()
         .filter(|relative| !relative.as_os_str().is_empty())
         .map(Path::to_path_buf)
-        .or_else(|| canonical_relative_display_path(path, base))
-        .or_else(|| {
-            #[cfg(windows)]
-            {
-                windows_relative_display_path(path, base)
-            }
-            #[cfg(not(windows))]
-            {
-                None
-            }
-        })
+        .or_else(|| canonical_relative_display_path(path, base));
+
+    #[cfg(windows)]
+    {
+        relative.or_else(|| windows_relative_display_path(path, base))
+    }
+
+    #[cfg(not(windows))]
+    {
+        relative
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
