@@ -1530,7 +1530,10 @@ path = "src/main"
         let resolved =
             futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
                 .expect("named entrypoint should resolve");
-        assert_eq!(resolved.display_name, "src/main.m");
+        assert_eq!(
+            PathBuf::from(&resolved.display_name),
+            PathBuf::from("src").join("main.m")
+        );
         let resolved_path = std::path::PathBuf::from(
             resolved
                 .fullpath_name
@@ -1561,7 +1564,10 @@ path = "src/main"
         )))
         .expect("path without extension should infer .m");
 
-        assert_eq!(resolved.display_name, "src/main.m");
+        assert_eq!(
+            PathBuf::from(&resolved.display_name),
+            PathBuf::from("src").join("main.m")
+        );
         assert_eq!(resolved.text.trim(), "x = 1;");
     }
 
@@ -1578,7 +1584,10 @@ path = "src/main"
             )))
             .expect("memory provider should resolve path without extension");
 
-            assert_eq!(resolved.display_name, "main.m");
+            assert_eq!(
+                PathBuf::from(&resolved.display_name),
+                PathBuf::from("main.m")
+            );
             assert_eq!(resolved.text, "x = 1;");
         });
     }

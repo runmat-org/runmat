@@ -8,15 +8,9 @@ pub(crate) fn display_path_for_current_cwd(path: &Path) -> String {
 }
 
 pub(crate) fn display_path_from_base(path: &Path, base: &Path) -> String {
-    let display_path = if path.is_absolute() {
-        path.strip_prefix(base)
-            .ok()
-            .filter(|relative| !relative.as_os_str().is_empty())
-            .unwrap_or(path)
-    } else {
-        path
-    };
-    path_to_string(display_path)
+    relative_display_path(path, base)
+        .map(|path| path_to_string(&path))
+        .unwrap_or_else(|| path_to_string(path))
 }
 
 pub(crate) fn resolve_against_base(path: &str, base: &Path) -> PathBuf {
@@ -30,6 +24,84 @@ pub(crate) fn resolve_against_base(path: &str, base: &Path) -> PathBuf {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+fn relative_display_path(path: &Path, base: &Path) -> Option<PathBuf> {
+    path.strip_prefix(base)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .or_else(|| canonical_relative_display_path(path, base))
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                windows_relative_display_path(path, base)
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn canonical_relative_display_path(path: &Path, base: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() || !base.is_absolute() {
+        return None;
+    }
+
+    let path = path.canonicalize().ok()?;
+    let base = base.canonicalize().ok()?;
+    path.strip_prefix(base)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn canonical_relative_display_path(_path: &Path, _base: &Path) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
+fn windows_relative_display_path(path: &Path, base: &Path) -> Option<PathBuf> {
+    let path = windows_display_key(path);
+    let base = windows_display_key(base);
+    if path.eq_ignore_ascii_case(&base) {
+        return None;
+    }
+
+    let prefix = if base.ends_with('\\') {
+        base
+    } else {
+        format!("{base}\\")
+    };
+    let path_lower = path.to_ascii_lowercase();
+    let prefix_lower = prefix.to_ascii_lowercase();
+    path_lower
+        .starts_with(&prefix_lower)
+        .then(|| PathBuf::from(&path[prefix.len()..]))
+        .filter(|relative| !relative.as_os_str().is_empty())
+}
+
+#[cfg(windows)]
+fn windows_display_key(path: &Path) -> String {
+    let mut text = path.to_string_lossy().replace('/', "\\");
+    if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+        text = format!(r"\\{stripped}");
+    } else if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        text = stripped.to_string();
+    }
+    while text.ends_with('\\') && text.len() > 1 && !is_windows_drive_root(&text) {
+        text.pop();
+    }
+    text
+}
+
+#[cfg(windows)]
+fn is_windows_drive_root(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() == 3 && bytes[1] == b':' && bytes[2] == b'\\'
 }
 
 #[cfg(test)]
@@ -64,5 +136,27 @@ mod tests {
         let path = Path::new("src/main.m");
 
         assert_eq!(display_path_from_base(path, base), "src/main.m");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn display_path_strips_extended_length_base_equivalent() {
+        let base = Path::new(r"C:\project");
+        let path = Path::new(r"\\?\C:\project\src\main.m");
+        let expected = Path::new("src").join("main.m");
+
+        assert_eq!(PathBuf::from(display_path_from_base(path, base)), expected);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn display_path_strips_virtual_root_base() {
+        let base = Path::new("/");
+        let path = Path::new("/main.m");
+
+        assert_eq!(
+            PathBuf::from(display_path_from_base(path, base)),
+            PathBuf::from("main.m")
+        );
     }
 }
