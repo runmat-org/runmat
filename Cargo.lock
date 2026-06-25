@@ -5453,6 +5453,7 @@ dependencies = [
  "runmat-time",
  "runmat-turbine",
  "runmat-vm",
+ "stacker",
  "tempfile",
  "tokio",
  "tracing",
@@ -5510,6 +5511,14 @@ dependencies = [
 [[package]]
 name = "runmat-gc-api"
 version = "0.5.3"
+
+[[package]]
+name = "runmat-gc-miri-tests"
+version = "0.5.0"
+dependencies = [
+ "runmat-builtins",
+ "runmat-gc",
+]
 
 [[package]]
 name = "runmat-geometry-core"
@@ -5907,6 +5916,7 @@ dependencies = [
  "runmat-thread-local",
  "runmat-time",
  "serde",
+ "stacker",
  "tracing",
 ]
 

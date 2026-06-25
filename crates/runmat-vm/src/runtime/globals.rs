@@ -215,3 +215,9 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
         }
     }
 }
+
+pub(crate) fn reset_thread_state_for_tests() {
+    GLOBALS.with(|globals| globals.borrow_mut().clear());
+    PERSISTENTS.with(|persistents| persistents.borrow_mut().clear());
+    PERSISTENTS_BY_NAME.with(|persistents| persistents.borrow_mut().clear());
+}

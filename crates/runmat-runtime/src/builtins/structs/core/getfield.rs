@@ -393,7 +393,7 @@ fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
 
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
-        let entry = unsafe { &*handle.as_raw() };
+        let entry = handle;
         components.push(parse_index_component(entry)?);
     }
 
@@ -956,8 +956,7 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
                 ));
             }
             // Default to first element when no index is specified
-            let first_handle = &cell.data[0];
-            let first_entry = unsafe { &*first_handle.as_raw() };
+            let first_entry = &cell.data[0];
             match first_entry {
                 Value::Struct(st) => get_struct_field(st, name),
                 _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
@@ -1037,13 +1036,18 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
-    if !runmat_builtins::is_handle_valid(handle) {
+    if !crate::is_handle_valid(handle) {
         return Err(getfield_error_with_message(
             format!("Invalid or deleted handle object '{}'.", handle.class_name),
             &GETFIELD_ERROR_INVALID_HANDLE,
         ));
     }
-    let target = unsafe { &*handle.target.as_raw() }.clone();
+    let target = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+        getfield_error_with_message(
+            format!("getfield: invalid handle target: {e}"),
+            &GETFIELD_ERROR_INVALID_HANDLE,
+        )
+    })?;
     get_field_value(target, name).await
 }
 
@@ -1053,11 +1057,33 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
         "Valid" | "valid" => Ok(Value::Bool(listener.valid)),
         "EventName" | "event_name" => Ok(Value::String(listener.event_name.clone())),
         "Callback" | "callback" => {
-            let value = unsafe { &*listener.callback.as_raw() }.clone();
+            if !listener.valid {
+                return Err(getfield_error_with_message(
+                    "getfield: listener is invalid or deleted",
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                ));
+            }
+            let value = runmat_gc::gc_clone_value(&listener.callback).map_err(|e| {
+                getfield_error_with_message(
+                    format!("getfield: invalid listener callback: {e}"),
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                )
+            })?;
             Ok(value)
         }
         "Target" | "target" => {
-            let value = unsafe { &*listener.target.as_raw() }.clone();
+            if !listener.valid {
+                return Err(getfield_error_with_message(
+                    "getfield: listener is invalid or deleted",
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                ));
+            }
+            let value = runmat_gc::gc_clone_value(&listener.target).map_err(|e| {
+                getfield_error_with_message(
+                    format!("getfield: invalid listener target: {e}"),
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                )
+            })?;
             Ok(value)
         }
         "Id" | "id" => Ok(Value::Int(runmat_builtins::IntValue::U64(listener.id))),
@@ -1096,7 +1122,7 @@ fn exception_stack_to_value(stack: &[String]) -> BuiltinResult<Value> {
 fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
-        .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+        .all(|handle| matches!(handle, Value::Struct(_)))
 }
 
 #[cfg(test)]
@@ -1106,7 +1132,6 @@ pub(crate) mod tests {
         Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, Listener,
         MException, ObjectInstance, PropertyDef, StructValue,
     };
-    use runmat_gc_api::GcPtr;
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
@@ -1214,7 +1239,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cell.rows, 2);
         assert_eq!(cell.cols, 1);
-        let first = unsafe { &*cell.data[0].as_raw() }.clone();
+        let first = cell.data[0].clone();
         assert_eq!(first, Value::String("demo.m:5".to_string()));
     }
 
@@ -1386,7 +1411,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_invalid_handle_errors() {
-        let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(1.0)))) };
+        let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
         let handle = HandleRef {
             class_name: "Demo".to_string(),
             target,
@@ -1401,15 +1426,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_listener_fields_resolved() {
-        let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(7.0)))) };
-        let callback = unsafe {
-            GcPtr::from_raw(Box::into_raw(Box::new(Value::FunctionHandle(
-                "cb".to_string(),
-            ))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
+        let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            .expect("gc allocate callback");
         let listener = Listener {
             id: 9,
             target,
+            target_class_name: "EventTarget".to_string(),
             event_name: "tick".to_string(),
             callback,
             enabled: true,
@@ -1430,6 +1453,37 @@ pub(crate) mod tests {
         let callback = run_getfield(Value::Listener(listener), vec![Value::from("Callback")])
             .expect("callback");
         assert!(matches!(callback, Value::FunctionHandle(_)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn getfield_invalid_listener_rejects_rooted_fields() {
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
+        let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            .expect("gc allocate callback");
+        let listener = Listener {
+            id: 10,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "tick".to_string(),
+            callback,
+            enabled: false,
+            valid: false,
+        };
+
+        let err = error_message(
+            run_getfield(
+                Value::Listener(listener.clone()),
+                vec![Value::from("Callback")],
+            )
+            .unwrap_err(),
+        );
+        assert!(err.contains("listener is invalid or deleted"));
+
+        let err = error_message(
+            run_getfield(Value::Listener(listener), vec![Value::from("Target")]).unwrap_err(),
+        );
+        assert!(err.contains("listener is invalid or deleted"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

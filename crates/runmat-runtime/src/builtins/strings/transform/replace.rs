@@ -326,7 +326,7 @@ fn extract_text_list(
             let CellArray { data, .. } = cell.clone();
             let mut entries = Vec::with_capacity(data.len());
             for element in data {
-                match &*element {
+                match &element {
                     Value::String(text) => entries.push(text.clone()),
                     Value::StringArray(sa) if sa.data.len() == 1 => {
                         entries.push(sa.data[0].clone());

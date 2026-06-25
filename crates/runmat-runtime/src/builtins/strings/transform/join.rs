@@ -912,8 +912,8 @@ pub(crate) mod tests {
             Value::Cell(cell_out) => {
                 assert_eq!(cell_out.rows, 2);
                 assert_eq!(cell_out.cols, 1);
-                let first = unsafe { &*cell_out.data[0].as_raw() };
-                let second = unsafe { &*cell_out.data[1].as_raw() };
+                let first = &cell_out.data[0];
+                let second = &cell_out.data[1];
                 match (first, second) {
                     (Value::CharArray(a), Value::CharArray(b)) => {
                         assert_eq!(

@@ -239,7 +239,7 @@ pub fn build_string_rhs_view(
         let dims = selection_lengths.len();
         let mut data = Vec::with_capacity(cell.data.len());
         for handle in &cell.data {
-            let value = unsafe { &*handle.as_raw() };
+            let value = handle;
             match value {
                 Value::String(text) => data.push(text.clone()),
                 Value::CharArray(chars) => data.push(chars.to_string()),
@@ -835,7 +835,6 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 mod tests {
     use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
     use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
-    use runmat_gc::GcPtr;
 
     #[test]
     fn complex_rhs_view_shape_mismatch_reports_identifier() {
@@ -878,16 +877,12 @@ mod tests {
 
     #[test]
     fn string_cell_rhs_view_rejects_shape_data_length_mismatch() {
-        let handles = ["a", "b", "c"]
+        let data = ["a", "b", "c"]
             .into_iter()
-            .map(|text| unsafe {
-                // The test leaks boxed values for the duration of the process,
-                // which is sufficient for this short-lived GcPtr fixture.
-                GcPtr::from_raw(Box::into_raw(Box::new(Value::String(text.to_string()))))
-            })
+            .map(|text| Value::String(text.to_string()))
             .collect();
         let rhs = Value::Cell(CellArray {
-            data: handles,
+            data,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,

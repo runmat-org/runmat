@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 use chrono::Utc;
 use runmat_builtins::{ObjectInstance, Tensor, Value};
@@ -123,9 +124,54 @@ pub enum TxnStatus {
     Aborted,
 }
 
-fn tx_registry() -> &'static Mutex<HashMap<String, PendingTxn>> {
-    static REG: OnceLock<Mutex<HashMap<String, PendingTxn>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
+thread_local! {
+    static FALLBACK_TX_REGISTRY: RefCell<HashMap<String, PendingTxn>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+tokio::task_local! {
+    static TASK_TX_REGISTRY: RefCell<HashMap<String, PendingTxn>>;
+}
+
+pub async fn with_tx_registry_scope<F>(future: F) -> F::Output
+where
+    F: Future,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            future.await
+        } else {
+            TASK_TX_REGISTRY
+                .scope(RefCell::new(HashMap::new()), future)
+                .await
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        future.await
+    }
+}
+
+fn with_tx_registry<T>(f: impl FnOnce(&mut HashMap<String, PendingTxn>) -> T) -> BuiltinResult<T> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            return TASK_TX_REGISTRY.with(|registry| {
+                let mut registry = registry.try_borrow_mut().map_err(|_| {
+                    data_error("data transaction registry is already mutably borrowed")
+                })?;
+                Ok(f(&mut registry))
+            });
+        }
+    }
+
+    FALLBACK_TX_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| data_error("data transaction registry is already mutably borrowed"))?;
+        Ok(f(&mut registry))
+    })
 }
 
 pub fn data_error(message: impl Into<String>) -> RuntimeError {
@@ -987,7 +1033,7 @@ pub fn new_tx_id() -> String {
     format!("tx_{}_{}", Utc::now().timestamp_millis(), seq)
 }
 
-pub fn start_tx(dataset_path: String, base_sequence: u64) -> String {
+pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<String> {
     let tx_id = new_tx_id();
     let pending = PendingTxn {
         dataset_path,
@@ -1000,42 +1046,67 @@ pub fn start_tx(dataset_path: String, base_sequence: u64) -> String {
         attrs: BTreeMap::new(),
         status: TxnStatus::Open,
     };
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    guard.insert(tx_id.clone(), pending);
-    tx_id
+    with_tx_registry(|registry| {
+        registry.insert(tx_id.clone(), pending);
+    })?;
+    Ok(tx_id)
 }
 
 pub fn with_tx_mut<T>(
     tx_id: &str,
     f: impl FnOnce(&mut PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard.get_mut(tx_id).ok_or_else(|| {
-        data_error_with_identifier(
-            format!("transaction '{tx_id}' not found"),
-            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
-        )
-    })?;
-    f(tx)
+    with_tx_registry(|registry| {
+        let tx = registry.get_mut(tx_id).ok_or_else(|| {
+            data_error_with_identifier(
+                format!("transaction '{tx_id}' not found"),
+                DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+            )
+        })?;
+        f(tx)
+    })?
 }
 
 pub fn with_tx<T>(
     tx_id: &str,
     f: impl FnOnce(&PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
-    let guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard.get(tx_id).ok_or_else(|| {
-        data_error_with_identifier(
-            format!("transaction '{tx_id}' not found"),
-            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
-        )
-    })?;
-    f(tx)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            return TASK_TX_REGISTRY.with(|registry| {
+                let registry = registry
+                    .try_borrow()
+                    .map_err(|_| data_error("data transaction registry is already borrowed"))?;
+                let tx = registry.get(tx_id).ok_or_else(|| {
+                    data_error_with_identifier(
+                        format!("transaction '{tx_id}' not found"),
+                        DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+                    )
+                })?;
+                f(tx)
+            });
+        }
+    }
+
+    FALLBACK_TX_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| data_error("data transaction registry is already borrowed"))?;
+        let tx = registry.get(tx_id).ok_or_else(|| {
+            data_error_with_identifier(
+                format!("transaction '{tx_id}' not found"),
+                DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+            )
+        })?;
+        f(tx)
+    })
 }
 
-pub fn remove_tx(tx_id: &str) {
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let _ = guard.remove(tx_id);
+pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
+    with_tx_registry(|registry| {
+        let _ = registry.remove(tx_id);
+    })
 }
 
 #[cfg(test)]
@@ -1081,16 +1152,34 @@ mod tests {
 
     #[test]
     fn transaction_registry_roundtrip() {
-        let tx_id = start_tx("/datasets/test.data".to_string(), 7);
+        let tx_id = start_tx("/datasets/test.data".to_string(), 7).expect("start tx");
         let status = with_tx(&tx_id, |tx| Ok(tx.status.clone())).expect("tx lookup");
         assert_eq!(status, TxnStatus::Open);
-        remove_tx(&tx_id);
+        remove_tx(&tx_id).expect("remove tx");
         let err = with_tx(&tx_id, |_| Ok(())).expect_err("expected missing tx");
         assert_eq!(
             err.identifier(),
             Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER),
             "missing transaction lookups should expose a stable identifier"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transaction_registry_scope_survives_await() {
+        with_tx_registry_scope(async {
+            let tx_id = start_tx("/datasets/task-local.data".to_string(), 11).expect("start tx");
+            tokio::task::yield_now().await;
+            let status = with_tx(&tx_id, |tx| Ok(tx.status.clone())).expect("tx lookup");
+            assert_eq!(status, TxnStatus::Open);
+            remove_tx(&tx_id).expect("remove tx");
+            let err = with_tx(&tx_id, |_| Ok(())).expect_err("expected missing tx");
+            assert_eq!(
+                err.identifier(),
+                Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER)
+            );
+        })
+        .await;
     }
 
     #[test]

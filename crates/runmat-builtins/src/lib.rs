@@ -1,6 +1,6 @@
 pub use inventory;
 pub mod symbolic;
-use runmat_gc_api::GcPtr;
+use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,6 +9,8 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Mutex;
+use std::thread::ThreadId;
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 
 use indexmap::IndexMap;
@@ -1099,7 +1101,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.data.iter().map(|p| (**p).clone()).collect()),
+            Value::Cell(c) => Ok(c.data.clone()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }
@@ -2085,49 +2087,13 @@ impl MException {
 #[derive(Debug, Clone)]
 pub struct HandleRef {
     pub class_name: String,
-    pub target: GcPtr<Value>,
+    pub target: GcHandle,
     pub valid: bool,
-}
-
-const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
-
-pub fn is_handle_valid(handle: &HandleRef) -> bool {
-    if !handle.valid {
-        return false;
-    }
-    let raw = unsafe { handle.target.as_raw() };
-    if raw.is_null() {
-        return false;
-    }
-    match unsafe { &*raw } {
-        Value::Object(obj) => !matches!(
-            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
-            Some(Value::Bool(false))
-        ),
-        _ => true,
-    }
-}
-
-pub fn set_handle_valid(handle: &HandleRef, valid: bool) -> bool {
-    let raw = unsafe { handle.target.as_raw_mut() };
-    if raw.is_null() {
-        return false;
-    }
-    match unsafe { &mut *raw } {
-        Value::Object(obj) => {
-            obj.properties
-                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
-            true
-        }
-        _ => false,
-    }
 }
 
 impl PartialEq for HandleRef {
     fn eq(&self, other: &Self) -> bool {
-        let a = unsafe { self.target.as_raw() } as usize;
-        let b = unsafe { other.target.as_raw() } as usize;
-        a == b
+        self.target == other.target
     }
 }
 
@@ -2135,19 +2101,98 @@ impl PartialEq for HandleRef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Listener {
     pub id: u64,
-    pub target: GcPtr<Value>,
+    pub target: GcHandle,
+    pub target_class_name: String,
     pub event_name: String,
-    pub callback: GcPtr<Value>,
+    pub callback: GcHandle,
     pub enabled: bool,
     pub valid: bool,
 }
 
 impl Listener {
     pub fn class_name(&self) -> String {
-        match unsafe { &*self.target.as_raw() } {
-            Value::Object(o) => o.class_name.clone(),
-            Value::HandleObject(h) => h.class_name.clone(),
-            _ => String::new(),
+        self.target_class_name.clone()
+    }
+}
+
+impl Trace for CellArray {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in &self.data {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace for StructValue {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in self.fields.values() {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace for Closure {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in &self.captures {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace for ObjectInstance {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in self.properties.values() {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace for HandleRef {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        tracer.mark(self.target);
+    }
+}
+
+impl Trace for Listener {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        tracer.mark(self.target);
+        tracer.mark(self.callback);
+    }
+}
+
+impl Trace for Value {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match self {
+            Value::Cell(cells) => cells.trace(tracer),
+            Value::Struct(struct_value) => struct_value.trace(tracer),
+            Value::HandleObject(handle) => handle.trace(tracer),
+            Value::Listener(listener) => listener.trace(tracer),
+            Value::Closure(closure) => closure.trace(tracer),
+            Value::Object(object) => object.trace(tracer),
+            Value::OutputList(values) => {
+                for value in values {
+                    value.trace(tracer);
+                }
+            }
+            Value::Int(_)
+            | Value::Num(_)
+            | Value::Complex(_, _)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::ComplexTensor(_)
+            | Value::Symbolic(_)
+            | Value::GpuTensor(_)
+            | Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::ClassRef(_)
+            | Value::MException(_) => {}
         }
     }
 }
@@ -2186,21 +2231,21 @@ impl fmt::Display for Value {
             ),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
             Value::HandleObject(h) => {
-                let ptr = unsafe { h.target.as_raw() } as usize;
                 write!(
                     f,
                     "<handle {} @0x{:x} valid={}>",
-                    h.class_name, ptr, h.valid
+                    h.class_name,
+                    h.target.addr(),
+                    h.valid
                 )
             }
             Value::Listener(l) => {
-                let ptr = unsafe { l.target.as_raw() } as usize;
                 write!(
                     f,
                     "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>",
                     l.id,
                     l.class_name(),
-                    ptr,
+                    l.target.addr(),
                     l.event_name,
                     l.enabled,
                     l.valid
@@ -2374,7 +2419,7 @@ mod display_tests {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
-    pub data: Vec<GcPtr<Value>>,
+    pub data: Vec<Value>,
     /// Full MATLAB-visible shape vector (column-major semantics).
     pub shape: Vec<usize>,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
@@ -2384,37 +2429,6 @@ pub struct CellArray {
 }
 
 impl CellArray {
-    pub fn new_handles(
-        handles: Vec<GcPtr<Value>>,
-        rows: usize,
-        cols: usize,
-    ) -> Result<Self, String> {
-        Self::new_handles_with_shape(handles, vec![rows, cols])
-    }
-
-    pub fn new_handles_with_shape(
-        handles: Vec<GcPtr<Value>>,
-        shape: Vec<usize>,
-    ) -> Result<Self, String> {
-        let expected = total_len(&shape)
-            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
-        if expected != handles.len() {
-            return Err(format!(
-                "Cell data length {} doesn't match shape {:?} ({} elements)",
-                handles.len(),
-                shape,
-                expected
-            ));
-        }
-        let (rows, cols) = shape_rows_cols(&shape);
-        Ok(CellArray {
-            data: handles,
-            shape,
-            rows,
-            cols,
-        })
-    }
-
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new_with_shape(data, vec![rows, cols])
     }
@@ -2430,12 +2444,13 @@ impl CellArray {
                 expected
             ));
         }
-        // Note: data will be allocated into GC handles by callers (runtime/vm) to avoid builtins↔gc cycles
-        let handles: Vec<GcPtr<Value>> = data
-            .into_iter()
-            .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
-            .collect();
-        Self::new_handles_with_shape(handles, shape)
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(CellArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -2445,7 +2460,7 @@ impl CellArray {
                 self.rows, self.cols
             ));
         }
-        Ok((*self.data[row * self.cols + col]).clone())
+        Ok(self.data[row * self.cols + col].clone())
     }
 }
 
@@ -2550,28 +2565,65 @@ pub struct ClassDef {
     pub methods: HashMap<String, MethodDef>,
 }
 
-use std::sync::Mutex;
-
-static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
-static SEALED_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static ABSTRACT_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
-static ENUMERATION_REGISTRY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
-
-fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
-    CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
+thread_local! {
+    static CLASS_REGISTRY: RefCell<HashMap<String, ClassDef>> =
+        RefCell::new(primitive_class_registry());
+    static SEALED_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static ABSTRACT_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static STATIC_VALUES: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
+    static STATIC_VALUE_THREAD_REGISTRATION: StaticValueThreadRegistration =
+        const { StaticValueThreadRegistration };
+    static ENUMERATION_REGISTRY: RefCell<HashMap<String, HashSet<String>>> =
+        RefCell::new(HashMap::new());
 }
 
-fn sealed_registry() -> &'static Mutex<HashSet<String>> {
-    SEALED_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+static STATIC_VALUE_THREADS: once_cell::sync::Lazy<Mutex<HashSet<ThreadId>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashSet::new()));
+
+struct StaticValueThreadRegistration;
+
+impl Drop for StaticValueThreadRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut threads) = STATIC_VALUE_THREADS.lock() {
+            threads.remove(&std::thread::current().id());
+        }
+    }
 }
 
-fn abstract_registry() -> &'static Mutex<HashSet<String>> {
-    ABSTRACT_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+fn mark_static_values_thread_active() {
+    STATIC_VALUE_THREAD_REGISTRATION.with(|_| {});
+    if let Ok(mut threads) = STATIC_VALUE_THREADS.lock() {
+        threads.insert(std::thread::current().id());
+    }
 }
 
-fn enumeration_registry() -> &'static Mutex<HashMap<String, HashSet<String>>> {
-    ENUMERATION_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+pub fn static_property_values_exist_on_other_threads() -> bool {
+    let current = std::thread::current().id();
+    STATIC_VALUE_THREADS
+        .lock()
+        .map(|threads| threads.iter().any(|thread_id| *thread_id != current))
+        .unwrap_or(false)
+}
+
+pub fn static_property_gc_roots() -> Vec<GcHandle> {
+    struct RootCollector {
+        roots: Vec<GcHandle>,
+    }
+
+    impl Tracer for RootCollector {
+        fn mark(&mut self, handle: GcHandle) {
+            self.roots.push(handle);
+        }
+    }
+
+    STATIC_VALUES.with(|values| {
+        let values = values.borrow();
+        let mut collector = RootCollector { roots: Vec::new() };
+        for value in values.values() {
+            value.trace(&mut collector);
+        }
+        collector.roots
+    })
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
@@ -2613,141 +2665,152 @@ pub fn register_class_with_sealed(def: ClassDef, is_sealed: bool) {
 }
 
 pub fn register_class_with_modifiers(def: ClassDef, is_sealed: bool, is_abstract: bool) {
-    let mut m = registry().lock().unwrap();
     let class_name = def.name.clone();
-    m.insert(class_name.clone(), def);
-    let mut sealed = sealed_registry().lock().unwrap();
-    if is_sealed {
-        sealed.insert(class_name.clone());
-    } else {
-        sealed.remove(&class_name);
-    }
-    let mut abstract_classes = abstract_registry().lock().unwrap();
-    if is_abstract {
-        abstract_classes.insert(class_name.clone());
-    } else {
-        abstract_classes.remove(&class_name);
-    }
-    enumeration_registry()
-        .lock()
-        .unwrap()
-        .entry(class_name)
-        .or_default();
+    CLASS_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(class_name.clone(), def);
+    });
+    SEALED_CLASS_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        if is_sealed {
+            registry.insert(class_name.clone());
+        } else {
+            registry.remove(&class_name);
+        }
+    });
+    ABSTRACT_CLASS_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        if is_abstract {
+            registry.insert(class_name.clone());
+        } else {
+            registry.remove(&class_name);
+        }
+    });
+    ENUMERATION_REGISTRY.with(|registry| {
+        registry.borrow_mut().entry(class_name).or_default();
+    });
 }
 
 pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
-    let mut registry = enumeration_registry().lock().unwrap();
-    let entry = registry.entry(class_name.to_string()).or_default();
-    entry.clear();
-    entry.extend(members);
+    ENUMERATION_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let entry = registry.entry(class_name.to_string()).or_default();
+        entry.clear();
+        entry.extend(members);
+    });
 }
 
 pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
-    enumeration_registry()
-        .lock()
-        .unwrap()
-        .get(class_name)
-        .is_some_and(|members| members.contains(member))
+    ENUMERATION_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .get(class_name)
+            .is_some_and(|members| members.contains(member))
+    })
 }
 
 pub fn get_class(name: &str) -> Option<ClassDef> {
-    registry().lock().unwrap().get(name).cloned()
+    CLASS_REGISTRY.with(|registry| registry.borrow().get(name).cloned())
 }
 
 pub fn class_names() -> Vec<String> {
-    registry().lock().unwrap().keys().cloned().collect()
+    CLASS_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
 }
 
 pub fn is_class_sealed(name: &str) -> bool {
-    sealed_registry().lock().unwrap().contains(name)
+    SEALED_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
 }
 
 pub fn is_class_abstract(name: &str) -> bool {
-    abstract_registry().lock().unwrap().contains(name)
+    ABSTRACT_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
 }
 
 pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     if class_name == ancestor_name {
         return true;
     }
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if name == ancestor_name {
+                return true;
+            }
+            current = registry
+                .get(&name)
+                .and_then(|class_def| class_def.parent.clone());
         }
-        if name == ancestor_name {
-            return true;
-        }
-        current = reg
-            .get(&name)
-            .and_then(|class_def| class_def.parent.clone());
-    }
-    false
+        false
+    })
 }
 
 /// Resolve a property through the inheritance chain, returning the property definition and
 /// the name of the class where it was defined.
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
-        }
-        if let Some(cls) = reg.get(&name) {
-            if let Some(p) = cls.properties.get(prop) {
-                return Some((p.clone(), name));
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
             }
-            current = cls.parent.clone();
-        } else {
-            break;
+            if let Some(cls) = registry.get(&name) {
+                if let Some(p) = cls.properties.get(prop) {
+                    return Some((p.clone(), name));
+                }
+                current = cls.parent.clone();
+            } else {
+                break;
+            }
         }
-    }
-    None
+        None
+    })
 }
 
 /// Resolve a method through the inheritance chain, returning the method definition and
 /// the name of the class where it was defined.
 pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
-        }
-        if let Some(cls) = reg.get(&name) {
-            if let Some(m) = cls.methods.get(method) {
-                return Some((m.clone(), name));
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
             }
-            current = cls.parent.clone();
-        } else {
-            break;
+            if let Some(cls) = registry.get(&name) {
+                if let Some(m) = cls.methods.get(method) {
+                    return Some((m.clone(), name));
+                }
+                current = cls.parent.clone();
+            } else {
+                break;
+            }
         }
-    }
-    None
-}
-
-fn static_values() -> &'static Mutex<HashMap<(String, String), Value>> {
-    STATIC_VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+        None
+    })
 }
 
 pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> {
-    static_values()
-        .lock()
-        .unwrap()
-        .get(&(class_name.to_string(), prop.to_string()))
-        .cloned()
+    STATIC_VALUES.with(|values| {
+        values
+            .borrow()
+            .get(&(class_name.to_string(), prop.to_string()))
+            .cloned()
+    })
 }
 
 pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
-    static_values()
-        .lock()
-        .unwrap()
-        .insert((class_name.to_string(), prop.to_string()), value);
+    mark_static_values_thread_active();
+    STATIC_VALUES.with(|values| {
+        values
+            .borrow_mut()
+            .insert((class_name.to_string(), prop.to_string()), value);
+    });
 }
 
 /// Set a static property, resolving the defining ancestor class for storage.

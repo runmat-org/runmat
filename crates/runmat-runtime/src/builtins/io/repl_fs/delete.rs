@@ -430,7 +430,7 @@ fn collect_string_array_targets(
 
 fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> BuiltinResult<()> {
     for handle in &cell.data {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         collect_targets(value, targets)?;
     }
     Ok(())
@@ -476,7 +476,15 @@ async fn process_handle_value(
                     ));
                 }
             }
-            let _ = runmat_builtins::set_handle_valid(handle, false);
+            if !crate::set_handle_valid(handle, false) {
+                return Err(delete_error_with(
+                    &DELETE_ERROR_INVALID_HANDLE,
+                    format!(
+                        "delete: failed to invalidate handle object '{}'",
+                        handle.class_name
+                    ),
+                ));
+            }
             let mut invalid = handle.clone();
             invalid.valid = false;
             *mutated_last = Some(Value::HandleObject(invalid));
@@ -493,7 +501,7 @@ async fn process_handle_value(
         Value::Cell(cell) => {
             let mut total = 0usize;
             for handle in &cell.data {
-                let inner = unsafe { &*handle.as_raw() };
+                let inner = handle;
                 total += Box::pin(process_handle_value(inner, mutated_last)).await?;
             }
             Ok(total)
@@ -508,10 +516,7 @@ async fn process_handle_value(
 fn is_handle_input(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .all(|ptr| is_handle_input(unsafe { &*ptr.as_raw() })),
+        Value::Cell(cell) => cell.data.iter().all(|ptr| is_handle_input(ptr)),
         _ => false,
     }
 }
@@ -519,10 +524,7 @@ fn is_handle_input(value: &Value) -> bool {
 fn contains_handle_input(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .any(|ptr| contains_handle_input(unsafe { &*ptr.as_raw() })),
+        Value::Cell(cell) => cell.data.iter().any(|ptr| contains_handle_input(ptr)),
         _ => false,
     }
 }

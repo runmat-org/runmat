@@ -1299,7 +1299,7 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(ca) => {
             let mut names = Vec::with_capacity(ca.data.len());
             for handle in &ca.data {
-                let inner = unsafe { &*handle.as_raw() };
+                let inner = handle;
                 let text = value_to_string_scalar(inner).ok_or_else(|| {
                     load_error(
                         "load: cell arrays used for variable selection must contain string scalars",

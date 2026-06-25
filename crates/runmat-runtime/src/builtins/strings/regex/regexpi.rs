@@ -327,7 +327,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                let first = unsafe { &*ca.data[0].as_raw() };
+                let first = &ca.data[0];
                 assert_eq!(first, &Value::String("abcXYZ".into()));
             }
             other => panic!("unexpected output {other:?}"),
@@ -364,7 +364,7 @@ pub(crate) mod tests {
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                let entry = unsafe { &*ca.data[0].as_raw() };
+                let entry = &ca.data[0];
                 assert_eq!(entry, &Value::String("Bar".into()));
             }
             other => panic!("unexpected builtin output {other:?}"),
@@ -390,8 +390,8 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                let first = unsafe { &*ca.data[0].as_raw() };
-                let second = unsafe { &*ca.data[1].as_raw() };
+                let first = &ca.data[0];
+                let second = &ca.data[1];
                 assert_eq!(first, &Value::String("AB".into()));
                 assert_eq!(second, &Value::String("12".into()));
             }
@@ -425,12 +425,12 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
-                let cell = unsafe { &*ca.data[0].as_raw() };
+                let cell = &ca.data[0];
                 match cell {
                     Value::Cell(inner) => {
                         assert_eq!(inner.data.len(), 2);
-                        let first = unsafe { &*inner.data[0].as_raw() };
-                        let second = unsafe { &*inner.data[1].as_raw() };
+                        let first = &inner.data[0];
+                        let second = &inner.data[1];
                         assert_eq!(first, &Value::String("l".into()));
                         assert_eq!(second, &Value::String("l".into()));
                     }
@@ -455,7 +455,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                let matrix = unsafe { &*ca.data[0].as_raw() };
+                let matrix = &ca.data[0];
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
@@ -485,7 +485,7 @@ pub(crate) mod tests {
                 let parts: Vec<String> = ca
                     .data
                     .iter()
-                    .map(|ptr| match unsafe { &*ptr.as_raw() } {
+                    .map(|ptr| match ptr {
                         Value::String(s) => s.clone(),
                         other => panic!("expected string split part, got {other:?}"),
                     })
@@ -542,13 +542,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_cell_array_inputs_require_all_strings() {
-        let handles = vec![
-            unsafe {
-                runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::String("A".into()))))
-            },
-            unsafe { runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(1.0)))) },
-        ];
-        let cell = CellArray::new_handles(handles, 2, 1).unwrap();
+        let cell = CellArray::new(vec![Value::String("A".into()), Value::Num(1.0)], 2, 1).unwrap();
         let err = evaluate(Value::Cell(cell), Value::String("a".into()), &[])
             .err()
             .expect("expected regexpi to reject non-text cell elements");

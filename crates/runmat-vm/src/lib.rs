@@ -23,7 +23,7 @@ pub use bytecode::{
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
-pub use call::builtins::set_dynamic_eval_options;
+pub use call::builtins::{push_dynamic_eval_options, set_dynamic_eval_options};
 pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
@@ -40,6 +40,13 @@ pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
     PendingWorkspaceGuard, WorkspaceAssignedReport,
 };
+
+#[doc(hidden)]
+pub fn reset_thread_state_for_tests() {
+    runtime::call_stack::reset_thread_state_for_tests();
+    runtime::globals::reset_thread_state_for_tests();
+    runtime::workspace::reset_thread_state_for_tests();
+}
 
 pub async fn call_method_or_member_index_named_with_outputs(
     base: runmat_builtins::Value,

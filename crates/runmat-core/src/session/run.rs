@@ -276,11 +276,15 @@ impl RunMatSession {
         // the outer interpret() is already on the call stack. On WASM the JS event
         // loop drives both as async state-machines and the WASM linear stack is
         // large, so nesting is safe. On native the default thread stack is too
-        // small for two nested interpret() invocations, so we instead run the inner
-        // interpret() on a dedicated thread that has its own 16 MB stack and block
-        // the calling future synchronously on the result (safe because the native
-        // executor — futures::executor::block_on — is already synchronous).
+        // small for two nested interpret() invocations. We cannot move the inner
+        // evaluation to another thread because `Value` can carry thread-confined
+        // GC handles, so the native path grows the current stack and blocks the
+        // calling future synchronously while the inner eval completes. To avoid
+        // blocking async-yielding prompt code on that local executor, native
+        // prompt eval deliberately disables top-level await.
         let compat = self.compat_mode;
+        let dynamic_eval_enabled = self.dynamic_eval_enabled;
+        #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
         let source_name_for_eval_hook = self.current_source_name().to_string();
         let known_project_symbols_for_eval_hook = Arc::new(discover_known_project_symbols(Some(
@@ -331,52 +335,33 @@ impl RunMatSession {
                             })
                     }
 
+                    let known_project_symbols = Arc::clone(&known_project_symbols_for_eval_hook);
                     #[cfg(target_arch = "wasm32")]
                     {
-                        // On WASM: await the inner interpret() directly. The JS async
-                        // runtime handles both futures as cooperative state-machines and
-                        // the WASM linear stack is large enough for the extra frames.
                         Box::pin(eval_expr(
                             expr,
                             compat,
                             top_level_await_enabled,
-                            Arc::clone(&known_project_symbols_for_eval_hook),
+                            known_project_symbols,
                         ))
                     }
-
                     #[cfg(not(target_arch = "wasm32"))]
                     {
-                        // On native: run interpret() on a dedicated thread so it gets
-                        // its own 16 MB stack, fully isolated from the outer interpret()
-                        // call stack. The result is sent back via a tokio oneshot channel
-                        // and awaited asynchronously so the tokio worker thread is never
-                        // blocked by a synchronous recv().
-                        let (tx, rx) = tokio::sync::oneshot::channel();
-                        let known_project_symbols =
-                            Arc::clone(&known_project_symbols_for_eval_hook);
-                        let spawn_result = std::thread::Builder::new()
-                            .stack_size(16 * 1024 * 1024)
-                            .spawn(move || {
-                                let result = futures::executor::block_on(eval_expr(
+                        const INPUT_EVAL_STACK_BYTES: usize = 16 * 1024 * 1024;
+                        Box::pin(async move {
+                            stacker::grow(INPUT_EVAL_STACK_BYTES, || {
+                                let _dynamic_eval_guard = runmat_vm::push_dynamic_eval_options(
+                                    compat,
+                                    compat.allows_runmat_extensions(),
+                                    false,
+                                    dynamic_eval_enabled,
+                                );
+                                futures::executor::block_on(eval_expr(
                                     expr,
                                     compat,
-                                    top_level_await_enabled,
+                                    false,
                                     known_project_symbols,
-                                ));
-                                let _ = tx.send(result);
-                            });
-                        Box::pin(async move {
-                            spawn_result.map_err(|err| {
-                                build_runtime_error(format!(
-                                    "input: failed to spawn eval thread: {err}"
                                 ))
-                                .with_identifier("RunMat:input:EvalThreadSpawnFailed")
-                                .build()
-                            })?;
-                            rx.await.unwrap_or_else(|_| {
-                                Err(build_runtime_error("input: eval thread panicked")
-                                    .with_identifier("RunMat:input:EvalThreadPanic")
-                                    .build())
                             })
                         })
                     }

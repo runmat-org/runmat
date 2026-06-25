@@ -375,7 +375,7 @@ fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> crate::BuiltinResult<Val
             ))
         }
     };
-    CellArray::new_handles(ca.data, rows, cols)
+    CellArray::new(ca.data, rows, cols)
         .map(Value::Cell)
         .map_err(|e| reshape_error(format!("reshape: {e}")))
 }

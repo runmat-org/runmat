@@ -128,7 +128,7 @@ mod tests {
         };
         assert_eq!(cell.data.len(), 1);
         assert!(matches!(
-            &*cell.data[0],
+            &cell.data[0],
             Value::BoundFunctionHandle { name, function } if name == "first" && *function == 10
         ));
     }

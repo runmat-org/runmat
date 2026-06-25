@@ -1030,10 +1030,7 @@ mod tests {
         assert_eq!(cols, 1);
         assert_eq!(rows, data.len());
         data.into_iter()
-            .map(|handle| {
-                let value = unsafe { &*handle.as_raw() };
-                String::try_from(value).expect("cell string")
-            })
+            .map(|value| String::try_from(&value).expect("cell string"))
             .collect()
     }
 

@@ -1,7 +1,7 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
@@ -19,7 +19,9 @@ pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
 
-static TF_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static TF_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Clone, Debug)]
 pub struct TfModel {
@@ -67,7 +69,10 @@ pub fn control_error(
 }
 
 pub fn ensure_tf_class_registered() {
-    TF_CLASS_REGISTERED.get_or_init(|| {
+    TF_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         for name in [
             "Numerator",
@@ -116,6 +121,7 @@ pub fn ensure_tf_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 

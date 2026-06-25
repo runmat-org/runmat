@@ -269,31 +269,37 @@ fn test_complex_expression_execution() {
 }
 
 #[test]
-fn test_concurrent_safety() {
-    use std::sync::Arc;
+fn test_independent_sessions_execute_on_distinct_threads() {
     use std::thread;
 
-    gc_test_context(|| {
-        let engine = Arc::new(std::sync::Mutex::new(RunMatSession::new().unwrap()));
-        let mut handles = vec![];
+    let mut handles = vec![];
 
-        // Spawn multiple threads executing different operations
-        for i in 0..5 {
-            let engine_clone = Arc::clone(&engine);
-            let handle = thread::spawn(move || {
+    // Spawn multiple threads executing independent sessions. Session values can
+    // contain GC handles, so results are reduced to a Send-safe success flag
+    // before crossing the thread boundary.
+    for i in 0..5 {
+        let handle = thread::spawn(move || {
+            gc_test_context(|| {
+                let mut engine = RunMatSession::new().unwrap();
                 let input = format!("x{i} = {i} * 2");
-                let mut eng = engine_clone.lock().unwrap();
-                runmat_core::execute_text_request_for_testing(&mut eng, &input)
-            });
-            handles.push(handle);
-        }
+                let expected = runmat_builtins::Value::Num((i * 2) as f64);
+                let assigned = runmat_core::execute_text_request_for_testing(&mut engine, &input)
+                    .map(|result| result.error.is_none())
+                    .unwrap_or(false);
+                let read_back =
+                    runmat_core::execute_text_request_for_testing(&mut engine, &format!("x{i}"))
+                        .map(|result| result.error.is_none() && result.value == Some(expected))
+                        .unwrap_or(false);
+                assigned && read_back
+            })
+        });
+        handles.push(handle);
+    }
 
-        // Wait for all threads to complete
-        for handle in handles {
-            let result = handle.join().unwrap();
-            assert!(result.is_ok());
-        }
-    });
+    // Wait for all threads to complete
+    for handle in handles {
+        assert!(handle.join().unwrap());
+    }
 }
 
 #[test]

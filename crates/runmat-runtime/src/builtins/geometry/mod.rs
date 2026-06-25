@@ -574,7 +574,7 @@ mod tests {
             panic!("expected cell array of mesh structs");
         };
         assert_eq!(cell.data.len(), 1);
-        let Value::Struct(mesh) = &*cell.data[0] else {
+        let Value::Struct(mesh) = &cell.data[0] else {
             panic!("expected mesh struct");
         };
         let Some(Value::Tensor(vertices)) = mesh.fields.get("vertices") else {

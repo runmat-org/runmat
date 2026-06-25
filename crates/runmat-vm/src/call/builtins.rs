@@ -14,9 +14,6 @@ use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(not(target_arch = "wasm32"))]
-const DYNAMIC_EVAL_STACK_BYTES: usize = 32 * 1024 * 1024;
-
 #[cfg(feature = "native-accel")]
 fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
     mex(
@@ -100,6 +97,36 @@ pub fn set_dynamic_eval_options(
             dynamic_eval_enabled,
         };
     });
+}
+
+#[must_use]
+pub struct DynamicEvalOptionsGuard {
+    previous: DynamicEvalOptions,
+}
+
+impl Drop for DynamicEvalOptionsGuard {
+    fn drop(&mut self) {
+        let previous = self.previous;
+        DYNAMIC_EVAL_OPTIONS.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+pub fn push_dynamic_eval_options(
+    compat_mode: CompatMode,
+    runmat_extensions_enabled: bool,
+    top_level_await_enabled: bool,
+    dynamic_eval_enabled: bool,
+) -> DynamicEvalOptionsGuard {
+    let previous = current_dynamic_eval_options();
+    set_dynamic_eval_options(
+        compat_mode,
+        runmat_extensions_enabled,
+        top_level_await_enabled,
+        dynamic_eval_enabled,
+    );
+    DynamicEvalOptionsGuard { previous }
 }
 
 fn current_dynamic_eval_options() -> DynamicEvalOptions {
@@ -623,15 +650,6 @@ struct DynamicThreadEffects {
 }
 
 impl DynamicThreadEffects {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn capture_current_thread() -> Self {
-        Self {
-            console: runmat_runtime::console::take_thread_buffer(),
-            warnings: runmat_runtime::warning_store::take_all(),
-            recent_figures: runmat_runtime::plotting_hooks::take_recent_figures(),
-        }
-    }
-
     fn replay(self) {
         runmat_runtime::console::append_thread_buffer(self.console);
         runmat_runtime::warning_store::extend(self.warnings);
@@ -639,7 +657,6 @@ impl DynamicThreadEffects {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 async fn interpret_dynamic_workspace_eval(
     bytecode: Bytecode,
     mut target_vars: Vec<Value>,
@@ -660,59 +677,6 @@ async fn interpret_dynamic_workspace_eval(
     let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
     let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
     Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn interpret_dynamic_workspace_eval(
-    bytecode: Bytecode,
-    mut target_vars: Vec<Value>,
-    names: HashMap<String, usize>,
-    assigned: HashSet<String>,
-    builtin: &'static str,
-    source_label: String,
-) -> Result<
-    (
-        Result<InterpreterOutcome, RuntimeError>,
-        Option<WorkspaceValueSnapshot>,
-        DynamicThreadEffects,
-    ),
-    RuntimeError,
-> {
-    let source_catalog_entries =
-        runmat_runtime::source_context::source_catalog_entries_with_fullpaths();
-    let (tx, rx) = futures::channel::oneshot::channel();
-    let spawn_result = std::thread::Builder::new()
-        .name("runmat-dynamic-eval".to_string())
-        .stack_size(DYNAMIC_EVAL_STACK_BYTES)
-        .spawn(move || {
-            let _source_catalog_guard =
-                runmat_runtime::source_context::replace_source_catalog_with_fullpaths(
-                    source_catalog_entries,
-                );
-            let _pending_workspace =
-                crate::runtime::workspace::push_pending_workspace(names, assigned);
-            let outcome = futures::executor::block_on(interpret_with_vars(
-                &bytecode,
-                &mut target_vars,
-                Some(&source_label),
-            ));
-            let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
-            let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
-            let effects = DynamicThreadEffects::capture_current_thread();
-            let _ = tx.send((outcome, updated_workspace, effects));
-        });
-    spawn_result.map_err(|err| {
-        mex(
-            "DynamicWorkspaceEvalThreadSpawnFailed",
-            &format!("{builtin}: failed to spawn dynamic eval thread: {err}"),
-        )
-    })?;
-    rx.await.map_err(|_| {
-        mex(
-            "DynamicWorkspaceEvalThreadPanic",
-            &format!("{builtin}: dynamic eval thread panicked"),
-        )
-    })
 }
 
 fn compile_dynamic_workspace_eval(

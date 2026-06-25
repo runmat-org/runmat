@@ -181,10 +181,13 @@ pub(crate) mod tests {
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
         MException, ObjectInstance, ResolveContext, StructValue, SymbolicExpr, Tensor, Type,
     };
-    use runmat_gc_api::GcPtr;
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
         block_on(super::isreal_builtin(value))
+    }
+
+    fn test_handle_target() -> runmat_gc::GcHandle {
+        runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation")
     }
 
     #[test]
@@ -278,15 +281,16 @@ pub(crate) mod tests {
         .expect("isreal closure");
         let handle_flag = run_isreal(Value::HandleObject(HandleRef {
             class_name: "MockHandle".into(),
-            target: GcPtr::null(),
+            target: test_handle_target(),
             valid: true,
         }))
         .expect("isreal handle");
         let listener_flag = run_isreal(Value::Listener(Listener {
             id: 42,
-            target: GcPtr::null(),
+            target: test_handle_target(),
+            target_class_name: "EventTarget".into(),
             event_name: "changed".into(),
-            callback: GcPtr::null(),
+            callback: test_handle_target(),
             enabled: true,
             valid: true,
         }))

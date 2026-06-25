@@ -568,7 +568,7 @@ impl NormalizedText {
                 let mut data = Vec::with_capacity(cell.data.len());
                 let mut kinds = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
-                    match &**element {
+                    match &element {
                         Value::String(s) => {
                             data.push(s.clone());
                             kinds.push(CellElementKind::String);
@@ -811,7 +811,7 @@ impl BoundaryText {
                 let shape = cell.shape.clone();
                 let mut data = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
-                    match &**element {
+                    match &element {
                         Value::String(s) => data.push(s.clone()),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
                             data.push(sa.data[0].clone());

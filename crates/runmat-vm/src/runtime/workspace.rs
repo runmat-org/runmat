@@ -533,6 +533,19 @@ pub fn mark_workspace_assigned(index: usize) {
     });
 }
 
+pub(crate) fn reset_thread_state_for_tests() {
+    WORKSPACE_STACK.with(|stack| stack.borrow_mut().clear());
+    PENDING_WORKSPACE.with(|slot| {
+        slot.borrow_mut().take();
+    });
+    LAST_WORKSPACE_STATE.with(|slot| {
+        slot.borrow_mut().take();
+    });
+    LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

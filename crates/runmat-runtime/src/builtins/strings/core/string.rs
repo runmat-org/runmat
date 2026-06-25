@@ -220,7 +220,7 @@ fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
 }
 
 fn cell_contains_only_text_scalars(cell: &runmat_builtins::CellArray) -> bool {
-    cell.data.iter().all(|ptr| match &**ptr {
+    cell.data.iter().all(|ptr| match &ptr {
         Value::String(_) => true,
         Value::StringArray(sa) => sa.data.len() <= 1,
         Value::CharArray(ca) => ca.rows <= 1,
@@ -277,7 +277,7 @@ fn has_format_placeholders(value: &Value) -> bool {
         }
         Value::Cell(cell) => {
             for ptr in &cell.data {
-                let element = (**ptr).clone();
+                let element = (ptr).clone();
                 if has_format_placeholders(&element) {
                     return true;
                 }
@@ -490,7 +490,7 @@ pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpe
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
-                    let value = (**element).clone();
+                    let value = (element).clone();
                     let gathered = gather_if_needed_async(&value)
                         .await
                         .map_err(|flow| remap_string_flow(flow))?;
@@ -583,7 +583,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
                     let element = &cell.data[idx];
-                    let value = (**element).clone();
+                    let value = (element).clone();
                     let gathered = gather_if_needed_async(&value)
                         .await
                         .map_err(|flow| remap_string_flow(flow))?;
@@ -790,7 +790,7 @@ async fn cell_array_to_string_array(
         for row in 0..cell.rows {
             let idx = row * cell.cols + col;
             let element = &cell.data[idx];
-            let value = (**element).clone();
+            let value = (element).clone();
             let gathered = gather_if_needed_async(&value)
                 .await
                 .map_err(|flow| remap_string_flow(flow))?;

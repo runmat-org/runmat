@@ -222,7 +222,7 @@ fn close_value(value: &Value) -> BuiltinResult<bool> {
         Value::Cell(cell) => {
             let mut closed = false;
             for element in &cell.data {
-                let inner = unsafe { &*element.as_raw() };
+                let inner = element;
                 closed |= close_value(inner)?;
             }
             Ok(closed)
@@ -307,7 +307,7 @@ fn is_network_target_value(value: &Value) -> bool {
                 && cell
                     .data
                     .iter()
-                    .all(|element| is_network_target_value(unsafe { &*element.as_raw() }))
+                    .all(|element| is_network_target_value(element))
         }
         _ => false,
     }

@@ -1,10 +1,10 @@
 //! MATLAB table datatype support and tabular workflow builtins.
 
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as SpreadsheetReader};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
@@ -42,7 +42,9 @@ const USER_DATA: &str = "UserData";
 const DEFAULT_ROW_DIM_NAME: &str = "Rows";
 const DEFAULT_VARIABLE_DIM_NAME: &str = "Variables";
 
-static TABLE_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static TABLE_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -462,7 +464,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 }
 
 pub fn ensure_table_class_registered() {
-    TABLE_CLASS_REGISTERED.get_or_init(|| {
+    TABLE_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         properties.insert(
             PROPERTIES_MEMBER.to_string(),
@@ -499,6 +504,7 @@ pub fn ensure_table_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 
@@ -3390,7 +3396,7 @@ fn selector_values(payload: &Value) -> BuiltinResult<Vec<Value>> {
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for handle in &cell.data {
-                out.push(unsafe { &*handle.as_raw() }.clone());
+                out.push(handle.clone());
             }
             Ok(out)
         }
@@ -4290,11 +4296,7 @@ fn option_value_is_empty(value: &Value) -> bool {
             array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
         }
         Value::Cell(cell) => {
-            cell.data.is_empty()
-                || cell
-                    .data
-                    .iter()
-                    .all(|handle| option_value_is_empty(unsafe { &*handle.as_raw() }))
+            cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
         }
         _ => false,
     }
@@ -4308,7 +4310,7 @@ fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for handle in &cell.data {
-                let value = unsafe { &*handle.as_raw() };
+                let value = handle;
                 out.extend(string_list(value)?);
             }
             Ok(out)

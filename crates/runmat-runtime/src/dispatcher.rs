@@ -493,37 +493,44 @@ async fn call_registered_class_constructor(
         .with_identifier("RunMat:MethodPrivate")
         .build());
     }
-    let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
-        &ctor.function_name,
-        args,
-        requested_outputs,
-    )
-    .await
-    else {
+    let constructor_result = crate::with_constructor_receiver(default_object.clone(), async {
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &ctor.function_name,
+            args,
+            requested_outputs,
+        )
+        .await
+        {
+            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+        }
         if runmat_builtins::builtin_function_by_name(&ctor.function_name).is_some()
             && ctor.function_name != class_name
         {
             let result = call_builtin_async_impl(&ctor.function_name, args, output_count).await?;
-            return normalize_constructor_result(default_object, result, requested_outputs);
+            return Ok::<Option<Value>, RuntimeError>(Some(result));
         }
-        let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
             &owner_qualified,
             args,
             requested_outputs,
         )
         .await
-        else {
-            if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
-                && owner_qualified != class_name
-            {
-                let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
-                return normalize_constructor_result(default_object, result, requested_outputs);
-            }
-            return Ok(default_object);
-        };
-        return normalize_constructor_result(default_object, result?, requested_outputs);
+        {
+            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+        }
+        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+            && owner_qualified != class_name
+        {
+            let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
+            return Ok::<Option<Value>, RuntimeError>(Some(result));
+        }
+        Ok::<Option<Value>, RuntimeError>(None)
+    })
+    .await?;
+    let Some(result) = constructor_result else {
+        return Ok(default_object);
     };
-    normalize_constructor_result(default_object, result?, requested_outputs)
+    normalize_constructor_result(default_object, result, requested_outputs)
 }
 
 fn normalize_constructor_result(
@@ -543,16 +550,43 @@ fn normalize_constructor_result(
                 Ok(Value::Object(object))
             }
             Value::HandleObject(handle) => {
-                let raw = unsafe { handle.target.as_raw_mut() };
-                if raw.is_null() {
-                    return Ok(Value::HandleObject(handle));
+                enum ConstructorMergeStatus {
+                    Merged,
+                    InvalidHandle,
+                    NonObject,
                 }
-                if let Value::Object(mut object) = unsafe { (&*raw).clone() } {
-                    for (field, value) in struct_value.fields {
-                        object.properties.insert(field, value);
+
+                let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+                    if let Value::Object(object) = target {
+                        if !crate::object_handle_flag_valid(object) {
+                            return ConstructorMergeStatus::InvalidHandle;
+                        }
+                        for (field, value) in struct_value.fields {
+                            runmat_gc::gc_record_handle_write(&handle.target, &value);
+                            object.properties.insert(field, value);
+                        }
+                        ConstructorMergeStatus::Merged
+                    } else {
+                        ConstructorMergeStatus::NonObject
                     }
-                    unsafe {
-                        *raw = Value::Object(object);
+                })
+                .map_err(|e| {
+                    build_runtime_error(format!("constructor result handle target invalid: {e}"))
+                        .build()
+                })?;
+                match merged {
+                    ConstructorMergeStatus::Merged => {}
+                    ConstructorMergeStatus::InvalidHandle => {
+                        return Err(build_runtime_error(
+                            "constructor result handle target is invalid",
+                        )
+                        .build());
+                    }
+                    ConstructorMergeStatus::NonObject => {
+                        return Err(build_runtime_error(
+                            "constructor result handle target is not an object",
+                        )
+                        .build());
                     }
                 }
                 Ok(Value::HandleObject(handle))

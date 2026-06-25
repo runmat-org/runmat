@@ -604,7 +604,7 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(ca) => {
             let mut names = Vec::with_capacity(ca.data.len());
             for handle in &ca.data {
-                let inner = unsafe { &*handle.as_raw() };
+                let inner = handle;
                 let text = value_to_string_scalar(inner).ok_or_else(|| {
                     save_error_with(
                         &SAVE_ERROR_INVALID_ARGUMENT,
@@ -851,7 +851,7 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 for col in 0..cell.cols {
                     for row in 0..cell.rows {
                         let idx = row * cell.cols + col;
-                        let element = unsafe { &*cell.data[idx].as_raw() };
+                        let element = &cell.data[idx];
                         let gathered = gather_if_needed_async(element).await?;
                         elements.push(convert_value(gathered).await?);
                     }

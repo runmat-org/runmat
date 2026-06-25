@@ -1,5 +1,6 @@
 use runmat_builtins::{StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{LegendStyle, TextStyle};
+use std::borrow::Cow;
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
@@ -315,7 +316,7 @@ fn get_figure_property(
     let sg_title_handle =
         super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
     let has_sg_title = figure_has_sg_title(handle);
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Handle", Value::Num(handle.as_u32() as f64));
@@ -374,7 +375,7 @@ fn get_axes_property(
         axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let axes =
         axes_state_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert(
@@ -591,7 +592,7 @@ fn get_text_property(
     } else {
         Value::Num(super::state::encode_axes_handle(handle, axes_index))
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("text".into()));
@@ -658,7 +659,7 @@ fn get_legend_property(
         axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let entries = legend_entries_snapshot(handle, axes_index)
         .map_err(|err| map_figure_error(builtin, err))?;
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("legend".into()));
@@ -761,7 +762,7 @@ fn get_legend_property(
 
 fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     value_as_string(value)
-        .map(|s| canonical_property_name(s.trim()).to_string())
+        .map(|s| canonical_property_name(s.trim()).into_owned())
         .ok_or_else(|| {
             plotting_error(
                 builtin,
@@ -770,51 +771,83 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
         })
 }
 
-fn canonical_property_name(name: &str) -> &str {
+fn canonical_property_name(name: &str) -> Cow<'_, str> {
     match name.to_ascii_lowercase().as_str() {
-        "textcolor" => "textcolor",
-        "color" | "backgroundcolor" => "color",
-        "fontsize" => "fontsize",
-        "fontweight" => "fontweight",
-        "fontangle" => "fontangle",
-        "interpreter" => "interpreter",
-        "visible" => "visible",
-        "location" => "location",
-        "box" => "box",
-        "orientation" => "orientation",
-        "string" => "string",
-        "title" => "title",
-        "xlabel" => "xlabel",
-        "ylabel" => "ylabel",
-        "zlabel" => "zlabel",
-        "view" => "view",
-        "grid" | "xgrid" | "ygrid" | "zgrid" => "grid",
-        "minorgrid" | "xminorgrid" | "yminorgrid" | "zminorgrid" => "minorgrid",
-        "axisequal" => "axisequal",
-        "colorbar" => "colorbar",
-        "colorbarvisible" => "colorbarvisible",
-        "colormap" => "colormap",
-        "xdisplaylabels" => "xdisplaylabels",
-        "ydisplaylabels" => "ydisplaylabels",
-        "colordata" | "cdata" => "colordata",
-        "xlim" => "xlim",
-        "ylim" => "ylim",
-        "zlim" => "zlim",
-        "clim" => "clim",
-        "caxis" => "clim",
-        "xscale" => "xscale",
-        "yscale" => "yscale",
-        "currentaxes" => "currentaxes",
-        "sgtitle" | "supertitle" => "sgtitle",
-        "children" => "children",
-        "parent" => "parent",
-        "type" => "type",
-        "number" => "number",
-        "name" => "name",
-        "numbertitle" => "numbertitle",
-        "legend" => "legend",
-        "legendvisible" => "legendvisible",
-        other => Box::leak(other.to_string().into_boxed_str()),
+        "textcolor" => Cow::Borrowed("textcolor"),
+        "color" => Cow::Borrowed("color"),
+        "fontsize" => Cow::Borrowed("fontsize"),
+        "fontweight" => Cow::Borrowed("fontweight"),
+        "fontangle" => Cow::Borrowed("fontangle"),
+        "interpreter" => Cow::Borrowed("interpreter"),
+        "visible" => Cow::Borrowed("visible"),
+        "location" => Cow::Borrowed("location"),
+        "box" => Cow::Borrowed("box"),
+        "orientation" => Cow::Borrowed("orientation"),
+        "string" => Cow::Borrowed("string"),
+        "title" => Cow::Borrowed("title"),
+        "xlabel" => Cow::Borrowed("xlabel"),
+        "ylabel" => Cow::Borrowed("ylabel"),
+        "zlabel" => Cow::Borrowed("zlabel"),
+        "view" => Cow::Borrowed("view"),
+        "grid" | "xgrid" | "ygrid" | "zgrid" => Cow::Borrowed("grid"),
+        "minorgrid" | "xminorgrid" | "yminorgrid" | "zminorgrid" => Cow::Borrowed("minorgrid"),
+        "axisequal" => Cow::Borrowed("axisequal"),
+        "colorbar" => Cow::Borrowed("colorbar"),
+        "colorbarvisible" => Cow::Borrowed("colorbarvisible"),
+        "colormap" => Cow::Borrowed("colormap"),
+        "xdisplaylabels" => Cow::Borrowed("xdisplaylabels"),
+        "ydisplaylabels" => Cow::Borrowed("ydisplaylabels"),
+        "colordata" | "cdata" => Cow::Borrowed("colordata"),
+        "xlim" => Cow::Borrowed("xlim"),
+        "ylim" => Cow::Borrowed("ylim"),
+        "zlim" => Cow::Borrowed("zlim"),
+        "clim" | "caxis" => Cow::Borrowed("clim"),
+        "xscale" => Cow::Borrowed("xscale"),
+        "yscale" => Cow::Borrowed("yscale"),
+        "currentaxes" => Cow::Borrowed("currentaxes"),
+        "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
+        "children" => Cow::Borrowed("children"),
+        "parent" => Cow::Borrowed("parent"),
+        "type" => Cow::Borrowed("type"),
+        "number" => Cow::Borrowed("number"),
+        "name" => Cow::Borrowed("name"),
+        "numbertitle" => Cow::Borrowed("numbertitle"),
+        "legend" => Cow::Borrowed("legend"),
+        "legendvisible" => Cow::Borrowed("legendvisible"),
+        "autoscalefactor" => Cow::Borrowed("autoscalefactor"),
+        "barwidth" => Cow::Borrowed("barwidth"),
+        "baseline" => Cow::Borrowed("baseline"),
+        "basevalue" => Cow::Borrowed("basevalue"),
+        "bincounts" => Cow::Borrowed("bincounts"),
+        "binedges" => Cow::Borrowed("binedges"),
+        "capsize" => Cow::Borrowed("capsize"),
+        "cdatamapping" => Cow::Borrowed("cdatamapping"),
+        "displayname" => Cow::Borrowed("displayname"),
+        "edgealpha" => Cow::Borrowed("edgealpha"),
+        "edgecolor" => Cow::Borrowed("edgecolor"),
+        "facealpha" => Cow::Borrowed("facealpha"),
+        "facecolor" => Cow::Borrowed("facecolor"),
+        "faces" => Cow::Borrowed("faces"),
+        "filled" => Cow::Borrowed("filled"),
+        "label" => Cow::Borrowed("label"),
+        "labelorientation" => Cow::Borrowed("labelorientation"),
+        "linestyle" => Cow::Borrowed("linestyle"),
+        "linewidth" => Cow::Borrowed("linewidth"),
+        "marker" => Cow::Borrowed("marker"),
+        "markeredgecolor" => Cow::Borrowed("markeredgecolor"),
+        "markerfacecolor" => Cow::Borrowed("markerfacecolor"),
+        "markersize" => Cow::Borrowed("markersize"),
+        "maxheadsize" => Cow::Borrowed("maxheadsize"),
+        "normalization" => Cow::Borrowed("normalization"),
+        "numbins" => Cow::Borrowed("numbins"),
+        "position" => Cow::Borrowed("position"),
+        "sizedata" => Cow::Borrowed("sizedata"),
+        "value" => Cow::Borrowed("value"),
+        "vertices" => Cow::Borrowed("vertices"),
+        "xdata" => Cow::Borrowed("xdata"),
+        "ydata" => Cow::Borrowed("ydata"),
+        "zdata" => Cow::Borrowed("zdata"),
+        other => Cow::Owned(other.to_string()),
     }
 }
 
@@ -1266,7 +1299,7 @@ fn get_histogram_property(
 ) -> BuiltinResult<Value> {
     let normalized =
         apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &hist.normalization);
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("histogram".into()));
@@ -1488,7 +1521,7 @@ fn get_world_text_property(
         .axes_text_annotation(handle.axes_index, handle.annotation_index)
         .cloned()
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text handle")))?;
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("text", handle.figure, handle.axes_index);
             st.insert("String", Value::String(annotation.text.clone()));
@@ -1562,7 +1595,7 @@ fn apply_world_text_property(
     let mut text = None;
     let mut position = None;
     let mut style = annotation.style;
-    match canonical_property_name(key) {
+    match canonical_property_name(key).as_ref() {
         "string" => {
             text = Some(value_as_text_string(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: String must be text"))
@@ -1609,7 +1642,7 @@ fn get_line_property(
             format!("{builtin}: invalid line handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
             st.insert("XData", tensor_from_vec(line.x_data.clone()));
@@ -1658,7 +1691,7 @@ fn get_reference_line_property(
         runmat_plot::plots::ReferenceLineOrientation::Vertical => "vertical",
         runmat_plot::plots::ReferenceLineOrientation::Horizontal => "horizontal",
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
@@ -1724,7 +1757,7 @@ fn get_stairs_property(
             format!("{builtin}: invalid stairs handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
@@ -1767,7 +1800,7 @@ fn get_scatter_property(
             format!("{builtin}: invalid scatter handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
@@ -1832,7 +1865,7 @@ fn get_bar_property(
             format!("{builtin}: invalid bar handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("bar", bar_handle.figure, bar_handle.axes_index);
             st.insert("FaceColor", Value::String(color_to_short_name(bar.color)));
@@ -1870,7 +1903,7 @@ fn get_surface_property(
             format!("{builtin}: invalid surface handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("surface", surface_handle.figure, surface_handle.axes_index);
@@ -1919,7 +1952,7 @@ fn get_patch_property(
             format!("{builtin}: invalid patch handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
             st.insert("Faces", faces_tensor(patch.faces()));
@@ -2002,7 +2035,7 @@ fn get_line3_property(
             format!("{builtin}: invalid plot3 handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
             st.insert("XData", tensor_from_vec(line.x_data.clone()));
@@ -2056,7 +2089,7 @@ fn get_scatter3_property(
         .iter()
         .map(|p| (p.x as f64, p.y as f64, p.z as f64))
         .unzip_n_vec();
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
@@ -2124,7 +2157,7 @@ fn get_pie_property(
             format!("{builtin}: invalid pie handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("pie", pie_handle.figure, pie_handle.axes_index);
             if let Some(label) = pie.label.clone() {
@@ -2158,7 +2191,7 @@ fn get_contour_property(
             format!("{builtin}: invalid contour handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("contour", contour_handle.figure, contour_handle.axes_index);
@@ -2195,7 +2228,7 @@ fn get_contour_fill_property(
             format!("{builtin}: invalid contourf handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("contour", fill_handle.figure, fill_handle.axes_index);
             if let Some(label) = fill.label.clone() {
@@ -2234,7 +2267,7 @@ fn get_stem_property(
             format!("{builtin}: invalid stem handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("stem".into()));
@@ -2331,7 +2364,7 @@ fn get_errorbar_property(
             format!("{builtin}: invalid errorbar handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("errorbar".into()));
@@ -2407,7 +2440,7 @@ fn get_quiver_property(
             format!("{builtin}: invalid quiver handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("quiver".into()));
@@ -2465,7 +2498,7 @@ fn get_image_property(
             format!("{builtin}: handle does not reference an image plot"),
         ));
     }
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("image".into()));
@@ -2535,7 +2568,7 @@ fn get_heatmap_property(
     let meta = figure
         .axes_metadata(heatmap_handle.axes_index)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap axes")))?;
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("heatmap".into()));
@@ -2618,7 +2651,7 @@ fn get_area_property(
             format!("{builtin}: invalid area handle"),
         ));
     };
-    match property.map(canonical_property_name) {
+    match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("area".into()));

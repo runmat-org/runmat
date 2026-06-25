@@ -190,7 +190,7 @@ impl PatternList {
             Value::Cell(cell) => {
                 let mut list = Vec::with_capacity(cell.data.len());
                 for handle in &cell.data {
-                    match &**handle {
+                    match &handle {
                         Value::String(text) => list.push(text.clone()),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
                             list.push(sa.data[0].clone());

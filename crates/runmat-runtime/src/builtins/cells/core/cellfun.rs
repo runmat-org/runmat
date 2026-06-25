@@ -502,7 +502,7 @@ async fn execute_cell(
 fn deref_cell_value(cell: &CellArray, index: usize) -> Value {
     cell.data
         .get(index)
-        .map(|ptr| (**ptr).clone())
+        .cloned()
         .unwrap_or(Value::Num(f64::NAN))
 }
 
@@ -1365,9 +1365,9 @@ pub(crate) mod tests {
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.shape, vec![1, 3]);
-                let upper_a = (*ca.data[0]).clone();
-                let upper_b = (*ca.data[1]).clone();
-                let upper_c = (*ca.data[2]).clone();
+                let upper_a = ca.data[0].clone();
+                let upper_b = ca.data[1].clone();
+                let upper_c = ca.data[2].clone();
                 assert_eq!(extract_string(&upper_a).unwrap(), "ADA");
                 assert_eq!(extract_string(&upper_b).unwrap(), "LINUS");
                 assert_eq!(extract_string(&upper_c).unwrap(), "KATHERINE");
@@ -1605,7 +1605,7 @@ pub(crate) mod tests {
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.shape, vec![1, 1]);
-                let inner = (*ca.data[0]).clone();
+                let inner = ca.data[0].clone();
                 match inner {
                     Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 3.0]),
                     _ => panic!("expected tensor inside cell"),
