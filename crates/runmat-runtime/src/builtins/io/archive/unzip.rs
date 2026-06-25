@@ -1099,19 +1099,26 @@ mod tests {
         .expect("unzip");
 
         let extracted = cell_strings(value);
-        let expected_a = out.path().join("data/a.txt").to_string_lossy().to_string();
+        let expected_a = out
+            .path()
+            .join("data")
+            .join("a.txt")
+            .to_string_lossy()
+            .to_string();
         let expected_b = out
             .path()
-            .join("data/nested/b.txt")
+            .join("data")
+            .join("nested")
+            .join("b.txt")
             .to_string_lossy()
             .to_string();
         assert_eq!(extracted, vec![expected_a, expected_b]);
         assert_eq!(
-            fs::read_to_string(out.path().join("data/a.txt")).unwrap(),
+            fs::read_to_string(out.path().join("data").join("a.txt")).unwrap(),
             "alpha"
         );
         assert_eq!(
-            fs::read_to_string(out.path().join("data/nested/b.txt")).unwrap(),
+            fs::read_to_string(out.path().join("data").join("nested").join("b.txt")).unwrap(),
             "beta"
         );
         let _ = fs::remove_file(archive);
