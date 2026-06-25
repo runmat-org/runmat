@@ -2320,28 +2320,54 @@ fn compile_input_lowers_axis_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_lowers_colormap_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let prepared = session
-        .compile_input("colormap jet;")
-        .expect("colormap command syntax should compile");
+    for colormap_name in [
+        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
+        "summer", "autumn", "winter", "gray", "grey", "bone", "copper", "pink", "lines",
+    ] {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let source = format!("colormap {colormap_name};");
+        let prepared = session
+            .compile_input(&source)
+            .unwrap_or_else(|err| panic!("{source}: colormap command syntax failed: {err:?}"));
 
+        assert!(
+            prepared.bytecode.layout.is_some(),
+            "{source}: colormap command syntax should compile through semantic HIR/MIR/VM"
+        );
+        assert!(
+            prepared
+                .bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == colormap_name)),
+            "{source}: colormap command should carry normalized keyword as semantic string argument"
+        );
+        assert!(
+            prepared.bytecode.instructions.iter().any(
+                |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "colormap")
+            ),
+            "{source}: colormap command should lower to builtin dispatch with one normalized argument"
+        );
+    }
+}
+
+#[test]
+fn compile_input_rejects_unsupported_hsv_colormap_command_keyword() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input("colormap hsv;") {
+        Ok(_) => panic!("unsupported hsv colormap command syntax should fail"),
+        Err(err) => err,
+    };
+    let RunError::Syntax(syntax) = err else {
+        panic!("expected syntax error for unsupported colormap command keyword");
+    };
     assert!(
-        prepared.bytecode.layout.is_some(),
-        "colormap command syntax should compile through semantic HIR/MIR/VM"
-    );
-    assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "jet")),
-        "colormap command should carry normalized keyword as semantic string argument"
-    );
-    assert!(
-        prepared.bytecode.instructions.iter().any(
-            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "colormap")
-        ),
-        "colormap command should lower to builtin dispatch with one normalized argument"
+        syntax
+            .message
+            .contains("'colormap' command syntax does not support 'hsv'"),
+        "unexpected colormap hsv syntax error: {}",
+        syntax.message
     );
 }
 

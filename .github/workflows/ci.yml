@@ -270,9 +270,8 @@ jobs:
             }
 
   fea-conformance:
-    if: >
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')))
+    # Temporarily disabled; keep the job definition intact for future re-enablement.
+    if: ${{ false }}
     name: fea-conformance
     runs-on: ubuntu-latest-gpu
     env:

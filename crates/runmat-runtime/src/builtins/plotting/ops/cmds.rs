@@ -542,35 +542,16 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             &COLORMAP_ERROR_INVALID_ARGUMENT,
         ));
     };
-    let cmap = match name.trim() {
-        "parula" => runmat_plot::plots::surface::ColorMap::Parula,
-        "viridis" => runmat_plot::plots::surface::ColorMap::Viridis,
-        "plasma" => runmat_plot::plots::surface::ColorMap::Plasma,
-        "inferno" => runmat_plot::plots::surface::ColorMap::Inferno,
-        "magma" => runmat_plot::plots::surface::ColorMap::Magma,
-        "turbo" => runmat_plot::plots::surface::ColorMap::Turbo,
-        "jet" => runmat_plot::plots::surface::ColorMap::Jet,
-        "hot" => runmat_plot::plots::surface::ColorMap::Hot,
-        "cool" => runmat_plot::plots::surface::ColorMap::Cool,
-        "spring" => runmat_plot::plots::surface::ColorMap::Spring,
-        "summer" => runmat_plot::plots::surface::ColorMap::Summer,
-        "autumn" => runmat_plot::plots::surface::ColorMap::Autumn,
-        "winter" => runmat_plot::plots::surface::ColorMap::Winter,
-        "gray" | "grey" => runmat_plot::plots::surface::ColorMap::Gray,
-        "bone" => runmat_plot::plots::surface::ColorMap::Bone,
-        "copper" => runmat_plot::plots::surface::ColorMap::Copper,
-        "pink" => runmat_plot::plots::surface::ColorMap::Pink,
-        "lines" => runmat_plot::plots::surface::ColorMap::Lines,
-        other => {
-            return Err(cmd_error_with_message(
-                "colormap",
-                format!(
-                    "{}: unknown colormap '{other}'",
-                    COLORMAP_ERROR_INVALID_ARGUMENT.message
-                ),
-                &COLORMAP_ERROR_INVALID_ARGUMENT,
-            ))
-        }
+    let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
+        let other = name.trim();
+        return Err(cmd_error_with_message(
+            "colormap",
+            format!(
+                "{}: unknown colormap '{other}'",
+                COLORMAP_ERROR_INVALID_ARGUMENT.message
+            ),
+            &COLORMAP_ERROR_INVALID_ARGUMENT,
+        ));
     };
     set_colormap(cmap);
     Ok(true)
