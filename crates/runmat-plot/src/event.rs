@@ -2171,27 +2171,7 @@ fn parse_marker_style(value: &str) -> MarkerStyle {
 }
 
 fn parse_colormap(value: &str) -> ColorMap {
-    match value {
-        "Jet" => ColorMap::Jet,
-        "Hot" => ColorMap::Hot,
-        "Cool" => ColorMap::Cool,
-        "Spring" => ColorMap::Spring,
-        "Summer" => ColorMap::Summer,
-        "Autumn" => ColorMap::Autumn,
-        "Winter" => ColorMap::Winter,
-        "Gray" => ColorMap::Gray,
-        "Bone" => ColorMap::Bone,
-        "Copper" => ColorMap::Copper,
-        "Pink" => ColorMap::Pink,
-        "Lines" => ColorMap::Lines,
-        "Viridis" => ColorMap::Viridis,
-        "Plasma" => ColorMap::Plasma,
-        "Inferno" => ColorMap::Inferno,
-        "Magma" => ColorMap::Magma,
-        "Turbo" => ColorMap::Turbo,
-        "Parula" => ColorMap::Parula,
-        _ => ColorMap::Parula,
-    }
+    ColorMap::from_name(value).unwrap_or(ColorMap::Parula)
 }
 
 fn parse_shading_mode(value: &str) -> ShadingMode {
@@ -2347,26 +2327,8 @@ fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
 }
 
 fn parse_colormap_name(name: &str) -> crate::plots::surface::ColorMap {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "viridis" => crate::plots::surface::ColorMap::Viridis,
-        "plasma" => crate::plots::surface::ColorMap::Plasma,
-        "inferno" => crate::plots::surface::ColorMap::Inferno,
-        "magma" => crate::plots::surface::ColorMap::Magma,
-        "turbo" => crate::plots::surface::ColorMap::Turbo,
-        "jet" => crate::plots::surface::ColorMap::Jet,
-        "hot" => crate::plots::surface::ColorMap::Hot,
-        "cool" => crate::plots::surface::ColorMap::Cool,
-        "spring" => crate::plots::surface::ColorMap::Spring,
-        "summer" => crate::plots::surface::ColorMap::Summer,
-        "autumn" => crate::plots::surface::ColorMap::Autumn,
-        "winter" => crate::plots::surface::ColorMap::Winter,
-        "gray" | "grey" => crate::plots::surface::ColorMap::Gray,
-        "bone" => crate::plots::surface::ColorMap::Bone,
-        "copper" => crate::plots::surface::ColorMap::Copper,
-        "pink" => crate::plots::surface::ColorMap::Pink,
-        "lines" => crate::plots::surface::ColorMap::Lines,
-        _ => crate::plots::surface::ColorMap::Parula,
-    }
+    crate::plots::surface::ColorMap::from_name(name)
+        .unwrap_or(crate::plots::surface::ColorMap::Parula)
 }
 
 fn vec4_to_rgba(value: Vec4) -> [f32; 4] {

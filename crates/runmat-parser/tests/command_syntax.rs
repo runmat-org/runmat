@@ -601,6 +601,28 @@ fn assert_command_string_args(source: &str, expected_name: &str, expected_args: 
 }
 
 #[test]
+fn colormap_command_accepts_supported_runtime_names() {
+    for name in [
+        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
+        "summer", "autumn", "winter", "gray", "grey", "bone", "copper", "pink", "lines",
+    ] {
+        assert_command_string_args(&format!("colormap {name}"), "colormap", &[name]);
+    }
+}
+
+#[test]
+fn colormap_command_rejects_unsupported_hsv() {
+    let err = parse_with_options("colormap hsv", ParserOptions::new(CompatMode::Matlab))
+        .expect_err("colormap hsv should be rejected");
+    assert!(
+        err.message
+            .contains("'colormap' command syntax does not support 'hsv'"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());

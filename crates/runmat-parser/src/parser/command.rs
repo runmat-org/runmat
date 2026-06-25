@@ -25,6 +25,10 @@ enum CommandArgKind {
 
 const REQUIRED_PATH_WORDS: CommandArgKind = CommandArgKind::PathWords { optional: false };
 const OPTIONAL_PATH_WORDS: CommandArgKind = CommandArgKind::PathWords { optional: true };
+const COLORMAP_COMMAND_KEYWORDS: &[&str] = &[
+    "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
+    "summer", "autumn", "winter", "gray", "grey", "bone", "copper", "pink", "lines",
+];
 
 const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
@@ -67,10 +71,7 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "colormap",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &[
-                "parula", "jet", "hsv", "hot", "cool", "spring", "summer", "autumn", "winter",
-                "gray", "bone", "copper", "pink",
-            ],
+            allowed: COLORMAP_COMMAND_KEYWORDS,
             optional: false,
         },
     },
