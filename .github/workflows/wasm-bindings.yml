@@ -10,6 +10,7 @@ on:
       - "crates/runmat-runtime/**"
       - "crates/runmat-lsp/**"
       - "scripts/regenerate-wasm-registry.sh"
+      - "scripts/regenerate-wasm-registry.mjs"
       - "scripts/test-wasm-headless.sh"
       - "scripts/runtime/**"
       - "Cargo.toml"
