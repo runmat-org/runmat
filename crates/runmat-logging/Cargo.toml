@@ -1,6 +1,6 @@
 [package]
 name = "runmat-logging"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 description = "Structured logging and tracing utilities for RunMat hosts"
 license-file = "../LICENSE.md"

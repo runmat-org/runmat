@@ -5269,7 +5269,7 @@ dependencies = [
 
 [[package]]
 name = "runmat"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "atty",
@@ -5317,7 +5317,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5354,7 +5354,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate-api"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -5366,7 +5366,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-core"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "runmat-geometry-core",
  "serde",
@@ -5376,7 +5376,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-fea"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "futures",
  "runmat-accelerate-api",
@@ -5388,7 +5388,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-async"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "miette",
  "thiserror 1.0.69",
@@ -5396,7 +5396,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-builtins"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "indexmap 1.9.3",
  "inventory",
@@ -5414,7 +5414,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-config"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -5432,7 +5432,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "futures",
@@ -5463,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-filesystem"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -5488,7 +5488,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "futures",
  "log",
@@ -5510,11 +5510,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc-api"
-version = "0.5.3"
+version = "0.5.4"
 
 [[package]]
 name = "runmat-gc-miri-tests"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "runmat-builtins",
  "runmat-gc",
@@ -5522,7 +5522,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-core"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -5530,7 +5530,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-io"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5548,7 +5548,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-ops"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "runmat-geometry-core",
  "serde",
@@ -5556,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-hir"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "runmat-builtins",
  "runmat-parser",
@@ -5565,14 +5565,14 @@ dependencies = [
 
 [[package]]
 name = "runmat-lexer"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "runmat-logging"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "chrono",
  "js-sys",
@@ -5590,7 +5590,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lsp"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "env_logger 0.11.10",
  "futures",
@@ -5619,7 +5619,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-macros"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "inventory",
  "proc-macro2",
@@ -5631,7 +5631,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-core"
-version = "0.5.0"
+version = "0.5.4"
 dependencies = [
  "runmat-geometry-core",
  "serde",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-mir"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "runmat-builtins",
  "runmat-hir",
@@ -5651,7 +5651,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-parser"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "runmat-lexer",
  "serde",
@@ -5659,7 +5659,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-plot"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "bytemuck",
  "egui 0.27.2",
@@ -5692,7 +5692,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -5763,7 +5763,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime-integration-tests"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "futures",
  "inventory",
@@ -5776,7 +5776,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-server-client"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5801,7 +5801,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-snapshot"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5840,7 +5840,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-static-analysis"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "runmat-builtins",
  "runmat-hir",
@@ -5851,7 +5851,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-telemetry"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "runmat-accelerate-api",
  "serde",
@@ -5860,11 +5860,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-thread-local"
-version = "0.5.3"
+version = "0.5.4"
 
 [[package]]
 name = "runmat-time"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "instant",
  "js-sys",
@@ -5872,7 +5872,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-turbine"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -5898,7 +5898,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-vm"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "futures",
@@ -5922,7 +5922,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-wasm"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "async-trait",
  "console_error_panic_hook",
