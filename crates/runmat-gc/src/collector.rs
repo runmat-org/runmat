@@ -4,7 +4,7 @@
 //! with optimizations for RunMat's value types and usage patterns.
 
 use crate::{
-    roots::collect_value_roots, GcConfig, GcError, GcHandle, GcStats, GenerationalAllocator, Result,
+    roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
 };
 use runmat_builtins::Value;
 use runmat_time::Instant;
@@ -175,10 +175,12 @@ impl MarkSweepCollector {
         let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
         let ptr = value_ptr.as_ptr().cast::<u8>();
         if allocator.find_generation(ptr).is_none() || !allocator.is_live_handle(&obj) {
-            return Err(GcError::InvalidPointer(format!(
-                "GC mark traversal found stale handle {:p}",
-                value_ptr.as_ptr()
-            )));
+            log::debug!(
+                "Ignoring stale GC mark edge {:p}@{}",
+                value_ptr.as_ptr(),
+                obj.epoch()
+            );
+            return Ok(());
         }
         let ptr_addr = ptr as usize;
 
@@ -578,5 +580,39 @@ mod tests {
             .expect("mark phase should succeed");
 
         assert!(collector.marked_objects.lock().contains(&target_addr));
+    }
+
+    #[test]
+    fn collector_ignores_stale_handles_reachable_through_live_values() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let stale_target = allocator
+            .allocate(Value::String("stale".to_string()), &stats)
+            .expect("target allocation");
+        let stale_addr = stale_target.addr();
+        let stale_epoch = stale_target.epoch().checked_add(1).expect("epoch increment");
+        let stale_handle =
+            unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
+
+        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+            class_name: "TestHandle".to_string(),
+            target: stale_handle,
+            valid: true,
+        });
+        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
+        let cell_root = allocator
+            .allocate(Value::Cell(cell), &stats)
+            .expect("cell allocation");
+
+        collector
+            .mark_phase(&allocator, &[cell_root], 0)
+            .expect("stale nested handles should not abort marking");
+
+        let marked = collector.marked_objects.lock();
+        assert!(marked.contains(&cell_root.addr()));
+        assert!(!marked.contains(&stale_addr));
     }
 }
