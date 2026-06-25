@@ -278,11 +278,11 @@ impl RunMatSession {
         // large, so nesting is safe. On native the default thread stack is too
         // small for two nested interpret() invocations. We cannot move the inner
         // evaluation to another thread because `Value` can carry thread-confined
-        // GC handles, so the native path grows the current stack and blocks the
-        // calling future synchronously while the inner eval completes. To avoid
-        // blocking async-yielding prompt code on that local executor, native
-        // prompt eval deliberately disables top-level await.
+        // GC handles, so the native path grows the stack around each poll of the
+        // inner eval future. To avoid re-entering async-yielding prompt code
+        // recursively, native prompt eval deliberately disables top-level await.
         let compat = self.compat_mode;
+        #[cfg(not(target_arch = "wasm32"))]
         let dynamic_eval_enabled = self.dynamic_eval_enabled;
         #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
@@ -348,7 +348,9 @@ impl RunMatSession {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         const INPUT_EVAL_STACK_BYTES: usize = 16 * 1024 * 1024;
-                        Box::pin(async move {
+                        let mut eval_future =
+                            Box::pin(eval_expr(expr, compat, false, known_project_symbols));
+                        Box::pin(futures::future::poll_fn(move |cx| {
                             stacker::grow(INPUT_EVAL_STACK_BYTES, || {
                                 let _dynamic_eval_guard = runmat_vm::push_dynamic_eval_options(
                                     compat,
@@ -356,14 +358,9 @@ impl RunMatSession {
                                     false,
                                     dynamic_eval_enabled,
                                 );
-                                futures::executor::block_on(eval_expr(
-                                    expr,
-                                    compat,
-                                    false,
-                                    known_project_symbols,
-                                ))
+                                eval_future.as_mut().poll(cx)
                             })
-                        })
+                        }))
                     }
                 },
             )));

@@ -10,7 +10,6 @@
     "line plot"
   ],
   "summary": "Create 2-D line plots in polar coordinates.",
-  "hero_image": null,
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -93,12 +92,5 @@
       "label": "get",
       "url": "./get"
     }
-  ],
-  "related": [
-    "plot",
-    "semilogx",
-    "semilogy",
-    "loglog",
-    "scatter"
   ]
 }

@@ -14,19 +14,20 @@ use std::thread::ThreadId;
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 
 use indexmap::IndexMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_registry {
     use super::{BuiltinDoc, BuiltinFunction, Constant};
-    use once_cell::sync::Lazy;
-    use std::sync::Mutex;
+    use std::cell::{Cell, RefCell};
 
-    static FUNCTIONS: Lazy<Mutex<Vec<&'static BuiltinFunction>>> =
-        Lazy::new(|| Mutex::new(Vec::new()));
-    static CONSTANTS: Lazy<Mutex<Vec<&'static Constant>>> = Lazy::new(|| Mutex::new(Vec::new()));
-    static DOCS: Lazy<Mutex<Vec<&'static BuiltinDoc>>> = Lazy::new(|| Mutex::new(Vec::new()));
-    static REGISTERED: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+    thread_local! {
+        static FUNCTIONS: RefCell<Vec<&'static BuiltinFunction>> = const { RefCell::new(Vec::new()) };
+        static CONSTANTS: RefCell<Vec<&'static Constant>> = const { RefCell::new(Vec::new()) };
+        static DOCS: RefCell<Vec<&'static BuiltinDoc>> = const { RefCell::new(Vec::new()) };
+        static REGISTERED: Cell<bool> = const { Cell::new(false) };
+    }
 
     fn leak<T>(value: T) -> &'static T {
         Box::leak(Box::new(value))
@@ -34,37 +35,37 @@ pub mod wasm_registry {
 
     pub fn submit_builtin_function(func: BuiltinFunction) {
         let leaked = leak(func);
-        FUNCTIONS.lock().unwrap().push(leaked);
+        FUNCTIONS.with_borrow_mut(|functions| functions.push(leaked));
     }
 
     pub fn submit_constant(constant: Constant) {
         let leaked = leak(constant);
-        CONSTANTS.lock().unwrap().push(leaked);
+        CONSTANTS.with_borrow_mut(|constants| constants.push(leaked));
     }
 
     pub fn submit_builtin_doc(doc: BuiltinDoc) {
         let leaked = leak(doc);
-        DOCS.lock().unwrap().push(leaked);
+        DOCS.with_borrow_mut(|docs| docs.push(leaked));
     }
 
     pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
-        FUNCTIONS.lock().unwrap().clone()
+        FUNCTIONS.with_borrow(Clone::clone)
     }
 
     pub fn constants() -> Vec<&'static Constant> {
-        CONSTANTS.lock().unwrap().clone()
+        CONSTANTS.with_borrow(Clone::clone)
     }
 
     pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
-        DOCS.lock().unwrap().clone()
+        DOCS.with_borrow(Clone::clone)
     }
 
     pub fn mark_registered() {
-        *REGISTERED.lock().unwrap() = true;
+        REGISTERED.set(true);
     }
 
     pub fn is_registered() -> bool {
-        *REGISTERED.lock().unwrap()
+        REGISTERED.get()
     }
 }
 
