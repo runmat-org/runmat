@@ -437,7 +437,7 @@ thread_local! {
 }
 
 struct MapRootState {
-    _root_id: RootId,
+    root_id: RootId,
     active: Arc<AtomicBool>,
 }
 
@@ -503,10 +503,7 @@ fn ensure_map_registry_root_registered(builtin: &'static str) -> BuiltinResult<(
                 builtin,
             )
         })?;
-        *state.borrow_mut() = Some(MapRootState {
-            _root_id: root_id,
-            active,
-        });
+        *state.borrow_mut() = Some(MapRootState { root_id, active });
         Ok(())
     })
 }
@@ -520,8 +517,11 @@ fn deactivate_map_registry_root_if_empty() {
     });
     if empty {
         MAP_ROOT_STATE.with(|state| {
-            if let Some(state) = state.borrow().as_ref() {
+            if let Some(state) = state.borrow_mut().take() {
                 state.active.store(false, AtomicOrdering::Release);
+                if let Err(err) = runmat_gc::gc_unregister_root(state.root_id) {
+                    log::warn!("containers.Map: failed to unregister empty registry root: {err}");
+                }
             }
         });
     }

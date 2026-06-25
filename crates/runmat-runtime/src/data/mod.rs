@@ -1165,7 +1165,7 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn transaction_registry_scope_survives_await() {
         with_tx_registry_scope(async {
             let tx_id = start_tx("/datasets/task-local.data".to_string(), 11).expect("start tx");

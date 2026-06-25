@@ -99,6 +99,7 @@ pub fn set_dynamic_eval_options(
     });
 }
 
+#[must_use]
 pub struct DynamicEvalOptionsGuard {
     previous: DynamicEvalOptions,
 }

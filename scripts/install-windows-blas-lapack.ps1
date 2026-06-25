@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$VcpkgRoot,
 
-  [string]$VcpkgRef = "master",
+  [string]$VcpkgRef = "a7eda31dc16994fcaa8587982eb833a8695f1b6f",
 
   [string]$Triplet = "x64-windows",
 
@@ -32,20 +32,20 @@ function Invoke-CheckedNative {
 function Ensure-VcpkgCheckout {
   if (-not (Test-Path -LiteralPath $VcpkgRoot)) {
     Invoke-CheckedNative "git clone vcpkg" {
-      git clone --depth 1 --branch $VcpkgRef https://github.com/microsoft/vcpkg.git $VcpkgRoot
+      git clone --depth 1 https://github.com/microsoft/vcpkg.git $VcpkgRoot
     }
-  } else {
-    Push-Location $VcpkgRoot
-    try {
-      Invoke-CheckedNative "git fetch vcpkg ref" {
-        git fetch --depth 1 origin $VcpkgRef
-      }
-      Invoke-CheckedNative "git checkout vcpkg ref" {
-        git checkout --force FETCH_HEAD
-      }
-    } finally {
-      Pop-Location
+  }
+
+  Push-Location $VcpkgRoot
+  try {
+    Invoke-CheckedNative "git fetch vcpkg ref" {
+      git fetch --depth 1 origin $VcpkgRef
     }
+    Invoke-CheckedNative "git checkout vcpkg ref" {
+      git checkout --force FETCH_HEAD
+    }
+  } finally {
+    Pop-Location
   }
 
   Invoke-CheckedNative "bootstrap vcpkg" {
