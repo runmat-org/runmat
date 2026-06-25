@@ -593,7 +593,10 @@ mod tests {
             .allocate(Value::String("stale".to_string()), &stats)
             .expect("target allocation");
         let stale_addr = stale_target.addr();
-        let stale_epoch = stale_target.epoch().checked_add(1).expect("epoch increment");
+        let stale_epoch = stale_target
+            .epoch()
+            .checked_add(1)
+            .expect("epoch increment");
         let stale_handle =
             unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
 
