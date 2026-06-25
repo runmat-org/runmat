@@ -868,27 +868,7 @@ fn parse_colormap_option(opts: &LineStyleParseOptions, value: &Value) -> Builtin
 }
 
 fn parse_colormap_name(name: &str) -> Option<ColorMap> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "parula" => Some(ColorMap::Parula),
-        "jet" => Some(ColorMap::Jet),
-        "turbo" => Some(ColorMap::Turbo),
-        "viridis" => Some(ColorMap::Viridis),
-        "plasma" => Some(ColorMap::Plasma),
-        "inferno" => Some(ColorMap::Inferno),
-        "magma" => Some(ColorMap::Magma),
-        "hot" => Some(ColorMap::Hot),
-        "cool" => Some(ColorMap::Cool),
-        "spring" => Some(ColorMap::Spring),
-        "summer" => Some(ColorMap::Summer),
-        "autumn" => Some(ColorMap::Autumn),
-        "winter" => Some(ColorMap::Winter),
-        "gray" | "grey" => Some(ColorMap::Gray),
-        "bone" => Some(ColorMap::Bone),
-        "copper" => Some(ColorMap::Copper),
-        "pink" => Some(ColorMap::Pink),
-        "lines" => Some(ColorMap::Lines),
-        _ => None,
-    }
+    ColorMap::from_name(name)
 }
 
 fn parse_shading_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<ShadingMode> {

@@ -87,6 +87,39 @@ pub enum ColorMap {
     Custom(Vec4, Vec4), // (min_color, max_color)
 }
 
+impl ColorMap {
+    pub const CANONICAL_NAMES: &[&str] = &[
+        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
+        "summer", "autumn", "winter", "gray", "bone", "copper", "pink", "lines",
+    ];
+
+    pub const ALIASES: &[&str] = &["grey"];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "parula" => Some(Self::Parula),
+            "viridis" => Some(Self::Viridis),
+            "plasma" => Some(Self::Plasma),
+            "inferno" => Some(Self::Inferno),
+            "magma" => Some(Self::Magma),
+            "turbo" => Some(Self::Turbo),
+            "jet" => Some(Self::Jet),
+            "hot" => Some(Self::Hot),
+            "cool" => Some(Self::Cool),
+            "spring" => Some(Self::Spring),
+            "summer" => Some(Self::Summer),
+            "autumn" => Some(Self::Autumn),
+            "winter" => Some(Self::Winter),
+            "gray" | "grey" => Some(Self::Gray),
+            "bone" => Some(Self::Bone),
+            "copper" => Some(Self::Copper),
+            "pink" => Some(Self::Pink),
+            "lines" => Some(Self::Lines),
+            _ => None,
+        }
+    }
+}
+
 /// Surface shading modes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShadingMode {
@@ -914,15 +947,8 @@ pub mod matlab_compat {
         z: Vec<Vec<f64>>,
         colormap: &str,
     ) -> Result<SurfacePlot, String> {
-        let cmap = match colormap {
-            "jet" => ColorMap::Jet,
-            "hot" => ColorMap::Hot,
-            "cool" => ColorMap::Cool,
-            "viridis" => ColorMap::Viridis,
-            "plasma" => ColorMap::Plasma,
-            "gray" | "grey" => ColorMap::Gray,
-            _ => return Err(format!("Unknown colormap: {colormap}")),
-        };
+        let cmap =
+            ColorMap::from_name(colormap).ok_or_else(|| format!("Unknown colormap: {colormap}"))?;
 
         Ok(SurfacePlot::new(x, y, z)?.with_colormap(cmap))
     }
@@ -1048,5 +1074,54 @@ mod tests {
 
         let colormap_surface = surf_with_colormap(x, y, z, "viridis").unwrap();
         assert_eq!(colormap_surface.colormap, ColorMap::Viridis);
+    }
+
+    #[test]
+    fn colormap_from_name_accepts_canonical_names_and_aliases() {
+        let cases = [
+            ("parula", ColorMap::Parula),
+            ("viridis", ColorMap::Viridis),
+            ("plasma", ColorMap::Plasma),
+            ("inferno", ColorMap::Inferno),
+            ("magma", ColorMap::Magma),
+            ("turbo", ColorMap::Turbo),
+            ("jet", ColorMap::Jet),
+            ("hot", ColorMap::Hot),
+            ("cool", ColorMap::Cool),
+            ("spring", ColorMap::Spring),
+            ("summer", ColorMap::Summer),
+            ("autumn", ColorMap::Autumn),
+            ("winter", ColorMap::Winter),
+            ("gray", ColorMap::Gray),
+            ("grey", ColorMap::Gray),
+            ("bone", ColorMap::Bone),
+            ("copper", ColorMap::Copper),
+            ("pink", ColorMap::Pink),
+            ("lines", ColorMap::Lines),
+        ];
+
+        for (name, expected) in cases {
+            assert_eq!(ColorMap::from_name(name), Some(expected), "{name}");
+        }
+        for name in ColorMap::CANONICAL_NAMES
+            .iter()
+            .chain(ColorMap::ALIASES.iter())
+            .copied()
+        {
+            assert!(
+                ColorMap::from_name(name).is_some(),
+                "colormap table entry should parse: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn colormap_from_name_normalizes_and_rejects_unknown_names() {
+        assert_eq!(ColorMap::from_name(" Turbo "), Some(ColorMap::Turbo));
+        assert_eq!(ColorMap::from_name("GREY"), Some(ColorMap::Gray));
+        assert_eq!(ColorMap::from_name("hsv"), None);
+        assert!(!ColorMap::CANONICAL_NAMES.contains(&"hsv"));
+        assert!(!ColorMap::ALIASES.contains(&"hsv"));
+        assert_eq!(ColorMap::from_name("not-a-colormap"), None);
     }
 }

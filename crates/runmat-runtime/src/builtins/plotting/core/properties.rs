@@ -3566,30 +3566,12 @@ fn parse_colormap_name(
     name: &str,
     builtin: &'static str,
 ) -> BuiltinResult<runmat_plot::plots::surface::ColorMap> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "parula" => Ok(runmat_plot::plots::surface::ColorMap::Parula),
-        "viridis" => Ok(runmat_plot::plots::surface::ColorMap::Viridis),
-        "plasma" => Ok(runmat_plot::plots::surface::ColorMap::Plasma),
-        "inferno" => Ok(runmat_plot::plots::surface::ColorMap::Inferno),
-        "magma" => Ok(runmat_plot::plots::surface::ColorMap::Magma),
-        "turbo" => Ok(runmat_plot::plots::surface::ColorMap::Turbo),
-        "jet" => Ok(runmat_plot::plots::surface::ColorMap::Jet),
-        "hot" => Ok(runmat_plot::plots::surface::ColorMap::Hot),
-        "cool" => Ok(runmat_plot::plots::surface::ColorMap::Cool),
-        "spring" => Ok(runmat_plot::plots::surface::ColorMap::Spring),
-        "summer" => Ok(runmat_plot::plots::surface::ColorMap::Summer),
-        "autumn" => Ok(runmat_plot::plots::surface::ColorMap::Autumn),
-        "winter" => Ok(runmat_plot::plots::surface::ColorMap::Winter),
-        "gray" | "grey" => Ok(runmat_plot::plots::surface::ColorMap::Gray),
-        "bone" => Ok(runmat_plot::plots::surface::ColorMap::Bone),
-        "copper" => Ok(runmat_plot::plots::surface::ColorMap::Copper),
-        "pink" => Ok(runmat_plot::plots::surface::ColorMap::Pink),
-        "lines" => Ok(runmat_plot::plots::surface::ColorMap::Lines),
-        other => Err(plotting_error(
+    runmat_plot::plots::surface::ColorMap::from_name(name).ok_or_else(|| {
+        plotting_error(
             builtin,
-            format!("{builtin}: unknown colormap '{other}'"),
-        )),
-    }
+            format!("{builtin}: unknown colormap '{}'", name.trim()),
+        )
+    })
 }
 
 fn apply_axes_text_alias(
