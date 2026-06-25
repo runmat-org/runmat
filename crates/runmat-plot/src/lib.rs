@@ -11,6 +11,7 @@ pub mod core;
 pub mod data;
 pub mod event;
 pub mod geometry;
+pub mod geometry_scene;
 pub mod gpu;
 pub(crate) mod wgpu_compat;
 
@@ -46,6 +47,14 @@ pub use core::scene::GpuVertexBuffer;
 pub use event::{
     FigureEvent, FigureEventKind, FigureLayout, FigureLegendEntry, FigureMetadata, FigureScene,
     FigureSnapshot, PlotDescriptor, PlotKind,
+};
+pub use geometry_scene::{
+    cad_default_material, vertex as geometry_scene_vertex, GeometryScene,
+    GeometrySceneAssemblyNode, GeometrySceneCacheKey, GeometrySceneChunk,
+    GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
+    GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
+    GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionAnnotation,
+    GeometrySceneRegionSummary, GeometrySceneTriangleRange,
 };
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,

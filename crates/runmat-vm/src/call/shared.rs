@@ -1060,7 +1060,7 @@ mod tests {
             Value::String(OBJECT_PROTOCOL_KIND_BRACE.to_string())
         );
         match &args[1] {
-            Value::Cell(cell) => assert_eq!((*cell.data[0]).clone(), Value::Num(2.0)),
+            Value::Cell(cell) => assert_eq!(cell.data[0].clone(), Value::Num(2.0)),
             other => panic!("expected selector cell, got {other:?}"),
         }
     }
@@ -1318,12 +1318,12 @@ mod tests {
         match &selectors[0] {
             Value::Cell(cell) => {
                 assert_eq!(
-                    (*cell.data[2]).clone(),
+                    cell.data[2].clone(),
                     Value::String(OBJECT_END_RANGE_TAG.to_string())
                 );
-                assert_eq!((*cell.data[1]).clone(), Value::Num(2.0));
+                assert_eq!(cell.data[1].clone(), Value::Num(2.0));
                 assert_eq!(
-                    (*cell.data[3]).clone(),
+                    cell.data[3].clone(),
                     Value::String(OBJECT_SELECTOR_END.to_string())
                 );
             }
@@ -1616,7 +1616,7 @@ mod tests {
         assert_eq!(selectors.len(), 1);
         match &selectors[0] {
             Value::Cell(cell) => {
-                assert_eq!((*cell.data[0]).clone(), Value::String("/".to_string()));
+                assert_eq!(cell.data[0].clone(), Value::String("/".to_string()));
             }
             other => panic!("expected encoded end expression cell, got {other:?}"),
         }

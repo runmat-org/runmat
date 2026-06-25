@@ -200,7 +200,7 @@ fn repelem_cell_array_nd() {
         let values: Vec<f64> = out
             .data
             .iter()
-            .map(|ptr| match unsafe { &*ptr.as_raw() } {
+            .map(|ptr| match ptr {
                 Value::Num(n) => *n,
                 other => panic!("expected numeric cell element, got {other:?}"),
             })

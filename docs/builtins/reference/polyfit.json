@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Fit least-squares polynomials in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB polyfit documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

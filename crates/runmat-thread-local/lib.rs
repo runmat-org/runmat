@@ -1,6 +1,11 @@
 #[cfg(target_arch = "wasm32")]
 use std::cell::UnsafeCell;
 
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+compile_error!(
+    "runmat_thread_local wasm TLS shim assumes single-threaded wasm; use native thread_local semantics for wasm atomics builds"
+);
+
 #[cfg(target_arch = "wasm32")]
 pub struct WasmTlsCell<T> {
     init: fn() -> T,
@@ -29,11 +34,6 @@ impl<T> WasmTlsCell<T> {
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         let ptr = self.ensure();
         unsafe { f(&*ptr) }
-    }
-
-    pub fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        let ptr = self.ensure();
-        unsafe { f(&mut *ptr) }
     }
 }
 

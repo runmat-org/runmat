@@ -541,8 +541,8 @@ fn format_cell(cell: &CellArray) -> Vec<String> {
     format_table(rows, cols, CELL_ROW_INDENT, 1, Align::Left, |r, c| {
         let idx = r * cols + c;
         let handle = cell.data[idx].clone();
-        let value = unsafe { &*handle.as_raw() };
-        summarize_for_cell(value)
+        let value = handle;
+        summarize_for_cell(&value)
     })
 }
 

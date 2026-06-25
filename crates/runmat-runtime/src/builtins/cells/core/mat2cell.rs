@@ -790,7 +790,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cell.shape, vec![2, 2]);
 
-        let bottom_right = (*cell.data[3]).clone();
+        let bottom_right = cell.data[3].clone();
         let gathered = test_support::gather(bottom_right).expect("gather");
         assert_eq!(gathered.shape, vec![2, 3]);
         assert_eq!(gathered.data, vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]);
@@ -811,7 +811,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cell.shape, vec![1, 3]);
         assert_eq!(cell.data.len(), 3);
-        let third = (*cell.data[2]).clone();
+        let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
         assert_eq!(gathered.data, vec![4.0, 5.0, 6.0]);
         assert_eq!(gathered.shape, vec![1, 3]);
@@ -828,7 +828,7 @@ pub(crate) mod tests {
             other => panic!("expected cell array, got {other:?}"),
         };
         assert_eq!(cell.shape, vec![2, 1]);
-        let second = (*cell.data[1]).clone();
+        let second = cell.data[1].clone();
         let gathered = test_support::gather(second).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
         assert_eq!(gathered.data, vec![3.0, 4.0]);
@@ -847,7 +847,7 @@ pub(crate) mod tests {
             other => panic!("expected cell array, got {other:?}"),
         };
         assert_eq!(cell.shape, vec![1, 1]);
-        let value = (*cell.data[0]).clone();
+        let value = cell.data[0].clone();
         match value {
             Value::Complex(re, im) => {
                 assert!((re - 1.25).abs() < 1e-12);
@@ -876,7 +876,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cell.shape, vec![2, 2, 2]);
         let index = 6; // (2,2,1) in row-major indexing
-        let block = (*cell.data[index]).clone();
+        let block = cell.data[index].clone();
         let gathered = test_support::gather(block).expect("gather");
         assert_eq!(gathered.shape, vec![2, 2, 1]);
         assert_eq!(gathered.data, vec![8.0, 9.0, 11.0, 12.0]);
@@ -896,7 +896,7 @@ pub(crate) mod tests {
             other => panic!("expected cell array, got {other:?}"),
         };
         assert_eq!(cell.shape, vec![2, 2]);
-        let top_left = (*cell.data[0]).clone();
+        let top_left = cell.data[0].clone();
         let gathered = test_support::gather(top_left).expect("gather");
         assert_eq!(gathered.data.len(), 0);
         assert_eq!(gathered.shape, vec![0, 1]);
@@ -915,7 +915,7 @@ pub(crate) mod tests {
             other => panic!("expected cell array, got {other:?}"),
         };
         assert_eq!(cell.shape, vec![4, 1]);
-        let third = (*cell.data[2]).clone();
+        let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
         assert_eq!(gathered.data, vec![3.0]);
@@ -939,7 +939,7 @@ pub(crate) mod tests {
             Value::Cell(ca) => ca,
             other => panic!("expected cell array, got {other:?}"),
         };
-        let second = (*cell.data[1]).clone();
+        let second = cell.data[1].clone();
         match second {
             Value::CharArray(slice) => {
                 assert_eq!(slice.rows, 1);
@@ -1010,7 +1010,7 @@ pub(crate) mod tests {
                 other => panic!("expected cell array, got {other:?}"),
             };
             assert_eq!(cell.shape, vec![2, 2]);
-            let block = (*cell.data[3]).clone();
+            let block = cell.data[3].clone();
             let gathered = test_support::gather(block).expect("gather");
             assert_eq!(gathered.data, vec![5.0, 6.0]);
             assert_eq!(gathered.shape, vec![2, 1]);
@@ -1057,8 +1057,8 @@ pub(crate) mod tests {
         assert_eq!(cpu_cell.shape, gpu_cell.shape);
         assert_eq!(cpu_cell.data.len(), gpu_cell.data.len());
         for (cpu, gpu) in cpu_cell.data.iter().zip(gpu_cell.data.iter()) {
-            let cpu_val = (**cpu).clone();
-            let gpu_val = (**gpu).clone();
+            let cpu_val = cpu.clone();
+            let gpu_val = gpu.clone();
             let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");
             let gpu_tensor = test_support::gather(gpu_val).expect("gpu gather");
             assert_eq!(cpu_tensor.shape, gpu_tensor.shape);

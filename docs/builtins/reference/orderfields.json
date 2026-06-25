@@ -10,7 +10,6 @@
     "field order"
   ],
   "summary": "Reorder struct field definitions alphabetically or according to supplied ordering rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

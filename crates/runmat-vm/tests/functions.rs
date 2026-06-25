@@ -2,7 +2,6 @@
 mod test_helpers;
 
 use std::convert::TryFrom;
-use std::thread;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
@@ -16,19 +15,12 @@ fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_builtins:
     let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
     let source_text = source.to_string();
     let source_name = name.to_string();
-    thread::Builder::new()
-        .stack_size(8 * 1024 * 1024)
-        .spawn(move || {
-            let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
-                source_id,
-                source_name,
-                source_text,
-            )]);
-            futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
-        })
-        .expect("spawn catalog test thread")
-        .join()
-        .expect("catalog test thread failed")
+    let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
+        source_id,
+        source_name,
+        source_text,
+    )]);
+    futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
 }
 
 fn execute_source_result(
@@ -1673,19 +1665,13 @@ fn mfilename_reads_current_source_context() {
     "#;
     let bytecode = compile_source(source).expect("compile source");
     let source_text = source.to_string();
-    let vars = thread::Builder::new()
-        .stack_size(8 * 1024 * 1024)
-        .spawn(move || {
-            let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
-                runmat_hir::SourceId(0),
-                "/tmp/runmat_vm_mfilename_probe.m".to_string(),
-                source_text,
-            )]);
-            futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
-        })
-        .expect("spawn mfilename test thread")
-        .join()
-        .expect("mfilename test thread failed");
+    let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
+        runmat_hir::SourceId(0),
+        "/tmp/runmat_vm_mfilename_probe.m".to_string(),
+        source_text,
+    )]);
+    let vars =
+        futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode");
     assert!(vars.iter().any(|v| {
         matches!(v, runmat_builtins::Value::String(s) if s == "runmat_vm_mfilename_probe")
     }));
@@ -1914,16 +1900,10 @@ fn too_many_outputs_and_varargout_mismatch() {
 #[test]
 fn nested_function_calls() {
     let program = "function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);";
-    let handle = thread::Builder::new()
-        .stack_size(8 * 1024 * 1024)
-        .spawn(move || {
-            let vars = execute_source(program);
-            assert!(vars
-                .iter()
-                .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
-        })
-        .expect("spawn nested_function_calls thread");
-    handle.join().expect("nested_function_calls thread failed");
+    let vars = execute_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2375,6 +2355,17 @@ fn eig_builtin_multi_assign_execute() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+}
+
+#[test]
+fn eig_generalized_builtin_execute() {
+    let bytecode =
+        compile_source("A = [2 0; 0 9]; B = [1 0; 0 3]; d = eig(A, B); z = d(1) + d(2);").unwrap();
+    let vars = interpret(&bytecode).expect("generalized eig should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3172,7 +3163,7 @@ fn cellfun_upper_function_handle_round_trip() {
             let texts: Vec<String> = ca
                 .data
                 .iter()
-                .map(|ptr| String::try_from(&**ptr))
+                .map(String::try_from)
                 .collect::<Result<_, _>>()
                 .unwrap_or_default();
             if texts == vec!["ADA", "LINUS", "KATHERINE"] {

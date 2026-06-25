@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Generate arithmetic progressions with MATLAB and RunMat colon semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

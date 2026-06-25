@@ -51,7 +51,7 @@ fn test_collection_with_live_objects() {
         let mut live_objects = Vec::new();
         for i in 0..10 {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Explicitly protect from collection
+            gc_add_root(ptr).expect("root registration should succeed"); // Explicitly protect from collection
             live_objects.push(ptr);
         }
 
@@ -70,7 +70,10 @@ fn test_collection_with_live_objects() {
 
         // Live objects should still be accessible
         for (i, ptr) in live_objects.iter().enumerate() {
-            assert_eq!(**ptr, Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Some garbage should have been collected
@@ -84,7 +87,7 @@ fn test_collection_with_live_objects() {
 
         // Clean up roots
         for ptr in &live_objects {
-            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+            gc_remove_root(*ptr).expect("root removal should succeed");
         }
     });
 }
@@ -166,7 +169,7 @@ fn test_collection_with_different_generations() {
         let mut young_objects = Vec::new();
         for i in 0..5 {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Protect from collection
+            gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
             young_objects.push(ptr);
         }
 
@@ -183,12 +186,15 @@ fn test_collection_with_different_generations() {
 
         // Young objects should still be accessible (they were promoted)
         for (i, ptr) in young_objects.iter().enumerate() {
-            assert_eq!(**ptr, Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Clean up roots
         for ptr in &young_objects {
-            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+            gc_remove_root(*ptr).expect("root removal should succeed");
         }
 
         // collected values are always valid (usize)
@@ -267,7 +273,10 @@ fn test_allocation_after_collection() {
         let new_ptr = gc_allocate(Value::String("post-collection".to_string()))
             .expect("allocation after collection should succeed");
 
-        assert_eq!(*new_ptr, Value::String("post-collection".to_string()));
+        assert_eq!(
+            gc_clone_value(&new_ptr).expect("valid GC handle"),
+            Value::String("post-collection".to_string())
+        );
     });
 }
 
@@ -304,7 +313,7 @@ fn test_collection_performance() {
         let alloc_start = Instant::now();
         for i in 0..num_objects {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Protect from collection
+            gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
             objects.push(ptr);
         }
         let alloc_duration = alloc_start.elapsed();
@@ -324,12 +333,15 @@ fn test_collection_performance() {
 
         // Objects should still be accessible (they're kept alive by the Vec)
         for (i, ptr) in objects.iter().enumerate() {
-            assert_eq!(**ptr, Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Clean up roots
         for ptr in &objects {
-            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+            gc_remove_root(*ptr).expect("root removal should succeed");
         }
     });
 }

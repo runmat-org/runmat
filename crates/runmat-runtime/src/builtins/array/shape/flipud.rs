@@ -250,7 +250,7 @@ fn flip_cell_array_rows(cell: CellArray) -> crate::BuiltinResult<Value> {
             flipped.push(data[base + col].clone());
         }
     }
-    CellArray::new_handles(flipped, rows, cols)
+    CellArray::new(flipped, rows, cols)
         .map(Value::Cell)
         .map_err(|e| flipud_error(format!("flipud: {e}")))
 }

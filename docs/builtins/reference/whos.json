@@ -9,7 +9,6 @@
     "introspection"
   ],
   "summary": "List workspace or MAT-file variables with MATLAB-compatible metadata fields.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

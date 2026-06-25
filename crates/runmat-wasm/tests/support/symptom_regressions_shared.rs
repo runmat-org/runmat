@@ -32,7 +32,184 @@ fn init_options(enable_gpu: bool) -> JsValue {
         &JsValue::from_bool(enable_gpu),
     )
     .expect("set enableGpu");
+    js_sys::Reflect::set(
+        &options,
+        &JsValue::from_str("fsProvider"),
+        &test_fs_provider(),
+    )
+    .expect("set fsProvider");
     options.into()
+}
+
+pub(crate) fn test_fs_provider() -> JsValue {
+    js_sys::eval(
+        r#"
+(function () {
+  const files = new Map();
+  const dirs = new Set(["/"]);
+  const now = () => Date.now();
+  const modified = new Map([["/", now()]]);
+  const normalize = (path) => {
+    let text = String(path || "/").replace(/\\/g, "/");
+    if (!text.startsWith("/")) text = "/" + text;
+    const parts = [];
+    for (const part of text.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") parts.pop();
+      else parts.push(part);
+    }
+    return "/" + parts.join("/");
+  };
+  const parentOf = (path) => {
+    const normalized = normalize(path);
+    const index = normalized.lastIndexOf("/");
+    return index <= 0 ? "/" : normalized.slice(0, index);
+  };
+  const baseName = (path) => normalize(path).split("/").pop() || "";
+  const notFound = (path) => {
+    const err = new Error(`NotFound: ${normalize(path)}`);
+    err.name = "NotFoundError";
+    err.code = "NotFound";
+    return err;
+  };
+  const ensureDir = (path) => {
+    const normalized = normalize(path);
+    if (!dirs.has(normalized)) throw notFound(normalized);
+  };
+  const createDirAll = (path) => {
+    const normalized = normalize(path);
+    let current = "";
+    for (const part of normalized.split("/").filter(Boolean)) {
+      current = `${current}/${part}`;
+      dirs.add(current);
+      modified.set(current, now());
+    }
+  };
+  const bytesOf = (data) => {
+    if (data instanceof Uint8Array) return data.slice();
+    if (ArrayBuffer.isView(data)) {
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+    }
+    return new Uint8Array(data).slice();
+  };
+  const writeFile = async (path, data) => {
+    await Promise.resolve();
+    const normalized = normalize(path);
+    createDirAll(parentOf(normalized));
+    files.set(normalized, bytesOf(data));
+    modified.set(normalized, now());
+  };
+  const readFile = async (path) => {
+    await Promise.resolve();
+    const normalized = normalize(path);
+    const data = files.get(normalized);
+    if (!data) throw notFound(normalized);
+    return data.slice();
+  };
+  const removeFile = (path) => {
+    const normalized = normalize(path);
+    if (!files.delete(normalized)) throw notFound(normalized);
+    modified.delete(normalized);
+  };
+  const metadata = (path) => {
+    const normalized = normalize(path);
+    if (dirs.has(normalized)) {
+      return { fileType: "directory", len: 0, modified: modified.get(normalized) || now(), readonly: false };
+    }
+    const data = files.get(normalized);
+    if (!data) throw notFound(normalized);
+    return { fileType: "file", len: data.length, modified: modified.get(normalized) || now(), readonly: false };
+  };
+  const readDir = (path) => {
+    const normalized = normalize(path);
+    ensureDir(normalized);
+    const prefix = normalized === "/" ? "/" : `${normalized}/`;
+    const names = new Set();
+    for (const dir of dirs) {
+      if (dir !== normalized && dir.startsWith(prefix)) {
+        const rest = dir.slice(prefix.length);
+        if (rest && !rest.includes("/")) names.add(rest);
+      }
+    }
+    for (const file of files.keys()) {
+      if (file.startsWith(prefix)) {
+        const rest = file.slice(prefix.length);
+        if (rest && !rest.includes("/")) names.add(rest);
+      }
+    }
+    return Array.from(names).sort().map((name) => {
+      const child = normalized === "/" ? `/${name}` : `${normalized}/${name}`;
+      return { path: child, fileName: name, fileType: dirs.has(child) ? "directory" : "file" };
+    });
+  };
+  const createDir = (path) => {
+    const normalized = normalize(path);
+    ensureDir(parentOf(normalized));
+    dirs.add(normalized);
+    modified.set(normalized, now());
+  };
+  const removeDir = (path) => {
+    const normalized = normalize(path);
+    if (normalized === "/" || !dirs.has(normalized)) throw notFound(normalized);
+    if (readDir(normalized).length > 0) throw new Error(`DirectoryNotEmpty: ${normalized}`);
+    dirs.delete(normalized);
+    modified.delete(normalized);
+  };
+  const removeDirAll = (path) => {
+    const normalized = normalize(path);
+    if (normalized === "/") throw new Error("Cannot remove root");
+    for (const dir of Array.from(dirs)) {
+      if (dir === normalized || dir.startsWith(`${normalized}/`)) {
+        dirs.delete(dir);
+        modified.delete(dir);
+      }
+    }
+    for (const file of Array.from(files.keys())) {
+      if (file === normalized || file.startsWith(`${normalized}/`)) {
+        files.delete(file);
+        modified.delete(file);
+      }
+    }
+  };
+  const rename = (from, to) => {
+    const src = normalize(from);
+    const dst = normalize(to);
+    if (files.has(src)) {
+      writeFile(dst, files.get(src));
+      files.delete(src);
+      modified.delete(src);
+      return;
+    }
+    if (!dirs.has(src)) throw notFound(src);
+    createDirAll(dst);
+    for (const file of Array.from(files.keys())) {
+      if (file.startsWith(`${src}/`)) {
+        const next = `${dst}${file.slice(src.length)}`;
+        writeFile(next, files.get(file));
+        files.delete(file);
+      }
+    }
+    removeDirAll(src);
+  };
+  return {
+    readFile,
+    writeFile,
+    removeFile,
+    metadata,
+    symlinkMetadata: metadata,
+    readDir,
+    canonicalize: normalize,
+    createDir,
+    createDirAll,
+    removeDir,
+    removeDirAll,
+    rename,
+    setReadonly: function () {}
+  };
+})()
+"#,
+    )
+    .expect("create wasm test filesystem provider")
 }
 
 pub(crate) async fn execute_script_with_runtime(runtime: &RunMatWasm, script: &str) -> ExecPayload {
@@ -102,6 +279,24 @@ fn finite_stdout_numbers(stdout_text: &str) -> Vec<f64> {
         })
         .filter(|value| value.is_finite())
         .collect()
+}
+
+pub(crate) async fn assert_signal_compatibility_harness_executes_without_runtime_error() {
+    let script =
+        include_str!("../../../runmat-runtime/tests/fixtures/signal_compatibility_harness.m");
+
+    let payload = execute_script(script).await;
+    if let Some(err) = payload.error {
+        panic!(
+            "signal compatibility harness wasm execution failed: {}",
+            err.message
+        );
+    }
+    let stdout_text = stdout_text(&payload);
+    assert!(
+        stdout_text.contains("RESULT_signal_compat csv=4 fft=2.0 conv=-1.0 mat=1.0"),
+        "signal compatibility harness produced unexpected stdout: {stdout_text:?}"
+    );
 }
 
 pub(crate) async fn assert_impedance_loop_executes_without_runtime_error() {

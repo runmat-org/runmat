@@ -6,16 +6,35 @@
 
 use cranelift::prelude::*;
 use runmat_builtins::{CellArray, Value};
-use runmat_gc::{gc_allocate, GcPtr};
+use runmat_gc::{gc_allocate_rooted, ExplicitRoot};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+
+fn gc_with_value_retry<R>(
+    handle: &runmat_gc::GcHandle,
+    f: impl Fn(&Value) -> R,
+) -> Result<R, String> {
+    for _ in 0..1_000 {
+        match runmat_gc::gc_with_value(handle, |value| f(value)) {
+            Ok(result) => return Ok(result),
+            Err(runmat_gc::GcError::CollectionFailed(_)) => {
+                std::thread::yield_now();
+                std::thread::sleep(std::time::Duration::from_micros(50));
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+
+    runmat_gc::gc_with_value(handle, |value| f(value)).map_err(|err| err.to_string())
+}
 
 /// JIT memory manager for marshaling data between Cranelift and RunMat runtime
 pub struct JitMemoryManager {
-    /// Global memory pools for different data types
-    string_pool: Arc<RwLock<HashMap<String, GcPtr<Value>>>>,
-    array_pool: Arc<RwLock<HashMap<String, GcPtr<Value>>>>, // Use string hash of f64 vector
+    /// Thread-local memory pools for rooted JIT constants.
+    string_pool: RefCell<HashMap<String, ExplicitRoot>>,
+    array_pool: RefCell<HashMap<String, ExplicitRoot>>, // Use string hash of f64 vector
+    array_data_pool: RefCell<HashMap<String, Box<[f64]>>>,
 
     /// Statistics
     allocated_strings: AtomicUsize,
@@ -25,8 +44,9 @@ pub struct JitMemoryManager {
 impl JitMemoryManager {
     pub fn new() -> Self {
         Self {
-            string_pool: Arc::new(RwLock::new(HashMap::new())),
-            array_pool: Arc::new(RwLock::new(HashMap::new())),
+            string_pool: RefCell::new(HashMap::new()),
+            array_pool: RefCell::new(HashMap::new()),
+            array_data_pool: RefCell::new(HashMap::new()),
             allocated_strings: AtomicUsize::new(0),
             allocated_arrays: AtomicUsize::new(0),
         }
@@ -35,32 +55,57 @@ impl JitMemoryManager {
     /// Allocate a string in GC memory and return its pointer and length
     pub fn allocate_string(&self, s: &str) -> Result<(*const u8, usize), String> {
         // Check if we already have this string in the pool
-        {
-            let pool = self.string_pool.read().unwrap();
-            if let Some(gc_ptr) = pool.get(s) {
-                let value_ptr = unsafe { gc_ptr.as_raw() };
-                if let Value::String(ref stored_str) = unsafe { &*value_ptr } {
-                    return Ok((stored_str.as_ptr(), stored_str.len()));
+        let mut remove_stale_root = false;
+        let pooled = {
+            let pool = self.string_pool.borrow();
+            if let Some(root) = pool.get(s) {
+                let handle = root.handle();
+                match gc_with_value_retry(&handle, |value| match value {
+                    Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
+                    _ => None,
+                }) {
+                    Ok(Some(result)) => Some(result),
+                    Ok(None) => {
+                        remove_stale_root = true;
+                        None
+                    }
+                    Err(_) => {
+                        remove_stale_root = true;
+                        None
+                    }
                 }
+            } else {
+                None
             }
+        };
+        if let Some(result) = pooled {
+            return Ok(result);
+        }
+        if remove_stale_root {
+            self.string_pool.borrow_mut().remove(s);
         }
 
         // Allocate new string in GC
         let string_value = Value::String(s.to_string());
-        let gc_ptr = gc_allocate(string_value)
-            .map_err(|e| format!("Failed to allocate string in GC: {e}"))?;
+        let root = gc_allocate_rooted(string_value)
+            .map_err(|e| format!("Failed to allocate rooted string in GC: {e}"))?;
+        let handle = root.handle();
 
         // Store in pool for reuse
         {
-            let mut pool = self.string_pool.write().unwrap();
-            pool.insert(s.to_string(), gc_ptr.clone());
+            let mut pool = self.string_pool.borrow_mut();
+            pool.insert(s.to_string(), root);
         }
 
         // Return pointer and length
-        let value_ptr = unsafe { gc_ptr.as_raw() };
-        if let Value::String(ref stored_str) = unsafe { &*value_ptr } {
+        if let Some(result) = gc_with_value_retry(&handle, |value| match value {
+            Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
+            _ => None,
+        })
+        .map_err(|e| format!("Invalid allocated string GC handle: {e}"))?
+        {
             self.allocated_strings.fetch_add(1, Ordering::Relaxed);
-            Ok((stored_str.as_ptr(), stored_str.len()))
+            Ok(result)
         } else {
             Err("Allocated value is not a string".to_string())
         }
@@ -73,11 +118,13 @@ impl JitMemoryManager {
 
         // Check if we already have this array in the pool
         {
-            let pool = self.array_pool.read().unwrap();
-            if let Some(_gc_ptr) = pool.get(&array_key) {
-                // For simplicity, return a pointer to the raw f64 data
-                // In a complete implementation, we'd need more sophisticated marshaling
-                return Ok((values.as_ptr(), values.len()));
+            let pool = self.array_pool.borrow();
+            if pool.contains_key(&array_key) {
+                let data_pool = self.array_data_pool.borrow();
+                let data = data_pool
+                    .get(&array_key)
+                    .ok_or_else(|| "array data pool missing cached buffer".to_string())?;
+                return Ok((data.as_ptr(), data.len()));
             }
         }
 
@@ -86,20 +133,23 @@ impl JitMemoryManager {
         let cell_array = CellArray::new(cell_values, 1, values.len())
             .map_err(|e| format!("Failed to build cell array: {e}"))?;
         let cell_value = Value::Cell(cell_array);
-        let gc_ptr =
-            gc_allocate(cell_value).map_err(|e| format!("Failed to allocate array in GC: {e}"))?;
+        let root = gc_allocate_rooted(cell_value)
+            .map_err(|e| format!("Failed to allocate rooted array in GC: {e}"))?;
 
         // Store in pool for reuse
         {
-            let mut pool = self.array_pool.write().unwrap();
-            pool.insert(array_key, gc_ptr);
+            let mut pool = self.array_pool.borrow_mut();
+            pool.insert(array_key.clone(), root);
         }
+
+        let data = values.to_vec().into_boxed_slice();
+        let ptr = data.as_ptr();
+        let len = data.len();
+        self.array_data_pool.borrow_mut().insert(array_key, data);
 
         self.allocated_arrays.fetch_add(1, Ordering::Relaxed);
 
-        // Return pointer to original data (this is simplified)
-        // In a complete implementation, we'd extract the data from the GC-allocated Cell
-        Ok((values.as_ptr(), values.len()))
+        Ok((ptr, len))
     }
 
     /// Create a string constant in JIT memory
@@ -148,15 +198,16 @@ impl JitMemoryManager {
         JitMemoryStats {
             allocated_strings: self.allocated_strings.load(Ordering::Relaxed),
             allocated_arrays: self.allocated_arrays.load(Ordering::Relaxed),
-            string_pool_size: self.string_pool.read().unwrap().len(),
-            array_pool_size: self.array_pool.read().unwrap().len(),
+            string_pool_size: self.string_pool.borrow().len(),
+            array_pool_size: self.array_pool.borrow().len(),
         }
     }
 
     /// Clear memory pools (for testing)
     pub fn clear_pools(&self) {
-        self.string_pool.write().unwrap().clear();
-        self.array_pool.write().unwrap().clear();
+        self.string_pool.borrow_mut().clear();
+        self.array_pool.borrow_mut().clear();
+        self.array_data_pool.borrow_mut().clear();
     }
 }
 
@@ -175,22 +226,23 @@ pub struct JitMemoryStats {
     pub array_pool_size: usize,
 }
 
-/// Global JIT memory manager instance
-static GLOBAL_JIT_MEMORY: std::sync::OnceLock<JitMemoryManager> = std::sync::OnceLock::new();
+thread_local! {
+    static GLOBAL_JIT_MEMORY: RefCell<JitMemoryManager> = RefCell::new(JitMemoryManager::new());
+}
 
-/// Get the global JIT memory manager
-pub fn get_jit_memory_manager() -> &'static JitMemoryManager {
-    GLOBAL_JIT_MEMORY.get_or_init(JitMemoryManager::new)
+/// Borrow the global JIT memory manager for the current thread.
+pub fn with_jit_memory_manager<R>(f: impl FnOnce(&JitMemoryManager) -> R) -> R {
+    GLOBAL_JIT_MEMORY.with(|manager| f(&manager.borrow()))
 }
 
 /// Helper function to allocate a string for JIT use
 pub fn jit_allocate_string(s: &str) -> Result<(*const u8, usize), String> {
-    get_jit_memory_manager().allocate_string(s)
+    with_jit_memory_manager(|manager| manager.allocate_string(s))
 }
 
 /// Helper function to allocate an f64 array for JIT use
 pub fn jit_allocate_f64_array(values: &[f64]) -> Result<(*const f64, usize), String> {
-    get_jit_memory_manager().allocate_f64_array(values)
+    with_jit_memory_manager(|manager| manager.allocate_f64_array(values))
 }
 
 /// Helper to create runtime function signatures for Cranelift
@@ -232,67 +284,121 @@ mod tests {
 
     #[test]
     fn test_string_allocation() {
-        let manager = JitMemoryManager::new();
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
 
-        let result = manager.allocate_string("test_string");
-        assert!(result.is_ok());
+            let result = manager.allocate_string("test_string");
+            assert!(result.is_ok());
 
-        let (ptr, len) = result.unwrap();
-        assert!(!ptr.is_null());
-        assert_eq!(len, "test_string".len());
+            let (ptr, len) = result.unwrap();
+            assert!(!ptr.is_null());
+            assert_eq!(len, "test_string".len());
 
-        let stats = manager.stats();
-        assert_eq!(stats.allocated_strings, 1);
-        assert_eq!(stats.string_pool_size, 1);
+            let stats = manager.stats();
+            assert_eq!(stats.allocated_strings, 1);
+            assert_eq!(stats.string_pool_size, 1);
+        });
     }
 
     #[test]
     fn test_string_pool_reuse() {
-        let manager = JitMemoryManager::new();
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
 
-        // Allocate same string twice
-        let result1 = manager.allocate_string("reuse_test");
-        let result2 = manager.allocate_string("reuse_test");
+            // Allocate same string twice
+            let result1 = manager.allocate_string("reuse_test");
+            let result2 = manager.allocate_string("reuse_test");
 
-        assert!(result1.is_ok());
-        assert!(result2.is_ok());
+            assert!(result1.is_ok());
+            assert!(result2.is_ok());
 
-        let (ptr1, _) = result1.unwrap();
-        let (ptr2, _) = result2.unwrap();
+            let (ptr1, _) = result1.unwrap();
+            let (ptr2, _) = result2.unwrap();
 
-        // Should reuse the same allocation
-        assert_eq!(ptr1, ptr2);
+            // Should reuse the same allocation
+            assert_eq!(ptr1, ptr2);
 
-        let stats = manager.stats();
-        assert_eq!(stats.string_pool_size, 1);
+            let stats = manager.stats();
+            assert_eq!(stats.string_pool_size, 1);
+        });
+    }
+
+    #[test]
+    fn test_string_pool_uses_rooted_cache() {
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
+
+            let (ptr1, len1) = manager
+                .allocate_string("rooted_reuse_test")
+                .expect("string allocation should succeed");
+
+            let (ptr2, len2) = manager
+                .allocate_string("rooted_reuse_test")
+                .expect("pooled string should use rooted cache");
+
+            assert_eq!(ptr1, ptr2);
+            assert_eq!(len1, len2);
+            assert_eq!(manager.stats().string_pool_size, 1);
+        });
     }
 
     #[test]
     fn test_f64_array_allocation() {
-        let manager = JitMemoryManager::new();
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
 
-        let values = [1.0, 2.0, 3.0, 4.0];
-        let result = manager.allocate_f64_array(&values);
-        assert!(result.is_ok());
+            let values = [1.0, 2.0, 3.0, 4.0];
+            let result = manager.allocate_f64_array(&values);
+            assert!(result.is_ok());
 
-        let (ptr, len) = result.unwrap();
-        assert!(!ptr.is_null());
-        assert_eq!(len, 4);
+            let (ptr, len) = result.unwrap();
+            assert!(!ptr.is_null());
+            assert_eq!(len, 4);
 
-        let stats = manager.stats();
-        assert_eq!(stats.allocated_arrays, 1);
-        assert_eq!(stats.array_pool_size, 1);
+            let stats = manager.stats();
+            assert_eq!(stats.allocated_arrays, 1);
+            assert_eq!(stats.array_pool_size, 1);
+        });
+    }
+
+    #[test]
+    fn test_f64_array_pool_returns_owned_cached_buffer() {
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
+
+            let (ptr1, len1) = manager
+                .allocate_f64_array(&[1.0, 2.0])
+                .expect("array allocation should succeed");
+            let (ptr2, len2) = {
+                let temporary_values = vec![1.0, 2.0];
+                manager
+                    .allocate_f64_array(&temporary_values)
+                    .expect("cached array allocation should succeed")
+            };
+
+            assert_eq!(ptr1, ptr2);
+            assert_eq!(len1, len2);
+            assert_eq!(len2, 2);
+            unsafe {
+                assert_eq!(*ptr2.add(0), 1.0);
+                assert_eq!(*ptr2.add(1), 2.0);
+            }
+        });
     }
 
     #[test]
     fn test_global_memory_manager() {
-        let _manager = get_jit_memory_manager();
+        runmat_gc::gc_test_context(|| {
+            with_jit_memory_manager(|manager| manager.clear_pools());
 
-        let result = jit_allocate_string("global_test");
-        assert!(result.is_ok());
+            let result = jit_allocate_string("global_test");
+            assert!(result.is_ok());
 
-        let array_result = jit_allocate_f64_array(&[1.0, 2.0]);
-        assert!(array_result.is_ok());
+            let array_result = jit_allocate_f64_array(&[1.0, 2.0]);
+            assert!(array_result.is_ok());
+
+            with_jit_memory_manager(|manager| manager.clear_pools());
+        });
     }
 
     #[test]

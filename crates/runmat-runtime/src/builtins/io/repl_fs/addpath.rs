@@ -478,7 +478,7 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
         }
         Value::Cell(cell) => {
             for ptr in &cell.data {
-                let inner = (**ptr).clone();
+                let inner = (ptr).clone();
                 let gathered = gather_if_needed_async(&inner)
                     .await
                     .map_err(map_control_flow)?;

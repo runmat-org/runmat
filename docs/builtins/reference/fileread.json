@@ -9,7 +9,6 @@
     "character vector"
   ],
   "summary": "Read full text files into character vectors in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

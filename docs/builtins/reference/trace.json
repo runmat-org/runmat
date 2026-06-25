@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Sum main-diagonal elements of matrix and matrix-like inputs with MATLAB-compatible numeric behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

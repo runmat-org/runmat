@@ -10,7 +10,6 @@
     "elementwise"
   ],
   "summary": "Generate periodic square waves with MATLAB-compatible duty-cycle control.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

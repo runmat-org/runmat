@@ -10,7 +10,6 @@
     "elementwise"
   ],
   "summary": "Compute element-wise sine values for degree-based angles with MATLAB-compatible canonical outputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

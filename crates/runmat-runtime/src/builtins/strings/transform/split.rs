@@ -1624,15 +1624,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_cell_array_mixed_inputs() {
-        let handles: Vec<_> = vec![
-            runmat_gc::gc_allocate(Value::String("alpha beta".to_string())).unwrap(),
-            runmat_gc::gc_allocate(Value::CharArray(
-                CharArray::new("gamma".chars().collect(), 1, 5).unwrap(),
-            ))
-            .unwrap(),
+        let values = vec![
+            Value::String("alpha beta".to_string()),
+            Value::CharArray(CharArray::new("gamma".chars().collect(), 1, 5).unwrap()),
         ];
-        let cell =
-            Value::Cell(CellArray::new_handles(handles, 1, 2).expect("cell array construction"));
+        let cell = Value::Cell(CellArray::new(values, 1, 2).expect("cell array construction"));
         let result = split_builtin(cell, Vec::new()).expect("split");
         match result {
             Value::StringArray(array) => {
@@ -1677,14 +1673,8 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 2);
-                assert_eq!(
-                    unsafe { &*cell.data[0].as_raw() },
-                    &Value::String("a".into())
-                );
-                assert_eq!(
-                    unsafe { &*cell.data[1].as_raw() },
-                    &Value::String("b".into())
-                );
+                assert_eq!(&cell.data[0], &Value::String("a".into()));
+                assert_eq!(&cell.data[1], &Value::String("b".into()));
             }
             other => panic!("expected cell output, got {other:?}"),
         }

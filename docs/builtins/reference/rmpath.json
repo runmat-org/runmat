@@ -9,7 +9,6 @@
     "toolbox cleanup"
   ],
   "summary": "Remove folders from the active MATLAB search path with MATLAB-compatible argument handling.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

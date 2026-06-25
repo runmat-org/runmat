@@ -24,7 +24,7 @@ impl RunMatSession {
                     "Snapshot loaded successfully from {}",
                     path.as_ref().display()
                 );
-                Some(Arc::new(snapshot))
+                Some(Rc::new(snapshot))
             }
             Err(e) => {
                 warn!(
@@ -48,7 +48,7 @@ impl RunMatSession {
             snapshot_bytes.and_then(|bytes| match Self::load_snapshot_from_bytes(bytes) {
                 Ok(snapshot) => {
                     info!("Snapshot loaded successfully from in-memory bytes");
-                    Some(Arc::new(snapshot))
+                    Some(Rc::new(snapshot))
                 }
                 Err(e) => {
                     warn!("Failed to load snapshot from bytes: {e}, continuing without snapshot");
@@ -61,7 +61,7 @@ impl RunMatSession {
     fn from_snapshot(
         enable_jit: bool,
         verbose: bool,
-        snapshot: Option<Arc<Snapshot>>,
+        snapshot: Option<Rc<Snapshot>>,
     ) -> Result<Self> {
         #[cfg(target_arch = "wasm32")]
         let snapshot = {
@@ -115,6 +115,7 @@ impl RunMatSession {
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
             active_source_name: "<repl>".to_string(),
+            active_source_fullpath_name: None,
             telemetry_consent: true,
             telemetry_client_id: None,
             telemetry_platform: TelemetryPlatformInfo::default(),
@@ -150,8 +151,12 @@ impl RunMatSession {
         &self.active_source_name
     }
 
+    pub(crate) fn current_source_fullpath_name(&self) -> Option<&str> {
+        self.active_source_fullpath_name.as_deref()
+    }
+
     #[cfg(target_arch = "wasm32")]
-    fn build_wasm_snapshot() -> Option<Arc<Snapshot>> {
+    fn build_wasm_snapshot() -> Option<Rc<Snapshot>> {
         use log::{info, warn};
 
         info!("No snapshot provided; building stdlib snapshot inside wasm runtime");
@@ -167,7 +172,7 @@ impl RunMatSession {
         match SnapshotBuilder::new(config).build() {
             Ok(snapshot) => {
                 info!("WASM snapshot build completed successfully");
-                Some(Arc::new(snapshot))
+                Some(Rc::new(snapshot))
             }
             Err(err) => {
                 warn!("Failed to build stdlib snapshot in wasm runtime: {err}");

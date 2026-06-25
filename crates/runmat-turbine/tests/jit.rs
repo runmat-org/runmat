@@ -942,7 +942,7 @@ fn test_runtime_functions_available() {
             Instr::LoadConst(2.0),
             Instr::LoadConst(3.0),
             Instr::LoadConst(4.0),
-            Instr::CreateMatrix(2, 2), // This should generate a call to runmat_create_matrix
+            Instr::CreateMatrix(2, 2), // This should compile matrix creation lowering
             Instr::StoreVar(0),
         ],
         1,

@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Element-wise inverse cosine in MATLAB and RunMat, with complex promotion outside [-1, 1].",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

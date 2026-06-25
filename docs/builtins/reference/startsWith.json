@@ -9,7 +9,6 @@
     "text search"
   ],
   "summary": "Test whether text values start with specified prefixes using MATLAB-compatible broadcasting and case options.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

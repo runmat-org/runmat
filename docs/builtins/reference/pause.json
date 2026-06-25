@@ -10,7 +10,6 @@
     "execution"
   ],
   "summary": "Pause execution until keypress or specified duration elapses with MATLAB-compatible timing semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -17,6 +17,7 @@ members = [
     "crates/runmat-turbine",
     "crates/runmat-gc-api",
     "crates/runmat-gc",
+    "crates/runmat-gc-miri-tests",
     "crates/runmat-snapshot",
     "crates/runmat-logging",
     "crates/runmat-lsp",
@@ -29,6 +30,12 @@ members = [
     "crates/runmat-filesystem",
     "crates/runmat-config",
     "crates/runmat-static-analysis",
+    "crates/runmat-geometry/core",
+    "crates/runmat-geometry/io",
+    "crates/runmat-geometry/ops",
+    "crates/runmat-analysis/core",
+    "crates/runmat-analysis/fea",
+    "crates/runmat-meshing/core",
 ]
 resolver = "2"
 
@@ -84,3 +91,9 @@ runmat-accelerate = { version = "=0.5.3", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.5.3", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.5.3", path = "crates/runmat-gc-api" }
 runmat-thread-local = { version = "=0.5.3", path = "crates/runmat-thread-local" }
+runmat-geometry-core = { version = "=0.5.0", path = "crates/runmat-geometry/core" }
+runmat-geometry-io = { version = "=0.5.0", path = "crates/runmat-geometry/io" }
+runmat-geometry-ops = { version = "=0.5.0", path = "crates/runmat-geometry/ops" }
+runmat-analysis-core = { version = "=0.5.0", path = "crates/runmat-analysis/core" }
+runmat-analysis-fea = { version = "=0.5.0", path = "crates/runmat-analysis/fea" }
+runmat-meshing-core = { version = "=0.5.0", path = "crates/runmat-meshing/core" }

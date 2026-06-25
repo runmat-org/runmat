@@ -10,7 +10,6 @@
     "logical"
   ],
   "summary": "Create identity matrices and N-D identity tensors in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

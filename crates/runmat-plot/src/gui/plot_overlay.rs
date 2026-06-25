@@ -4,6 +4,7 @@
 //! plot content, providing controls, axis labels, grid lines, and titles.
 
 use crate::core::{plot_utils, PlotRenderer};
+use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
@@ -45,6 +46,9 @@ pub struct PlotOverlay {
     want_reset_view: bool,
     want_toggle_grid: Option<bool>,
     want_toggle_legend: Option<bool>,
+
+    cad_overlay: CadOverlayState,
+    cad_actions: CadOverlayActions,
 }
 
 /// Configuration for the plot overlay
@@ -296,6 +300,8 @@ impl PlotOverlay {
             want_reset_view: false,
             want_toggle_grid: None,
             want_toggle_legend: None,
+            cad_overlay: CadOverlayState::default(),
+            cad_actions: CadOverlayActions::default(),
         }
     }
 
@@ -924,7 +930,9 @@ impl PlotOverlay {
                 plot_area = Some(self.render_plot_area(ui, plot_renderer, config));
             });
 
-        consumed_input |= central_response.response.hovered();
+        if config.show_toolbar {
+            consumed_input |= central_response.response.hovered();
+        }
 
         // Render Dystr modal if needed
         if self.show_dystr_modal {
@@ -1152,8 +1160,12 @@ impl PlotOverlay {
                         }
                     }
                     self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
-                    self.draw_3d_origin_axis_ticks(ui, r, plot_renderer, i, config.font_scale);
-                    self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
+                    let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
+                        || plot_renderer.overlay_show_grid_for_axes(i);
+                    if show_world_grid_overlay {
+                        self.draw_3d_origin_axis_ticks(ui, r, plot_renderer, i, config.font_scale);
+                        self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
+                    }
                     for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
                         self.draw_pie_label(ui, r, &label, pos, config.font_scale);
                     }
@@ -1282,20 +1294,24 @@ impl PlotOverlay {
                     0,
                     config.font_scale,
                 );
-                self.draw_3d_origin_axis_ticks(
-                    ui,
-                    centered_plot_rect,
-                    plot_renderer,
-                    0,
-                    config.font_scale,
-                );
-                self.draw_projected_world_texts(
-                    ui,
-                    centered_plot_rect,
-                    plot_renderer,
-                    0,
-                    config.font_scale,
-                );
+                let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
+                    || plot_renderer.overlay_show_grid_for_axes(0);
+                if show_world_grid_overlay {
+                    self.draw_3d_origin_axis_ticks(
+                        ui,
+                        centered_plot_rect,
+                        plot_renderer,
+                        0,
+                        config.font_scale,
+                    );
+                    self.draw_projected_world_texts(
+                        ui,
+                        centered_plot_rect,
+                        plot_renderer,
+                        0,
+                        config.font_scale,
+                    );
+                }
             } else {
                 // Draw plot frame (2D only; 3D uses the axes cube instead)
                 if plot_renderer.overlay_show_box() {
@@ -1456,6 +1472,19 @@ impl PlotOverlay {
             #[cfg(not(target_arch = "wasm32"))]
             ui.painter()
                 .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, border));
+        }
+
+        if let Some(overlay) = plot_renderer.geometry_overlay() {
+            let actions = self.cad_overlay.render(CadOverlayRenderInput {
+                ctx: ui.ctx(),
+                plot_rect: centered_plot_rect,
+                overlay,
+                grid_enabled: plot_renderer.overlay_show_grid(),
+                xray_enabled: plot_renderer.geometry_xray_enabled(),
+                owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
+                font_scale: config.font_scale,
+            });
+            self.cad_actions.merge(actions);
         }
 
         self.axes_plot_rects = rendered_axes_rects;
@@ -2426,6 +2455,7 @@ impl PlotOverlay {
                 crate::plots::figure::PlotType::Bar
                 | crate::plots::figure::PlotType::Area
                 | crate::plots::figure::PlotType::Surface
+                | crate::plots::figure::PlotType::Mesh
                 | crate::plots::figure::PlotType::Patch
                 | crate::plots::figure::PlotType::Pie
                 | crate::plots::figure::PlotType::ContourFill => {
@@ -2631,6 +2661,32 @@ impl PlotOverlay {
         self.want_save_svg = false;
         self.want_reset_view = false;
         out
+    }
+
+    pub(crate) fn take_cad_actions(&mut self) -> CadOverlayActions {
+        std::mem::take(&mut self.cad_actions)
+    }
+
+    pub(crate) fn overlay_pointer_captured(&self) -> bool {
+        self.cad_overlay.pointer_captured() || self.show_dystr_modal
+    }
+
+    pub(crate) fn overlay_capture_regions(&self) -> Vec<[f32; 4]> {
+        let mut regions: Vec<[f32; 4]> = self
+            .cad_overlay
+            .capture_regions()
+            .iter()
+            .map(|rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y])
+            .collect();
+        if self.show_dystr_modal {
+            regions.push([
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::INFINITY,
+                f32::INFINITY,
+            ]);
+        }
+        regions
     }
 
     /// Render the Dystr information modal

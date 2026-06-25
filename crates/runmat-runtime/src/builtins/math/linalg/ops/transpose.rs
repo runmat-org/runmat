@@ -315,7 +315,7 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
             out.push(ca.data[idx].clone());
         }
     }
-    CellArray::new_handles(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
+    CellArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {

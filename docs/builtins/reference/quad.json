@@ -1,0 +1,90 @@
+{
+  "title": "quad",
+  "category": "math/optim",
+  "keywords": [
+    "quad",
+    "numerical integration",
+    "adaptive simpson",
+    "quadrature",
+    "function handle"
+  ],
+  "summary": "Approximate finite scalar definite integrals with MATLAB's legacy quad interface.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The adaptive Simpson loop runs on the host. Callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::quad::tests",
+    "integration": null
+  },
+  "description": "`q = quad(fun, a, b)` approximates the definite integral of scalar integrand `fun` from `a` to `b` using adaptive Simpson quadrature. It supports the legacy MATLAB call forms with optional tolerance, trace output, forwarded parameters, and `[q, fcnt]` output.",
+  "behaviors": [
+    "The function may be a named function handle such as `@sin`, an anonymous function such as `@(x) x.^2`, or a function-handle string.",
+    "The integration loop evaluates the integrand at scalar sample points and adapts subintervals using Simpson error estimates.",
+    "`tol` is an absolute positive scalar tolerance and defaults to `1e-6`; an empty `tol` uses the default.",
+    "`trace` prints legacy adaptive subdivision rows as `[fcnEvals, a, b-a, Q]` when nonzero; an empty `trace` disables tracing.",
+    "Arguments after `trace` are forwarded to the integrand as `fun(x, p1, p2, ...)`.",
+    "The integrand must return a finite real scalar. Array-valued and complex-valued integrands are not supported by `quad`.",
+    "Finite reversed bounds are accepted and negate the result. Equal bounds return zero with a function count of zero.",
+    "Requests for more than two outputs are rejected."
+  ],
+  "examples": [
+    {
+      "description": "Integrate sine over one half-period",
+      "input": "q = quad(@sin, 0, pi)",
+      "output": "q =\n    2.0000"
+    },
+    {
+      "description": "Return the function evaluation count",
+      "input": "[q, fcnt] = quad(@(x) x.^2, 0, 1)",
+      "output": "q =\n    0.3333"
+    },
+    {
+      "description": "Forward an extra argument to the integrand",
+      "input": "q = quad(@(x,a) a.*x, 0, 2, [], [], 3)",
+      "output": "q =\n    6.0000"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should new code use quad or integral?",
+      "answer": "Use `integral` for new code when possible. `quad` exists for legacy MATLAB script compatibility."
+    },
+    {
+      "question": "Does quad support extra parameters?",
+      "answer": "Yes. Values after `trace` are forwarded to the function handle after the scalar sample point."
+    },
+    {
+      "question": "Does quad run on the GPU?",
+      "answer": "The adaptive solver runs on the host because it repeatedly invokes user code through function-handle dispatch. The callback itself may call GPU-aware builtins."
+    }
+  ],
+  "links": [
+    {
+      "label": "integral",
+      "url": "./integral"
+    },
+    {
+      "label": "trapz",
+      "url": "./trapz"
+    },
+    {
+      "label": "cumtrapz",
+      "url": "./cumtrapz"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/quad.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/quad.rs"
+  }
+}

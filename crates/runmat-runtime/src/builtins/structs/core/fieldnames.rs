@@ -157,7 +157,7 @@ fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
 fn collect_struct_array_fieldnames(array: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut names = BTreeSet::new();
     for handle in array.data.iter() {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let Value::Struct(st) = value else {
             return Err(fieldnames_error_with_message(
                 FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS.message,
@@ -178,9 +178,14 @@ fn collect_object_fieldnames(obj: &ObjectInstance) -> Vec<String> {
 fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
-    if runmat_builtins::is_handle_valid(handle) {
-        let target = unsafe { &*handle.target.as_raw() };
-        match target {
+    if crate::is_handle_valid(handle) {
+        let target = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+            fieldnames_error_with_message(
+                format!("fieldnames: invalid handle target: {e}"),
+                &FIELDNAMES_ERROR_INVALID_TARGET,
+            )
+        })?;
+        match &target {
             Value::Struct(st) => {
                 names.extend(collect_struct_fieldnames(st));
             }
@@ -484,13 +489,11 @@ pub(crate) mod tests {
         );
         runmat_builtins::register_class(def);
 
-        let mut payload = StructValue::new();
+        let mut payload = ObjectInstance::new(class_name.to_string());
         payload
-            .fields
+            .properties
             .insert("Status".to_string(), Value::from("ready"));
-        let target = unsafe {
-            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: class_name.to_string(),
@@ -553,13 +556,11 @@ pub(crate) mod tests {
         );
         runmat_builtins::register_class(child);
 
-        let mut payload = StructValue::new();
+        let mut payload = ObjectInstance::new(child_name.to_string());
         payload
-            .fields
+            .properties
             .insert("Status".to_string(), Value::from("ready"));
-        let target = unsafe {
-            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: child_name.to_string(),
@@ -586,7 +587,7 @@ pub(crate) mod tests {
     fn cell_strings(cell: &CellArray) -> Vec<String> {
         cell.data
             .iter()
-            .map(|ptr| match unsafe { &*ptr.as_raw() } {
+            .map(|ptr| match ptr {
                 Value::CharArray(ca) => ca.data.iter().collect(),
                 other => panic!("expected character array cell element, got {other:?}"),
             })

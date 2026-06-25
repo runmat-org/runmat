@@ -1,0 +1,71 @@
+{
+  "category": "image/io",
+  "keywords": [
+    "imwrite",
+    "image",
+    "write image",
+    "png",
+    "jpeg",
+    "jpg",
+    "gif",
+    "bmp",
+    "tiff",
+    "indexed image"
+  ],
+  "summary": "Write image data to PNG, JPEG, GIF, BMP, or TIFF files.",
+  "syntax": {
+    "example": {
+      "description": "Write image data to a file",
+      "input": "imwrite(A, filename)"
+    },
+    "points": [
+      "`imwrite(A, filename)` writes direct-color or grayscale image data and infers the format from the file extension.",
+      "`imwrite(A, filename, fmt)` uses an explicit format hint such as `\"png\"`, `\"jpg\"`, `\"gif\"`, `\"bmp\"`, `\"tif\"`, or `\"tiff\"`.",
+      "`imwrite(A, filename, name, value, ...)` applies writer options such as `\"Quality\"`, `\"Alpha\"`, `\"DelayTime\"`, `\"LoopCount\"`, and `\"WriteMode\"`.",
+      "`imwrite(X, map, filename, ...)` writes indexed image data with an explicit colormap."
+    ]
+  },
+  "description": "Writes grayscale, truecolor, RGBA, logical, and indexed image arrays to common image formats. Numeric floating-point image data is interpreted in the normalized range [0, 1]; uint8 data is written directly; uint16 data is preserved for PNG/TIFF and projected to 8-bit for GIF/JPEG/BMP.",
+  "behaviors": [
+    "Accepts MxN grayscale, MxNx3 RGB, MxNx4 RGBA, logical, and indexed image arrays.",
+    "For indexed image writes, pass `X` with an Nx3 colormap. `uint8` and `uint16` indices are zero-based; floating-point indices are one-based.",
+    "The destination path can be a string scalar or char vector. When `fmt` is omitted, the file extension determines the output format.",
+    "Common explicit format hints include `\"png\"`, `\"jpg\"`, `\"jpeg\"`, `\"gif\"`, `\"bmp\"`, `\"tif\"`, and `\"tiff\"`.",
+    "Advanced writer options that are not currently supported produce explicit unsupported-option errors."
+  ],
+  "options": [
+    "`\"Alpha\"` supplies an MxN alpha plane for PNG, GIF, and TIFF output.",
+    "`\"Quality\"` controls JPEG quality from 0 to 100. The default is 75.",
+    "`\"DelayTime\"` controls GIF frame delay in seconds.",
+    "`\"LoopCount\"` controls GIF repeat count. `Inf` requests infinite looping.",
+    "`\"WriteMode\"` accepts `\"overwrite\"` or `\"append\"`. Append is supported for GIF animations."
+  ],
+  "examples": [
+    {
+      "description": "Write an RGB PNG",
+      "input": "rgb = uint8(zeros(32, 32, 3));\nrgb(:,:,1) = 255;\nimwrite(rgb, \"red.png\")"
+    },
+    {
+      "description": "Write a JPEG with explicit quality",
+      "input": "imwrite(rgb, \"photo.jpg\", \"Quality\", 90)"
+    },
+    {
+      "description": "Append frames to an animated GIF",
+      "input": "imwrite(frame1, \"anim.gif\", \"LoopCount\", Inf, \"DelayTime\", 0.2);\nimwrite(frame2, \"anim.gif\", \"WriteMode\", \"append\", \"DelayTime\", 0.2)"
+    },
+    {
+      "description": "Write indexed image data",
+      "input": "imwrite(X, map, \"indexed.gif\")"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which image formats can `imwrite` create?",
+      "answer": "RunMat covers common MATLAB `imwrite` forms for PNG, JPEG, GIF, BMP, and TIFF output, including direct-color, indexed, alpha PNG/GIF/TIFF, JPEG quality, and animated GIF append workflows."
+    },
+    {
+      "question": "What errors can image writes raise?",
+      "answer": "Invalid arguments, filenames, formats, image data, colormaps, options, encoder failures, and filesystem failures raise descriptive `RunMat:imwrite:*` errors."
+    }
+  ]
+}

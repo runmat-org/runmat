@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Raise scalars or square matrices to powers in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

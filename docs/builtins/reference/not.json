@@ -9,7 +9,6 @@
     "logical invert"
   ],
   "summary": "Compute element-wise logical negation in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

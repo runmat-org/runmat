@@ -10,6 +10,10 @@
 use crate::context::SharedWgpuContext;
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
+use crate::geometry_scene::{
+    GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
+    GeometryScenePresentation,
+};
 use crate::plots::Figure;
 #[cfg(feature = "egui-overlay")]
 use crate::styling::ModernDarkTheme;
@@ -131,6 +135,8 @@ pub struct WebRenderer {
     background_policy: BackgroundPolicy,
     has_active_figure: bool,
     #[cfg(feature = "egui-overlay")]
+    pending_overlay_events: Vec<PlotEvent>,
+    #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
 }
 
@@ -170,6 +176,12 @@ pub struct PlotSurfaceCameraState {
     pub axes: Vec<PlotCameraState>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebSurfaceHostAction {
+    CreateFeaStudy,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum BackgroundPolicy {
     ThemeDriven,
@@ -181,6 +193,10 @@ struct WebOverlayState {
     egui_ctx: egui::Context,
     egui_renderer: egui_wgpu::Renderer,
     plot_overlay: PlotOverlay,
+    wants_pointer_input: bool,
+    capture_regions_px: Vec<[f32; 4]>,
+    host_actions: Vec<WebSurfaceHostAction>,
+    pointer_active: bool,
 }
 
 impl WebRenderer {
@@ -285,6 +301,10 @@ impl WebRenderer {
                 egui_ctx,
                 egui_renderer,
                 plot_overlay: PlotOverlay::new(),
+                wants_pointer_input: false,
+                capture_regions_px: Vec::new(),
+                host_actions: Vec::new(),
+                pointer_active: false,
             })
         } else {
             None
@@ -313,6 +333,8 @@ impl WebRenderer {
             background_policy: BackgroundPolicy::ThemeDriven,
             has_active_figure: false,
             #[cfg(feature = "egui-overlay")]
+            pending_overlay_events: Vec::new(),
+            #[cfg(feature = "egui-overlay")]
             overlay,
         };
         renderer.sync_renderer_config();
@@ -335,6 +357,30 @@ impl WebRenderer {
     /// Apply a user interaction event (mouse/keyboard) to the renderer state.
     /// Returns `true` when a re-render is recommended.
     pub fn handle_event(&mut self, event: PlotEvent) -> bool {
+        #[cfg(feature = "egui-overlay")]
+        let overlay_pointer_captured = self
+            .overlay
+            .as_mut()
+            .map(|overlay| update_overlay_pointer_capture(overlay, &event))
+            .unwrap_or(false);
+
+        #[cfg(feature = "egui-overlay")]
+        if self.overlay.is_some() {
+            if should_forward_event_to_overlay(
+                &event,
+                overlay_pointer_captured,
+                self.camera_controller.active_button.is_some(),
+            ) {
+                self.pending_overlay_events.push(event.clone());
+            }
+        }
+        #[cfg(feature = "egui-overlay")]
+        if overlay_pointer_captured && self.camera_controller.active_button.is_none() {
+            if let Some(position) = event_position(&event) {
+                self.last_pointer_position = position;
+            }
+            return true;
+        }
         match event {
             PlotEvent::MousePress {
                 position,
@@ -368,6 +414,7 @@ impl WebRenderer {
             PlotEvent::MouseMove {
                 position,
                 delta,
+                buttons,
                 modifiers,
             } => {
                 #[cfg(target_arch = "wasm32")]
@@ -379,29 +426,31 @@ impl WebRenderer {
                     delta.x,
                     delta.y
                 );
-                let axes_index = self.pick_axes_index(position);
-                let (vx, vy, vw, vh) = self
-                    .last_axes_viewports_px
-                    .get(axes_index)
-                    .copied()
-                    .unwrap_or((
-                        0,
-                        0,
-                        self.render_config.width.max(1),
-                        self.render_config.height.max(1),
-                    ));
-                let viewport = (vw.max(1), vh.max(1));
-                if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
-                    self.camera_controller.mouse_move(
-                        glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
-                        delta,
-                        viewport,
-                        modifiers,
-                        cam,
-                    );
+                if buttons != 0 && delta.length_squared() > f32::EPSILON {
+                    let axes_index = self.pick_axes_index(position);
+                    let (vx, vy, vw, vh) = self
+                        .last_axes_viewports_px
+                        .get(axes_index)
+                        .copied()
+                        .unwrap_or((
+                            0,
+                            0,
+                            self.render_config.width.max(1),
+                            self.render_config.height.max(1),
+                        ));
+                    let viewport = (vw.max(1), vh.max(1));
+                    if let Some(cam) = self.plot_renderer.axes_camera_mut(axes_index) {
+                        self.camera_controller.mouse_move(
+                            glam::Vec2::new(position.x - (vx as f32), position.y - (vy as f32)),
+                            delta,
+                            viewport,
+                            modifiers,
+                            cam,
+                        );
+                    }
+                    self.plot_renderer.note_axes_camera_interaction(axes_index);
                 }
                 self.last_pointer_position = position;
-                self.plot_renderer.note_axes_camera_interaction(axes_index);
                 true
             }
             PlotEvent::MouseWheel {
@@ -515,6 +564,55 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
+    /// Render a chunked geometry scene directly into the canvas.
+    pub fn render_geometry_scene(
+        &mut self,
+        scene: crate::GeometryScene,
+    ) -> Result<(), WebRendererError> {
+        self.render_geometry_scene_with_presentation(scene, None)
+    }
+
+    pub fn render_geometry_scene_with_presentation(
+        &mut self,
+        scene: crate::GeometryScene,
+        presentation: Option<GeometryScenePresentation>,
+    ) -> Result<(), WebRendererError> {
+        self.background_policy = BackgroundPolicy::ThemeDriven;
+        self.apply_background_policy();
+        self.has_active_figure = true;
+        if let Some(presentation) = presentation {
+            self.plot_renderer
+                .set_geometry_scene_with_presentation(scene, presentation);
+        } else {
+            self.plot_renderer.set_geometry_scene(scene);
+        }
+        self.render_current_scene()
+    }
+
+    pub fn set_geometry_scene_presentation(
+        &mut self,
+        presentation: GeometryScenePresentation,
+    ) -> Result<(), WebRendererError> {
+        self.plot_renderer
+            .set_geometry_scene_presentation(presentation);
+        self.render_current_scene()
+    }
+
+    pub fn pick_geometry_scene_region(
+        &self,
+        index: &GeometryScenePickIndex,
+        position: [f32; 2],
+    ) -> Option<GeometryScenePickResult> {
+        index.pick(GeometryScenePickRequest {
+            camera: self.plot_renderer.camera().clone(),
+            surface_size: [
+                self.surface_config.width.max(1) as f32,
+                self.surface_config.height.max(1) as f32,
+            ],
+            position,
+        })
+    }
+
     /// Clear the canvas to the themed background and remove any bound plot scene.
     pub fn clear_surface(&mut self) -> Result<(), WebRendererError> {
         self.background_policy = BackgroundPolicy::ThemeDriven;
@@ -568,6 +666,22 @@ impl WebRenderer {
         }
         for idx in 0..state.axes.len() {
             self.plot_renderer.note_axes_camera_interaction(idx);
+        }
+    }
+
+    pub fn take_host_actions(&mut self) -> Vec<WebSurfaceHostAction> {
+        #[cfg(feature = "egui-overlay")]
+        {
+            return self
+                .overlay
+                .as_mut()
+                .map(|overlay| std::mem::take(&mut overlay.host_actions))
+                .unwrap_or_default();
+        }
+
+        #[cfg(not(feature = "egui-overlay"))]
+        {
+            Vec::new()
         }
     }
 
@@ -728,21 +842,11 @@ impl WebRenderer {
                         (self.surface_config.height.max(1) as f32) / self.pixels_per_point,
                     ),
                 );
-                let raw_input = egui::RawInput {
-                    screen_rect: Some(screen_rect),
-                    viewports: std::iter::once((
-                        egui::ViewportId::ROOT,
-                        egui::ViewportInfo {
-                            native_pixels_per_point: Some(self.pixels_per_point),
-                            inner_rect: Some(screen_rect),
-                            outer_rect: Some(screen_rect),
-                            focused: Some(true),
-                            ..Default::default()
-                        },
-                    ))
-                    .collect(),
-                    ..Default::default()
-                };
+                let raw_input = crate::core::interaction::egui_raw_input_from_plot_events(
+                    screen_rect,
+                    self.pixels_per_point,
+                    std::mem::take(&mut self.pending_overlay_events),
+                );
 
                 // Build overlay UI and capture plot area.
                 let scene_stats = self.plot_renderer.scene.statistics();
@@ -760,7 +864,7 @@ impl WebRenderer {
                         // Make overlay text more readable in the IDE.
                         font_scale: 1.25,
                         show_axes: true,
-                        show_title: true,
+                        show_title: self.plot_renderer.geometry_overlay().is_none(),
                         title: self
                             .plot_renderer
                             .overlay_title()
@@ -794,6 +898,26 @@ impl WebRenderer {
                     );
                     plot_area_points = frame_info.plot_area;
                 });
+
+                let cad_actions = overlay.plot_overlay.take_cad_actions();
+                overlay.host_actions.extend(apply_cad_overlay_actions(
+                    &mut self.plot_renderer,
+                    cad_actions,
+                ));
+                overlay.wants_pointer_input = overlay.plot_overlay.overlay_pointer_captured();
+                overlay.capture_regions_px = overlay
+                    .plot_overlay
+                    .overlay_capture_regions()
+                    .into_iter()
+                    .map(|[x0, y0, x1, y1]| {
+                        [
+                            x0 * self.pixels_per_point,
+                            y0 * self.pixels_per_point,
+                            x1 * self.pixels_per_point,
+                            y1 * self.pixels_per_point,
+                        ]
+                    })
+                    .collect();
 
                 let paint_jobs = overlay
                     .egui_ctx
@@ -1168,6 +1292,90 @@ fn map_mouse_button(button: crate::core::interaction::MouseButton) -> CameraMous
         crate::core::interaction::MouseButton::Right => CameraMouseButton::Right,
         crate::core::interaction::MouseButton::Middle => CameraMouseButton::Middle,
     }
+}
+
+#[cfg(feature = "egui-overlay")]
+fn event_position(event: &PlotEvent) -> Option<glam::Vec2> {
+    match event {
+        PlotEvent::MousePress { position, .. }
+        | PlotEvent::MouseRelease { position, .. }
+        | PlotEvent::MouseMove { position, .. }
+        | PlotEvent::MouseWheel { position, .. } => Some(*position),
+        PlotEvent::Resize { .. } | PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "egui-overlay")]
+fn update_overlay_pointer_capture(overlay: &mut WebOverlayState, event: &PlotEvent) -> bool {
+    let hit = event_position(event)
+        .map(|position| point_in_capture_regions(position, &overlay.capture_regions_px))
+        .unwrap_or(false);
+    let captured = hit || overlay.pointer_active;
+    match event {
+        PlotEvent::MousePress { .. } if hit => {
+            overlay.pointer_active = true;
+        }
+        PlotEvent::MouseRelease { .. } => {
+            overlay.pointer_active = false;
+        }
+        _ => {}
+    }
+    captured
+}
+
+#[cfg(feature = "egui-overlay")]
+fn point_in_capture_regions(position: glam::Vec2, regions: &[[f32; 4]]) -> bool {
+    regions.iter().any(|[x0, y0, x1, y1]| {
+        position.x >= *x0 && position.x <= *x1 && position.y >= *y0 && position.y <= *y1
+    })
+}
+
+#[cfg(feature = "egui-overlay")]
+fn should_forward_event_to_overlay(
+    event: &PlotEvent,
+    overlay_pointer_captured: bool,
+    camera_drag_active: bool,
+) -> bool {
+    if overlay_pointer_captured {
+        return true;
+    }
+    match event {
+        PlotEvent::MouseMove { buttons, .. } => *buttons == 0 && !camera_drag_active,
+        PlotEvent::MousePress { .. } | PlotEvent::MouseRelease { .. } => true,
+        PlotEvent::MouseWheel { .. } => false,
+        PlotEvent::Resize { .. } | PlotEvent::KeyPress { .. } | PlotEvent::KeyRelease { .. } => {
+            false
+        }
+    }
+}
+
+#[cfg(feature = "egui-overlay")]
+fn apply_cad_overlay_actions(
+    renderer: &mut PlotRenderer,
+    actions: crate::overlay::cad_overlay::CadOverlayActions,
+) -> Vec<WebSurfaceHostAction> {
+    let mut host_actions = Vec::new();
+    if actions.reset_view {
+        renderer.reset_geometry_view();
+    }
+    if actions.create_fea_study {
+        host_actions.push(WebSurfaceHostAction::CreateFeaStudy);
+    }
+    if let Some(preset) = actions.view_preset {
+        renderer.set_camera_view_preset(preset);
+    }
+    if let Some(enabled) = actions.grid_enabled {
+        renderer.set_overlay_grid_enabled(enabled);
+    }
+    if let Some(enabled) = actions.xray_enabled {
+        renderer.set_geometry_xray_enabled(enabled);
+    }
+    for (owner_id, visible) in actions.owner_visibility {
+        renderer.set_geometry_owner_visible(owner_id, visible);
+    }
+    host_actions
 }
 
 fn desired_canvas_size(

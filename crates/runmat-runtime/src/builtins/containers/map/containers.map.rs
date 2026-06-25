@@ -1,18 +1,20 @@
 //! MATLAB-compatible `containers.Map` constructor and methods for RunMat.
 
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    OnceLock, RwLock,
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc,
 };
 
-use once_cell::sync::Lazy;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, PropertyDef, StructValue,
-    Tensor, Value,
+    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, ObjectInstance, PropertyDef,
+    StructValue, Tensor, Value,
 };
+use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::keyword_of;
@@ -427,12 +429,109 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static CONTAINERS_MAP_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+thread_local! {
+    static MAP_REGISTRY: RefCell<HashMap<u64, MapStore>> = RefCell::new(HashMap::new());
+    static CONTAINERS_MAP_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+    static MAP_ROOT_STATE: RefCell<Option<MapRootState>> = const { RefCell::new(None) };
+}
+
+struct MapRootState {
+    root_id: RootId,
+    active: Arc<AtomicBool>,
+}
+
+struct MapRegistryRoot {
+    active: Arc<AtomicBool>,
+}
+
+impl GcRoot for MapRegistryRoot {
+    fn scan(&self) -> Vec<GcHandle> {
+        struct RootCollector {
+            roots: Vec<GcHandle>,
+        }
+
+        impl Tracer for RootCollector {
+            fn mark(&mut self, handle: GcHandle) {
+                self.roots.push(handle);
+            }
+        }
+
+        MAP_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let mut collector = RootCollector { roots: Vec::new() };
+            for store in registry.values() {
+                if let Some(storage) = store.storage {
+                    collector.mark(storage);
+                }
+                for entry in &store.entries {
+                    entry.key_value.trace(&mut collector);
+                    entry.value.trace(&mut collector);
+                }
+            }
+            collector.roots
+        })
+    }
+
+    fn description(&self) -> String {
+        "containers.Map registry values".to_string()
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(AtomicOrdering::Acquire)
+            && MAP_REGISTRY.with(|registry| !registry.borrow().is_empty())
+    }
+}
+
+fn ensure_map_registry_root_registered(builtin: &'static str) -> BuiltinResult<()> {
+    MAP_ROOT_STATE.with(|state| {
+        if state
+            .borrow()
+            .as_ref()
+            .is_some_and(|state| state.active.load(AtomicOrdering::Acquire))
+        {
+            return Ok(());
+        }
+
+        let active = Arc::new(AtomicBool::new(true));
+        let root_id = runmat_gc::gc_register_root(Box::new(MapRegistryRoot {
+            active: Arc::clone(&active),
+        }))
+        .map_err(|e| {
+            map_internal(
+                format!("containers.Map: failed to register GC root: {e}"),
+                builtin,
+            )
+        })?;
+        *state.borrow_mut() = Some(MapRootState { root_id, active });
+        Ok(())
+    })
+}
+
+fn deactivate_map_registry_root_if_empty() {
+    let empty = MAP_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map(|registry| registry.is_empty())
+            .unwrap_or(false)
+    });
+    if empty {
+        MAP_ROOT_STATE.with(|state| {
+            if let Some(state) = state.borrow_mut().take() {
+                state.active.store(false, AtomicOrdering::Release);
+                if let Err(err) = runmat_gc::gc_unregister_root(state.root_id) {
+                    log::warn!("containers.Map: failed to unregister empty registry root: {err}");
+                }
+            }
+        });
+    }
+}
 
 fn ensure_containers_map_class_registered() {
-    CONTAINERS_MAP_CLASS_REGISTERED.get_or_init(|| {
+    CONTAINERS_MAP_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         for name in ["Count", "KeyType", "ValueType"] {
             properties.insert(
@@ -478,6 +577,7 @@ fn ensure_containers_map_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 
@@ -613,6 +713,7 @@ struct MapEntry {
 }
 
 struct MapStore {
+    storage: Option<GcHandle>,
     key_type: KeyType,
     value_type: ValueType,
     uniform_values: bool,
@@ -624,6 +725,7 @@ struct MapStore {
 impl MapStore {
     fn new(key_type: KeyType, value_type: ValueType, uniform_values: bool) -> Self {
         Self {
+            storage: None,
             key_type,
             value_type,
             uniform_values,
@@ -1157,17 +1259,40 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
     ensure_containers_map_class_registered();
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    MAP_REGISTRY
-        .write()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?
-        .insert(id, store);
-    let mut struct_value = StructValue::new();
-    struct_value
-        .fields
+    ensure_map_registry_root_registered(builtin)?;
+    MAP_REGISTRY.with(|registry| {
+        registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry is already borrowed", builtin))?
+            .insert(id, store);
+        Ok::<(), RuntimeError>(())
+    })?;
+    let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+    storage
+        .properties
         .insert("id".to_string(), Value::Int(IntValue::U64(id)));
-    let storage = Value::Struct(struct_value);
-    let gc = runmat_gc::gc_allocate(storage)
-        .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
+    let gc = match runmat_gc::gc_allocate(Value::Object(storage)) {
+        Ok(gc) => gc,
+        Err(e) => {
+            MAP_REGISTRY.with(|registry| {
+                if let Ok(mut registry) = registry.try_borrow_mut() {
+                    registry.remove(&id);
+                }
+            });
+            deactivate_map_registry_root_if_empty();
+            return Err(map_error(format!("containers.Map: {e}"), builtin));
+        }
+    };
+    MAP_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry is already borrowed", builtin))?;
+        let store = registry
+            .get_mut(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        store.storage = Some(gc);
+        Ok::<(), RuntimeError>(())
+    })?;
     Ok(Value::HandleObject(HandleRef {
         class_name: CLASS_NAME.to_string(),
         target: gc,
@@ -1182,13 +1307,15 @@ where
     let handle = extract_handle(map, builtin)?;
     ensure_handle(handle, builtin)?;
     let id = map_id(handle, builtin)?;
-    let guard = MAP_REGISTRY
-        .read()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard
-        .get(&id)
-        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
-    f(store)
+    MAP_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| map_internal("containers.Map: registry already borrowed", builtin))?;
+        let store = registry
+            .get(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        f(store)
+    })
 }
 
 fn with_store_mut<F, R>(map: &Value, builtin: &'static str, f: F) -> BuiltinResult<R>
@@ -1198,13 +1325,15 @@ where
     let handle = extract_handle(map, builtin)?;
     ensure_handle(handle, builtin)?;
     let id = map_id(handle, builtin)?;
-    let mut guard = MAP_REGISTRY
-        .write()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard
-        .get_mut(&id)
-        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
-    f(store)
+    MAP_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry already borrowed", builtin))?;
+        let store = registry
+            .get_mut(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        f(store)
+    })
 }
 
 fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<&'a HandleRef> {
@@ -1218,7 +1347,7 @@ fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()> {
-    if !runmat_builtins::is_handle_valid(handle) {
+    if !crate::is_handle_valid(handle) {
         return Err(map_error("containers.Map: handle is invalid", builtin));
     }
     if handle.class_name != CLASS_NAME {
@@ -1234,29 +1363,47 @@ fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()>
 }
 
 fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
-    let storage = unsafe { &*handle.target.as_raw() };
-    match storage {
-        Value::Struct(StructValue { fields }) => match fields.get("id") {
-            Some(Value::Int(IntValue::U64(id))) => Ok(*id),
-            Some(Value::Int(other)) => {
-                let id = other.to_i64();
-                if id < 0 {
-                    Err(map_internal(
-                        "containers.Map: negative map identifier",
-                        builtin,
-                    ))
-                } else {
-                    Ok(id as u64)
-                }
-            }
-            Some(Value::Num(n)) if *n >= 0.0 => Ok(*n as u64),
-            _ => Err(map_internal(
-                "containers.Map: corrupted storage identifier",
+    let storage = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+        map_internal(
+            format!("containers.Map: invalid handle storage: {e}"),
+            builtin,
+        )
+    })?;
+    let id_value = match &storage {
+        Value::Object(object) if object.class_name == CLASS_NAME => object.properties.get("id"),
+        Value::Struct(StructValue { fields }) => fields.get("id"),
+        other => {
+            return Err(map_internal(
+                format!("containers.Map: internal storage has unexpected shape {other:?}"),
                 builtin,
-            )),
-        },
-        other => Err(map_internal(
-            format!("containers.Map: internal storage has unexpected shape {other:?}"),
+            ));
+        }
+    };
+    match id_value {
+        Some(Value::Int(IntValue::U64(id))) => Ok(*id),
+        Some(Value::Int(other)) => {
+            let id = other.to_i64();
+            if id < 0 {
+                Err(map_internal(
+                    "containers.Map: negative map identifier",
+                    builtin,
+                ))
+            } else {
+                Ok(id as u64)
+            }
+        }
+        Some(Value::Num(n)) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
+            if *n >= u64::MAX as f64 {
+                Err(map_internal(
+                    "containers.Map: map identifier out of range",
+                    builtin,
+                ))
+            } else {
+                Ok(*n as u64)
+            }
+        }
+        _ => Err(map_internal(
+            "containers.Map: corrupted storage identifier",
             builtin,
         )),
     }
@@ -1298,7 +1445,7 @@ async fn flatten_keys(
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
-                let element = unsafe { &*ptr.as_raw() };
+                let element = ptr;
                 if matches!(element, Value::Cell(_)) {
                     return Err(map_error(
                         "containers.Map: nested cell arrays are not supported for keys",
@@ -1357,7 +1504,7 @@ async fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<V
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 out.push(
-                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(ptr)
                         .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
@@ -1755,7 +1902,7 @@ fn extract_key_arguments(payload: &Value, builtin: &'static str) -> BuiltinResul
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
-                out.push(unsafe { &*ptr.as_raw() }.clone());
+                out.push(ptr.clone());
             }
             Ok(out)
         }
@@ -1817,7 +1964,7 @@ async fn collect_key_spec(
             let mut values = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 values.push(
-                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(ptr)
                         .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
@@ -1857,11 +2004,14 @@ async fn collect_key_spec(
 
 pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
-        if runmat_builtins::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
+        if crate::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
-                if let Ok(registry) = MAP_REGISTRY.read() {
-                    return registry.get(&id).map(|store| store.len());
-                }
+                return MAP_REGISTRY.with(|registry| {
+                    registry
+                        .try_borrow()
+                        .ok()
+                        .and_then(|registry| registry.get(&id).map(|store| store.len()))
+                });
             }
         }
     }
@@ -2312,6 +2462,29 @@ pub(crate) mod tests {
         .unwrap();
         let map = containers_map_builtin(vec![keys, values]).expect("map");
         assert_eq!(map_length(&map), Some(3));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn map_id_rejects_corrupted_numeric_identifiers() {
+        for id_value in [
+            Value::Num(1.9),
+            Value::Num(f64::INFINITY),
+            Value::Num(u64::MAX as f64),
+        ] {
+            let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+            storage.properties.insert("id".to_string(), id_value);
+            let target = runmat_gc::gc_allocate(Value::Object(storage)).expect("storage");
+            let handle = HandleRef {
+                class_name: CLASS_NAME.to_string(),
+                target,
+                valid: true,
+            };
+
+            let err =
+                map_id(&handle, BUILTIN_CONSTRUCTOR).expect_err("corrupted map id should reject");
+            assert_eq!(err.identifier(), CONTAINERS_MAP_ERROR_INTERNAL.identifier);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

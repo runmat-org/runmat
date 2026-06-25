@@ -8,7 +8,6 @@
     "workspace"
   ],
   "summary": "Declare scalar symbolic variables in the active workspace.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -64,6 +63,10 @@
     {
       "label": "limit",
       "url": "./limit"
+    },
+    {
+      "label": "int",
+      "url": "./int"
     }
   ],
   "source": {

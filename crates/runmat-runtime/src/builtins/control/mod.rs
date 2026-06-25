@@ -2,6 +2,7 @@
 
 use crate::RuntimeError;
 
+pub mod damp;
 pub mod db;
 pub mod dcgain;
 pub mod feedback;
@@ -16,6 +17,7 @@ pub mod stepinfo;
 pub mod tf;
 pub mod tf_model;
 pub(crate) mod type_resolvers;
+pub mod zero;
 
 fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
     let lower = err.to_string().to_ascii_lowercase();

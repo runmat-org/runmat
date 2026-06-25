@@ -9,7 +9,6 @@
     "adaptive step"
   ],
   "summary": "Solve nonstiff ODE systems using adaptive Dormand-Prince 5(4) integration.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

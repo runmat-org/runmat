@@ -13,7 +13,6 @@
     "char"
   ],
   "summary": "Return unique elements or rows with MATLAB-compatible ordering and index mappings.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

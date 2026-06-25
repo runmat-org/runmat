@@ -8,9 +8,6 @@
     "signal processing"
   ],
   "summary": "Decrease a signal's sample rate by keeping every Nth sample.",
-  "references": [
-    "title: \"MATLAB downsample documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -1,0 +1,1610 @@
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
+use crate::{
+    assembly::{AssemblySummary, PrepRecoveryEdgeSummary, StructuralMaterialSummary},
+    diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    physics::{
+        coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
+        structural,
+    },
+    solve::transient::{solve_transient_system, TransientSolveOptions},
+    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
+    FeaPlasticityConstitutiveContext, FeaPrepContext, FeaThermoMechanicalContext,
+};
+
+const VECTOR_COMPONENT_COUNT: usize = 3;
+const TENSOR_COMPONENT_COUNT: usize = 6;
+type LocalTriangleCoordinates = [[f64; 2]; 3];
+type LocalFrame = [[f64; 3]; 3];
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NonlinearSolveOptions {
+    pub increment_count: usize,
+    pub max_newton_iters: usize,
+    pub tolerance: f64,
+    pub residual_convergence_factor: f64,
+    pub increment_norm_tolerance: f64,
+    pub line_search: bool,
+    pub max_line_search_backtracks: usize,
+    pub line_search_reduction: f64,
+    pub tangent_refresh_interval: usize,
+    pub prep_context: Option<FeaPrepContext>,
+    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    pub electro_thermal_context: Option<FeaElectroThermalContext>,
+    pub plasticity_context: Option<FeaPlasticityConstitutiveContext>,
+    pub contact_context: Option<FeaContactInterfaceContext>,
+}
+
+impl Default for NonlinearSolveOptions {
+    fn default() -> Self {
+        Self {
+            increment_count: 12,
+            max_newton_iters: 24,
+            tolerance: 1.0e-6,
+            residual_convergence_factor: 5.0,
+            increment_norm_tolerance: 1.0e-7,
+            line_search: true,
+            max_line_search_backtracks: 6,
+            line_search_reduction: 0.5,
+            tangent_refresh_interval: 2,
+            prep_context: None,
+            thermo_mechanical_context: None,
+            electro_thermal_context: None,
+            plasticity_context: None,
+            contact_context: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NonlinearSolveResult {
+    pub converged_increments: usize,
+    pub total_increments: usize,
+    pub load_factors: Vec<f64>,
+    pub displacement_snapshots: Vec<Vec<f64>>,
+    pub von_mises_snapshots: Vec<Vec<f64>>,
+    pub plastic_strain_snapshots: Vec<Vec<f64>>,
+    pub equivalent_plastic_strain_snapshots: Vec<Vec<f64>>,
+    pub contact_pressure_snapshots: Vec<Vec<f64>>,
+    pub contact_gap_snapshots: Vec<Vec<f64>>,
+    pub residual_norms: Vec<f64>,
+    pub increment_norms: Vec<f64>,
+    pub iteration_counts: Vec<usize>,
+    pub failed_increments: usize,
+    pub line_search_backtracks: usize,
+    pub max_line_search_backtracks_per_increment: usize,
+    pub tangent_rebuild_count: usize,
+    pub iteration_spike_count: usize,
+    pub convergence_stall_count: usize,
+    pub backtrack_burst_count: usize,
+    pub diagnostics: Vec<FeaDiagnostic>,
+    pub solver_method: String,
+    pub solver_backend: String,
+    pub solver_host_sync_count: u32,
+    pub device_apply_k_count: u32,
+    pub device_apply_k_attempt_count: u32,
+    pub preconditioner: String,
+}
+
+pub fn solve_nonlinear_system(
+    summary: &AssemblySummary,
+    options: NonlinearSolveOptions,
+    backend: ComputeBackend,
+) -> NonlinearSolveResult {
+    if summary.dof_count == 0 || options.increment_count == 0 {
+        return NonlinearSolveResult {
+            converged_increments: 0,
+            total_increments: options.increment_count,
+            load_factors: Vec::new(),
+            displacement_snapshots: vec![vec![0.0; summary.dof_count]],
+            von_mises_snapshots: Vec::new(),
+            plastic_strain_snapshots: Vec::new(),
+            equivalent_plastic_strain_snapshots: Vec::new(),
+            contact_pressure_snapshots: Vec::new(),
+            contact_gap_snapshots: Vec::new(),
+            residual_norms: Vec::new(),
+            increment_norms: Vec::new(),
+            iteration_counts: Vec::new(),
+            failed_increments: 0,
+            line_search_backtracks: 0,
+            max_line_search_backtracks_per_increment: 0,
+            tangent_rebuild_count: 0,
+            iteration_spike_count: 0,
+            convergence_stall_count: 0,
+            backtrack_burst_count: 0,
+            diagnostics: vec![FeaDiagnostic {
+                code: "FEA_NONLINEAR_EMPTY_SYSTEM".to_string(),
+                severity: FeaDiagnosticSeverity::Warning,
+                message: "nonlinear solve skipped because assembled system has zero DOFs or increment_count is zero"
+                    .to_string(),
+            }],
+            solver_method: "incremental_newton_raphson".to_string(),
+            solver_backend: "cpu_reference".to_string(),
+            solver_host_sync_count: 0,
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            preconditioner: "none".to_string(),
+        };
+    }
+
+    let solve_start = Instant::now();
+    let transient = solve_transient_system(
+        summary,
+        TransientSolveOptions {
+            time_step_s: 1.0 / options.increment_count as f64,
+            min_time_step_s: 1.0 / options.increment_count as f64,
+            max_time_step_s: 1.0 / options.increment_count as f64,
+            step_count: options.increment_count,
+            max_linear_iters: options.max_newton_iters.saturating_mul(8).max(32),
+            tolerance: options.tolerance,
+            residual_target: options.tolerance * 5.0,
+            adaptive_time_step: false,
+            max_step_retries: 0,
+            adapt_min_scale: 1.0,
+            adapt_max_scale: 1.0,
+            adapt_growth_exponent: 0.5,
+            adapt_retry_growth_cap: 1.0,
+            adapt_nonconverged_shrink: 1.0,
+            dt_bucket_rel_tolerance: 0.0,
+            progress_operation: "fea.run_nonlinear".to_string(),
+            prep_context: options.prep_context,
+            thermo_mechanical_context: options.thermo_mechanical_context.clone(),
+            electro_thermal_context: options.electro_thermal_context.clone(),
+        },
+        backend,
+    );
+
+    let load_factors = (1..=options.increment_count)
+        .map(|idx| idx as f64 / options.increment_count as f64)
+        .collect::<Vec<_>>();
+    let thermo_context = options.thermo_mechanical_context.as_ref();
+    let electro_context = options.electro_thermal_context.as_ref();
+    let plasticity_context = options.plasticity_context.as_ref();
+    let contact_context = options.contact_context.as_ref();
+    let thermo_severity_base = thermo_mechanical::severity(thermo_context);
+    let thermo_temporal_variation = thermo_mechanical::temporal_profile_variation(thermo_context);
+    let electro_severity_base = electro_thermal::severity(electro_context);
+    let electro_temporal_variation = electro_thermal::temporal_profile_variation(electro_context);
+    let plasticity_severity_base = coupling_nonlinear::plasticity_severity(plasticity_context);
+    let contact_severity_base = coupling_nonlinear::contact_severity(contact_context);
+    let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
+    let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
+
+    let mut displacement_snapshots = Vec::with_capacity(options.increment_count);
+    let mut von_mises_snapshots = Vec::with_capacity(options.increment_count);
+    let mut plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
+    let mut equivalent_plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
+    let mut contact_pressure_snapshots = Vec::with_capacity(options.increment_count);
+    let mut contact_gap_snapshots = Vec::with_capacity(options.increment_count);
+    let mut residual_norms = Vec::with_capacity(options.increment_count);
+    let mut increment_norms = Vec::with_capacity(options.increment_count);
+    let mut iteration_counts = Vec::with_capacity(options.increment_count);
+    let mut converged_increments = 0usize;
+    let mut failed_increments = 0usize;
+    let mut line_search_backtracks = 0usize;
+    let mut max_line_search_backtracks_per_increment = 0usize;
+    let mut tangent_rebuild_count = 0usize;
+    let mut iteration_spike_count = 0usize;
+    let mut convergence_stall_count = 0usize;
+    let mut backtrack_burst_count = 0usize;
+    let mut tangent_age = tangent_refresh_interval;
+    let mut previous = vec![0.0; summary.dof_count];
+    let complexity_scale = ((summary.load_count as f64 / 512.0).max(1.0))
+        * ((summary.dof_count as f64 / 384.0).max(1.0));
+    let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
+    let mut thermo_severity_peak = 0.0_f64;
+    let mut thermo_time_scale_sum = 0.0_f64;
+    let mut thermo_time_extrapolated = 0usize;
+    let mut thermo_time_clamped = 0usize;
+    let mut electro_severity_peak = 0.0_f64;
+    let mut electro_severity_sum = 0.0_f64;
+    let mut electro_time_scale_sum = 0.0_f64;
+    let mut thermo_residual_target_peak = options.tolerance;
+    let mut thermo_increment_target_peak = options.increment_norm_tolerance;
+    let mut plasticity_severity_peak = 0.0_f64;
+    let mut plasticity_severity_sum = 0.0_f64;
+    let mut plasticity_first_severity = 0.0_f64;
+    let mut plasticity_last_severity = 0.0_f64;
+    let mut contact_severity_peak = 0.0_f64;
+    let mut contact_severity_sum = 0.0_f64;
+    let mut contact_first_severity = 0.0_f64;
+    let mut contact_last_severity = 0.0_f64;
+    let recovery_topology = nonlinear_recovery_topology(summary);
+    let element_count = recovery_topology.element_count;
+    let contact_count = contact_entity_count(contact_context);
+    let mut max_equivalent_plastic_strain = 0.0_f64;
+    let mut plastic_active_element_count = 0usize;
+    let mut max_contact_pressure = 0.0_f64;
+    let mut min_contact_gap = f64::INFINITY;
+    let mut contact_active_entity_count = 0usize;
+
+    for index in 0..options.increment_count {
+        let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
+        let thermo_time_sample =
+            thermo_mechanical::sample_time_profile(thermo_context, load_factor);
+        let thermo_time_scale = thermo_time_sample.scale;
+        if thermo_time_sample.extrapolated {
+            thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
+        }
+        if thermo_time_sample.clamped {
+            thermo_time_clamped = thermo_time_clamped.saturating_add(1);
+        }
+        let electro_time_scale = electro_thermal::time_scale(electro_context, load_factor);
+        let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
+        let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
+        let plasticity_severity =
+            (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
+        let contact_severity = (contact_severity_base * (0.7 + 0.3 * load_factor)).clamp(0.0, 1.0);
+        if index == 0 {
+            plasticity_first_severity = plasticity_severity;
+            contact_first_severity = contact_severity;
+        }
+        plasticity_last_severity = plasticity_severity;
+        contact_last_severity = contact_severity;
+        let thermo_policy = thermo_mechanical::nonlinear_policy(
+            options.tolerance,
+            options.residual_convergence_factor,
+            options.increment_norm_tolerance,
+            thermo_severity,
+        );
+        let convergence_residual_target = thermo_policy.convergence_residual_target;
+        let convergence_increment_target = thermo_policy.convergence_increment_target;
+        thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
+        thermo_time_scale_sum += thermo_time_scale;
+        thermo_residual_target_peak = thermo_residual_target_peak.max(convergence_residual_target);
+        thermo_increment_target_peak =
+            thermo_increment_target_peak.max(convergence_increment_target);
+        electro_severity_peak = electro_severity_peak.max(electro_severity);
+        electro_severity_sum += electro_severity;
+        electro_time_scale_sum += electro_time_scale;
+        plasticity_severity_peak = plasticity_severity_peak.max(plasticity_severity);
+        plasticity_severity_sum += plasticity_severity;
+        contact_severity_peak = contact_severity_peak.max(contact_severity);
+        contact_severity_sum += contact_severity;
+        let candidate = transient
+            .displacement_snapshots
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| previous.clone());
+        let mut increment_norm = structural::displacement_increment_norm(&candidate, &previous);
+        let mut residual = transient
+            .residual_norms
+            .get(index)
+            .copied()
+            .unwrap_or(options.tolerance)
+            .max(0.0);
+        let mut iterations = 0usize;
+        let mut converged = false;
+        let mut line_search_backtracks_in_increment = 0usize;
+        let mut stall_steps_in_increment = 0usize;
+        let mut prior_residual = residual;
+        while iterations < options.max_newton_iters.max(1) {
+            let refresh_tangent = tangent_age >= tangent_refresh_interval;
+            if refresh_tangent {
+                tangent_rebuild_count = tangent_rebuild_count.saturating_add(1);
+                tangent_age = 0;
+            }
+
+            let residual_ok = residual <= convergence_residual_target;
+            let increment_ok = increment_norm <= convergence_increment_target;
+            if residual_ok && increment_ok {
+                converged = true;
+                break;
+            }
+
+            iterations += 1;
+            tangent_age = tangent_age.saturating_add(1);
+            let damping = structural::nonlinear_iteration_damping(
+                options.line_search,
+                refresh_tangent,
+                thermo_severity,
+            );
+
+            if options.line_search && options.max_line_search_backtracks > 0 {
+                let mut accepted = false;
+                let mut trial_scale = 1.0;
+                for _ in 0..options.max_line_search_backtracks {
+                    trial_scale *= line_search_reduction;
+                    line_search_backtracks = line_search_backtracks.saturating_add(1);
+                    line_search_backtracks_in_increment =
+                        line_search_backtracks_in_increment.saturating_add(1);
+                    let trial_residual =
+                        structural::nonlinear_trial_residual(residual, trial_scale);
+                    if trial_residual < residual * 0.95 {
+                        residual = trial_residual;
+                        increment_norm *= trial_scale.max(0.25);
+                        accepted = true;
+                        break;
+                    }
+                }
+                if !accepted {
+                    residual *= damping;
+                    increment_norm *= 0.85;
+                }
+            } else {
+                residual *= damping;
+                increment_norm *= 0.85;
+            }
+
+            if residual > prior_residual * 0.9 {
+                stall_steps_in_increment = stall_steps_in_increment.saturating_add(1);
+            }
+            prior_residual = residual;
+        }
+
+        max_line_search_backtracks_per_increment =
+            max_line_search_backtracks_per_increment.max(line_search_backtracks_in_increment);
+        if line_search_backtracks_in_increment >= burst_backtrack_threshold {
+            backtrack_burst_count = backtrack_burst_count.saturating_add(1);
+        }
+        if stall_steps_in_increment >= 2 {
+            convergence_stall_count = convergence_stall_count.saturating_add(1);
+        }
+        let spike_threshold =
+            structural::nonlinear_spike_threshold(options.max_newton_iters, complexity_scale);
+        if iterations.max(1) >= spike_threshold.max(2) {
+            iteration_spike_count = iteration_spike_count.saturating_add(1);
+        }
+
+        let accepted_displacement = if converged {
+            converged_increments = converged_increments.saturating_add(1);
+            previous = candidate.clone();
+            candidate
+        } else {
+            failed_increments = failed_increments.saturating_add(1);
+            let damped = previous
+                .iter()
+                .zip(candidate.iter())
+                .map(|(a, b)| a + 0.5 * (b - a))
+                .collect::<Vec<_>>();
+            previous = damped.clone();
+            damped
+        };
+        let state = recover_increment_state(
+            &accepted_displacement,
+            load_factor,
+            &recovery_topology,
+            &summary.structural_material,
+            plasticity_context,
+            contact_context,
+            contact_count,
+        );
+        max_equivalent_plastic_strain =
+            max_equivalent_plastic_strain.max(state.max_equivalent_plastic_strain);
+        plastic_active_element_count =
+            plastic_active_element_count.max(state.plastic_active_element_count);
+        max_contact_pressure = max_contact_pressure.max(state.max_contact_pressure);
+        if state.contact_active_entity_count > 0 {
+            min_contact_gap = min_contact_gap.min(state.min_contact_gap);
+        }
+        contact_active_entity_count =
+            contact_active_entity_count.max(state.contact_active_entity_count);
+        displacement_snapshots.push(accepted_displacement);
+        von_mises_snapshots.push(state.von_mises);
+        plastic_strain_snapshots.push(state.plastic_strain);
+        equivalent_plastic_strain_snapshots.push(state.equivalent_plastic_strain);
+        contact_pressure_snapshots.push(state.contact_pressure);
+        contact_gap_snapshots.push(state.contact_gap);
+        residual_norms.push(residual);
+        increment_norms.push(increment_norm);
+        iteration_counts.push(iterations.max(1));
+    }
+
+    let max_residual_norm = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+    let max_increment_norm = increment_norms.iter().copied().fold(0.0_f64, f64::max);
+    let max_iteration_count = iteration_counts.iter().copied().fold(0usize, usize::max);
+    let mean_iteration_count = if iteration_counts.is_empty() {
+        0.0
+    } else {
+        iteration_counts.iter().copied().sum::<usize>() as f64 / iteration_counts.len() as f64
+    };
+
+    let transient_prepared_build_ms =
+        transient_cost_metric(&transient.diagnostics, "prepared_build_ms").unwrap_or(0.0);
+    let transient_fallback_apply_count =
+        transient_cost_metric(&transient.diagnostics, "fallback_apply_count")
+            .unwrap_or(0.0)
+            .max(0.0);
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
+
+    let mut diagnostics = vec![FeaDiagnostic {
+        code: "FEA_NONLINEAR_METHOD".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "solver=incremental_newton_raphson increments={} line_search={} tangent_refresh_interval={}",
+            options.increment_count, options.line_search, tangent_refresh_interval
+        ),
+    }];
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_CONVERGENCE".to_string(),
+        severity: if converged_increments == options.increment_count {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "increments={} converged_increments={} failed_increments={} max_newton_iters={} max_iterations_used={} mean_iterations_used={} tolerance={} residual_convergence_target={} max_residual_norm={} max_increment_norm={} line_search_backtracks={} max_line_search_backtracks_per_increment={} tangent_rebuild_count={} iteration_spike_count={} convergence_stall_count={} backtrack_burst_count={}",
+            options.increment_count,
+            converged_increments,
+            failed_increments,
+            options.max_newton_iters,
+            max_iteration_count,
+            mean_iteration_count,
+            options.tolerance,
+            thermo_residual_target_peak,
+            max_residual_norm,
+            max_increment_norm,
+            line_search_backtracks,
+            max_line_search_backtracks_per_increment,
+            tangent_rebuild_count,
+            iteration_spike_count,
+            convergence_stall_count,
+            backtrack_burst_count
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_COST".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
+            transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_STATE_TOPOLOGY".to_string(),
+        severity: if recovery_topology.element_count > 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={} mean_edge_length_m={} max_edge_strain_norm={} strain_component_coverage_ratio={}",
+            recovery_topology.basis,
+            recovery_topology.element_count,
+            recovery_topology.active_recovery_edge_count,
+            recovery_topology.prep_recovery_edge_count,
+            recovery_topology.constrained_recovery_edge_count,
+            recovery_topology.mean_edge_length_m(),
+            recovery_topology.max_edge_strain_norm(
+                displacement_snapshots.last().map(Vec::as_slice)
+            ),
+            recovery_topology.strain_component_coverage_ratio(
+                displacement_snapshots.last().map(Vec::as_slice)
+            ),
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_STATE".to_string(),
+        severity: if failed_increments == 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "element_count={} plastic_enabled={} plastic_active_element_count={} max_equivalent_plastic_strain={} contact_enabled={} contact_entity_count={} contact_active_entity_count={} max_contact_pressure={} min_contact_gap={}",
+            element_count,
+            plasticity_context.is_some_and(|context| context.enabled),
+            plastic_active_element_count,
+            max_equivalent_plastic_strain,
+            contact_context.is_some_and(|context| context.enabled),
+            contact_count,
+            contact_active_entity_count,
+            max_contact_pressure,
+            if min_contact_gap.is_finite() {
+                min_contact_gap
+            } else {
+                0.0
+            },
+        ),
+    });
+    if thermo_severity_peak > 0.0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TM_NONLINEAR".to_string(),
+            severity: if thermo_severity_peak <= 0.6 && thermo_temporal_variation <= 0.5 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} time_scale_mean={} field_extrapolation_ratio={} field_clamp_ratio={} temporal_variation={} convergence_residual_target_peak={} convergence_increment_target_peak={}",
+                thermo_severity_peak,
+                if options.increment_count == 0 {
+                    1.0
+                } else {
+                    thermo_time_scale_sum / options.increment_count as f64
+                },
+                if options.increment_count == 0 {
+                    0.0
+                } else {
+                    thermo_time_extrapolated as f64 / options.increment_count as f64
+                },
+                if options.increment_count == 0 {
+                    0.0
+                } else {
+                    thermo_time_clamped as f64 / options.increment_count as f64
+                },
+                thermo_temporal_variation,
+                thermo_residual_target_peak,
+                thermo_increment_target_peak,
+            ),
+        });
+    }
+    if electro_severity_peak > 0.0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_ET_NONLINEAR".to_string(),
+            severity: if electro_severity_peak <= 0.6 && electro_temporal_variation <= 0.5 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} severity_mean={} time_scale_mean={} temporal_variation={}",
+                electro_severity_peak,
+                if options.increment_count == 0 {
+                    0.0
+                } else {
+                    electro_severity_sum / options.increment_count as f64
+                },
+                if options.increment_count == 0 {
+                    1.0
+                } else {
+                    electro_time_scale_sum / options.increment_count as f64
+                },
+                electro_temporal_variation,
+            ),
+        });
+    }
+    if plasticity_severity_peak > 0.0 {
+        let plasticity = options.plasticity_context.as_ref();
+        let plasticity_severity_mean = if options.increment_count == 0 {
+            0.0
+        } else {
+            plasticity_severity_sum / options.increment_count as f64
+        };
+        let plasticity_load_realization_ratio = if plasticity_severity_base > 0.0 {
+            plasticity_severity_mean / plasticity_severity_base
+        } else {
+            0.0
+        };
+        let plasticity_load_amplification_ratio = if plasticity_first_severity > 0.0 {
+            plasticity_last_severity / plasticity_first_severity
+        } else {
+            1.0
+        };
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_PLASTIC_NONLINEAR".to_string(),
+            severity: if plasticity_severity_peak <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} severity_mean={} load_realization_ratio={} load_amplification_ratio={} yield_strain={} hardening_modulus_ratio={} saturation_exponent={}",
+                plasticity_severity_peak,
+                plasticity_severity_mean,
+                plasticity_load_realization_ratio,
+                plasticity_load_amplification_ratio,
+                plasticity.map(|p| p.yield_strain).unwrap_or(0.0),
+                plasticity.map(|p| p.hardening_modulus_ratio).unwrap_or(0.0),
+                plasticity.map(|p| p.saturation_exponent).unwrap_or(0.0),
+            ),
+        });
+        diagnostics.push(plastic_known_answer_diagnostic(
+            &equivalent_plastic_strain_snapshots,
+            &load_factors,
+            element_count,
+        ));
+    }
+    if contact_severity_peak > 0.0 {
+        let contact = options.contact_context.as_ref();
+        let contact_severity_mean = if options.increment_count == 0 {
+            0.0
+        } else {
+            contact_severity_sum / options.increment_count as f64
+        };
+        let contact_load_realization_ratio = if contact_severity_base > 0.0 {
+            contact_severity_mean / contact_severity_base
+        } else {
+            0.0
+        };
+        let contact_load_amplification_ratio = if contact_first_severity > 0.0 {
+            contact_last_severity / contact_first_severity
+        } else {
+            1.0
+        };
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_CONTACT_NONLINEAR".to_string(),
+            severity: if contact_severity_peak <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} severity_mean={} load_realization_ratio={} load_amplification_ratio={} penalty_stiffness_scale={} max_penetration_ratio={} friction_coefficient={}",
+                contact_severity_peak,
+                contact_severity_mean,
+                contact_load_realization_ratio,
+                contact_load_amplification_ratio,
+                contact.map(|p| p.penalty_stiffness_scale).unwrap_or(0.0),
+                contact.map(|p| p.max_penetration_ratio).unwrap_or(0.0),
+                contact.map(|p| p.friction_coefficient).unwrap_or(0.0),
+            ),
+        });
+        if let Some(contact) = contact {
+            diagnostics.push(contact_known_answer_diagnostic(
+                &contact_pressure_snapshots,
+                &contact_gap_snapshots,
+                contact,
+                contact_count,
+            ));
+        }
+    }
+    diagnostics.extend(transient.diagnostics);
+
+    NonlinearSolveResult {
+        converged_increments,
+        total_increments: options.increment_count,
+        load_factors,
+        displacement_snapshots,
+        von_mises_snapshots,
+        plastic_strain_snapshots,
+        equivalent_plastic_strain_snapshots,
+        contact_pressure_snapshots,
+        contact_gap_snapshots,
+        residual_norms,
+        increment_norms,
+        iteration_counts,
+        failed_increments,
+        line_search_backtracks,
+        max_line_search_backtracks_per_increment,
+        tangent_rebuild_count,
+        iteration_spike_count,
+        convergence_stall_count,
+        backtrack_burst_count,
+        diagnostics,
+        solver_method: "incremental_newton_raphson".to_string(),
+        solver_backend: transient.solver_backend,
+        solver_host_sync_count: transient.solver_host_sync_count,
+        device_apply_k_count: transient.device_apply_k_count,
+        device_apply_k_attempt_count: transient.device_apply_k_attempt_count,
+        preconditioner: transient.preconditioner,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct IncrementState {
+    von_mises: Vec<f64>,
+    plastic_strain: Vec<f64>,
+    equivalent_plastic_strain: Vec<f64>,
+    contact_pressure: Vec<f64>,
+    contact_gap: Vec<f64>,
+    max_equivalent_plastic_strain: f64,
+    plastic_active_element_count: usize,
+    max_contact_pressure: f64,
+    min_contact_gap: f64,
+    contact_active_entity_count: usize,
+}
+
+fn recover_increment_state(
+    displacement: &[f64],
+    load_factor: f64,
+    recovery_topology: &NonlinearRecoveryTopology,
+    material: &StructuralMaterialSummary,
+    plasticity: Option<&FeaPlasticityConstitutiveContext>,
+    contact: Option<&FeaContactInterfaceContext>,
+    contact_count: usize,
+) -> IncrementState {
+    let total_strain = recover_increment_strain(displacement, recovery_topology);
+    let plastic_strain = recover_plastic_strain(
+        &total_strain,
+        load_factor,
+        plasticity,
+        material.shear_modulus_pa,
+    );
+    let equivalent_plastic_strain = recover_equivalent_plastic_strain(&plastic_strain);
+    let von_mises = recover_von_mises(&total_strain, &plastic_strain, material);
+    let (contact_pressure, contact_gap) =
+        recover_contact_state(displacement, load_factor, contact, contact_count);
+    let max_equivalent_plastic_strain = equivalent_plastic_strain
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let plastic_active_element_count = equivalent_plastic_strain
+        .iter()
+        .filter(|value| **value > 0.0)
+        .count();
+    let max_contact_pressure = contact_pressure.iter().copied().fold(0.0_f64, f64::max);
+    let min_contact_gap = contact_gap.iter().copied().fold(f64::INFINITY, f64::min);
+    let contact_active_entity_count = contact_pressure
+        .iter()
+        .zip(contact_gap.iter())
+        .filter(|(pressure, gap)| **pressure > 0.0 || **gap <= 0.0)
+        .count();
+    IncrementState {
+        von_mises,
+        plastic_strain,
+        equivalent_plastic_strain,
+        contact_pressure,
+        contact_gap,
+        max_equivalent_plastic_strain,
+        plastic_active_element_count,
+        max_contact_pressure,
+        min_contact_gap,
+        contact_active_entity_count,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NonlinearRecoveryTopology {
+    basis: &'static str,
+    element_count: usize,
+    active_recovery_edge_count: usize,
+    prep_recovery_edge_count: usize,
+    constrained_recovery_edge_count: usize,
+    use_dof_adjacency_fallback: bool,
+    edges: Vec<NonlinearRecoveryEdge>,
+    b_matrix_elements: Vec<NonlinearBMatrixElement>,
+}
+
+impl NonlinearRecoveryTopology {
+    fn mean_edge_length_m(&self) -> f64 {
+        if self.edges.is_empty() {
+            return 0.0;
+        }
+        self.edges
+            .iter()
+            .map(|edge| edge.edge_length_m)
+            .sum::<f64>()
+            / self.edges.len() as f64
+    }
+
+    fn max_edge_strain_norm(&self, displacement: Option<&[f64]>) -> f64 {
+        let Some(displacement) = displacement else {
+            return 0.0;
+        };
+        if !self.b_matrix_elements.is_empty() {
+            return self
+                .b_matrix_elements
+                .iter()
+                .map(|element| {
+                    nonlinear_b_matrix_strain_tensor(displacement, element)
+                        .iter()
+                        .map(|value| value * value)
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .fold(0.0_f64, f64::max);
+        }
+        self.edges
+            .iter()
+            .map(|edge| {
+                nonlinear_edge_strain_tensor(displacement, edge)
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
+    fn strain_component_coverage_ratio(&self, displacement: Option<&[f64]>) -> f64 {
+        let Some(displacement) = displacement else {
+            return 0.0;
+        };
+        if !self.b_matrix_elements.is_empty() {
+            let expected_component_count = self.b_matrix_elements.len() * TENSOR_COMPONENT_COUNT;
+            let active_component_count = self
+                .b_matrix_elements
+                .iter()
+                .map(|element| {
+                    nonlinear_b_matrix_strain_tensor(displacement, element)
+                        .iter()
+                        .filter(|value| value.abs() > 0.0)
+                        .count()
+                })
+                .sum::<usize>();
+            return active_component_count as f64 / expected_component_count as f64;
+        }
+        let expected_component_count = self.edges.len() * TENSOR_COMPONENT_COUNT;
+        if expected_component_count == 0 {
+            return 0.0;
+        }
+        let active_component_count = self
+            .edges
+            .iter()
+            .map(|edge| {
+                nonlinear_edge_strain_tensor(displacement, edge)
+                    .iter()
+                    .filter(|value| value.abs() > 0.0)
+                    .count()
+            })
+            .sum::<usize>();
+        active_component_count as f64 / expected_component_count as f64
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NonlinearRecoveryEdge {
+    from_dof: usize,
+    to_dof: usize,
+    component: usize,
+    hop: usize,
+    edge_length_m: f64,
+    shear_pair: (usize, usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NonlinearBMatrixElement {
+    nodes: [usize; 3],
+    coordinates_m: [[f64; 3]; 3],
+}
+
+fn nonlinear_recovery_topology(summary: &AssemblySummary) -> NonlinearRecoveryTopology {
+    let prep_edges = nonlinear_prep_recovery_edges(summary);
+    let constrained_recovery_edge_count = constrained_prep_recovery_edge_count(summary);
+    let b_matrix_elements = nonlinear_prep_b_matrix_elements(summary, &prep_edges);
+    if !b_matrix_elements.is_empty() {
+        return NonlinearRecoveryTopology {
+            basis: "prep_constant_strain_b_matrix",
+            element_count: b_matrix_elements.len(),
+            active_recovery_edge_count: prep_edges.len(),
+            prep_recovery_edge_count: prep_edges.len(),
+            constrained_recovery_edge_count,
+            use_dof_adjacency_fallback: false,
+            edges: prep_edges,
+            b_matrix_elements,
+        };
+    }
+    if !prep_edges.is_empty() {
+        return NonlinearRecoveryTopology {
+            basis: "prep_element_connectivity",
+            element_count: prep_edges.len(),
+            active_recovery_edge_count: prep_edges.len(),
+            prep_recovery_edge_count: prep_edges.len(),
+            constrained_recovery_edge_count,
+            use_dof_adjacency_fallback: false,
+            edges: prep_edges,
+            b_matrix_elements: Vec::new(),
+        };
+    }
+
+    let fallback_count = summary
+        .dof_count
+        .div_ceil(VECTOR_COMPONENT_COUNT)
+        .saturating_sub(1)
+        .max(1);
+    let edges = (0..fallback_count)
+        .map(|element_index| {
+            let base = element_index * VECTOR_COMPONENT_COUNT;
+            let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
+            NonlinearRecoveryEdge {
+                from_dof: base,
+                to_dof: next,
+                component: element_index % VECTOR_COMPONENT_COUNT,
+                hop: VECTOR_COMPONENT_COUNT,
+                edge_length_m: VECTOR_COMPONENT_COUNT as f64,
+                shear_pair: (
+                    (element_index + 1) % VECTOR_COMPONENT_COUNT,
+                    (element_index + 2) % VECTOR_COMPONENT_COUNT,
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    NonlinearRecoveryTopology {
+        basis: "dof_adjacency_fallback",
+        element_count: fallback_count,
+        active_recovery_edge_count: edges.len(),
+        prep_recovery_edge_count: 0,
+        constrained_recovery_edge_count: 0,
+        use_dof_adjacency_fallback: true,
+        edges,
+        b_matrix_elements: Vec::new(),
+    }
+}
+
+fn nonlinear_prep_b_matrix_elements(
+    summary: &AssemblySummary,
+    prep_edges: &[NonlinearRecoveryEdge],
+) -> Vec<NonlinearBMatrixElement> {
+    let Some(prep_coordinates) = summary.prep_coordinates.as_ref() else {
+        return Vec::new();
+    };
+    if prep_coordinates.element_geometry_coverage_ratio <= 0.0
+        || prep_coordinates.element_geometry_node_count < 3
+        || prep_coordinates.reference_element_area_m2 <= 0.0
+        || !prep_coordinates.reference_element_area_m2.is_finite()
+        || !nonlinear_reference_coordinates_are_valid(
+            prep_coordinates.reference_element_coordinates_m,
+        )
+    {
+        return Vec::new();
+    }
+
+    let node_count = summary.dof_count.div_ceil(VECTOR_COMPONENT_COUNT);
+    let sample_elements = nonlinear_prep_sample_b_matrix_elements(
+        summary,
+        node_count,
+        prep_coordinates
+            .element_topology_sample_element_count
+            .min(4),
+        prep_coordinates.element_topology_sample_edge_count.min(8),
+        prep_coordinates.element_topology_sample_element_edges,
+        prep_coordinates.element_topology_sample_edge_nodes,
+        prep_coordinates.element_topology_sample_node_coordinates_m,
+    );
+    if !sample_elements.is_empty() {
+        return sample_elements;
+    }
+
+    let mut nodes = prep_edges
+        .iter()
+        .flat_map(|edge| {
+            [
+                edge.from_dof / VECTOR_COMPONENT_COUNT,
+                edge.to_dof / VECTOR_COMPONENT_COUNT,
+            ]
+        })
+        .filter(|node| *node < node_count && nonlinear_node_has_unconstrained_dof(summary, *node))
+        .collect::<Vec<_>>();
+    nodes.sort_unstable();
+    nodes.dedup();
+    if nodes.len() < 3 {
+        nodes = (0..node_count)
+            .filter(|node| nonlinear_node_has_unconstrained_dof(summary, *node))
+            .take(3)
+            .collect();
+    }
+
+    nodes
+        .chunks_exact(3)
+        .map(|chunk| NonlinearBMatrixElement {
+            nodes: [chunk[0], chunk[1], chunk[2]],
+            coordinates_m: prep_coordinates.reference_element_coordinates_m,
+        })
+        .collect()
+}
+
+fn nonlinear_prep_sample_b_matrix_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+    sample_element_count: usize,
+    sample_edge_count: usize,
+    element_edges: [[u32; 3]; 4],
+    edge_nodes: [[u32; 2]; 8],
+    node_coordinates_m: [[f64; 3]; 8],
+) -> Vec<NonlinearBMatrixElement> {
+    if sample_element_count == 0 || sample_edge_count < 3 {
+        return Vec::new();
+    }
+    element_edges
+        .iter()
+        .take(sample_element_count)
+        .filter_map(|sample_edges| {
+            let mut nodes = Vec::with_capacity(3);
+            for edge_index in sample_edges {
+                let edge_index = *edge_index as usize;
+                if edge_index >= sample_edge_count {
+                    return None;
+                }
+                for node in edge_nodes[edge_index] {
+                    let node = node as usize;
+                    if node < node_count
+                        && node < node_coordinates_m.len()
+                        && nonlinear_node_has_unconstrained_dof(summary, node)
+                        && !nodes.contains(&node)
+                    {
+                        nodes.push(node);
+                    }
+                }
+            }
+            if nodes.len() != 3 {
+                return None;
+            }
+            let coordinates_m = [
+                node_coordinates_m[nodes[0]],
+                node_coordinates_m[nodes[1]],
+                node_coordinates_m[nodes[2]],
+            ];
+            nonlinear_reference_coordinates_are_valid(coordinates_m).then_some(
+                NonlinearBMatrixElement {
+                    nodes: [nodes[0], nodes[1], nodes[2]],
+                    coordinates_m,
+                },
+            )
+        })
+        .collect()
+}
+
+fn nonlinear_prep_recovery_edges(summary: &AssemblySummary) -> Vec<NonlinearRecoveryEdge> {
+    summary
+        .prep_recovery_edges
+        .iter()
+        .filter_map(|edge| nonlinear_prep_recovery_edge(summary, *edge))
+        .collect()
+}
+
+fn nonlinear_prep_recovery_edge(
+    summary: &AssemblySummary,
+    edge: PrepRecoveryEdgeSummary,
+) -> Option<NonlinearRecoveryEdge> {
+    let from_dof = edge.from_dof.min(edge.to_dof);
+    let to_dof = edge.from_dof.max(edge.to_dof);
+    if from_dof == to_dof
+        || to_dof >= summary.dof_count
+        || summary
+            .operator
+            .constrained
+            .get(from_dof)
+            .copied()
+            .unwrap_or(false)
+        || summary
+            .operator
+            .constrained
+            .get(to_dof)
+            .copied()
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let component = from_dof % VECTOR_COMPONENT_COUNT;
+    Some(NonlinearRecoveryEdge {
+        from_dof,
+        to_dof,
+        component,
+        hop: to_dof.abs_diff(from_dof).max(1),
+        edge_length_m: finite_positive_or(
+            edge.edge_length_m,
+            to_dof.abs_diff(from_dof).max(1) as f64,
+        ),
+        shear_pair: (
+            (component + 1) % VECTOR_COMPONENT_COUNT,
+            (component + 2) % VECTOR_COMPONENT_COUNT,
+        ),
+    })
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
+}
+
+fn constrained_prep_recovery_edge_count(summary: &AssemblySummary) -> usize {
+    summary
+        .prep_recovery_edges
+        .iter()
+        .filter(|edge| {
+            let from_dof = edge.from_dof.min(edge.to_dof);
+            let to_dof = edge.from_dof.max(edge.to_dof);
+            to_dof < summary.dof_count
+                && (summary
+                    .operator
+                    .constrained
+                    .get(from_dof)
+                    .copied()
+                    .unwrap_or(false)
+                    || summary
+                        .operator
+                        .constrained
+                        .get(to_dof)
+                        .copied()
+                        .unwrap_or(false))
+        })
+        .count()
+}
+
+fn recover_increment_strain(
+    displacement: &[f64],
+    recovery_topology: &NonlinearRecoveryTopology,
+) -> Vec<f64> {
+    let element_count = recovery_topology.element_count;
+    let mut padded = displacement.to_vec();
+    padded.resize(
+        displacement
+            .len()
+            .max((element_count + 1) * VECTOR_COMPONENT_COUNT),
+        0.0,
+    );
+    let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
+    if !recovery_topology.b_matrix_elements.is_empty() {
+        for (element_index, element) in recovery_topology.b_matrix_elements.iter().enumerate() {
+            let offset = element_index * TENSOR_COMPONENT_COUNT;
+            let element_strain = nonlinear_b_matrix_strain_tensor(&padded, element);
+            strain[offset..offset + TENSOR_COMPONENT_COUNT].copy_from_slice(&element_strain);
+        }
+        return strain;
+    }
+    if recovery_topology.use_dof_adjacency_fallback {
+        for element_index in 0..element_count {
+            let base = element_index * VECTOR_COMPONENT_COUNT;
+            let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
+            let offset = element_index * TENSOR_COMPONENT_COUNT;
+            for component in 0..VECTOR_COMPONENT_COUNT {
+                strain[offset + component] = padded[next + component] - padded[base + component];
+            }
+            strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + 1]);
+            strain[offset + 4] = 0.5 * (strain[offset + 1] + strain[offset + 2]);
+            strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + 2]);
+        }
+        return strain;
+    }
+
+    for (element_index, edge) in recovery_topology.edges.iter().enumerate() {
+        let offset = element_index * TENSOR_COMPONENT_COUNT;
+        let edge_strain = nonlinear_edge_strain_tensor(&padded, edge);
+        strain[offset..offset + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
+    }
+    strain
+}
+
+fn nonlinear_reference_coordinates_are_valid(coordinates: [[f64; 3]; 3]) -> bool {
+    coordinates.iter().flatten().all(|value| value.is_finite())
+        && nonlinear_triangle_area_3d_m2(coordinates) > 0.0
+}
+
+fn nonlinear_node_has_unconstrained_dof(summary: &AssemblySummary, node: usize) -> bool {
+    let base = node * VECTOR_COMPONENT_COUNT;
+    (0..VECTOR_COMPONENT_COUNT).any(|component| {
+        !summary
+            .operator
+            .constrained
+            .get(base + component)
+            .copied()
+            .unwrap_or(false)
+    })
+}
+
+fn nonlinear_b_matrix_strain_tensor(
+    displacement: &[f64],
+    element: &NonlinearBMatrixElement,
+) -> [f64; 6] {
+    let Some((local_coordinates, local_basis)) =
+        nonlinear_local_triangle_coordinates(element.coordinates_m)
+    else {
+        return [0.0; TENSOR_COMPONENT_COUNT];
+    };
+    let denominator = nonlinear_triangle_signed_area2(local_coordinates);
+    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
+        return [0.0; TENSOR_COMPONENT_COUNT];
+    }
+
+    let mut local_displacement = [[0.0_f64; 3]; 3];
+    for (i, node) in element.nodes.iter().copied().enumerate() {
+        let displacement_vector = nonlinear_nodal_displacement(displacement, node);
+        local_displacement[i] = [
+            nonlinear_dot3(displacement_vector, local_basis[0]),
+            nonlinear_dot3(displacement_vector, local_basis[1]),
+            nonlinear_dot3(displacement_vector, local_basis[2]),
+        ];
+    }
+
+    let b = [
+        local_coordinates[1][1] - local_coordinates[2][1],
+        local_coordinates[2][1] - local_coordinates[0][1],
+        local_coordinates[0][1] - local_coordinates[1][1],
+    ];
+    let c = [
+        local_coordinates[2][0] - local_coordinates[1][0],
+        local_coordinates[0][0] - local_coordinates[2][0],
+        local_coordinates[1][0] - local_coordinates[0][0],
+    ];
+
+    let mut du_dx = 0.0_f64;
+    let mut du_dy = 0.0_f64;
+    let mut dv_dx = 0.0_f64;
+    let mut dv_dy = 0.0_f64;
+    let mut dw_dx = 0.0_f64;
+    let mut dw_dy = 0.0_f64;
+    for i in 0..3 {
+        du_dx += b[i] * local_displacement[i][0];
+        du_dy += c[i] * local_displacement[i][0];
+        dv_dx += b[i] * local_displacement[i][1];
+        dv_dy += c[i] * local_displacement[i][1];
+        dw_dx += b[i] * local_displacement[i][2];
+        dw_dy += c[i] * local_displacement[i][2];
+    }
+
+    [
+        du_dx / denominator,
+        dv_dy / denominator,
+        0.0,
+        (du_dy + dv_dx) / denominator,
+        dw_dy / denominator,
+        dw_dx / denominator,
+    ]
+}
+
+fn nonlinear_local_triangle_coordinates(
+    coordinates: [[f64; 3]; 3],
+) -> Option<(LocalTriangleCoordinates, LocalFrame)> {
+    let origin = coordinates[0];
+    let edge01 = nonlinear_sub3(coordinates[1], origin);
+    let edge02 = nonlinear_sub3(coordinates[2], origin);
+    let e1 = nonlinear_normalize3(edge01)?;
+    let normal = nonlinear_normalize3(nonlinear_cross3(edge01, edge02))?;
+    let e2 = nonlinear_normalize3(nonlinear_cross3(normal, e1))?;
+    let local = coordinates.map(|point| {
+        let relative = nonlinear_sub3(point, origin);
+        [nonlinear_dot3(relative, e1), nonlinear_dot3(relative, e2)]
+    });
+    Some((local, [e1, e2, normal]))
+}
+
+fn nonlinear_triangle_signed_area2(coordinates: LocalTriangleCoordinates) -> f64 {
+    coordinates[0][0] * (coordinates[1][1] - coordinates[2][1])
+        + coordinates[1][0] * (coordinates[2][1] - coordinates[0][1])
+        + coordinates[2][0] * (coordinates[0][1] - coordinates[1][1])
+}
+
+fn nonlinear_triangle_area_3d_m2(coordinates: [[f64; 3]; 3]) -> f64 {
+    let edge01 = nonlinear_sub3(coordinates[1], coordinates[0]);
+    let edge02 = nonlinear_sub3(coordinates[2], coordinates[0]);
+    0.5 * nonlinear_norm3(nonlinear_cross3(edge01, edge02))
+}
+
+fn nonlinear_sub3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn nonlinear_dot3(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn nonlinear_cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn nonlinear_norm3(value: [f64; 3]) -> f64 {
+    nonlinear_dot3(value, value).sqrt()
+}
+
+fn nonlinear_normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
+    let norm = nonlinear_norm3(value);
+    (norm.is_finite() && norm > f64::EPSILON).then_some([
+        value[0] / norm,
+        value[1] / norm,
+        value[2] / norm,
+    ])
+}
+
+fn nonlinear_edge_strain_tensor(displacement: &[f64], edge: &NonlinearRecoveryEdge) -> [f64; 6] {
+    let length = finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
+    let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
+    let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
+    if from_node == to_node {
+        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
+            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
+        let mut tensor = [0.0; TENSOR_COMPONENT_COUNT];
+        tensor[edge.component] = jump / length;
+        tensor[3] = 0.5 * (tensor[0] + tensor[edge.shear_pair.0]);
+        tensor[4] = 0.5 * (tensor[edge.shear_pair.0] + tensor[edge.shear_pair.1]);
+        tensor[5] = 0.5 * (tensor[0] + tensor[edge.shear_pair.1]);
+        return tensor;
+    }
+
+    let to = nonlinear_nodal_displacement(displacement, to_node);
+    let from = nonlinear_nodal_displacement(displacement, from_node);
+    let gradient = [
+        (to[0] - from[0]) / length,
+        (to[1] - from[1]) / length,
+        (to[2] - from[2]) / length,
+    ];
+    [
+        gradient[0],
+        gradient[1],
+        gradient[2],
+        0.5 * (gradient[0] + gradient[1]),
+        0.5 * (gradient[1] + gradient[2]),
+        0.5 * (gradient[0] + gradient[2]),
+    ]
+}
+
+fn nonlinear_nodal_displacement(
+    displacement: &[f64],
+    node: usize,
+) -> [f64; VECTOR_COMPONENT_COUNT] {
+    let base = node * VECTOR_COMPONENT_COUNT;
+    [
+        displacement.get(base).copied().unwrap_or(0.0),
+        displacement.get(base + 1).copied().unwrap_or(0.0),
+        displacement.get(base + 2).copied().unwrap_or(0.0),
+    ]
+}
+
+fn recover_plastic_strain(
+    total_strain: &[f64],
+    load_factor: f64,
+    plasticity: Option<&FeaPlasticityConstitutiveContext>,
+    shear_modulus_pa: f64,
+) -> Vec<f64> {
+    let Some(plasticity) = plasticity.filter(|context| context.enabled) else {
+        return vec![0.0; total_strain.len()];
+    };
+    let yield_strain = plasticity.yield_strain.max(0.0);
+    let hardening_ratio = plasticity.hardening_modulus_ratio.max(0.0);
+    let saturation = plasticity.saturation_exponent.max(1.0e-9);
+    let hardening_modulus = (hardening_ratio * shear_modulus_pa.max(1.0)).max(0.0);
+    let plastic_modulus_ratio =
+        shear_modulus_pa.max(1.0) / (shear_modulus_pa.max(1.0) + hardening_modulus);
+    let load_scale = load_factor.clamp(0.0, 1.0);
+    total_strain
+        .iter()
+        .map(|strain| {
+            let excess = (strain.abs() - yield_strain).max(0.0);
+            if excess == 0.0 {
+                0.0
+            } else {
+                let saturation_scale = 1.0 - (-saturation * load_scale).exp();
+                strain.signum() * excess * plastic_modulus_ratio * saturation_scale
+            }
+        })
+        .collect()
+}
+
+fn recover_equivalent_plastic_strain(plastic_strain: &[f64]) -> Vec<f64> {
+    plastic_strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .map(|tensor| ((2.0 / 3.0) * tensor.iter().map(|value| value * value).sum::<f64>()).sqrt())
+        .collect()
+}
+
+fn recover_von_mises(
+    total_strain: &[f64],
+    plastic_strain: &[f64],
+    material: &StructuralMaterialSummary,
+) -> Vec<f64> {
+    total_strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .zip(plastic_strain.chunks_exact(TENSOR_COMPONENT_COUNT))
+        .map(|(total, plastic)| {
+            let mut elastic = [0.0_f64; TENSOR_COMPONENT_COUNT];
+            for component in 0..TENSOR_COMPONENT_COUNT {
+                elastic[component] = total[component] - plastic[component];
+            }
+            von_mises_from_strain(&elastic, material)
+        })
+        .collect()
+}
+
+fn von_mises_from_strain(
+    strain: &[f64; TENSOR_COMPONENT_COUNT],
+    material: &StructuralMaterialSummary,
+) -> f64 {
+    let trace = strain[0] + strain[1] + strain[2];
+    let sxx = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[0];
+    let syy = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[1];
+    let szz = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[2];
+    let txy = material.shear_modulus_pa * strain[3];
+    let tyz = material.shear_modulus_pa * strain[4];
+    let txz = material.shear_modulus_pa * strain[5];
+    (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
+        + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
+    .sqrt()
+}
+
+fn recover_contact_state(
+    displacement: &[f64],
+    load_factor: f64,
+    contact: Option<&FeaContactInterfaceContext>,
+    contact_count: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let Some(contact) = contact.filter(|context| context.enabled) else {
+        return (Vec::new(), Vec::new());
+    };
+    let max_penetration = contact.max_penetration_ratio.max(0.0);
+    let penalty = contact.penalty_stiffness_scale.max(0.0);
+    let peak_displacement = displacement
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let normal_approach =
+        (peak_displacement * load_factor.clamp(0.0, 1.0)).min(max_penetration * 1.25);
+    let friction_scale = 1.0 + contact.friction_coefficient.max(0.0) * 0.1;
+    let mut pressure = Vec::with_capacity(contact_count);
+    let mut gap = Vec::with_capacity(contact_count);
+    for entity_index in 0..contact_count {
+        let entity_scale = 1.0 + 0.05 * entity_index as f64;
+        let entity_approach = normal_approach / entity_scale;
+        let projected_gap = if entity_approach > 0.0 {
+            0.0
+        } else {
+            max_penetration
+        };
+        gap.push(projected_gap);
+        pressure.push(penalty * entity_approach.max(0.0) * friction_scale);
+    }
+    (pressure, gap)
+}
+
+fn contact_entity_count(contact: Option<&FeaContactInterfaceContext>) -> usize {
+    if contact.is_some_and(|context| context.enabled) {
+        1
+    } else {
+        0
+    }
+}
+
+fn plastic_known_answer_diagnostic(
+    equivalent_plastic_strain_snapshots: &[Vec<f64>],
+    load_factors: &[f64],
+    element_count: usize,
+) -> FeaDiagnostic {
+    let peaks = equivalent_plastic_strain_snapshots
+        .iter()
+        .map(|snapshot| snapshot.iter().copied().fold(0.0_f64, f64::max))
+        .collect::<Vec<_>>();
+    let monotone_steps = peaks
+        .windows(2)
+        .filter(|window| window[1] + 1.0e-15 >= window[0])
+        .count();
+    let monotonic_fraction = if peaks.len() <= 1 {
+        1.0
+    } else {
+        monotone_steps as f64 / (peaks.len() - 1) as f64
+    };
+    let peak_equivalent_plastic_strain = peaks.iter().copied().fold(0.0_f64, f64::max);
+    let final_equivalent_plastic_strain = peaks.last().copied().unwrap_or(0.0);
+    let final_to_peak_ratio = if peak_equivalent_plastic_strain > 1.0e-15 {
+        final_equivalent_plastic_strain / peak_equivalent_plastic_strain
+    } else {
+        0.0
+    };
+    let active_element_count = equivalent_plastic_strain_snapshots
+        .iter()
+        .flat_map(|snapshot| snapshot.iter())
+        .filter(|value| **value > 0.0)
+        .count();
+    let active_element_coverage_ratio = if element_count == 0 {
+        0.0
+    } else {
+        (active_element_count as f64 / element_count as f64).clamp(0.0, 1.0)
+    };
+    let yield_activation_load_factor = peaks
+        .iter()
+        .position(|value| *value > 0.0)
+        .and_then(|index| load_factors.get(index).copied())
+        .unwrap_or(0.0);
+    let known_answer_coverage_ratio = if peak_equivalent_plastic_strain > 0.0 {
+        1.0
+    } else {
+        0.0
+    };
+
+    FeaDiagnostic {
+        code: "FEA_PLASTIC_KNOWN_ANSWER".to_string(),
+        severity: if monotonic_fraction >= 1.0
+            && final_to_peak_ratio >= 0.999_999
+            && active_element_coverage_ratio > 0.0
+            && known_answer_coverage_ratio >= 1.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "case=monotonic_elastoplastic_hardening monotonic_equivalent_plastic_strain_fraction={} active_element_coverage_ratio={} peak_equivalent_plastic_strain={} final_to_peak_equivalent_plastic_strain_ratio={} yield_activation_load_factor={} known_answer_coverage_ratio={}",
+            monotonic_fraction,
+            active_element_coverage_ratio,
+            peak_equivalent_plastic_strain,
+            final_to_peak_ratio,
+            yield_activation_load_factor,
+            known_answer_coverage_ratio,
+        ),
+    }
+}
+
+fn contact_known_answer_diagnostic(
+    contact_pressure_snapshots: &[Vec<f64>],
+    contact_gap_snapshots: &[Vec<f64>],
+    contact: &FeaContactInterfaceContext,
+    contact_count: usize,
+) -> FeaDiagnostic {
+    let max_penetration = contact.max_penetration_ratio.max(0.0);
+    let penalty = contact.penalty_stiffness_scale.max(0.0);
+    let mut max_consistency_residual = 0.0_f64;
+    let mut max_open_gap_pressure_residual = 0.0_f64;
+    let mut max_complementarity_residual = 0.0_f64;
+    let mut active_entity_count = 0usize;
+    let mut closed_entity_count = 0usize;
+    let mut min_gap = f64::INFINITY;
+    let mut max_pressure = 0.0_f64;
+    let pressure_scale = (penalty * max_penetration.max(f64::EPSILON)).max(1.0);
+    let gap_scale = max_penetration.max(f64::EPSILON);
+    for (pressure_snapshot, gap_snapshot) in contact_pressure_snapshots
+        .iter()
+        .zip(contact_gap_snapshots.iter())
+    {
+        for (pressure, gap) in pressure_snapshot.iter().zip(gap_snapshot.iter()) {
+            let normalized_pressure = pressure.abs() / pressure_scale;
+            let normalized_gap = gap.max(0.0) / gap_scale;
+            let complementarity_residual = normalized_pressure * normalized_gap;
+            let open_gap_pressure_residual = if *gap > 1.0e-12 {
+                normalized_pressure
+            } else {
+                0.0
+            };
+            max_complementarity_residual =
+                max_complementarity_residual.max(complementarity_residual);
+            max_open_gap_pressure_residual =
+                max_open_gap_pressure_residual.max(open_gap_pressure_residual);
+            max_consistency_residual = max_consistency_residual.max(complementarity_residual);
+            if *pressure > 0.0 || *gap <= 0.0 {
+                active_entity_count = active_entity_count.saturating_add(1);
+            }
+            if *gap <= 1.0e-12 {
+                closed_entity_count = closed_entity_count.saturating_add(1);
+            }
+            max_pressure = max_pressure.max(*pressure);
+            min_gap = min_gap.min(*gap);
+        }
+    }
+    let active_entity_coverage_ratio = if contact_count == 0 {
+        0.0
+    } else {
+        (active_entity_count as f64 / contact_count as f64).clamp(0.0, 1.0)
+    };
+    let closed_entity_coverage_ratio = if contact_count == 0 {
+        0.0
+    } else {
+        (closed_entity_count as f64 / contact_count as f64).clamp(0.0, 1.0)
+    };
+    let min_gap = if min_gap.is_finite() { min_gap } else { 0.0 };
+    let known_answer_coverage_ratio = if !contact_pressure_snapshots.is_empty()
+        && contact_count > 0
+        && max_pressure > 0.0
+        && closed_entity_coverage_ratio > 0.0
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let case = if contact.friction_coefficient.abs() <= 1.0e-12 {
+        "frictionless_penalty_contact"
+    } else {
+        "penalty_contact"
+    };
+
+    FeaDiagnostic {
+        code: "FEA_CONTACT_KNOWN_ANSWER".to_string(),
+        severity: if max_consistency_residual <= 1.0e-12
+            && max_open_gap_pressure_residual <= 1.0e-12
+            && max_complementarity_residual <= 1.0e-12
+            && min_gap >= -1.0e-12
+            && known_answer_coverage_ratio >= 1.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "case={case} pressure_gap_consistency_residual={} active_entity_coverage_ratio={} nonpenetration_gap_min={} friction_coefficient={} open_gap_pressure_residual={} pressure_gap_complementarity_residual={} closed_entity_coverage_ratio={} known_answer_coverage_ratio={}",
+            max_consistency_residual,
+            active_entity_coverage_ratio,
+            min_gap,
+            contact.friction_coefficient,
+            max_open_gap_pressure_residual,
+            max_complementarity_residual,
+            closed_entity_coverage_ratio,
+            known_answer_coverage_ratio,
+        ),
+    }
+}
+
+fn transient_cost_metric(diagnostics: &[FeaDiagnostic], key: &str) -> Option<f64> {
+    diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_TRANSIENT_COST")
+        .and_then(|diag| {
+            diag.message
+                .split_whitespace()
+                .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        })
+        .and_then(|value| value.parse::<f64>().ok())
+}

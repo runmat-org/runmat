@@ -343,7 +343,7 @@ fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<char>>> {
 fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
     let mut rows = Vec::with_capacity(ca.data.len());
     for ptr in &ca.data {
-        let element = (**ptr).clone();
+        let element = (ptr).clone();
         let mut converted = value_to_char_rows(&element)?;
         match converted.len() {
             0 => rows.push(Vec::new()),

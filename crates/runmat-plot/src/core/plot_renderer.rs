@@ -5,15 +5,22 @@
 //! high-quality output across all use cases.
 
 use crate::core::renderer::Vertex;
-use crate::core::{BoundingBox, Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
+use crate::core::{
+    BoundingBox, Camera, CameraViewPreset, ClipPolicy, DepthMode, Scene, WgpuRenderer,
+};
+use crate::geometry_scene::{
+    GeometryScene, GeometrySceneCacheKey, GeometrySceneOverlay, GeometryScenePresentation,
+};
 use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
-use crate::plots::Figure;
+use crate::plots::{AxesKind, Figure};
 use glam::{Mat4, Vec3, Vec4};
 use runmat_time::Instant;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
@@ -36,6 +43,7 @@ struct AxesViewContract {
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
     has_3d_content: bool,
+    axes_kind: AxesKind,
     x_limits: Option<(f64, f64)>,
     y_limits: Option<(f64, f64)>,
     z_limits: Option<(f64, f64)>,
@@ -50,6 +58,25 @@ struct AxesViewContractEntry {
 const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
 const PATCH_3D_REL_EPSILON: f32 = 1e-6;
 const MAX_2D_GRID_LINES_PER_AXIS: usize = 4096;
+
+fn render_item_diagnostics_enabled() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| match std::env::var("RUNMAT_PLOT_RENDER_ITEM_LOGS") {
+            Ok(value) => matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            ),
+            Err(_) => false,
+        })
+    }
+}
 
 /// Unified plot renderer that handles both interactive and static rendering
 pub struct PlotRenderer {
@@ -92,6 +119,14 @@ pub struct PlotRenderer {
     axes_cameras: Vec<Camera>,
     /// Keep a clone of the last figure set for export/UX operations
     pub(crate) last_figure: Option<crate::plots::Figure>,
+    /// Current chunked geometry scene key, when the renderer is driven by CAD/FEA scene data.
+    last_geometry_scene_key: Option<GeometrySceneCacheKey>,
+    last_geometry_scene: Option<GeometryScene>,
+    geometry_overlay: Option<GeometrySceneOverlay>,
+    geometry_presentation: GeometryScenePresentation,
+    geometry_xray_enabled: bool,
+    geometry_node_owner_ids: HashMap<u64, Vec<String>>,
+    geometry_hidden_owner_node_ids: BTreeSet<String>,
 
     /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
     /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
@@ -177,6 +212,12 @@ pub struct RenderResult {
 
     /// Rendered data bounds
     pub data_bounds: Option<(f64, f64, f64, f64)>,
+
+    /// Axes viewports in physical pixels as `(x, y, width, height)`.
+    ///
+    /// Hosts use these rectangles to route pointer events and picking through the
+    /// same viewport that was used for rendering.
+    pub axes_viewports_px: Vec<(u32, u32, u32, u32)>,
 
     /// Performance metrics
     pub vertex_count: usize,
@@ -295,6 +336,13 @@ impl PlotRenderer {
             figure_categorical_labels: None,
             axes_cameras: vec![Self::create_default_camera()],
             last_figure: None,
+            last_geometry_scene_key: None,
+            last_geometry_scene: None,
+            geometry_overlay: None,
+            geometry_presentation: GeometryScenePresentation::default(),
+            geometry_xray_enabled: false,
+            geometry_node_owner_ids: HashMap::new(),
+            geometry_hidden_owner_node_ids: BTreeSet::new(),
             last_scene_viewport_px: None,
             last_axes_plot_sizes_px: None,
             last_axes_view_bounds: None,
@@ -309,6 +357,7 @@ impl PlotRenderer {
     fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
         match plot {
             crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Mesh(_) => true,
             crate::plots::figure::PlotElement::Patch(patch) => {
                 if patch.force_3d() {
                     return true;
@@ -361,6 +410,7 @@ impl PlotRenderer {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
                     has_3d_content: has_3d_content[axes_index],
+                    axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),
                     x_limits: meta.and_then(|m| m.x_limits),
                     y_limits: meta.and_then(|m| m.y_limits),
                     z_limits: meta.and_then(|m| m.z_limits),
@@ -410,6 +460,10 @@ impl PlotRenderer {
         }
     }
 
+    pub fn axes_camera_interaction_flags(&self) -> &[bool] {
+        &self.axes_2d_camera_user_controlled
+    }
+
     fn clear_axes_camera_interaction(&mut self, axes_index: usize) {
         if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
             *flag = false;
@@ -424,6 +478,11 @@ impl PlotRenderer {
 
     /// Set the figure to render
     pub fn set_figure(&mut self, figure: Figure) {
+        self.last_geometry_scene_key = None;
+        self.geometry_overlay = None;
+        self.geometry_xray_enabled = false;
+        self.geometry_node_owner_ids.clear();
+        self.geometry_hidden_owner_node_ids.clear();
         // Clear existing scene
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
@@ -507,6 +566,121 @@ impl PlotRenderer {
             self.camera_auto_fit = false;
         }
         self.apply_stored_axes_views();
+    }
+
+    /// Set a chunked geometry scene to render.
+    ///
+    /// Unlike figures, geometry scenes are expected to represent large, stable CAD/FEA
+    /// datasets. Re-applying the same cache key preserves scene nodes and GPU buffers so
+    /// camera motion only updates uniforms and redraws the existing buffers.
+    pub fn set_geometry_scene(&mut self, geometry_scene: GeometryScene) {
+        self.set_geometry_scene_with_presentation(
+            geometry_scene,
+            self.geometry_presentation.clone(),
+        );
+    }
+
+    pub fn set_geometry_scene_with_presentation(
+        &mut self,
+        geometry_scene: GeometryScene,
+        presentation: GeometryScenePresentation,
+    ) {
+        let cache_key = geometry_scene.cache_key();
+        let same_scene_identity = self
+            .last_geometry_scene_key
+            .as_ref()
+            .map(|key| key.scene_id.as_str())
+            == Some(cache_key.scene_id.as_str());
+        let preserved_camera = same_scene_identity
+            .then(|| self.axes_cameras.first().cloned())
+            .flatten();
+        let preserved_xray_enabled = same_scene_identity.then_some(self.geometry_xray_enabled);
+        self.geometry_overlay = geometry_scene.overlay.clone();
+        let geometry_xray_enabled = geometry_scene.chunks.iter().any(|chunk| {
+            chunk.material.albedo.w < 0.95
+                || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend)
+        });
+        if self.last_geometry_scene_key.as_ref() == Some(&cache_key) {
+            self.last_geometry_scene = Some(geometry_scene.clone());
+            if self.geometry_presentation != presentation {
+                self.geometry_presentation = presentation;
+                self.refresh_geometry_scene_render_data(&geometry_scene);
+            }
+            return;
+        }
+
+        self.scene.clear();
+        self.scene_buffer_cache.borrow_mut().clear();
+        self.geometry_node_owner_ids.clear();
+        if !same_scene_identity {
+            self.geometry_hidden_owner_node_ids.clear();
+        }
+        self.last_geometry_scene_key = Some(cache_key);
+        self.last_geometry_scene = Some(geometry_scene.clone());
+        self.geometry_presentation = presentation;
+        self.geometry_xray_enabled = preserved_xray_enabled.unwrap_or(geometry_xray_enabled);
+        self.last_figure = None;
+        self.last_scene_viewport_px = Some((
+            self.wgpu_renderer.surface_config.width.max(1),
+            self.wgpu_renderer.surface_config.height.max(1),
+        ));
+        self.last_axes_plot_sizes_px = None;
+        self.last_axes_view_bounds = None;
+        self.last_axes_view_contract = None;
+
+        self.figure_title = geometry_scene.title.clone();
+        self.figure_sg_title = None;
+        self.figure_sg_title_style = TextStyle::default();
+        self.figure_x_label = Some("X".to_string());
+        self.figure_y_label = Some("Y".to_string());
+        self.figure_z_label = Some("Z".to_string());
+        self.figure_show_grid = geometry_scene.show_grid;
+        self.figure_show_legend = false;
+        self.figure_show_box = true;
+        self.figure_x_limits = None;
+        self.figure_y_limits = None;
+        self.legend_entries.clear();
+        self.figure_x_log = false;
+        self.figure_y_log = false;
+        self.figure_axis_equal = geometry_scene.axis_equal;
+        self.figure_colorbar_enabled = false;
+        self.figure_categorical_is_x = None;
+        self.figure_categorical_labels = None;
+
+        self.axes_cameras.clear();
+        self.axes_cameras
+            .push(preserved_camera.clone().unwrap_or_else(Camera::new));
+        self.axes_2d_camera_user_controlled.clear();
+        self.axes_2d_camera_user_controlled.push(false);
+        self.axes_applied_view_revisions.clear();
+        self.axes_applied_view_revisions.push(None);
+
+        for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
+            let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
+            if !chunk.owner_node_ids.is_empty() {
+                self.geometry_node_owner_ids
+                    .insert(node_id, chunk.owner_node_ids.clone());
+            }
+        }
+
+        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
+            self.scene.add_node(node);
+        }
+        self.apply_geometry_xray_to_nodes();
+        self.apply_geometry_visibility_filter();
+
+        if preserved_camera.is_none() {
+            let mut camera = Camera::new();
+            if Self::bounds_are_finite(geometry_scene.bounds) {
+                camera.target = geometry_scene.bounds.center();
+                camera.up = Vec3::Z;
+                camera.position = camera.target + Vec3::new(1.0, -1.0, 1.0);
+                camera.fit_bounds(geometry_scene.bounds.min, geometry_scene.bounds.max);
+            }
+            self.axes_cameras[0] = camera;
+        }
+        self.camera_auto_fit = false;
+        self.needs_update = true;
     }
 
     /// Add a figure to the current scene
@@ -1019,6 +1193,89 @@ impl PlotRenderer {
         self.needs_update = true;
     }
 
+    pub fn reset_geometry_view(&mut self) {
+        self.set_camera_view_preset(CameraViewPreset::Perspective);
+    }
+
+    pub fn set_camera_view_preset(&mut self, preset: CameraViewPreset) {
+        let bounds_by_axes: Vec<Option<BoundingBox>> = (0..self.axes_cameras.len())
+            .map(|idx| {
+                if self.axes_has_3d_content(idx) {
+                    self.display_bounds_3d_for_axes(idx)
+                } else {
+                    self.axes_bounds(idx)
+                }
+            })
+            .collect();
+        let display_bounds: PerAxesViewBounds = (0..self.axes_cameras.len())
+            .map(|idx| self.display_bounds_for_axes(idx))
+            .collect();
+
+        for (idx, camera) in self.axes_cameras.iter_mut().enumerate() {
+            if matches!(
+                camera.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
+                Self::apply_perspective_view_preset(camera, preset, bounds_by_axes[idx]);
+            } else if let Some((x_min, x_max, y_min, y_max)) = display_bounds[idx] {
+                let mut cam = Self::create_default_camera();
+                if let crate::core::camera::ProjectionType::Orthographic {
+                    ref mut left,
+                    ref mut right,
+                    ref mut bottom,
+                    ref mut top,
+                    ..
+                } = cam.projection
+                {
+                    *left = x_min as f32;
+                    *right = x_max as f32;
+                    *bottom = y_min as f32;
+                    *top = y_max as f32;
+                }
+                cam.position.z = 1.0;
+                cam.target.z = 0.0;
+                cam.mark_dirty();
+                *camera = cam;
+            }
+        }
+
+        self.clear_all_axes_camera_interaction();
+        self.camera_auto_fit = false;
+        self.needs_update = true;
+    }
+
+    fn apply_perspective_view_preset(
+        camera: &mut Camera,
+        preset: CameraViewPreset,
+        bounds: Option<BoundingBox>,
+    ) {
+        let (direction, up) = Self::view_preset_orientation(preset);
+        camera.up = up;
+
+        if let Some(bounds) = bounds {
+            let center = (bounds.min + bounds.max) * 0.5;
+            camera.target = center;
+            camera.position = center + direction;
+            camera.fit_bounds(bounds.min, bounds.max);
+        } else {
+            let distance = (camera.position - camera.target).length().max(1.0);
+            camera.position = camera.target + direction * distance;
+            camera.mark_dirty();
+        }
+    }
+
+    fn view_preset_orientation(preset: CameraViewPreset) -> (Vec3, Vec3) {
+        match preset {
+            CameraViewPreset::Perspective => (Vec3::new(1.0, -1.0, 1.0).normalize(), Vec3::Z),
+            CameraViewPreset::Top => (Vec3::Z, Vec3::Y),
+            CameraViewPreset::Bottom => (-Vec3::Z, Vec3::Y),
+            CameraViewPreset::Front => (-Vec3::Y, Vec3::Z),
+            CameraViewPreset::Back => (Vec3::Y, Vec3::Z),
+            CameraViewPreset::Left => (-Vec3::X, Vec3::Z),
+            CameraViewPreset::Right => (Vec3::X, Vec3::Z),
+        }
+    }
+
     /// Explicit "Reset Camera" action. Restores the default orientation without re-framing.
     ///
     /// For 3D, this resets the view direction around the current data center (or current target)
@@ -1205,6 +1462,12 @@ impl PlotRenderer {
         Ok(RenderResult {
             success: true,
             data_bounds: self.data_bounds,
+            axes_viewports_px: vec![(
+                vx.round().max(0.0) as u32,
+                vy.round().max(0.0) as u32,
+                vw.round().max(1.0) as u32,
+                vh.round().max(1.0) as u32,
+            )],
             vertex_count: total_vertices,
             triangle_count: total_triangles,
             render_time_ms: render_time,
@@ -1557,6 +1820,7 @@ impl PlotRenderer {
         Ok(RenderResult {
             success: true,
             data_bounds: self.data_bounds,
+            axes_viewports_px: vec![(0, 0, config.width.max(1), config.height.max(1))],
             vertex_count: total_vertices,
             triangle_count: total_triangles,
             render_time_ms: render_time,
@@ -1613,6 +1877,7 @@ impl PlotRenderer {
         Ok(RenderResult {
             success: true,
             data_bounds: self.data_bounds,
+            axes_viewports_px: viewports,
             vertex_count: stats.total_vertices,
             triangle_count: stats.total_triangles,
             render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
@@ -1767,6 +2032,7 @@ impl PlotRenderer {
             return Ok(RenderResult {
                 success: true,
                 data_bounds: self.data_bounds,
+                axes_viewports_px: vec![(0, 0, target_w, target_h)],
                 vertex_count: 0,
                 triangle_count: 0,
                 render_time_ms: 0.0,
@@ -1834,13 +2100,14 @@ impl PlotRenderer {
         let mut grid_plane_buffers: Option<(wgpu::Buffer, wgpu::Buffer)> = None;
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
+        let render_item_logs = render_item_diagnostics_enabled();
         log::debug!(
             "runmat-plot: renderer.camera_to_target_viewport.collect_render_items.start axes_index={}",
             axes_index
         );
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
-                if node.axes_index == axes_index {
+                if render_item_logs && node.axes_index == axes_index {
                     log::debug!(
                         target: "runmat_plot.draw_item",
                         "draw item axes_index={} node_axes_index={} pipeline={:?} vertex_count={} has_indices={} has_bounds={} gpu_vertices={}",
@@ -1872,9 +2139,10 @@ impl PlotRenderer {
             total_triangles
         );
 
-        // 3D helpers: CAD-style XY grid at Z=0 (grid on/off) + origin triad (always).
+        // 3D helpers: CAD-style XY grid and world-axis ticks. The compact corner
+        // triad is drawn separately and remains available as navigation context.
         // These are generated per-frame so they can adapt to zoom level.
-        if !is_2d {
+        if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
             let view_proj = view_proj_matrix;
             let inv_view_proj = view_proj.inverse();
 
@@ -2079,7 +2347,7 @@ impl PlotRenderer {
                 grid_plane_buffers = Some((vb, ib));
             }
 
-            // Origin triad (always, for spatial awareness).
+            // World-axis helper for spatial awareness at model scale.
             let axis_len = (major_step as f32 * 5.0).clamp(0.5, (dx.max(dy) * 0.6).max(0.5));
             let origin = Vec3::new(0.0, 0.0, 0.0);
             let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
@@ -2230,7 +2498,14 @@ impl PlotRenderer {
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
         if is_2d && (show_major_grid || show_minor_grid) {
-            if let Some((l, r, b, t)) = self.view_bounds_for_axes(axes_index) {
+            if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
+                if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
+                    let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
+                    l = -radius;
+                    r = radius;
+                    b = -radius;
+                    t = radius;
+                }
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
@@ -2250,47 +2525,61 @@ impl PlotRenderer {
                 let g = 80.0_f32 / 255.0_f32;
                 let major_col = Vec4::new(g, g, g, 1.0);
                 let minor_col = Vec4::new(g, g, g, 0.42);
-                if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
-                    let minor_step = (x_step / 5.0).max(f64::EPSILON);
-                    Self::push_vertical_grid_lines(
+                if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
+                    let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
+                    let step = plot_utils::calculate_tick_interval(radius);
+                    Self::push_polar_grid_lines(
                         &mut grid_vertices,
-                        (l, r),
-                        (b, t),
-                        minor_step,
-                        minor_col,
-                        Some((x_step, minor_step * 0.25)),
-                    );
-                }
-                if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
-                    let minor_step = (y_step / 5.0).max(f64::EPSILON);
-                    Self::push_horizontal_grid_lines(
-                        &mut grid_vertices,
-                        (b, t),
-                        (l, r),
-                        minor_step,
-                        minor_col,
-                        Some((y_step, minor_step * 0.25)),
-                    );
-                }
-                if show_major_grid && x_step.is_finite() && x_step > 0.0 {
-                    Self::push_vertical_grid_lines(
-                        &mut grid_vertices,
-                        (l, r),
-                        (b, t),
-                        x_step,
+                        radius,
+                        step,
+                        show_major_grid,
+                        show_minor_grid,
                         major_col,
-                        None,
+                        minor_col,
                     );
-                }
-                if show_major_grid && y_step.is_finite() && y_step > 0.0 {
-                    Self::push_horizontal_grid_lines(
-                        &mut grid_vertices,
-                        (b, t),
-                        (l, r),
-                        y_step,
-                        major_col,
-                        None,
-                    );
+                } else {
+                    if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
+                        let minor_step = (x_step / 5.0).max(f64::EPSILON);
+                        Self::push_vertical_grid_lines(
+                            &mut grid_vertices,
+                            (l, r),
+                            (b, t),
+                            minor_step,
+                            minor_col,
+                            Some((x_step, minor_step * 0.25)),
+                        );
+                    }
+                    if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
+                        let minor_step = (y_step / 5.0).max(f64::EPSILON);
+                        Self::push_horizontal_grid_lines(
+                            &mut grid_vertices,
+                            (b, t),
+                            (l, r),
+                            minor_step,
+                            minor_col,
+                            Some((y_step, minor_step * 0.25)),
+                        );
+                    }
+                    if show_major_grid && x_step.is_finite() && x_step > 0.0 {
+                        Self::push_vertical_grid_lines(
+                            &mut grid_vertices,
+                            (l, r),
+                            (b, t),
+                            x_step,
+                            major_col,
+                            None,
+                        );
+                    }
+                    if show_major_grid && y_step.is_finite() && y_step > 0.0 {
+                        Self::push_horizontal_grid_lines(
+                            &mut grid_vertices,
+                            (b, t),
+                            (l, r),
+                            y_step,
+                            major_col,
+                            None,
+                        );
+                    }
                 }
                 if !grid_vertices.is_empty() {
                     grid_vb_opt = Some(self.wgpu_renderer.create_vertex_buffer(&grid_vertices));
@@ -2488,17 +2777,19 @@ impl PlotRenderer {
                         || (use_direct_for_lines && is_lines)
                         || is_points)
                     && bounds_opt.is_some();
-                log::debug!(
-                    "runmat-plot: renderer.camera_to_target_viewport.draw_item_start axes_index={} item_index={} pipeline={:?} use_direct={} textured={} indexed={} draw_calls={} point_buffer={} ",
-                    axes_index,
-                    idx,
-                    render_data.pipeline_type,
-                    use_direct,
-                    is_textured,
-                    index_buffer.is_some(),
-                    render_data.draw_calls.len(),
-                    point_buffers[idx].is_some()
-                );
+                if render_item_logs {
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_start axes_index={} item_index={} pipeline={:?} use_direct={} textured={} indexed={} draw_calls={} point_buffer={} ",
+                        axes_index,
+                        idx,
+                        render_data.pipeline_type,
+                        use_direct,
+                        is_textured,
+                        index_buffer.is_some(),
+                        render_data.draw_calls.len(),
+                        point_buffers[idx].is_some()
+                    );
+                }
 
                 if use_direct {
                     // Safe because we only read pointers here within pass
@@ -2521,11 +2812,13 @@ impl PlotRenderer {
                             render_pass.set_bind_group(1, bg, &[]);
                         }
                     }
-                    log::debug!(
-                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
-                        axes_index,
-                        idx
-                    );
+                    if render_item_logs {
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
+                            axes_index,
+                            idx
+                        );
+                    }
                 } else if is_textured {
                     let pipeline = self
                         .wgpu_renderer
@@ -2540,11 +2833,13 @@ impl PlotRenderer {
                     if let Some(ref bg) = image_bind_groups[idx] {
                         render_pass.set_bind_group(1, bg, &[]);
                     }
-                    log::debug!(
-                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=textured",
-                        axes_index,
-                        idx
-                    );
+                    if render_item_logs {
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=textured",
+                            axes_index,
+                            idx
+                        );
+                    }
                 } else {
                     let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
                     render_pass.set_pipeline(pipeline);
@@ -2565,23 +2860,27 @@ impl PlotRenderer {
                             &[],
                         );
                     }
-                    log::debug!(
-                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
-                        axes_index,
-                        idx
-                    );
+                    if render_item_logs {
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
+                            axes_index,
+                            idx
+                        );
+                    }
                 }
 
                 if is_points && use_direct {
                     if let Some((ref buf, len)) = point_buffers[idx] {
                         render_pass.set_vertex_buffer(0, buf.slice(..));
                         render_pass.draw(0..len as u32, 0..1);
-                        log::debug!(
-                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=direct_points vertices={}",
-                            axes_index,
-                            idx,
-                            len
-                        );
+                        if render_item_logs {
+                            log::debug!(
+                                "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=direct_points vertices={}",
+                                axes_index,
+                                idx,
+                                len
+                            );
+                        }
                         continue;
                     }
                 } else if is_points {
@@ -2598,12 +2897,14 @@ impl PlotRenderer {
                         .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
                     if let Some(indices) = &render_data.indices {
                         render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                        log::debug!(
-                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=indexed indices={}",
-                            axes_index,
-                            idx,
-                            indices.len()
-                        );
+                        if render_item_logs {
+                            log::debug!(
+                                "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=indexed indices={}",
+                                axes_index,
+                                idx,
+                                indices.len()
+                            );
+                        }
                     }
                 } else {
                     if is_points {
@@ -2617,14 +2918,16 @@ impl PlotRenderer {
                             dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,
                             0..dc.instance_count as u32,
                         );
-                        log::debug!(
-                            "runmat-plot: renderer.camera_to_target_viewport.draw_call_ok axes_index={} item_index={} mode=draw vertex_offset={} vertex_count={} instances={}",
-                            axes_index,
-                            idx,
-                            dc.vertex_offset,
-                            dc.vertex_count,
-                            dc.instance_count
-                        );
+                        if render_item_logs {
+                            log::debug!(
+                                "runmat-plot: renderer.camera_to_target_viewport.draw_call_ok axes_index={} item_index={} mode=draw vertex_offset={} vertex_count={} instances={}",
+                                axes_index,
+                                idx,
+                                dc.vertex_offset,
+                                dc.vertex_count,
+                                dc.instance_count
+                            );
+                        }
                     }
                 }
             }
@@ -2670,6 +2973,7 @@ impl PlotRenderer {
         Ok(RenderResult {
             success: true,
             data_bounds: self.data_bounds,
+            axes_viewports_px: vec![(sx, sy, sw, sh)],
             vertex_count: total_vertices,
             triangle_count: total_triangles,
             render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
@@ -2898,6 +3202,12 @@ impl PlotRenderer {
     pub fn overlay_show_grid(&self) -> bool {
         self.figure_show_grid
     }
+
+    pub fn set_overlay_grid_enabled(&mut self, enabled: bool) {
+        self.figure_show_grid = enabled;
+        self.needs_update = true;
+    }
+
     pub fn overlay_show_minor_grid(&self) -> bool {
         self.figure_show_minor_grid
     }
@@ -2914,6 +3224,13 @@ impl PlotRenderer {
             self.figure_show_minor_grid,
             axes_index,
         )
+    }
+
+    pub fn overlay_axes_kind_for_axes(&self, axes_index: usize) -> AxesKind {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_kind(axes_index))
+            .unwrap_or(AxesKind::Cartesian)
     }
 
     fn minor_grid_for_axes(
@@ -2962,6 +3279,72 @@ impl PlotRenderer {
                 vertices.push(Vertex::new(Vec3::new(x1, y, 0.0), color));
             }
         });
+    }
+
+    fn push_polar_grid_lines(
+        vertices: &mut Vec<Vertex>,
+        radius: f64,
+        major_step: f64,
+        show_major: bool,
+        show_minor: bool,
+        major_color: Vec4,
+        minor_color: Vec4,
+    ) {
+        if !radius.is_finite() || radius <= 0.0 || !major_step.is_finite() || major_step <= 0.0 {
+            return;
+        }
+
+        if show_minor {
+            let minor_step = (major_step / 5.0).max(f64::EPSILON);
+            Self::for_each_grid_position(
+                minor_step,
+                radius,
+                minor_step,
+                Some((major_step, minor_step * 0.25)),
+                |r| {
+                    Self::push_circle_grid_line(vertices, r, minor_color);
+                },
+            );
+        }
+        if show_major {
+            Self::for_each_grid_position(major_step, radius, major_step, None, |r| {
+                Self::push_circle_grid_line(vertices, r, major_color);
+            });
+            for i in 0..12 {
+                let theta = i as f64 * std::f64::consts::TAU / 12.0;
+                let x = (theta.cos() * radius) as f32;
+                let y = (theta.sin() * radius) as f32;
+                if x.is_finite() && y.is_finite() {
+                    vertices.push(Vertex::new(Vec3::ZERO, major_color));
+                    vertices.push(Vertex::new(Vec3::new(x, y, 0.0), major_color));
+                }
+            }
+        }
+    }
+
+    fn push_circle_grid_line(vertices: &mut Vec<Vertex>, radius: f64, color: Vec4) {
+        if !radius.is_finite() || radius <= 0.0 {
+            return;
+        }
+        const SEGMENTS: usize = 96;
+        for i in 0..SEGMENTS {
+            let theta0 = i as f64 * std::f64::consts::TAU / SEGMENTS as f64;
+            let theta1 = (i + 1) as f64 * std::f64::consts::TAU / SEGMENTS as f64;
+            let p0 = Vec3::new(
+                (theta0.cos() * radius) as f32,
+                (theta0.sin() * radius) as f32,
+                0.0,
+            );
+            let p1 = Vec3::new(
+                (theta1.cos() * radius) as f32,
+                (theta1.sin() * radius) as f32,
+                0.0,
+            );
+            if p0.is_finite() && p1.is_finite() {
+                vertices.push(Vertex::new(p0, color));
+                vertices.push(Vertex::new(p1, color));
+            }
+        }
     }
 
     fn for_each_grid_position(
@@ -3014,6 +3397,118 @@ impl PlotRenderer {
     }
     pub fn overlay_title(&self) -> Option<&String> {
         self.figure_title.as_ref()
+    }
+    pub fn geometry_overlay(&self) -> Option<&GeometrySceneOverlay> {
+        self.geometry_overlay.as_ref()
+    }
+    pub fn geometry_xray_enabled(&self) -> bool {
+        self.geometry_xray_enabled
+    }
+    pub fn geometry_scene_presentation(&self) -> &GeometryScenePresentation {
+        &self.geometry_presentation
+    }
+    pub fn set_geometry_scene_presentation(&mut self, presentation: GeometryScenePresentation) {
+        if self.geometry_presentation == presentation {
+            return;
+        }
+        self.geometry_presentation = presentation;
+        if let Some(scene) = self.last_geometry_scene.clone() {
+            self.refresh_geometry_scene_render_data(&scene);
+        }
+    }
+    pub fn geometry_owner_visible(&self, owner_id: &str) -> bool {
+        !self.geometry_hidden_owner_node_ids.contains(owner_id)
+    }
+    pub fn set_geometry_owner_visible(&mut self, owner_id: impl Into<String>, visible: bool) {
+        let owner_id = owner_id.into();
+        if owner_id.trim().is_empty() {
+            return;
+        }
+        if visible {
+            if !self.geometry_hidden_owner_node_ids.remove(&owner_id) {
+                return;
+            }
+        } else if !self.geometry_hidden_owner_node_ids.insert(owner_id) {
+            return;
+        }
+        self.apply_geometry_visibility_filter();
+        self.needs_update = true;
+    }
+    fn refresh_geometry_scene_render_data(&mut self, geometry_scene: &GeometryScene) {
+        for (index, chunk) in geometry_scene.chunks.iter().enumerate() {
+            let node_id = geometry_scene.chunk_node_id(index, &chunk.chunk_id);
+            if let Some(node) = self.scene.get_node_mut(node_id) {
+                node.render_data =
+                    Some(chunk.render_data_with_presentation(&self.geometry_presentation));
+                node.bounds = chunk.bounds;
+                node.visible = chunk.visible;
+            }
+        }
+        self.apply_geometry_xray_to_nodes();
+        self.apply_geometry_visibility_filter();
+        self.scene_buffer_cache.borrow_mut().clear();
+        self.needs_update = true;
+    }
+    fn apply_geometry_visibility_filter(&mut self) {
+        if self.geometry_node_owner_ids.is_empty() {
+            return;
+        }
+        let hidden_owner_ids = &self.geometry_hidden_owner_node_ids;
+        let node_owner_ids = &self.geometry_node_owner_ids;
+        self.scene.for_each_node_mut(|node| {
+            let Some(owner_ids) = node_owner_ids.get(&node.id) else {
+                return;
+            };
+            node.visible = !owner_ids
+                .iter()
+                .any(|owner_id| hidden_owner_ids.contains(owner_id));
+        });
+    }
+    pub fn set_geometry_xray_enabled(&mut self, enabled: bool) {
+        if self.geometry_overlay.is_none() || self.geometry_xray_enabled == enabled {
+            return;
+        }
+        self.geometry_xray_enabled = enabled;
+        if let Some(scene) = self.last_geometry_scene.clone() {
+            self.refresh_geometry_scene_render_data(&scene);
+        } else {
+            self.apply_geometry_xray_to_nodes();
+            self.scene_buffer_cache.borrow_mut().clear();
+            self.needs_update = true;
+        }
+    }
+    fn apply_geometry_xray_to_nodes(&mut self) {
+        let alpha = if self.geometry_xray_enabled {
+            0.38
+        } else {
+            1.0
+        };
+        self.scene.for_each_node_mut(|node| {
+            if let Some(render_data) = node.render_data.as_mut() {
+                if matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Triangles
+                ) {
+                    render_data.material.albedo.w = if self.geometry_xray_enabled {
+                        render_data.material.albedo.w.min(alpha)
+                    } else {
+                        render_data.material.albedo.w.max(alpha)
+                    };
+                    render_data.material.alpha_mode = if render_data.material.albedo.w < 0.98 {
+                        crate::core::AlphaMode::Blend
+                    } else {
+                        crate::core::AlphaMode::Opaque
+                    };
+                    for vertex in &mut render_data.vertices {
+                        vertex.color[3] = if self.geometry_xray_enabled {
+                            vertex.color[3].min(alpha)
+                        } else {
+                            vertex.color[3].max(alpha)
+                        };
+                    }
+                }
+            }
+        });
     }
     pub fn overlay_sg_title(&self) -> Option<&String> {
         self.figure_sg_title.as_ref()

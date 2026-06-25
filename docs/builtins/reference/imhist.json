@@ -10,7 +10,6 @@
     "matlab imhist"
   ],
   "summary": "Compute or display grayscale and indexed-image histograms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

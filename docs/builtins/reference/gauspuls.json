@@ -9,9 +9,6 @@
     "cutoff"
   ],
   "summary": "Generate Gaussian-modulated sinusoidal pulses.",
-  "references": [
-    "title: \"MATLAB gauspuls documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

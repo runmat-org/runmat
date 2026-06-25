@@ -1,0 +1,90 @@
+{
+  "title": "lsqcurvefit",
+  "category": "math/optim",
+  "keywords": [
+    "lsqcurvefit",
+    "least squares",
+    "curve fitting",
+    "optimization",
+    "Levenberg-Marquardt",
+    "bounds"
+  ],
+  "summary": "Fit nonlinear parametric curves in the least-squares sense.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The iterative nonlinear least-squares solver runs on the host. Callback functions may still call GPU-aware builtins, but residuals and finite-difference Jacobians are gathered for the solve."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 7,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::lsqcurvefit::tests",
+    "integration": "runmat-vm/tests/closures.rs::lsqcurvefit_accepts_anonymous_curve_model"
+  },
+  "description": "`x = lsqcurvefit(fun, x0, xdata, ydata)` estimates parameters `x` so that `fun(x, xdata)` matches `ydata` in the least-squares sense. RunMat preserves the shape of `x0`, supports scalar and vector parameters, accepts lower and upper parameter bounds, and can return solver diagnostics through MATLAB-compatible multi-output forms.",
+  "behaviors": [
+    "The model callback is evaluated as `fun(x, xdata)` and must return a finite real scalar or array with the same shape as `ydata`.",
+    "Unbounded problems use finite-difference Levenberg-Marquardt iterations.",
+    "Bounded problems project trial points into `[lb, ub]` and estimate finite-difference Jacobians without stepping outside finite bounds.",
+    "`lb` and `ub` may be empty, scalar, or arrays with the same number of elements as `x0`; scalar bounds are broadcast to every parameter.",
+    "`optimset` and `optimoptions` option structs are accepted. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm` are recognized.",
+    "`Algorithm` accepts `levenberg-marquardt` and `trust-region-reflective`; both currently use RunMat's projected Levenberg-Marquardt implementation.",
+    "With requested outputs, RunMat supports `[x, resnorm, residual, exitflag, output, lambda, jacobian]`."
+  ],
+  "examples": [
+    {
+      "description": "Fit a line",
+      "input": "xdata = [0 1 2 3];\nydata = 2.*xdata + 1;\np = lsqcurvefit(@(p,x) p(1).*x + p(2), [0; 0], xdata, ydata)",
+      "output": "p =\n    2.0000\n    1.0000"
+    },
+    {
+      "description": "Fit an exponential decay",
+      "input": "xdata = 0:0.2:2;\nydata = 2.5.*exp(-0.7.*xdata);\np = lsqcurvefit(@(p,x) p(1).*exp(-p(2).*x), [1; 0.1], xdata, ydata)",
+      "output": "p =\n    2.5000\n    0.7000"
+    },
+    {
+      "description": "Fit with bounds and diagnostics",
+      "input": "opts = optimoptions(\"lsqcurvefit\", \"TolX\", 1e-8, \"Display\", \"off\");\n[p, resnorm, residual, exitflag, output] = lsqcurvefit(@(p,x) p(1).*x, 0.5, [1 2 3], [2 4 6], 0, 1, opts)",
+      "output": "p =\n    1.0000"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does lsqcurvefit run on the GPU?",
+      "answer": "The solver itself is host-side because it repeatedly invokes user callbacks and adapts finite-difference steps. The callback can still use GPU-aware builtins, but the residual vector is gathered before each solver step."
+    },
+    {
+      "question": "What is returned in lambda?",
+      "answer": "`lambda.lower` and `lambda.upper` are approximate bound multipliers computed from the final finite-difference Jacobian and residual."
+    },
+    {
+      "question": "Are nonlinear constraints supported?",
+      "answer": "No. The MATLAB-compatible curve-fitting forms with optional lower and upper parameter bounds are supported."
+    }
+  ],
+  "links": [
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimoptions",
+      "url": "./optimoptions"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/lsqcurvefit.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/lsqcurvefit.rs"
+  }
+}

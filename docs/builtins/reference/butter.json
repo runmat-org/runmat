@@ -12,9 +12,6 @@
     "signal processing"
   ],
   "summary": "Design Butterworth IIR filters.",
-  "references": [
-    "title: \"MATLAB butter documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -429,7 +429,7 @@ impl OrderFieldsEvaluation {
 fn reorder_struct_array(array: &CellArray, order: &[String]) -> BuiltinResult<CellArray> {
     let mut reordered_elems = Vec::with_capacity(array.data.len());
     for (index, handle) in array.data.iter().enumerate() {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let Value::Struct(st) = value else {
             return Err(orderfields_error_with_message(
                 format!(
@@ -536,7 +536,7 @@ fn extract_reference_struct(value: &Value) -> BuiltinResult<Option<StructValue>>
         Value::Cell(cell) => {
             let mut first: Option<StructValue> = None;
             for (index, handle) in cell.data.iter().enumerate() {
-                let value = unsafe { &*handle.as_raw() };
+                let value = handle;
                 if let Value::Struct(st) = value {
                     if first.is_none() {
                         first = Some(st.clone());
@@ -565,7 +565,7 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
         Value::Cell(cell) => {
             let mut names = Vec::with_capacity(cell.data.len());
             for (index, handle) in cell.data.iter().enumerate() {
-                let value = unsafe { &*handle.as_raw() };
+                let value = handle;
                 let text = scalar_string(value).ok_or_else(|| {
                     orderfields_error_with_message(
                         format!(
@@ -666,7 +666,7 @@ fn ensure_same_field_set(order: &[String], original: &StructValue) -> BuiltinRes
 }
 
 fn extract_struct_from_cell(cell: &CellArray, index: usize) -> BuiltinResult<StructValue> {
-    let value = unsafe { &*cell.data[index].as_raw() };
+    let value = &cell.data[index];
     match value {
         Value::Struct(st) => Ok(st.clone()),
         other => Err(orderfields_error_with_message(
@@ -916,7 +916,7 @@ pub(crate) mod tests {
             panic!("expected cell array");
         };
         for handle in &reordered.data {
-            let Value::Struct(st) = (unsafe { &*handle.as_raw() }) else {
+            let Value::Struct(st) = handle else {
                 panic!("expected struct element");
             };
             assert_eq!(field_order(st), vec!["a".to_string(), "b".to_string()]);

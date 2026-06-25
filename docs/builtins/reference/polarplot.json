@@ -1,0 +1,96 @@
+{
+  "title": "polarplot",
+  "category": "plotting",
+  "keywords": [
+    "polarplot",
+    "polar plot",
+    "polar coordinates",
+    "theta rho",
+    "matlab polarplot",
+    "line plot"
+  ],
+  "summary": "Create 2-D line plots in polar coordinates.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "polarplot is a rendering sink. Real GPU inputs are gathered before polar-to-cartesian conversion; the resulting line uses the normal plotting renderer."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::polarplot::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`polarplot` converts angular/radial data to cartesian line coordinates and marks the active axes as polar so the renderer draws concentric radial rings and angular spokes.",
+  "behaviors": [
+    "`polarplot(theta, rho)` interprets theta values as radians and requires theta and rho to have the same number of elements.",
+    "`polarplot(rho)` creates implicit theta values over `[0, 2*pi]` with the same number of samples as rho.",
+    "`polarplot(Z)` interprets complex input as `theta = angle(Z)` and `rho = abs(Z)`.",
+    "Matrix rho or Z inputs create one polar line per column. A vector theta can be paired with a rho matrix when its length matches each column.",
+    "Multiple theta/rho pairs in one call create multiple line objects and return the handle for the first created series.",
+    "LineSpec strings and common line name/value pairs such as `LineWidth`, `Color`, `Marker`, and `DisplayName` share the same parser used by `plot`. A final all-name/value group applies to every line created by that call.",
+    "Empty data creates an empty line object, matching MATLAB graphics-object behavior.",
+    "The target axes are switched to polar mode with equal x/y scaling and symmetric cartesian limits based on the largest radius."
+  ],
+  "options": [
+    "Use MATLAB-style line specs such as `'r--'`, `'bo-'`, and `':'` after a polar series.",
+    "Use `hold on` before additional `polarplot` calls to overlay more polar lines on the same axes.",
+    "Use `set(h, ...)` on the returned line handle to update line properties after plotting."
+  ],
+  "examples": [
+    {
+      "description": "Plot a polar curve from theta and rho",
+      "input": "theta = linspace(0, 2*pi, 200);\nrho = abs(sin(2*theta).*cos(2*theta));\nh = polarplot(theta, rho);",
+      "output": "% h is a numeric handle for the first polar line"
+    },
+    {
+      "description": "Use complex data",
+      "input": "z = exp(1i*linspace(0, 2*pi, 100));\npolarplot(z, 'r--');",
+      "output": "% theta comes from angle(z), rho comes from abs(z)"
+    },
+    {
+      "description": "Overlay multiple polar series",
+      "input": "theta = linspace(0, 2*pi, 200);\npolarplot(theta, abs(sin(theta)), 'b-');\nhold on;\npolarplot(theta, abs(cos(theta)), 'r--', 'LineWidth', 2);",
+      "output": "% both lines share the same polar axes"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does polarplot store polar data internally?",
+      "answer": "The line object stores cartesian x/y coordinates after conversion. The axes metadata records that the axes are polar, which controls grid rendering and equal aspect behavior."
+    },
+    {
+      "question": "Are advanced MATLAB polar axes properties supported?",
+      "answer": "The initial implementation supports the common plotting forms, line styles, and polar grid rendering. Advanced axes properties such as `ThetaLim`, `RLim`, `ThetaDir`, and `ThetaZeroLocation` are not yet separate builtins/properties."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "hold",
+      "url": "./hold"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    }
+  ]
+}

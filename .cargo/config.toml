@@ -1,6 +1,9 @@
 [build]
 rustflags = ["-Dwarnings"]
 
+[alias]
+build-no-occt = "build -p runmat --no-default-features --features gui,blas-lapack,wgpu,jit"
+
 # Increase the default main-thread stack on Windows to 64 MB.
 # Clap's generated parser code for large command hierarchies can overflow
 # the OS default of ~1 MB before Rust's own stack-guard kicks in.

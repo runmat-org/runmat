@@ -617,8 +617,8 @@ pub(crate) mod tests {
                 };
                 assert_eq!(cell.data.len(), expected_total, "element count mismatch");
                 for handle in cell.data {
-                    let element = unsafe { &*handle.as_raw() };
-                    check(element);
+                    let element = handle;
+                    check(&element);
                 }
             }
             other => panic!("expected cell array, got {other:?}"),

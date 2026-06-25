@@ -10,7 +10,6 @@
     "3d"
   ],
   "summary": "Generate coordinate grids in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -39,7 +38,7 @@
     "`meshgrid(x, y, z)` returns three outputs sized `length(y) × length(x) × length(z)`, enabling 3-D volume visualisation.",
     "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
     "Complex inputs produce complex grids where each output shares the input’s complex values.",
-    "Supplying GPU vectors (or a `'like', gpuArray(...)` prototype) keeps the outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
+    "Supplying GPU vectors (or a `'like', gpuArray(...)` prototype) keeps real and complex-interleaved outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
     "`'like', prototype` matches both the residency (host or GPU) and numeric class (real or complex) of the prototype. Integer prototypes are promoted to double precision, consistent with MATLAB."
   ],
   "examples": [
@@ -94,7 +93,7 @@
     },
     {
       "question": "Does `meshgrid` support complex numbers?",
-      "answer": "Absolutely. Any imaginary components propagate into the outputs. Complex grids currently stay on the host even if GPU residency is requested."
+      "answer": "Absolutely. Any imaginary components propagate into the outputs. With an acceleration provider active, complex GPU inputs and complex `gpuArray` prototypes produce complex-interleaved GPU outputs."
     },
     {
       "question": "What does `'like'` do?",
@@ -187,10 +186,10 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs"
   },
-  "gpu_residency": "You usually do **not** need to wrap vectors with `gpuArray` manually. When the active acceleration provider supports uploads, RunMat automatically constructs the grid on the host and keeps the outputs on the GPU. Supplying a `'like', gpuArray(...)` prototype produces GPU outputs even when all inputs are host arrays. Until native provider hooks land, complex-valued grids remain host-side and emit a warning when GPU residency is requested.",
+  "gpu_residency": "You usually do **not** need to wrap vectors with `gpuArray` manually. When the active acceleration provider supports uploads, RunMat keeps real and complex-interleaved outputs on the GPU. Supplying a `'like', gpuArray(...)` prototype produces GPU outputs even when all inputs are host arrays, and complex GPU prototypes request complex-interleaved GPU outputs.",
   "gpu_behavior": [
-    "When the active acceleration provider implements the custom `meshgrid` hook, RunMat allocates every coordinate tensor directly on the device so large grids avoid host round-trips entirely.",
-    "If the hook is missing (or errors), RunMat gathers the 1-D axes, materialises the grids once on the host, and uploads the outputs whenever GPU residency is requested, preserving observable semantics.",
-    "Complex-valued grids always materialise on the host today; when GPU residency is requested the runtime logs a trace warning and returns host complex tensors so callers still receive correct MATLAB-compatible results."
+    "When vector inputs already live on the GPU, RunMat uses provider `reshape` and `repmat` hooks so real and complex-interleaved axis grids can stay resident.",
+    "If provider-side construction is unavailable, RunMat gathers the 1-D axes, materialises the grids once on the host, and uploads real or complex-interleaved outputs whenever GPU residency is requested, preserving observable semantics.",
+    "Complex GPU outputs use RunMat's interleaved real/imaginary storage metadata, so downstream complex-aware GPU operations can consume them without an immediate gather."
   ]
 }

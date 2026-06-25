@@ -9,7 +9,6 @@
     "temporary path"
   ],
   "summary": "Return the system temporary directory path with a trailing platform file separator.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -19,7 +19,7 @@ required-features = ["native"]
 [features]
 default = ["native"]
 native = ["tokio", "tower-lsp", "env_logger"]
-wasm = ["wasm-bindgen"]
+wasm = ["wasm-bindgen", "runmat-runtime/occt-wasm-host"]
 
 [dependencies]
 log = { workspace = true }

@@ -10,7 +10,6 @@
     "gpu"
   ],
   "summary": "Return common elements or rows across arrays in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

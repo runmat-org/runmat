@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -78,7 +79,7 @@ pub struct RunMatSession {
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Loaded snapshot for standard library preloading
-    snapshot: Option<Arc<Snapshot>>,
+    snapshot: Option<Rc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
     /// Tracks whether an execution is currently active.
@@ -92,6 +93,8 @@ pub struct RunMatSession {
     error_namespace: String,
     /// Active source name for diagnostics (set from execution requests).
     active_source_name: String,
+    /// Resolved active source path for file-aware builtins and source discovery.
+    active_source_fullpath_name: Option<String>,
     pub(crate) telemetry_consent: bool,
     pub(crate) telemetry_client_id: Option<String>,
     pub(crate) telemetry_platform: TelemetryPlatformInfo,

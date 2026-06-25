@@ -78,6 +78,16 @@ cargo build
 cargo build -p runmat
 ```
 
+The default CLI feature set includes `occt-native` for STEP, IGES, and BREP CAD topology import. If `RUNMAT_OCCT_ROOT` or `RUNMAT_OCCT_INCLUDE_DIR`/`RUNMAT_OCCT_LIB_DIR` do not point to an existing OCCT installation, the build uses bundled OCCT and requires CMake on `PATH` or through Cargo's `CMAKE` environment overrides. On macOS, install it with `brew install cmake`.
+
+Developers without CMake or OCCT can build the CLI with the default local feature set minus OCCT CAD topology import:
+
+```bash
+cargo build-no-occt
+```
+
+This alias enables `gui`, `blas-lapack`, `wgpu`, and `jit`, but excludes `occt-native`.
+
 Use release mode when checking CLI performance or benchmark behavior:
 
 ```bash
@@ -100,7 +110,7 @@ The WebAssembly target is `wasm32-unknown-unknown`. The CI path first generates 
 ```bash
 rustup target add wasm32-unknown-unknown
 scripts/regenerate-wasm-registry.sh
-cargo build -p runmat-wasm --target wasm32-unknown-unknown
+cargo build -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host
 scripts/test-wasm-headless.sh
 ```
 
@@ -114,7 +124,7 @@ npm run build
 
 `npm run build` cleans previous artifacts, generates builtin metadata, builds the web WASM package, builds the WASM LSP package, emits TypeScript, creates the standard-library snapshot, and syncs WASM artifacts into `dist`.
 
-The WASM registry has an ordering constraint: proc macros write registry entries while `runmat-runtime` compiles for `wasm32-unknown-unknown`. Always use `scripts/regenerate-wasm-registry.sh`; it generates the production `plot-web` registry into a temporary file, marks it complete only after cargo succeeds, then atomically replaces `generated_wasm_registry.rs`. Normal WASM builds validate the source fingerprint, target/features, completion marker, and entry count, and fail if the registry is missing, partial, stale, or generated for another runtime configuration.
+The WASM registry has an ordering constraint: proc macros write registry entries while `runmat-runtime` compiles for `wasm32-unknown-unknown`. Always use `scripts/regenerate-wasm-registry.sh`; it generates the production `plot-web,occt-wasm-host` registry into a temporary file, marks it complete only after cargo succeeds, then atomically replaces `generated_wasm_registry.rs`. Normal WASM builds validate the source fingerprint, target/features, completion marker, and entry count, and fail if the registry is missing, partial, stale, or generated for another runtime configuration.
 
 ## Release Helpers
 

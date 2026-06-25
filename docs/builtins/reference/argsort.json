@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Return permutation indices that sort arrays along a dimension in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

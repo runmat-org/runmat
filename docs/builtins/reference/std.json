@@ -12,7 +12,6 @@
     "native"
   ],
   "summary": "Compute sample or population standard deviation with MATLAB-compatible normalization and dimension options.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

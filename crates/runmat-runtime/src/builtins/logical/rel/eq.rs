@@ -264,17 +264,26 @@ fn scalar_eq_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Valu
 }
 
 fn eq_identity(lhs: &Value, rhs: &Value) -> Option<Value> {
-    match (handle_ptr(lhs), handle_ptr(rhs)) {
+    match (handle_identity(lhs), handle_identity(rhs)) {
         (Some(a), Some(b)) => Some(Value::Bool(a == b)),
         (Some(_), None) | (None, Some(_)) => Some(Value::Bool(false)),
         (None, None) => None,
     }
 }
 
-fn handle_ptr(value: &Value) -> Option<usize> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeIdentity {
+    Handle { addr: usize, epoch: usize },
+    Listener(u64),
+}
+
+fn handle_identity(value: &Value) -> Option<RuntimeIdentity> {
     match value {
-        Value::HandleObject(handle) => Some(unsafe { handle.target.as_raw() } as usize),
-        Value::Listener(listener) => Some(unsafe { listener.target.as_raw() } as usize),
+        Value::HandleObject(handle) => Some(RuntimeIdentity::Handle {
+            addr: handle.target.addr(),
+            epoch: handle.target.epoch(),
+        }),
+        Value::Listener(listener) => Some(RuntimeIdentity::Listener(listener.id)),
         _ => None,
     }
 }
@@ -560,7 +569,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, SymbolicExpr};
+    use runmat_builtins::{HandleRef, Listener, SymbolicExpr};
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
@@ -640,28 +649,68 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_handle_identity() {
-        unsafe {
-            let raw = Box::into_raw(Box::new(Value::Num(1.0)));
-            let ptr = runmat_gc_api::GcPtr::from_raw(raw);
-            let handle = HandleRef {
-                class_name: "Dummy".to_string(),
-                target: ptr,
-                valid: true,
-            };
-            let a = Value::HandleObject(handle.clone());
-            let b = Value::HandleObject(handle.clone());
-            assert_eq!(run_eq(a.clone(), b.clone()).unwrap(), Value::Bool(true));
+        let ptr = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocation");
+        let handle = HandleRef {
+            class_name: "Dummy".to_string(),
+            target: ptr,
+            valid: true,
+        };
+        let a = Value::HandleObject(handle.clone());
+        let b = Value::HandleObject(handle.clone());
+        assert_eq!(run_eq(a.clone(), b.clone()).unwrap(), Value::Bool(true));
 
-            let other_raw = Box::into_raw(Box::new(Value::Num(2.0)));
-            let other_ptr = runmat_gc_api::GcPtr::from_raw(other_raw);
-            let other_handle = HandleRef {
-                class_name: "Dummy".to_string(),
-                target: other_ptr,
-                valid: true,
-            };
-            let other = Value::HandleObject(other_handle);
-            assert_eq!(run_eq(a, other).unwrap(), Value::Bool(false));
-        }
+        let other_ptr = runmat_gc::gc_allocate(Value::Num(2.0)).expect("gc allocation");
+        let other_handle = HandleRef {
+            class_name: "Dummy".to_string(),
+            target: other_ptr,
+            valid: true,
+        };
+        let other = Value::HandleObject(other_handle);
+        assert_eq!(run_eq(a, other).unwrap(), Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eq_listener_identity_is_disjoint_from_target_identity() {
+        let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc target");
+        let callback =
+            runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
+        let handle = HandleRef {
+            class_name: "EventTarget".to_string(),
+            target,
+            valid: true,
+        };
+        let listener_a = Listener {
+            id: 101,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "Changed".to_string(),
+            callback,
+            enabled: true,
+            valid: true,
+        };
+        let listener_b = Listener {
+            id: 102,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "Changed".to_string(),
+            callback,
+            enabled: true,
+            valid: true,
+        };
+
+        assert_eq!(
+            run_eq(
+                Value::Listener(listener_a.clone()),
+                Value::Listener(listener_b)
+            )
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_eq(Value::Listener(listener_a), Value::HandleObject(handle)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

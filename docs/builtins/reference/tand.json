@@ -10,7 +10,6 @@
     "elementwise"
   ],
   "summary": "Compute element-wise tangent values for degree-based angles with MATLAB-compatible canonical handling.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -1110,7 +1110,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             for col in 0..cell.cols {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
-                    let inner = (*cell.data[idx]).clone();
+                    let inner = cell.data[idx].clone();
                     let gathered = gather_if_needed_async(&inner)
                         .await
                         .map_err(|flow| map_control_flow_with_context(flow, context))?;

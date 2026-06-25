@@ -62,13 +62,14 @@ runmat-server-client = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
-default = ["gui", "blas-lapack", "wgpu", "jit"]
+default = ["gui", "blas-lapack", "wgpu", "jit", "occt-native"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
 jit = ["runmat-core/jit"]
 vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
+occt-native = ["runmat-core/occt-native", "runmat-runtime/occt-native"]
 
 [dev-dependencies]
 tempfile = "3.12" 

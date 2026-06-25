@@ -9,7 +9,6 @@
     "nd indexing"
   ],
   "summary": "Convert N-D subscript coordinates into MATLAB-style column-major linear indices.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

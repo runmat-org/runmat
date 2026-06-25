@@ -9,7 +9,6 @@
     "complex"
   ],
   "summary": "Compute principal square roots element-wise with MATLAB-compatible real and complex behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

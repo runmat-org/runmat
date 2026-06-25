@@ -8,10 +8,13 @@
     "TolFun",
     "MaxIter",
     "MaxFunEvals",
-    "Display"
+    "Display",
+    "Algorithm",
+    "StepTolerance",
+    "FunctionTolerance",
+    "OptimalityTolerance"
   ],
-  "summary": "Create or update solver-specific optimization options for fminbnd, fzero, and fsolve.",
-  "references": [],
+  "summary": "Create or update solver-specific optimization options for fminbnd, fzero, fsolve, and lsqcurvefit.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -31,12 +34,14 @@
   },
   "description": "`optimoptions(solver)` creates a solver-specific options struct with RunMat defaults. `optimoptions(solver, name, value, ...)` applies validated name-value overrides, and `optimoptions(oldOptions, name, value, ...)` copies an existing options struct before applying later values.",
   "behaviors": [
-    "Supported solvers are `fminbnd`, `fzero`, and `fsolve`.",
-    "Option names are case-insensitive and stored with canonical field names: `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display`.",
+    "Supported solvers are `fminbnd`, `fzero`, `fsolve`, and `lsqcurvefit`.",
+    "Option names are case-insensitive and stored with canonical field names: `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm`.",
+    "Modern aliases are accepted: `StepTolerance` maps to `TolX`, and `FunctionTolerance` and `OptimalityTolerance` map to `TolFun`.",
     "`TolX` and `TolFun` must be finite positive numeric scalars. `MaxIter` and `MaxFunEvals` must be finite positive integer scalars.",
-    "`Display` accepts `off`, `none`, `iter`, and `final` for `fzero` and `fsolve`; `fminbnd` also accepts `notify` and defaults to it.",
+    "`Display` accepts `off`, `none`, `iter`, and `final` for `fzero`, `fsolve`, and `lsqcurvefit`; `fminbnd` also accepts `notify` and defaults to it.",
+    "`lsqcurvefit` accepts `Algorithm` values `levenberg-marquardt` and `trust-region-reflective`; both currently configure RunMat's projected Levenberg-Marquardt solver.",
     "Unknown options are rejected so solver configuration mistakes fail before the solver starts.",
-    "The returned struct can be passed directly to `fminbnd`, `fzero`, and `fsolve`."
+    "The returned struct can be passed directly to `fminbnd`, `fzero`, `fsolve`, and `lsqcurvefit`."
   ],
   "examples": [
     {
@@ -55,6 +60,11 @@
       "output": "x =\n    3.1416"
     },
     {
+      "description": "Construct lsqcurvefit options",
+      "input": "opts = optimoptions(\"lsqcurvefit\", \"StepTolerance\", 1e-8, \"Algorithm\", \"levenberg-marquardt\");\np = lsqcurvefit(@(p,x) p(1).*x + p(2), [0; 0], [0 1 2], [1 3 5], [], [], opts)",
+      "output": "p =\n    2.0000\n    1.0000"
+    },
+    {
       "description": "Update an existing options struct",
       "input": "base = optimoptions(\"fsolve\", \"TolX\", 1e-6);\nopts = optimoptions(base, \"TolX\", 1e-9, \"MaxIter\", 100);\nx = fsolve(@sin, 3, opts)",
       "output": "x =\n    3.1416"
@@ -71,7 +81,7 @@
     },
     {
       "question": "Can I pass optimoptions output to existing solvers?",
-      "answer": "Yes. `fminbnd`, `fzero`, and `fsolve` consume the same canonical option fields returned by `optimoptions`."
+      "answer": "Yes. `fminbnd`, `fzero`, `fsolve`, and `lsqcurvefit` consume the canonical option fields returned by `optimoptions`."
     }
   ],
   "links": [
@@ -90,6 +100,10 @@
     {
       "label": "fsolve",
       "url": "./fsolve"
+    },
+    {
+      "label": "lsqcurvefit",
+      "url": "./lsqcurvefit"
     }
   ],
   "source": {

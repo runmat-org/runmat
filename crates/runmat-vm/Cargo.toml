@@ -34,3 +34,4 @@ plot-core = ["runmat-runtime/plot-core"]
 
 [dev-dependencies]
 anyhow = "1"
+stacker = "0.1"

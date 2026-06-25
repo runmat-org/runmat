@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Concatenate inputs vertically along the first dimension with MATLAB semicolon semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

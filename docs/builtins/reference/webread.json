@@ -10,7 +10,6 @@
     "api"
   ],
   "summary": "Read web content over HTTP/HTTPS and decode responses with MATLAB-compatible behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

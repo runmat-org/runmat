@@ -5,12 +5,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(crate) struct SourceText {
     pub(crate) name: Arc<str>,
+    pub(crate) fullpath_name: Option<Arc<str>>,
     pub(crate) text: Arc<str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SourceKey {
     pub(crate) name: Arc<str>,
+    pub(crate) fullpath_name: Option<Arc<str>>,
     pub(crate) text: Arc<str>,
 }
 
@@ -21,18 +23,29 @@ pub(crate) struct SourcePool {
 }
 
 impl SourcePool {
-    pub(crate) fn intern(&mut self, name: &str, text: &str) -> SourceId {
+    pub(crate) fn intern_with_fullpath(
+        &mut self,
+        name: &str,
+        fullpath_name: Option<&str>,
+        text: &str,
+    ) -> SourceId {
         let name: Arc<str> = Arc::from(name);
+        let fullpath_name = fullpath_name.map(Arc::<str>::from);
         let text: Arc<str> = Arc::from(text);
         let key = SourceKey {
             name: Arc::clone(&name),
+            fullpath_name: fullpath_name.as_ref().map(Arc::clone),
             text: Arc::clone(&text),
         };
         if let Some(id) = self.index.get(&key) {
             return *id;
         }
         let id = SourceId(self.sources.len());
-        self.sources.push(SourceText { name, text });
+        self.sources.push(SourceText {
+            name,
+            fullpath_name,
+            text,
+        });
         self.index.insert(key, id);
         id
     }

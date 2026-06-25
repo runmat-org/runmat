@@ -588,7 +588,7 @@ fn repelem_cell_row_major(
             let src_coord = idx_tables[k][coord];
             src_index += src_coord * src_strides[k];
         }
-        values.push((unsafe { &*cell.data[src_index].as_raw() }).clone());
+        values.push(cell.data[src_index].clone());
     }
     Ok((values, output_shape))
 }
@@ -1344,7 +1344,7 @@ pub(crate) mod tests {
                 let values: Vec<f64> = out
                     .data
                     .iter()
-                    .map(|ptr| match unsafe { &*ptr.as_raw() } {
+                    .map(|ptr| match ptr {
                         Value::Num(n) => *n,
                         other => panic!("expected numeric cell element, got {other:?}"),
                     })

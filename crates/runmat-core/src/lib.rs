@@ -4,6 +4,7 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 pub mod abi;
+mod diagnostic_path;
 mod error;
 mod execution;
 mod fusion;

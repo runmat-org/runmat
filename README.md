@@ -34,8 +34,8 @@ Key Capabilities:
 
 - MATLAB Compatibility: Supports standard .m file syntax, including arrays, complex control flow, and over 400 built-in functions 
 - Automatic Fusion: Builds an internal graph of array operations to fuse elementwise math and reductions into optimized kernels 
-- Tiered Execution: Combines a fast-startup VM interpreter with a JIT (based on Cranelift) for hot code paths 
-- Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU 
+- Tiered Execution: Combines a fast-startup VM interpreter with a JIT (based on Cranelift) for hot code paths
+- Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU
 - Strong Static Analysis: Type/shape inference, definite assignment, and other static analysis passes are run before execution to optimize the execution plan.
 - Async Runtime: Built on Rust futures, allowing non-blocking execution in web environments, CLI tools and headless pipelines
 - Integrated Plotting: Features an interactive GPU-accelerated 2D/3D plotting engine supporting 30+ plot types

@@ -1,10 +1,11 @@
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
-    AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
-    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PatchEdgeColorMode,
-    PatchFaceColorMode, PatchPlot, PlotElement, PlotType, QuiverPlot, ReferenceLine,
-    ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot,
-    SurfacePlot, TextStyle,
+    AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
+    Figure, LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshDeformation,
+    MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField, MeshTriangleRange,
+    MeshVectorField, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot, PlotElement, PlotType,
+    QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode,
+    StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -237,6 +238,40 @@ pub enum ScenePlot {
         #[serde(default)]
         force_3d: bool,
     },
+    Mesh {
+        #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+        vertices: Vec<[f32; 3]>,
+        triangles: Vec<[u32; 3]>,
+        mesh_id: Option<String>,
+        face_color_rgba: [f32; 4],
+        edge_color_rgba: [f32; 4],
+        face_alpha: f32,
+        edge_alpha: f32,
+        edge_width: f32,
+        #[serde(default)]
+        edge_mode: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        feature_edge_groups: Vec<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        vertex_colors_rgba: Vec<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        triangle_colors_rgba: Vec<[f32; 4]>,
+        axes_index: u32,
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        regions: Vec<SerializedMeshRegion>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlighted_region_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlight_color_rgba: Option<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scalar_field: Option<Box<SerializedMeshScalarField>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vector_field: Option<Box<SerializedMeshVectorField>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deformation: Option<Box<SerializedMeshDeformation>>,
+        visible: bool,
+    },
     Line3 {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
@@ -346,7 +381,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 2;
+    pub const SCHEMA_VERSION: u32 = 3;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -359,6 +394,35 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots,
+        }
+    }
+
+    pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
+        let mut figure = Figure::new()
+            .with_grid(scene.show_grid)
+            .with_legend(false)
+            .with_axis_equal(scene.axis_equal);
+        figure.title = scene.title.clone();
+        figure.x_label = Some("X".to_string());
+        figure.y_label = Some("Y".to_string());
+        figure.z_label = Some("Z".to_string());
+        figure.set_axes_view(0, -38.0, 24.0);
+        let snapshot = FigureSnapshot::capture(&figure);
+        let plots = scene
+            .chunks
+            .iter()
+            .filter_map(scene_chunk_to_mesh_plot)
+            .collect::<Vec<_>>();
+
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            layout: FigureLayout {
+                axes_rows: 1,
+                axes_cols: 1,
+                axes_indices: vec![0; plots.len()],
+            },
             metadata: snapshot.metadata,
             plots,
         }
@@ -405,6 +469,30 @@ impl FigureScene {
         Ok(figure)
     }
 
+    pub fn into_geometry_scene(
+        self,
+        scene_id: impl Into<String>,
+        revision: u64,
+    ) -> Result<crate::GeometryScene, String> {
+        self.validate_schema_version()?;
+        let scene_id = scene_id.into();
+        let mut chunks = Vec::new();
+        for (plot_index, plot) in self.plots.into_iter().enumerate() {
+            append_geometry_scene_chunks(&scene_id, plot_index, plot, &mut chunks)?;
+        }
+        if chunks.is_empty() {
+            return Err("figure scene does not contain renderable mesh plots".to_string());
+        }
+        let mut scene = crate::GeometryScene::new(scene_id, revision, chunks).with_title(
+            self.metadata
+                .title
+                .unwrap_or_else(|| "Geometry Preview".to_string()),
+        );
+        scene.show_grid = self.metadata.grid_enabled;
+        scene.axis_equal = self.metadata.axis_equal;
+        Ok(scene)
+    }
+
     fn validate_schema_version(&self) -> Result<(), String> {
         if self.schema_version == 0 || self.schema_version > FigureScene::SCHEMA_VERSION {
             return Err(format!(
@@ -413,7 +501,7 @@ impl FigureScene {
                 FigureScene::SCHEMA_VERSION
             ));
         }
-        if self.schema_version < FigureScene::SCHEMA_VERSION
+        if self.schema_version < 2
             && self
                 .plots
                 .iter()
@@ -421,11 +509,193 @@ impl FigureScene {
         {
             return Err(format!(
                 "patch plots require figure scene schema version {}",
-                FigureScene::SCHEMA_VERSION
+                2
+            ));
+        }
+        if self.schema_version < 3
+            && self
+                .plots
+                .iter()
+                .any(|plot| matches!(plot, ScenePlot::Mesh { .. }))
+        {
+            return Err(format!(
+                "mesh plots require figure scene schema version {}",
+                3
             ));
         }
         Ok(())
     }
+}
+
+fn append_geometry_scene_chunks(
+    scene_id: &str,
+    plot_index: usize,
+    plot: ScenePlot,
+    chunks: &mut Vec<crate::GeometrySceneChunk>,
+) -> Result<(), String> {
+    let ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id,
+        face_color_rgba,
+        edge_color_rgba,
+        face_alpha,
+        edge_alpha,
+        edge_width,
+        edge_mode,
+        feature_edge_groups,
+        vertex_colors_rgba,
+        triangle_colors_rgba,
+        axes_index: _,
+        label,
+        regions,
+        highlighted_region_id,
+        highlight_color_rgba,
+        scalar_field,
+        vector_field,
+        deformation,
+        visible,
+    } = plot
+    else {
+        return Ok(());
+    };
+
+    if !visible {
+        return Ok(());
+    }
+
+    let region_metadata = regions
+        .iter()
+        .cloned()
+        .map(crate::geometry_scene::GeometrySceneRegion::from)
+        .collect::<Vec<_>>();
+    let mesh_id_for_chunk = mesh_id
+        .clone()
+        .unwrap_or_else(|| format!("mesh_{}", plot_index + 1));
+    let mut mesh = MeshPlot::new(vertices.into_iter().map(xyz_to_vec3).collect(), triangles)?;
+    mesh.set_mesh_id(mesh_id.clone());
+    mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+    mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+    mesh.set_face_alpha(face_alpha);
+    mesh.set_edge_alpha(edge_alpha);
+    mesh.set_edge_width(edge_width);
+    mesh.set_edge_mode(parse_mesh_edge_mode(&edge_mode));
+    if !feature_edge_groups.is_empty() {
+        mesh.set_feature_edge_groups(Some(feature_edge_groups))?;
+    }
+    if !vertex_colors_rgba.is_empty() {
+        mesh.set_vertex_colors(Some(
+            vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    if !triangle_colors_rgba.is_empty() {
+        mesh.set_triangle_colors(Some(
+            triangle_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    mesh.set_label(label.clone());
+    mesh.set_regions(regions.into_iter().map(Into::into).collect());
+    mesh.set_highlighted_region_id(highlighted_region_id);
+    if let Some(color) = highlight_color_rgba {
+        mesh.set_highlight_color(rgba_to_vec4(color));
+    }
+    if let Some(field) = scalar_field {
+        mesh.set_scalar_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = vector_field {
+        mesh.set_vector_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = deformation {
+        mesh.set_deformation(Some((*field).into()))?;
+    }
+
+    let face_render_data = mesh.render_data();
+    chunks.push(
+        crate::GeometrySceneChunk::from_render_data(
+            format!("{scene_id}:{mesh_id_for_chunk}:faces:{plot_index}"),
+            face_render_data,
+        )
+        .with_mesh_id(mesh_id_for_chunk.clone())
+        .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
+        .with_regions(region_metadata),
+    );
+
+    if let Some(edge_render_data) = mesh.edge_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:edges:{plot_index}"),
+                edge_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} edges",
+                label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    if let Some(vector_render_data) = mesh.vector_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:vectors:{plot_index}"),
+                vector_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} vectors",
+                label.unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    Ok(())
+}
+
+fn scene_chunk_to_mesh_plot(
+    chunk: &crate::geometry_scene::GeometrySceneChunk,
+) -> Option<ScenePlot> {
+    if chunk.render_data.pipeline_type != crate::core::PipelineType::Triangles {
+        return None;
+    }
+    let indices = chunk.indices.as_ref()?;
+    if indices.len() < 3 {
+        return None;
+    }
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|item| [item[0], item[1], item[2]])
+        .collect::<Vec<_>>();
+    if triangles.is_empty() {
+        return None;
+    }
+    let vertices = chunk
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect::<Vec<_>>();
+    Some(ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id: chunk.mesh_id.clone(),
+        face_color_rgba: chunk.material.albedo.to_array(),
+        edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
+        face_alpha: chunk.material.albedo.w,
+        edge_alpha: 0.0,
+        edge_width: 0.0,
+        edge_mode: "none".to_string(),
+        feature_edge_groups: Vec::new(),
+        vertex_colors_rgba: Vec::new(),
+        triangle_colors_rgba: Vec::new(),
+        axes_index: 0,
+        label: chunk.label.clone(),
+        regions: chunk.regions.iter().map(Into::into).collect(),
+        highlighted_region_id: None,
+        highlight_color_rgba: Some([0.98, 0.78, 0.22, 1.0]),
+        scalar_field: None,
+        vector_field: None,
+        deformation: None,
+        visible: chunk.visible,
+    })
 }
 
 fn figure_axis_index(figure: &Figure, plot_index: usize) -> u32 {
@@ -645,6 +915,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
+    pub axes_kind: SerializedAxesKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -698,6 +970,36 @@ pub struct SerializedAxesMetadata {
     pub world_text_annotations: Vec<SerializedTextAnnotation>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SerializedAxesKind {
+    #[default]
+    Cartesian,
+    Polar,
+}
+
+fn is_cartesian_axes_kind(value: &SerializedAxesKind) -> bool {
+    *value == SerializedAxesKind::Cartesian
+}
+
+impl From<AxesKind> for SerializedAxesKind {
+    fn from(value: AxesKind) -> Self {
+        match value {
+            AxesKind::Cartesian => Self::Cartesian,
+            AxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
+impl From<SerializedAxesKind> for AxesKind {
+    fn from(value: SerializedAxesKind) -> Self {
+        match value {
+            SerializedAxesKind::Cartesian => Self::Cartesian,
+            SerializedAxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedTextAnnotation {
@@ -706,9 +1008,69 @@ pub struct SerializedTextAnnotation {
     pub style: SerializedTextStyle,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshRegion {
+    pub region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_ranges: Vec<SerializedMeshTriangleRange>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshTriangleRange {
+    pub start: u32,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshScalarField {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub location: String,
+    #[serde(deserialize_with = "deserialize_vec_f32_lossy")]
+    pub values: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_limits: Option<[f32; 2]>,
+    pub colormap: String,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshVectorField {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub location: String,
+    #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+    pub vectors: Vec<[f32; 3]>,
+    pub scale: f32,
+    pub stride: usize,
+    pub color_rgba: [f32; 4],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshDeformation {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+    pub displacements: Vec<[f32; 3]>,
+    pub scale: f32,
+}
+
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -749,6 +1111,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -803,6 +1166,188 @@ impl From<SerializedTextAnnotation> for crate::plots::figure::TextAnnotation {
             position: glam::Vec3::from_array(value.position),
             text: value.text,
             style: value.style.into(),
+        }
+    }
+}
+
+impl From<&MeshRegion> for SerializedMeshRegion {
+    fn from(value: &MeshRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<&crate::geometry_scene::GeometrySceneRegion> for SerializedMeshRegion {
+    fn from(value: &crate::geometry_scene::GeometrySceneRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<SerializedMeshRegion> for MeshRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        MeshRegion {
+            region_id: value.region_id,
+            label: value.label,
+            tag: value.tag,
+            triangle_ranges: value.triangle_ranges.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<SerializedMeshRegion> for crate::geometry_scene::GeometrySceneRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        crate::geometry_scene::GeometrySceneRegion::new(
+            value.region_id,
+            value.label,
+            value.tag,
+            value.triangle_ranges.into_iter().map(Into::into).collect(),
+        )
+    }
+}
+
+impl From<MeshTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: MeshTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
+impl From<crate::geometry_scene::GeometrySceneTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: crate::geometry_scene::GeometrySceneTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for MeshTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for crate::geometry_scene::GeometrySceneTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
+    }
+}
+
+impl From<&MeshScalarField> for SerializedMeshScalarField {
+    fn from(value: &MeshScalarField) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            location: value.location.as_str().to_string(),
+            values: value.values.clone(),
+            color_limits: value.color_limits,
+            colormap: value.colormap.clone(),
+            alpha: value.alpha,
+        }
+    }
+}
+
+impl TryFrom<SerializedMeshScalarField> for MeshScalarField {
+    type Error = String;
+
+    fn try_from(value: SerializedMeshScalarField) -> Result<Self, Self::Error> {
+        Ok(Self {
+            field_id: value.field_id,
+            label: value.label,
+            location: MeshFieldLocation::parse(&value.location).ok_or_else(|| {
+                format!("unknown mesh scalar field location '{}'", value.location)
+            })?,
+            values: value.values,
+            color_limits: value.color_limits,
+            colormap: value.colormap,
+            alpha: value.alpha,
+        })
+    }
+}
+
+impl From<&MeshVectorField> for SerializedMeshVectorField {
+    fn from(value: &MeshVectorField) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            location: value.location.as_str().to_string(),
+            vectors: value
+                .vectors
+                .iter()
+                .map(|vector| vector.to_array())
+                .collect(),
+            scale: value.scale,
+            stride: value.stride,
+            color_rgba: vec4_to_rgba(value.color),
+        }
+    }
+}
+
+impl TryFrom<SerializedMeshVectorField> for MeshVectorField {
+    type Error = String;
+
+    fn try_from(value: SerializedMeshVectorField) -> Result<Self, Self::Error> {
+        Ok(Self {
+            field_id: value.field_id,
+            label: value.label,
+            location: MeshFieldLocation::parse(&value.location).ok_or_else(|| {
+                format!("unknown mesh vector field location '{}'", value.location)
+            })?,
+            vectors: value.vectors.into_iter().map(Vec3::from_array).collect(),
+            scale: value.scale,
+            stride: value.stride,
+            color: rgba_to_vec4(value.color_rgba),
+        })
+    }
+}
+
+impl From<&MeshDeformation> for SerializedMeshDeformation {
+    fn from(value: &MeshDeformation) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            displacements: value
+                .displacements
+                .iter()
+                .map(|displacement| displacement.to_array())
+                .collect(),
+            scale: value.scale,
+        }
+    }
+}
+
+impl From<SerializedMeshDeformation> for MeshDeformation {
+    fn from(value: SerializedMeshDeformation) -> Self {
+        Self {
+            field_id: value.field_id,
+            label: value.label,
+            displacements: value
+                .displacements
+                .into_iter()
+                .map(Vec3::from_array)
+                .collect(),
+            scale: value.scale,
         }
     }
 }
@@ -1002,6 +1547,42 @@ impl ScenePlot {
                 label: patch.label().map(str::to_string),
                 visible: patch.is_visible(),
                 force_3d: patch.force_3d(),
+            },
+            PlotElement::Mesh(mesh) => Self::Mesh {
+                vertices: mesh
+                    .vertices()
+                    .iter()
+                    .map(|point| vec3_to_xyz(*point))
+                    .collect(),
+                triangles: mesh.triangles().to_vec(),
+                mesh_id: mesh.mesh_id().map(str::to_string),
+                face_color_rgba: vec4_to_rgba(mesh.face_color()),
+                edge_color_rgba: vec4_to_rgba(mesh.edge_color()),
+                face_alpha: mesh.face_alpha(),
+                edge_alpha: mesh.edge_alpha(),
+                edge_width: mesh.edge_width(),
+                edge_mode: mesh.edge_mode().as_str().to_string(),
+                feature_edge_groups: mesh
+                    .feature_edge_groups()
+                    .map(|groups| groups.to_vec())
+                    .unwrap_or_default(),
+                vertex_colors_rgba: mesh
+                    .vertex_colors()
+                    .map(|colors| colors.iter().copied().map(vec4_to_rgba).collect())
+                    .unwrap_or_default(),
+                triangle_colors_rgba: mesh
+                    .triangle_colors()
+                    .map(|colors| colors.iter().copied().map(vec4_to_rgba).collect())
+                    .unwrap_or_default(),
+                axes_index,
+                label: mesh.label().map(str::to_string),
+                regions: mesh.regions().iter().map(Into::into).collect(),
+                highlighted_region_id: mesh.highlighted_region_id().map(str::to_string),
+                highlight_color_rgba: Some(vec4_to_rgba(mesh.highlight_color())),
+                scalar_field: mesh.scalar_field().map(|field| Box::new(field.into())),
+                vector_field: mesh.vector_field().map(|field| Box::new(field.into())),
+                deformation: mesh.deformation().map(|field| Box::new(field.into())),
+                visible: mesh.is_visible(),
             },
             PlotElement::Line3(line) => Self::Line3 {
                 x: line.x_data.clone(),
@@ -1378,6 +1959,69 @@ impl ScenePlot {
                 patch.set_force_3d(force_3d);
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
+            ScenePlot::Mesh {
+                vertices,
+                triangles,
+                mesh_id,
+                face_color_rgba,
+                edge_color_rgba,
+                face_alpha,
+                edge_alpha,
+                edge_width,
+                edge_mode,
+                feature_edge_groups,
+                vertex_colors_rgba,
+                triangle_colors_rgba,
+                axes_index,
+                label,
+                regions,
+                highlighted_region_id,
+                highlight_color_rgba,
+                scalar_field,
+                vector_field,
+                deformation,
+                visible,
+            } => {
+                let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
+                let mut mesh = MeshPlot::new(vertices, triangles)?;
+                mesh.set_mesh_id(mesh_id);
+                mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+                mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+                mesh.set_face_alpha(face_alpha);
+                mesh.set_edge_alpha(edge_alpha);
+                mesh.set_edge_width(edge_width);
+                mesh.set_edge_mode(parse_mesh_edge_mode(&edge_mode));
+                if !feature_edge_groups.is_empty() {
+                    mesh.set_feature_edge_groups(Some(feature_edge_groups))?;
+                }
+                if !vertex_colors_rgba.is_empty() {
+                    mesh.set_vertex_colors(Some(
+                        vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+                    ))?;
+                }
+                if !triangle_colors_rgba.is_empty() {
+                    mesh.set_triangle_colors(Some(
+                        triangle_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+                    ))?;
+                }
+                mesh.set_label(label);
+                mesh.set_regions(regions.into_iter().map(Into::into).collect());
+                mesh.set_highlighted_region_id(highlighted_region_id);
+                if let Some(color) = highlight_color_rgba {
+                    mesh.set_highlight_color(rgba_to_vec4(color));
+                }
+                if let Some(field) = scalar_field {
+                    mesh.set_scalar_field(Some((*field).try_into()?))?;
+                }
+                if let Some(field) = vector_field {
+                    mesh.set_vector_field(Some((*field).try_into()?))?;
+                }
+                if let Some(field) = deformation {
+                    mesh.set_deformation(Some((*field).into()))?;
+                }
+                mesh.set_visible(visible);
+                figure.add_mesh_plot_on_axes(mesh, axes_index as usize);
+            }
             ScenePlot::Line3 {
                 x,
                 y,
@@ -1575,6 +2219,10 @@ fn parse_patch_edge_color_mode(value: &str) -> PatchEdgeColorMode {
     }
 }
 
+fn parse_mesh_edge_mode(value: &str) -> MeshEdgeMode {
+    MeshEdgeMode::parse(value).unwrap_or_default()
+}
+
 fn xyz_to_vec3(value: [f32; 3]) -> Vec3 {
     Vec3::new(value[0], value[1], value[2])
 }
@@ -1657,6 +2305,7 @@ pub enum PlotKind {
     Pie,
     Image,
     Surface,
+    Mesh,
     Patch,
     Scatter3,
     Contour,
@@ -1678,6 +2327,7 @@ impl From<PlotType> for PlotKind {
             PlotType::Quiver => Self::Quiver,
             PlotType::Pie => Self::Pie,
             PlotType::Surface => Self::Surface,
+            PlotType::Mesh => Self::Mesh,
             PlotType::Patch => Self::Patch,
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
@@ -1739,6 +2389,17 @@ where
     Ok(values
         .into_iter()
         .map(|value| value.unwrap_or(f64::NAN))
+        .collect())
+}
+
+fn deserialize_vec_f32_lossy<'de, D>(deserializer: D) -> Result<Vec<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<Option<f32>>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|value| value.unwrap_or(f32::NAN))
         .collect())
 }
 
@@ -1963,15 +2624,163 @@ mod tests {
 
         let mut scene = FigureScene::capture(&figure);
         assert!(matches!(scene.plots.first(), Some(ScenePlot::Patch { .. })));
-        scene.schema_version = FigureScene::SCHEMA_VERSION - 1;
+        scene.schema_version = 1;
 
         let err = scene
             .into_figure()
             .expect_err("older patch schema must fail");
-        assert!(err.contains(&format!(
-            "patch plots require figure scene schema version {}",
-            FigureScene::SCHEMA_VERSION
-        )));
+        assert!(err.contains("patch plots require figure scene schema version 2"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_mesh_plot() {
+        let mut figure = Figure::new();
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        mesh.set_mesh_id(Some("mesh_1".to_string()));
+        mesh.set_label(Some("mesh tri".to_string()));
+        mesh.set_face_alpha(0.7);
+        mesh.set_edge_width(0.25);
+        mesh.set_edge_mode(MeshEdgeMode::Feature);
+        mesh.set_feature_edge_groups(Some(vec![3]))
+            .expect("feature group should be accepted");
+        mesh.set_vertex_colors(Some(vec![
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+        ]))
+        .expect("vertex colors should be accepted");
+        mesh.set_triangle_colors(Some(vec![Vec4::new(0.3, 0.4, 0.5, 1.0)]))
+            .expect("triangle color should be accepted");
+        mesh.set_regions(vec![MeshRegion::new(
+            "region_default",
+            Some("Default Region".to_string()),
+            Some("mesh_default".to_string()),
+            vec![MeshTriangleRange::new(0, 1)],
+        )]);
+        mesh.set_highlighted_region_id(Some("region_default".to_string()));
+        figure.add_mesh_plot(mesh);
+
+        let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, FigureScene::SCHEMA_VERSION);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        let rebuilt = scene.into_figure().expect("mesh scene restore");
+        let Some(PlotElement::Mesh(mesh)) = rebuilt.plots().next() else {
+            panic!("expected mesh plot");
+        };
+        assert_eq!(mesh.mesh_id(), Some("mesh_1"));
+        assert_eq!(mesh.triangles(), &[[0, 1, 2]]);
+        assert_eq!(mesh.label(), Some("mesh tri"));
+        assert!((mesh.face_alpha() - 0.7).abs() < f32::EPSILON);
+        assert!((mesh.edge_width() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(mesh.edge_mode(), MeshEdgeMode::Feature);
+        assert_eq!(mesh.feature_edge_groups().unwrap(), &[3]);
+        assert_eq!(
+            mesh.vertex_colors()
+                .and_then(|colors| colors.first().copied()),
+            Some(Vec4::new(0.3, 0.4, 0.5, 1.0))
+        );
+        assert_eq!(
+            mesh.triangle_colors()
+                .and_then(|colors| colors.first().copied()),
+            Some(Vec4::new(0.3, 0.4, 0.5, 1.0))
+        );
+        assert_eq!(mesh.regions().len(), 1);
+        assert_eq!(mesh.regions()[0].region_id, "region_default");
+        assert_eq!(mesh.highlighted_region_id(), Some("region_default"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_mesh_fea_overlays() {
+        let mut figure = Figure::new();
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        mesh.set_scalar_field(Some(MeshScalarField {
+            field_id: "fea.structural.von_mises".to_string(),
+            label: Some("Von Mises".to_string()),
+            location: MeshFieldLocation::Vertex,
+            values: vec![0.0, 0.5, 1.0],
+            color_limits: Some([0.0, 1.0]),
+            colormap: "viridis".to_string(),
+            alpha: 0.8,
+        }))
+        .unwrap();
+        mesh.set_vector_field(Some(MeshVectorField {
+            field_id: "fea.em.flux_density".to_string(),
+            label: Some("Flux density".to_string()),
+            location: MeshFieldLocation::Triangle,
+            vectors: vec![Vec3::new(0.0, 0.0, 1.0)],
+            scale: 0.25,
+            stride: 1,
+            color: Vec4::new(0.9, 0.7, 0.2, 1.0),
+        }))
+        .unwrap();
+        mesh.set_deformation(Some(MeshDeformation {
+            field_id: "fea.structural.displacement".to_string(),
+            label: Some("Displacement".to_string()),
+            displacements: vec![Vec3::ZERO, Vec3::Z, Vec3::ZERO],
+            scale: 0.5,
+        }))
+        .unwrap();
+        figure.add_mesh_plot(mesh);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("mesh scene restore");
+        let Some(PlotElement::Mesh(mesh)) = rebuilt.plots().next() else {
+            panic!("expected mesh plot");
+        };
+        assert_eq!(
+            mesh.scalar_field().map(|field| field.field_id.as_str()),
+            Some("fea.structural.von_mises")
+        );
+        assert_eq!(
+            mesh.vector_field().map(|field| field.field_id.as_str()),
+            Some("fea.em.flux_density")
+        );
+        assert_eq!(
+            mesh.deformation().map(|field| field.field_id.as_str()),
+            Some("fea.structural.displacement")
+        );
+    }
+
+    #[test]
+    fn figure_scene_rejects_mesh_in_older_schema() {
+        let mut figure = Figure::new();
+        figure.add_mesh_plot(
+            MeshPlot::new(
+                vec![
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ],
+                vec![[0, 1, 2]],
+            )
+            .unwrap(),
+        );
+
+        let mut scene = FigureScene::capture(&figure);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        scene.schema_version = 2;
+
+        let err = scene
+            .into_figure()
+            .expect_err("older mesh schema must fail");
+        assert!(err.contains("mesh plots require figure scene schema version 3"));
     }
 
     #[test]
@@ -2328,6 +3137,7 @@ mod tests {
         figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
+        figure.set_axes_kind(1, AxesKind::Polar);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
@@ -2352,6 +3162,7 @@ mod tests {
         assert!(meta.minor_grid_explicit);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
+        assert_eq!(meta.axes_kind, AxesKind::Polar);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));
