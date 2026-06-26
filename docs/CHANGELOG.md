@@ -2,6 +2,35 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.5.5](https://github.com/runmat-org/runmat/compare/v0.5.3...v0.5.5) - June 2026
+
+_June 26, 2026_
+
+### Runtime
+
+#### Added
+- Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
+- Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
+- Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+
+#### Changed
+- Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
+- Improve plotting and scene export behavior, including async replay/export handling, image export ownership, geometry renderer grid toggles, colormap command syntax, and portable rendering metadata
+- Harden runtime filesystem and diagnostic-path behavior so source paths, CWD-sensitive workflows, remote writes, create-new semantics, and WASM provider paths stay consistent across native, browser, and Windows environments
+
+#### Fixed
+- Fix GC safety by replacing dereference-oriented pointer APIs with opaque handles, explicit root guards, guarded borrow access, thread-local rooting, and Miri-backed soundness coverage
+- Fix WebAssembly and release publishing issues around OCCT feature wiring, generated builtin registries, TypeScript package builds, headless compatibility checks, and nested crate publishing
+- Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
+- Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
+
+### Development
+
+#### Changed
+- Document OCCT/CMake build requirements, add no-OCCT build support, align Linux and Windows runner bootstrap scripts, and move runtime WASM helper scripts into the runtime script namespace
+
+---
+
 ## [v0.5.3](https://github.com/runmat-org/runmat/compare/v0.5.2...v0.5.3) - June 2026
 
 _June 17, 2026_
