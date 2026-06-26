@@ -39,7 +39,7 @@ _June 26, 2026_
 - Improve Windows release signing so Desktop installers are verified
 
 #### Fixed
-- Fix Desktop reliability issues across project search, history restore, editor access, Agent responsiveness, notebook rendering, and plotting
+- Fix Desktop reliability issues across project search, history restore, file refresh and sync, editor access, Agent run responsiveness and recovery, notebook rendering, and plotting
 
 ---
 
