@@ -1758,6 +1758,8 @@ pub struct AnalysisStudyRunData {
     pub run_options: serde_json::Value,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,

@@ -35,7 +35,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
-use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
+use runmat_meshing_core::{
+    generate_analysis_mesh, validate_analysis_mesh, ElementFamilyHint, MeshConnectivityClass,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -1153,6 +1155,8 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
+    let analysis_mesh_artifact_path =
+        generate_and_persist_study_analysis_mesh(spec, &study_fingerprint, &context)?;
 
     let study_prep = crate::geometry::geometry_prep_for_analysis_op(
         &spec.geometry,
@@ -1306,6 +1310,7 @@ pub fn analysis_run_study_op(
             "run_kind": spec.run_kind,
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
+            "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -1351,6 +1356,7 @@ pub fn analysis_run_study_op(
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             prep_artifact_id: Some(study_prep_artifact_id),
+            analysis_mesh_artifact_path,
             run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
@@ -12988,6 +12994,84 @@ fn attach_prep_artifact_to_electromagnetic_options(
     if options.prep_artifact_id.is_none() {
         options.prep_artifact_id = Some(prep_artifact_id.to_string());
     }
+}
+
+fn generate_and_persist_study_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    study_fingerprint: &str,
+    context: &OperationContext,
+) -> Result<Option<String>, OperationErrorEnvelope> {
+    let Some(options) = spec.mesh_options.clone() else {
+        return Ok(None);
+    };
+    let mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to generate analysis mesh: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
+    validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESH_VALIDATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("generated analysis mesh failed validation: {err:?}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                ("mesh_id".to_string(), mesh.mesh_id.clone()),
+            ]),
+        )
+    })?;
+    persist_study_evidence(
+        study_fingerprint,
+        "analysis_mesh",
+        serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "mesh_options": options,
+            "mesh": mesh,
+        }),
+    )
+    .map(Some)
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis mesh artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })
 }
 
 fn study_evidence_root() -> PathBuf {

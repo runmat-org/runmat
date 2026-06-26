@@ -67,9 +67,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
-    TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MaterialEvidence,
+    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 
 use super::*;
@@ -523,6 +523,87 @@ fn sample_geometry_asset() -> GeometryAsset {
             "mesh_1",
             1,
         )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn closed_cube_geometry_asset() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo:closed_cube".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/closed_cube.step".to_string(),
+            sha256: "hash-closed-cube".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "cube_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 8,
+            element_count: 12,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "cube_surface",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0],
+            ],
+            vec![
+                [0, 2, 1],
+                [0, 3, 2],
+                [4, 5, 6],
+                [4, 6, 7],
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ],
+        )],
+        regions: vec![
+            Region {
+                region_id: "root".to_string(),
+                name: "root".to_string(),
+                tag: Some("fixed".to_string()),
+                cad_ownership: None,
+            },
+            Region {
+                region_id: "tip".to_string(),
+                name: "tip".to_string(),
+                tag: Some("load".to_string()),
+                cad_ownership: None,
+            },
+        ],
+        region_entity_mappings: vec![
+            RegionEntityMapping::new(
+                "root",
+                "cube_surface",
+                EntityKind::Face,
+                vec![EntityIdRange::new(0, 2)],
+            ),
+            RegionEntityMapping::new(
+                "tip",
+                "cube_surface",
+                EntityKind::Face,
+                vec![EntityIdRange::new(2, 2)],
+            ),
+        ],
         diagnostics: Vec::new(),
     }
 }
@@ -1850,6 +1931,65 @@ fn analysis_run_study_executes_linear_static_path() {
         vec![spec.geometry.surface_meshes[0].triangles.len()]
     );
     drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-analysis-mesh");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    spec.mesh_options = Some(runmat_meshing_core::VolumeMeshingOptions::default());
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist analysis mesh artifact path");
+    assert!(artifact_path.ends_with("analysis_mesh.json"));
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    assert_eq!(
+        payload["schema_version"].as_str(),
+        Some("fea_study_analysis_mesh_artifact/v1")
+    );
+    assert_eq!(
+        payload["mesh"]["schema_version"].as_str(),
+        Some("analysis-mesh/v1")
+    );
+    assert!(
+        payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("volume elements")
+            .len()
+            > spec.geometry.surface_meshes[0].triangles.len()
+    );
+    assert!(payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("boundary faces")
+        .iter()
+        .any(|face| face["region_ids"]
+            .as_array()
+            .expect("region ids")
+            .iter()
+            .any(|region| region.as_str() == Some("root"))));
+
+    let run_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
+    )
+    .expect("parse run evidence artifact");
+    assert_eq!(
+        run_payload["analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -4008,6 +4148,26 @@ fn scoped_thermo_field_artifact_root(root: &Path) -> EnvVarRestoreGuard {
     let previous = std::env::var(KEY).ok();
     std::env::set_var(KEY, root.display().to_string());
     EnvVarRestoreGuard { key: KEY, previous }
+}
+
+struct FeaRuntimeConfigRestoreGuard {
+    previous: FeaRuntimeConfig,
+}
+
+impl Drop for FeaRuntimeConfigRestoreGuard {
+    fn drop(&mut self) {
+        configure_fea_runtime(self.previous.clone()).expect("restore FEA runtime config");
+    }
+}
+
+fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+    let previous = current_fea_runtime_config();
+    configure_fea_runtime(FeaRuntimeConfig {
+        study_artifact_root: Some(root.to_path_buf()),
+        ..previous.clone()
+    })
+    .expect("configure FEA study artifact root");
+    FeaRuntimeConfigRestoreGuard { previous }
 }
 
 #[test]
