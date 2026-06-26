@@ -248,13 +248,25 @@ impl Scatter3Plot {
         self
     }
 
-    /// Override all point colors with a single RGBA value.
-    pub fn with_color(mut self, color: Vec4) -> Self {
-        self.colors = vec![color; self.points.len()];
+    fn invalidate_gpu_vertices(&mut self) {
         self.vertices = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+    }
+
+    fn clear_gpu_source_inputs(&mut self) {
         self.gpu_inputs = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    /// Override all point colors with a single RGBA value.
+    pub fn with_color(mut self, color: Vec4) -> Self {
+        self.colors = if self.points.is_empty() {
+            vec![color]
+        } else {
+            vec![color; self.points.len()]
+        };
+        self.invalidate_gpu_vertices();
         self.gpu_has_per_point_colors = false;
         self
     }
@@ -269,11 +281,8 @@ impl Scatter3Plot {
             ));
         }
         self.colors = colors;
-        self.vertices = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
+        self.clear_gpu_source_inputs();
         Ok(self)
     }
 
@@ -287,50 +296,33 @@ impl Scatter3Plot {
     pub fn with_point_size(mut self, size: f32) -> Self {
         self.point_size = size.max(1.0);
         self.point_sizes = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
         self
     }
 
     pub fn set_marker_style(&mut self, style: MarkerStyle) {
         self.marker_style = style;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_filled(&mut self, filled: bool) {
         self.filled = filled;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_color(&mut self, color: Vec4) {
         self.edge_color = color;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_thickness(&mut self, px: f32) {
         self.edge_thickness = px.max(0.0);
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_color_from_vertex(&mut self, enabled: bool) {
         self.edge_color_from_vertex_colors = enabled;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     /// Enable or disable visibility.
@@ -344,19 +336,14 @@ impl Scatter3Plot {
         self.gpu_vertices = Some(buffer);
         self.gpu_point_count = Some(point_count);
         self.vertices = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.clear_gpu_source_inputs();
         self
     }
 
     /// Supply per-point sizes in pixels.
     pub fn set_point_sizes(&mut self, sizes: Vec<f32>) {
         self.point_sizes = Some(sizes);
-        self.vertices = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_inputs = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     fn ensure_vertices(&mut self) {

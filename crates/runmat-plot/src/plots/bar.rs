@@ -236,10 +236,13 @@ impl BarChart {
         Ok(())
     }
 
-    fn invalidate_gpu_data(&mut self) {
+    fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+    }
+
+    fn clear_gpu_source(&mut self) {
         self.gpu_source = None;
     }
 
@@ -295,7 +298,7 @@ impl BarChart {
             self.per_bar_colors = Some(colors);
         }
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     pub fn clear_per_bar_colors(&mut self) {
@@ -323,7 +326,7 @@ impl BarChart {
         {
             self.stack_offsets = Some(offsets);
             self.dirty = true;
-            self.invalidate_gpu_data();
+            self.invalidate_gpu_render_cache();
         }
         self
     }
@@ -355,7 +358,8 @@ impl BarChart {
         self.vertices = None;
         self.indices = None;
         self.bounds = None;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
+        self.clear_gpu_source();
         Ok(())
     }
 
@@ -400,7 +404,7 @@ impl BarChart {
             self.outline_color = Some(Vec4::new(0.0, 0.0, 0.0, 1.0));
         }
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Override outline styling while preserving GPU geometry when possible.

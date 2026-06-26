@@ -1512,6 +1512,73 @@ impl PlotDescriptor {
     }
 }
 
+fn validate_required_equal_lengths(
+    kind: &str,
+    fields: &[(&str, usize)],
+) -> Result<(), SceneExportError> {
+    let Some((first_name, first_len)) = fields.first().copied() else {
+        return Ok(());
+    };
+    if first_len == 0 {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required {first_name} values"
+        )));
+    }
+    for (name, len) in fields.iter().copied().skip(1) {
+        if len == 0 {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} is missing required {name} values"
+            )));
+        }
+        if len != first_len {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} length mismatch: {name} has {len} values, expected {first_len}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_surface_grid<T>(
+    kind: &str,
+    x: &[f64],
+    y: &[f64],
+    grid: &[Vec<T>],
+) -> Result<(), SceneExportError> {
+    if x.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required x values"
+        )));
+    }
+    if y.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required y values"
+        )));
+    }
+    if grid.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required grid rows"
+        )));
+    }
+    if grid.len() != y.len() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} row count ({}) must match y length ({})",
+            grid.len(),
+            y.len()
+        )));
+    }
+    for (row_idx, row) in grid.iter().enumerate() {
+        if row.len() != x.len() {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} row {row_idx} length ({}) must match x length ({})",
+                row.len(),
+                x.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl ScenePlot {
     async fn from_plot_for_export(
         plot: &PlotElement,
@@ -1858,38 +1925,83 @@ impl ScenePlot {
             | ScenePlot::Stairs { x, y, .. }
             | ScenePlot::Stem { x, y, .. }
             | ScenePlot::Area { x, y, .. } => {
-                if x.is_empty() && y.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "plot has no exportable X/Y scene data",
-                    ));
-                }
+                validate_required_equal_lengths(
+                    "plot X/Y scene data",
+                    &[("x", x.len()), ("y", y.len())],
+                )?;
             }
-            ScenePlot::ErrorBar { x, y, .. } => {
-                if x.is_empty() && y.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "errorbar plot has no exportable scene data",
-                    ));
-                }
+            ScenePlot::ErrorBar {
+                x,
+                y,
+                err_low,
+                err_high,
+                x_err_low,
+                x_err_high,
+                ..
+            } => {
+                validate_required_equal_lengths(
+                    "errorbar scene data",
+                    &[
+                        ("x", x.len()),
+                        ("y", y.len()),
+                        ("err_low", err_low.len()),
+                        ("err_high", err_high.len()),
+                        ("x_err_low", x_err_low.len()),
+                        ("x_err_high", x_err_high.len()),
+                    ],
+                )?;
             }
             ScenePlot::Quiver { x, y, u, v, .. } => {
-                if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "quiver plot has no exportable vector field scene data",
-                    ));
+                validate_required_equal_lengths(
+                    "quiver vector field scene data",
+                    &[
+                        ("x", x.len()),
+                        ("y", y.len()),
+                        ("u", u.len()),
+                        ("v", v.len()),
+                    ],
+                )?;
+            }
+            ScenePlot::Bar {
+                labels,
+                values,
+                histogram_bin_edges,
+                stack_offsets,
+                ..
+            } => {
+                validate_required_equal_lengths(
+                    "bar value scene data",
+                    &[("labels", labels.len()), ("values", values.len())],
+                )?;
+                if let Some(edges) = histogram_bin_edges {
+                    if edges.len() != values.len() + 1 {
+                        return Err(SceneExportError::unexportable(format!(
+                            "bar histogram bin edge count ({}) must be values length + 1 ({})",
+                            edges.len(),
+                            values.len() + 1
+                        )));
+                    }
+                }
+                if let Some(offsets) = stack_offsets {
+                    if offsets.len() != values.len() {
+                        return Err(SceneExportError::unexportable(format!(
+                            "bar stack offset count ({}) must match value count ({})",
+                            offsets.len(),
+                            values.len()
+                        )));
+                    }
                 }
             }
-            ScenePlot::Bar { labels, values, .. } => {
-                if labels.is_empty() && values.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "bar plot has no exportable value scene data",
-                    ));
-                }
-            }
-            ScenePlot::Surface { x, y, z, .. } => {
-                if x.is_empty() && y.is_empty() && z.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "surface plot has no exportable grid scene data",
-                    ));
+            ScenePlot::Surface {
+                x,
+                y,
+                z,
+                color_grid_rgba,
+                ..
+            } => {
+                validate_surface_grid("surface grid scene data", x, y, z)?;
+                if let Some(color_grid) = color_grid_rgba {
+                    validate_surface_grid("surface color grid scene data", x, y, color_grid)?;
                 }
             }
             ScenePlot::Patch {
@@ -1913,17 +2025,37 @@ impl ScenePlot {
                 }
             }
             ScenePlot::Line3 { x, y, z, .. } => {
-                if x.is_empty() && y.is_empty() && z.is_empty() {
-                    return Err(SceneExportError::unexportable(
-                        "plot3 line has no exportable scene data",
-                    ));
-                }
+                validate_required_equal_lengths(
+                    "plot3 line scene data",
+                    &[("x", x.len()), ("y", y.len()), ("z", z.len())],
+                )?;
             }
-            ScenePlot::Scatter3 { points, .. } => {
+            ScenePlot::Scatter3 {
+                points,
+                colors_rgba,
+                point_sizes,
+                ..
+            } => {
                 if points.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter3 plot has no exportable point scene data",
                     ));
+                }
+                if !colors_rgba.is_empty() && colors_rgba.len() != points.len() {
+                    return Err(SceneExportError::unexportable(format!(
+                        "scatter3 color count ({}) must match point count ({})",
+                        colors_rgba.len(),
+                        points.len()
+                    )));
+                }
+                if let Some(sizes) = point_sizes {
+                    if sizes.len() != points.len() {
+                        return Err(SceneExportError::unexportable(format!(
+                            "scatter3 point size count ({}) must match point count ({})",
+                            sizes.len(),
+                            points.len()
+                        )));
+                    }
                 }
             }
             ScenePlot::Contour { vertices, .. } | ScenePlot::ContourFill { vertices, .. } => {

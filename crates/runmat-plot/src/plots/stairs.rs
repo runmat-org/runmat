@@ -33,8 +33,15 @@ pub struct StairsPlot {
 
 impl StairsPlot {
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x.is_empty() || !self.y.is_empty() {
+        if !self.x.is_empty() && self.x.len() == self.y.len() {
             return Ok((self.x.clone(), self.y.clone()));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() {
+            return Err(format!(
+                "stairs plot has partial CPU source data: x has {} values, y has {} values",
+                self.x.len(),
+                self.y.len()
+            ));
         }
 
         if let Some(inputs) = &self.gpu_inputs {
@@ -129,7 +136,7 @@ impl StairsPlot {
         self.line_width = line_width.max(0.5);
         self.dirty = true;
         self.marker_dirty = true;
-        self.drop_gpu();
+        self.drop_gpu_render_cache();
         self
     }
 
@@ -162,11 +169,10 @@ impl StairsPlot {
         }
     }
 
-    fn drop_gpu(&mut self) {
+    fn drop_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
-        self.gpu_inputs = None;
         self.marker_gpu_vertices = None;
     }
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {

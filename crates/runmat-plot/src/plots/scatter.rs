@@ -82,8 +82,15 @@ pub struct ScatterGpuStyle {
 
 impl ScatterPlot {
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+        if !self.x_data.is_empty() && self.x_data.len() == self.y_data.len() {
             return Ok((self.x_data.clone(), self.y_data.clone()));
+        }
+        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+            return Err(format!(
+                "scatter plot has partial CPU source data: x has {} values, y has {} values",
+                self.x_data.len(),
+                self.y_data.len()
+            ));
         }
 
         if let Some(inputs) = &self.gpu_inputs {
@@ -205,7 +212,12 @@ impl ScatterPlot {
     fn invalidate_gpu_vertices(&mut self) {
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+    }
+
+    fn clear_gpu_source_inputs(&mut self) {
         self.gpu_inputs = None;
+        self.gpu_has_per_point_sizes = false;
+        self.gpu_has_per_point_colors = false;
     }
 
     /// Create a scatter plot with custom styling
@@ -296,6 +308,7 @@ impl ScatterPlot {
         self.y_data = y_data;
         self.dirty = true;
         self.invalidate_gpu_vertices();
+        self.clear_gpu_source_inputs();
         Ok(())
     }
 

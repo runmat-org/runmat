@@ -117,8 +117,15 @@ impl LinePlot {
     }
 
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+        if !self.x_data.is_empty() && self.x_data.len() == self.y_data.len() {
             return Ok((self.x_data.clone(), self.y_data.clone()));
+        }
+        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+            return Err(format!(
+                "line plot has partial CPU source data: x has {} values, y has {} values",
+                self.x_data.len(),
+                self.y_data.len()
+            ));
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
@@ -261,16 +268,19 @@ impl LinePlot {
         }
     }
 
-    fn invalidate_gpu_data(&mut self) {
+    fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.bounds = None;
-        self.gpu_line_inputs = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self.gpu_topology = None;
         self.gpu_pack_viewport_px = None;
         self.gpu_pack_view_bounds = None;
+    }
+
+    fn clear_gpu_source_inputs(&mut self) {
+        self.gpu_line_inputs = None;
     }
 
     fn invalidate_marker_data(&mut self) {
@@ -287,7 +297,7 @@ impl LinePlot {
         self.line_width = line_width;
         self.line_style = line_style;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
         self
     }
 
@@ -310,7 +320,8 @@ impl LinePlot {
         self.x_data = x_data;
         self.y_data = y_data;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
+        self.clear_gpu_source_inputs();
         self.invalidate_marker_data();
         Ok(())
     }
@@ -319,7 +330,7 @@ impl LinePlot {
     pub fn set_color(&mut self, color: Vec4) {
         self.color = color;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
         self.invalidate_marker_data();
     }
 
@@ -327,14 +338,14 @@ impl LinePlot {
     pub fn set_line_width(&mut self, width: f32) {
         self.line_width = width.max(0.1); // Minimum line width
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Set the line style
     pub fn set_line_style(&mut self, style: LineStyle) {
         self.line_style = style;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Attach marker metadata so renderers can emit hybrid line+marker plots.
@@ -347,14 +358,14 @@ impl LinePlot {
     pub fn set_line_join(&mut self, join: LineJoin) {
         self.line_join = join;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Set the line cap style for thick lines
     pub fn set_line_cap(&mut self, cap: LineCap) {
         self.line_cap = cap;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Show or hide the plot

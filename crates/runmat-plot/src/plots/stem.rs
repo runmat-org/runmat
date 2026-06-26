@@ -37,8 +37,15 @@ pub struct StemPlot {
 
 impl StemPlot {
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x.is_empty() || !self.y.is_empty() {
+        if !self.x.is_empty() && self.x.len() == self.y.len() {
             return Ok((self.x.clone(), self.y.clone()));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() {
+            return Err(format!(
+                "stem plot has partial CPU source data: x has {} values, y has {} values",
+                self.x.len(),
+                self.y.len()
+            ));
         }
 
         if let Some(inputs) = &self.gpu_inputs {
@@ -162,7 +169,6 @@ impl StemPlot {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
-        self.gpu_inputs = None;
         self.marker_gpu_vertices = None;
         self
     }

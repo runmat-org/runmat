@@ -521,6 +521,10 @@ pub struct WgpuContextHandle {
 }
 
 /// Borrowed reference to a provider-owned WGPU buffer corresponding to a `GpuTensorHandle`.
+///
+/// Providers that expose this handle must ensure the buffer was created with
+/// `wgpu::BufferUsages::COPY_SRC`, so zero-copy consumers can export or inspect
+/// tensor data without depending on provider-specific readback APIs.
 #[cfg(feature = "wgpu")]
 #[derive(Clone)]
 pub struct WgpuBufferRef {

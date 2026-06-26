@@ -12,7 +12,6 @@ use runmat_core::{
 };
 use runmat_runtime::builtins::plotting::{
     close_figure as runtime_close_figure, close_geometry_scene as runtime_close_geometry_scene,
-    current_figure_handle as runtime_current_figure_handle,
     export_geometry_scene as runtime_export_geometry_scene,
     figure_handles as runtime_figure_handles, import_figure as runtime_import_figure,
     import_geometry_scene as runtime_import_geometry_scene,
@@ -1674,29 +1673,11 @@ impl RunMatWasm {
             }
             Ok(None) => {
                 log::debug!("RunMat wasm: exportFigureScene empty handle={}", handle);
-                let current = runtime_current_figure_handle();
-                if current.as_u32() == handle {
-                    return Ok(None);
-                }
-                match export_scene(current).await {
-                    Ok(payload) => {
-                        log::debug!(
-                            "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",
-                            handle,
-                            current.as_u32(),
-                            payload.as_ref().map(|bytes| bytes.len()).unwrap_or(0)
-                        );
-                        Ok(payload)
-                    }
-                    Err(err) => {
-                        warn!("RunMat wasm: fallback figure scene export rejected: {err}");
-                        Ok(None)
-                    }
-                }
+                Ok(None)
             }
             Err(err) => {
                 warn!("RunMat wasm: figure scene export rejected: {err}");
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }

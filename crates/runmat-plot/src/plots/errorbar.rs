@@ -134,7 +134,6 @@ impl ErrorBar {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
-        self.gpu_inputs = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self
@@ -247,11 +246,11 @@ impl ErrorBar {
         &self,
     ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
         if !self.x.is_empty()
-            || !self.y.is_empty()
-            || !self.y_neg.is_empty()
-            || !self.y_pos.is_empty()
-            || !self.x_neg.is_empty()
-            || !self.x_pos.is_empty()
+            && self.x.len() == self.y.len()
+            && self.x.len() == self.y_neg.len()
+            && self.x.len() == self.y_pos.len()
+            && self.x.len() == self.x_neg.len()
+            && self.x.len() == self.x_pos.len()
         {
             return Ok((
                 self.x.clone(),
@@ -260,6 +259,23 @@ impl ErrorBar {
                 self.y_pos.clone(),
                 self.x_neg.clone(),
                 self.x_pos.clone(),
+            ));
+        }
+        if !self.x.is_empty()
+            || !self.y.is_empty()
+            || !self.y_neg.is_empty()
+            || !self.y_pos.is_empty()
+            || !self.x_neg.is_empty()
+            || !self.x_pos.is_empty()
+        {
+            return Err(format!(
+                "errorbar plot has partial CPU source data: x={}, y={}, y_neg={}, y_pos={}, x_neg={}, x_pos={}",
+                self.x.len(),
+                self.y.len(),
+                self.y_neg.len(),
+                self.y_pos.len(),
+                self.x_neg.len(),
+                self.x_pos.len()
             ));
         }
 
