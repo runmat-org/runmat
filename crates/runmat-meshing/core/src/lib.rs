@@ -1,3 +1,26 @@
+pub mod artifact;
+pub mod options;
+pub mod provenance;
+pub mod quality;
+pub mod sizing;
+pub mod topology;
+pub mod validation;
+
+pub use artifact::{
+    AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+    AnalysisVolumeElement,
+};
+pub use options::{
+    AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
+    MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
+    RefinementStrategy, VolumeMeshingOptions,
+};
+pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
+pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
+pub use sizing::{MeshSizingField, SizingSample};
+pub use topology::{BoundaryElementKind, VolumeElementKind};
+pub use validation::{validate_analysis_mesh, AnalysisMeshValidationError};
+
 use runmat_geometry_core::{GeometryAsset, MeshKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
