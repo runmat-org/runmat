@@ -1,15 +1,18 @@
 pub mod artifact;
+pub mod boundary;
 pub mod options;
 pub mod provenance;
 pub mod quality;
 pub mod sizing;
 pub mod topology;
 pub mod validation;
+pub mod volume;
 
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
     AnalysisVolumeElement,
 };
+pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
@@ -20,6 +23,7 @@ pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{MeshSizingField, SizingSample};
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{validate_analysis_mesh, AnalysisMeshValidationError};
+pub use volume::{generate_analysis_mesh, MeshingError, StructuredTetMesher, VolumeMesher};
 
 use runmat_geometry_core::{GeometryAsset, MeshKind};
 use serde::{Deserialize, Serialize};
