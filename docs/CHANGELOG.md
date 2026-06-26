@@ -12,6 +12,7 @@ _June 26, 2026_
 - Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+- Add the foundation for FEA tooling. Learn more in the [PR overview](https://github.com/runmat-org/runmat/pull/399)
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
@@ -24,22 +25,21 @@ _June 26, 2026_
 - Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
 - Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
 
-### Desktop
-
-#### Added
-- Add public project links so people can share cloud projects and let viewers explore them in a temporary Cloud Sandbox
-- Add the foundation for FEA tooling. Learn more in the [PR overview](https://github.com/runmat-org/runmat/pull/399)
-
-#### Changed
-- Improve project sharing access controls and Windows release signing so public/private projects behave consistently and Windows installers are verified
-
-#### Fixed
-- Fix Desktop reliability issues across project search, rename, history restore, public-link sandbox runs, editor access, Agent responsiveness, notebook rendering, and plotting
-
 ### Development
 
 #### Changed
 - Document OCCT/CMake build requirements, add no-OCCT build support, align Linux and Windows runner bootstrap scripts, and move runtime WASM helper scripts into the runtime script namespace
+
+### Desktop
+
+#### Added
+- Add public project links so people can share cloud projects with consistent public/private access controls and let viewers explore them in a temporary Cloud Sandbox
+
+#### Changed
+- Improve Windows release signing so Desktop installers are verified
+
+#### Fixed
+- Fix Desktop reliability issues across project search, history restore, editor access, Agent responsiveness, notebook rendering, and plotting
 
 ---
 
