@@ -307,6 +307,12 @@ struct FeaLoadDocument {
     #[serde(default)]
     vector: Option<[f64; 3]>,
     #[serde(default)]
+    force: Option<[f64; 3]>,
+    #[serde(default)]
+    moment: Option<[f64; 3]>,
+    #[serde(default)]
+    point: Option<[f64; 3]>,
+    #[serde(default)]
     magnitude_pa: Option<f64>,
     #[serde(default)]
     current_a: Option<f64>,
@@ -324,6 +330,7 @@ enum FeaLoadType {
     Force,
     Moment,
     Torque,
+    Wrench,
     Pressure,
     BodyForce,
     CurrentDensity,
@@ -811,6 +818,22 @@ fn resolve_load(
             let [mx, my, mz] = load_vector(load, "moment")?;
             LoadKind::Moment { mx, my, mz }
         }
+        FeaLoadType::Wrench => {
+            let [fx, fy, fz] = load_force(load)?;
+            let [mx, my, mz] = load_moment(load)?;
+            let [px, py, pz] = load_point(load)?;
+            LoadKind::Wrench {
+                fx,
+                fy,
+                fz,
+                mx,
+                my,
+                mz,
+                px,
+                py,
+                pz,
+            }
+        }
         FeaLoadType::Pressure => LoadKind::Pressure {
             magnitude_pa: required_f64(load.magnitude_pa, "pressure.magnitude_pa")?,
         },
@@ -1027,6 +1050,21 @@ fn load_vector(load: &FeaLoadDocument, label: &str) -> Result<[f64; 3], String> 
         .ok_or_else(|| format!("{label} load requires vector: [x, y, z]"))
 }
 
+fn load_force(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.force
+        .ok_or_else(|| "wrench load requires force: [fx, fy, fz]".to_string())
+}
+
+fn load_moment(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.moment
+        .ok_or_else(|| "wrench load requires moment: [mx, my, mz]".to_string())
+}
+
+fn load_point(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.point
+        .ok_or_else(|| "wrench load requires point: [px, py, pz]".to_string())
+}
+
 fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
     value.ok_or_else(|| format!("{label} is required"))
 }
@@ -1169,6 +1207,62 @@ type: moment
             .expect_err("moment without vector should fail");
 
         assert!(err.contains("moment load requires vector: [x, y, z]"));
+    }
+
+    #[test]
+    fn fea_document_resolves_wrench_load() {
+        let geometry = sample_geometry();
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tag:tip
+type: wrench
+force: [10.0, 20.0, 30.0]
+moment: [1.0, 2.0, 3.0]
+point: [0.1, 0.2, 0.3]
+"#,
+        )
+        .expect("load document should parse");
+
+        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect("load should resolve against geometry");
+
+        assert_eq!(resolved.load_id, "tip_wrench");
+        assert_eq!(resolved.region_id, "tip");
+        assert!(matches!(
+            resolved.kind,
+            LoadKind::Wrench {
+                fx: 10.0,
+                fy: 20.0,
+                fz: 30.0,
+                mx: 1.0,
+                my: 2.0,
+                mz: 3.0,
+                px: 0.1,
+                py: 0.2,
+                pz: 0.3,
+            }
+        ));
+    }
+
+    #[test]
+    fn fea_document_wrench_requires_force_moment_and_point() {
+        let geometry = sample_geometry();
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tip
+type: wrench
+force: [1.0, 0.0, 0.0]
+moment: [0.0, 0.0, 1.0]
+"#,
+        )
+        .expect("load document should parse");
+
+        let err = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect_err("wrench without point should fail");
+
+        assert!(err.contains("wrench load requires point: [px, py, pz]"));
     }
 
     #[test]

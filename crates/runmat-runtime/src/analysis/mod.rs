@@ -280,8 +280,13 @@ fn reject_moment_loads_for_run_family(
     if let Some(load) = model
         .loads
         .iter()
-        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
+        .find(|load| matches!(load.kind, LoadKind::Moment { .. } | LoadKind::Wrench { .. }))
     {
+        let load_kind = match load.kind {
+            LoadKind::Moment { .. } => "moment",
+            LoadKind::Wrench { .. } => "wrench",
+            _ => "structural",
+        };
         return Err(operation_error(
             operation,
             op_version,
@@ -292,7 +297,7 @@ fn reject_moment_loads_for_run_family(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("moment loads are structural loads and cannot be used as {family} loads"),
+            format!("{load_kind} loads are structural loads and cannot be used as {family} loads"),
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("load_id".to_string(), load.load_id.clone()),
@@ -15456,6 +15461,16 @@ fn map_validate_error(
         AnalysisValidationError::ZeroMomentVector { load_id } => (
             "RM.FEA.VALIDATE.ZERO_MOMENT",
             format!("moment load {load_id} must have nonzero magnitude"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
+        AnalysisValidationError::InvalidWrench { load_id } => (
+            "RM.FEA.VALIDATE.INVALID_WRENCH",
+            format!("wrench load {load_id} must have finite force, moment, and point components"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
+        AnalysisValidationError::ZeroWrench { load_id } => (
+            "RM.FEA.VALIDATE.ZERO_WRENCH",
+            format!("wrench load {load_id} must have nonzero force or moment"),
             BTreeMap::from([("load_id".to_string(), load_id)]),
         ),
         AnalysisValidationError::UnitMismatch { model, geometry } => (

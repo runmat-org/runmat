@@ -1,4 +1,5 @@
 use clap::{CommandFactory, FromArgMatches};
+use std::io::Write;
 use std::process::ExitCode;
 
 #[tokio::main]
@@ -12,8 +13,8 @@ async fn main() -> ExitCode {
         }
     };
     let sources = runmat::CliOverrideSources::from_matches(&matches);
-    match runmat::run_cli(cli, sources).await {
-        Ok(()) => ExitCode::SUCCESS,
+    let exit_code = match runmat::run_cli(cli, sources).await {
+        Ok(()) => 0,
         Err(err) => {
             if err
                 .downcast_ref::<runmat::AlreadyReportedCliError>()
@@ -21,7 +22,26 @@ async fn main() -> ExitCode {
             {
                 eprintln!("Error: {err}");
             }
-            ExitCode::from(1)
+            1
         }
+    };
+    exit_after_native_cad_if_needed(exit_code);
+    ExitCode::from(exit_code)
+}
+
+fn exit_after_native_cad_if_needed(exit_code: u8) {
+    if !runmat_runtime::geometry::native_cad_backend_was_used() {
+        return;
     }
+
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+
+    #[cfg(unix)]
+    unsafe {
+        libc::_exit(i32::from(exit_code));
+    }
+
+    #[cfg(not(unix))]
+    std::process::exit(i32::from(exit_code));
 }

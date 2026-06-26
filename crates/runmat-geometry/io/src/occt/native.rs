@@ -5,9 +5,15 @@ use super::{
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
+static NATIVE_CAD_BACKEND_USED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn native_cad_backend_was_used() -> bool {
+    NATIVE_CAD_BACKEND_USED.load(Ordering::Relaxed)
+}
 
 pub(crate) fn import_cad_topology(
     path: &str,
@@ -16,6 +22,7 @@ pub(crate) fn import_cad_topology(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadTopology, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let linear_deflection = options
@@ -56,6 +63,7 @@ pub(crate) fn start_cad_preview_session(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let payload = ffi::bridge::start_cad_preview_session(
@@ -81,6 +89,7 @@ pub(crate) fn read_cad_preview_session_chunk(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let payload = ffi::bridge::read_cad_preview_session_chunk(

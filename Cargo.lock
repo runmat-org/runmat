@@ -5278,6 +5278,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs 5.0.1",
  "env_logger 0.11.10",
+ "libc",
  "log",
  "miette",
  "once_cell",

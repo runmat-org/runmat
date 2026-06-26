@@ -41,6 +41,8 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_direct_rotational_moment_load_count: usize,
     #[serde(default)]
+    pub structural_wrench_lowering: Vec<WrenchLoweringSummary>,
+    #[serde(default)]
     pub structural_rotational_constraint_count: usize,
     #[serde(default)]
     pub structural_beam_element_count: usize,
@@ -102,6 +104,18 @@ pub struct ShellRecoveryElementSummary {
     pub area_m2: f64,
     pub section: ShellSection,
     pub material: ShellMaterial,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WrenchLoweringSummary {
+    pub load_id: String,
+    pub region_id: String,
+    pub target_node_count: usize,
+    pub applied_force: [f64; 3],
+    pub applied_moment_at_point: [f64; 3],
+    pub force_residual: [f64; 3],
+    pub moment_residual: [f64; 3],
+    pub moment_couple_applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -385,6 +399,15 @@ pub fn assemble_linear_system(
                 }
             }
             runmat_analysis_core::LoadKind::Moment { .. } => {}
+            runmat_analysis_core::LoadKind::Wrench { fx, fy, fz, .. } => {
+                rhs[base] += *fx;
+                if base + 1 < dof_count {
+                    rhs[base + 1] += *fy;
+                }
+                if base + 2 < dof_count {
+                    rhs[base + 2] += *fz;
+                }
+            }
             runmat_analysis_core::LoadKind::Pressure { magnitude_pa } => {
                 rhs[base] += magnitude_pa * 1.0e-3;
                 if base + 1 < dof_count {
@@ -915,6 +938,7 @@ pub fn assemble_linear_system(
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
+        structural_wrench_lowering: Vec::new(),
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
@@ -1142,6 +1166,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     }
 
     let mut direct_rotational_moment_load_count = 0usize;
+    let mut structural_wrench_lowering = Vec::new();
     for load in &model.loads {
         let target_nodes = structural_target_nodes(structural, &load.region_id);
         if target_nodes.is_empty() {
@@ -1199,6 +1224,32 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                         mz * scale,
                     );
                 }
+            }
+            LoadKind::Wrench {
+                fx,
+                fy,
+                fz,
+                mx,
+                my,
+                mz,
+                px,
+                py,
+                pz,
+            } => {
+                let summary = add_wrench_rhs(
+                    structural,
+                    &structural_dof_layout,
+                    &mut rhs,
+                    &target_nodes,
+                    [fx, fy, fz],
+                    [mx, my, mz],
+                    [px, py, pz],
+                );
+                structural_wrench_lowering.push(WrenchLoweringSummary {
+                    load_id: load.load_id.clone(),
+                    region_id: load.region_id.clone(),
+                    ..summary
+                });
             }
             _ => {}
         }
@@ -1303,6 +1354,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             .filter(|load| matches!(load.kind, LoadKind::Moment { .. }))
             .count(),
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
+        structural_wrench_lowering,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
@@ -1575,6 +1627,207 @@ fn add_rhs(
     if let Some(dof) = layout.index(node_index, kind) {
         rhs[dof] += value;
     }
+}
+
+fn add_wrench_rhs(
+    structural: &StructuralModel,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    target_nodes: &[usize],
+    force: [f64; 3],
+    moment_at_point: [f64; 3],
+    point_m: [f64; 3],
+) -> WrenchLoweringSummary {
+    if target_nodes.is_empty() {
+        return WrenchLoweringSummary {
+            load_id: String::new(),
+            region_id: String::new(),
+            target_node_count: 0,
+            applied_force: [0.0; 3],
+            applied_moment_at_point: [0.0; 3],
+            force_residual: force,
+            moment_residual: moment_at_point,
+            moment_couple_applied: false,
+        };
+    }
+
+    let centroid = target_centroid(structural, target_nodes);
+    let scale = 1.0 / target_nodes.len() as f64;
+    let mut nodal_forces = Vec::with_capacity(target_nodes.len());
+    for &node_index in target_nodes {
+        let nodal_force = scale_vec(force, scale);
+        add_translational_rhs(layout, rhs, node_index, nodal_force);
+        nodal_forces.push(nodal_force);
+    }
+
+    let force_arm = [
+        centroid[0] - point_m[0],
+        centroid[1] - point_m[1],
+        centroid[2] - point_m[2],
+    ];
+    let force_moment = cross(force_arm, force);
+    let couple = [
+        moment_at_point[0] - force_moment[0],
+        moment_at_point[1] - force_moment[1],
+        moment_at_point[2] - force_moment[2],
+    ];
+    let mut moment_couple_applied = false;
+
+    if !couple.iter().all(|component| component.abs() <= f64::EPSILON) {
+        let mut coupling = [[0.0_f64; 3]; 3];
+        let offsets = target_nodes
+            .iter()
+            .map(|&node_index| {
+                let node = structural.nodes[node_index].coordinates_m;
+                [
+                    node[0] - centroid[0],
+                    node[1] - centroid[1],
+                    node[2] - centroid[2],
+                ]
+            })
+            .collect::<Vec<_>>();
+        for offset in &offsets {
+            let r2 = dot(*offset, *offset);
+            for row in 0..3 {
+                coupling[row][row] += r2;
+                for col in 0..3 {
+                    coupling[row][col] -= offset[row] * offset[col];
+                }
+            }
+        }
+
+        if let Some(inv) = invert_3x3(coupling) {
+            let lambda = mat_vec(inv, couple);
+            for ((&node_index, offset), nodal_force) in target_nodes
+                .iter()
+                .zip(offsets.iter())
+                .zip(nodal_forces.iter_mut())
+            {
+                let couple_force = cross(lambda, *offset);
+                add_translational_rhs(layout, rhs, node_index, couple_force);
+                nodal_force[0] += couple_force[0];
+                nodal_force[1] += couple_force[1];
+                nodal_force[2] += couple_force[2];
+            }
+            moment_couple_applied = true;
+        }
+    }
+
+    let (applied_force, applied_moment_at_point) =
+        wrench_resultants(structural, target_nodes, &nodal_forces, point_m);
+    WrenchLoweringSummary {
+        load_id: String::new(),
+        region_id: String::new(),
+        target_node_count: target_nodes.len(),
+        applied_force,
+        applied_moment_at_point,
+        force_residual: [
+            force[0] - applied_force[0],
+            force[1] - applied_force[1],
+            force[2] - applied_force[2],
+        ],
+        moment_residual: [
+            moment_at_point[0] - applied_moment_at_point[0],
+            moment_at_point[1] - applied_moment_at_point[1],
+            moment_at_point[2] - applied_moment_at_point[2],
+        ],
+        moment_couple_applied,
+    }
+}
+
+fn add_translational_rhs(
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    node_index: usize,
+    force: [f64; 3],
+) {
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, force[0]);
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, force[1]);
+    add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
+}
+
+fn target_centroid(structural: &StructuralModel, target_nodes: &[usize]) -> [f64; 3] {
+    let mut centroid = [0.0_f64; 3];
+    for &node_index in target_nodes {
+        let node = structural.nodes[node_index].coordinates_m;
+        centroid[0] += node[0];
+        centroid[1] += node[1];
+        centroid[2] += node[2];
+    }
+    scale_vec(centroid, 1.0 / target_nodes.len() as f64)
+}
+
+fn wrench_resultants(
+    structural: &StructuralModel,
+    target_nodes: &[usize],
+    nodal_forces: &[[f64; 3]],
+    point_m: [f64; 3],
+) -> ([f64; 3], [f64; 3]) {
+    let mut applied_force = [0.0_f64; 3];
+    let mut applied_moment = [0.0_f64; 3];
+    for (&node_index, &force) in target_nodes.iter().zip(nodal_forces.iter()) {
+        applied_force[0] += force[0];
+        applied_force[1] += force[1];
+        applied_force[2] += force[2];
+        let node = structural.nodes[node_index].coordinates_m;
+        let arm = [
+            node[0] - point_m[0],
+            node[1] - point_m[1],
+            node[2] - point_m[2],
+        ];
+        let moment = cross(arm, force);
+        applied_moment[0] += moment[0];
+        applied_moment[1] += moment[1];
+        applied_moment[2] += moment[2];
+    }
+    (applied_force, applied_moment)
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn scale_vec(value: [f64; 3], scale: f64) -> [f64; 3] {
+    [value[0] * scale, value[1] * scale, value[2] * scale]
+}
+
+fn mat_vec(matrix: [[f64; 3]; 3], value: [f64; 3]) -> [f64; 3] {
+    [
+        dot(matrix[0], value),
+        dot(matrix[1], value),
+        dot(matrix[2], value),
+    ]
+}
+
+fn invert_3x3(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let m = matrix;
+    let c00 = m[1][1] * m[2][2] - m[1][2] * m[2][1];
+    let c01 = -(m[1][0] * m[2][2] - m[1][2] * m[2][0]);
+    let c02 = m[1][0] * m[2][1] - m[1][1] * m[2][0];
+    let c10 = -(m[0][1] * m[2][2] - m[0][2] * m[2][1]);
+    let c11 = m[0][0] * m[2][2] - m[0][2] * m[2][0];
+    let c12 = -(m[0][0] * m[2][1] - m[0][1] * m[2][0]);
+    let c20 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
+    let c21 = -(m[0][0] * m[1][2] - m[0][2] * m[1][0]);
+    let c22 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+    let det = m[0][0] * c00 + m[0][1] * c01 + m[0][2] * c02;
+    if det.abs() <= 1.0e-18 {
+        return None;
+    }
+    let inv_det = 1.0 / det;
+    Some([
+        [c00 * inv_det, c10 * inv_det, c20 * inv_det],
+        [c01 * inv_det, c11 * inv_det, c21 * inv_det],
+        [c02 * inv_det, c12 * inv_det, c22 * inv_det],
+    ])
 }
 
 fn constrain_dof(

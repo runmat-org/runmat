@@ -73,13 +73,18 @@ pub(crate) fn reject_moment_loads_for_nonstructural_pipeline(
     let Some(load) = model
         .loads
         .iter()
-        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
+        .find(|load| matches!(load.kind, LoadKind::Moment { .. } | LoadKind::Wrench { .. }))
     else {
         return Ok(());
     };
+    let load_kind = match load.kind {
+        LoadKind::Moment { .. } => "moment",
+        LoadKind::Wrench { .. } => "wrench",
+        _ => "structural",
+    };
 
     Err(FeaRunError::InvalidModel(format!(
-        "moment loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
+        "{load_kind} loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
         load.load_id, load.region_id
     )))
 }

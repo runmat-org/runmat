@@ -89,6 +89,54 @@ struct CadDocument {
   Handle(XCAFDoc_LayerTool) layer_tool;
   Handle(XCAFDoc_MaterialTool) material_tool;
   bool has_xcaf = false;
+
+  CadDocument() = default;
+  CadDocument(const CadDocument&) = delete;
+  CadDocument& operator=(const CadDocument&) = delete;
+
+  CadDocument(CadDocument&& other) noexcept {
+    *this = std::move(other);
+  }
+
+  CadDocument& operator=(CadDocument&& other) noexcept {
+    if (this != &other) {
+      close_document();
+      shape = std::move(other.shape);
+      document = std::move(other.document);
+      shape_tool = std::move(other.shape_tool);
+      color_tool = std::move(other.color_tool);
+      layer_tool = std::move(other.layer_tool);
+      material_tool = std::move(other.material_tool);
+      has_xcaf = other.has_xcaf;
+
+      other.document.Nullify();
+      other.shape_tool.Nullify();
+      other.color_tool.Nullify();
+      other.layer_tool.Nullify();
+      other.material_tool.Nullify();
+      other.has_xcaf = false;
+    }
+    return *this;
+  }
+
+  ~CadDocument() {
+    close_document();
+  }
+
+private:
+  void close_document() {
+    if (document.IsNull()) {
+      return;
+    }
+    Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+    app->Close(document);
+    document.Nullify();
+    shape_tool.Nullify();
+    color_tool.Nullify();
+    layer_tool.Nullify();
+    material_tool.Nullify();
+    has_xcaf = false;
+  }
 };
 
 struct CadPreviewSession {

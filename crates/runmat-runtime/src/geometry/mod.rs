@@ -875,6 +875,10 @@ pub fn geometry_inspect_op(
     ))
 }
 
+pub fn native_cad_backend_was_used() -> bool {
+    runmat_geometry_io::native_cad_backend_was_used()
+}
+
 pub fn geometry_inspect(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryInspectResult> {
     let envelope =
         geometry_inspect_op(path, bytes, OperationContext::new(None, None)).map_err(|error| {

@@ -17,6 +17,17 @@ pub enum LoadKind {
         my: f64,
         mz: f64,
     },
+    Wrench {
+        fx: f64,
+        fy: f64,
+        fz: f64,
+        mx: f64,
+        my: f64,
+        mz: f64,
+        px: f64,
+        py: f64,
+        pz: f64,
+    },
     Pressure {
         magnitude_pa: f64,
     },

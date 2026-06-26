@@ -20,6 +20,16 @@ pub use preview::{
 pub use report::{ImportDiagnostic, ImportDiagnosticSeverity, ImportReport, ImportResult};
 pub use sniff::{detect_geometry_format, GeometryFormat};
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub fn native_cad_backend_was_used() -> bool {
+    occt::native_cad_backend_was_used()
+}
+
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+pub fn native_cad_backend_was_used() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;

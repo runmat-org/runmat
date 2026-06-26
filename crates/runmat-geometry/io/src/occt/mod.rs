@@ -138,6 +138,11 @@ pub(crate) struct OcctRawAssemblyNode {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn native_cad_backend_was_used() -> bool {
+    native::native_cad_backend_was_used()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 pub(crate) fn import_cad_topology(
     path: &str,
     bytes: &[u8],
