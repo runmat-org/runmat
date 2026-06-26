@@ -539,6 +539,7 @@ pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
+    pub analysis_mesh_artifact_path: Option<String>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -549,6 +550,7 @@ impl Default for LinearStaticSolveOptions {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
+            analysis_mesh_artifact_path: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }

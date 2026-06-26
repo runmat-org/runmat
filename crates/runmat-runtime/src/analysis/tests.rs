@@ -1953,6 +1953,10 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .analysis_mesh_artifact_path
         .as_ref()
         .expect("study run should persist analysis mesh artifact path");
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
     assert!(artifact_path.ends_with("analysis_mesh.json"));
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
@@ -1990,6 +1994,13 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["analysis_mesh_artifact_path"].as_str(),
         Some(artifact_path.as_str())
     );
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
+            && diagnostic.message.contains(artifact_path)
+    }));
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2390,6 +2401,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: Some(sample_analysis_run_prep_context()),
             prep_artifact_id: Some(prep_artifact_id),
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         context,
@@ -2446,6 +2458,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
@@ -4471,6 +4484,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
@@ -4500,6 +4514,7 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
@@ -4531,6 +4546,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             quality_policy: QualityPolicy::Exploratory,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
@@ -4591,6 +4607,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
@@ -4653,6 +4670,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Strict,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),

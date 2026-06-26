@@ -387,6 +387,8 @@ pub struct AnalysisRunOptions {
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
@@ -437,6 +439,7 @@ impl Default for AnalysisRunOptions {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         }
     }

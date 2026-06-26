@@ -174,6 +174,13 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
+    if let Some(path) = options.analysis_mesh_artifact_path.as_ref() {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_ANALYSIS_MESH_REFERENCE".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!("analysis_mesh_artifact_path={path}"),
+        });
+    }
     if let (Some(residual_norm), Some(equation_scale)) = (
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),

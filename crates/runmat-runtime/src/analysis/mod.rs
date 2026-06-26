@@ -1191,6 +1191,10 @@ pub fn analysis_run_study_op(
         AnalysisRunKind::LinearStatic => {
             let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
             attach_prep_artifact_to_run_options(&mut options, &study_prep_artifact_id);
+            attach_analysis_mesh_artifact_to_run_options(
+                &mut options,
+                analysis_mesh_artifact_path.as_deref(),
+            );
             let run = analysis_run_linear_static_with_options(
                 &model,
                 spec.backend,
@@ -9216,6 +9220,7 @@ pub fn analysis_run_linear_static_with_options(
                 prep_context.as_ref(),
                 options.prep_calibration_profile,
             ),
+            analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -12912,6 +12917,15 @@ fn run_options_to_json<T: Serialize>(options: &T) -> serde_json::Value {
 fn attach_prep_artifact_to_run_options(options: &mut AnalysisRunOptions, prep_artifact_id: &str) {
     if options.prep_artifact_id.is_none() {
         options.prep_artifact_id = Some(prep_artifact_id.to_string());
+    }
+}
+
+fn attach_analysis_mesh_artifact_to_run_options(
+    options: &mut AnalysisRunOptions,
+    analysis_mesh_artifact_path: Option<&str>,
+) {
+    if options.analysis_mesh_artifact_path.is_none() {
+        options.analysis_mesh_artifact_path = analysis_mesh_artifact_path.map(str::to_string);
     }
 }
 
