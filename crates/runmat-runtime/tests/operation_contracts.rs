@@ -143,6 +143,7 @@ fn contract_study_spec(
         model: None,
         run_kind,
         backend: ComputeBackend::Cpu,
+        mesh_options: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,

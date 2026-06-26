@@ -741,6 +741,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         model,
         run_kind,
         backend: options.backend.unwrap_or(ComputeBackend::Cpu),
+        mesh_options: None,
         linear_static_run_options: run_options.linear_static,
         modal_run_options: run_options.modal,
         acoustic_run_options: run_options.acoustic,

@@ -13,8 +13,13 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use runmat_meshing_core::{
+    MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions, MeshTargetSize,
+    RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions, RefinementStrategy,
+    VolumeElementKind, VolumeMeshingOptions,
+};
+use serde::de::{DeserializeOwned, Error as DeError};
+use serde::{Deserialize, Deserializer};
 
 use super::{
     analysis_create_model_op, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
@@ -58,6 +63,8 @@ struct FeaStudyDocument {
     geometry: FeaGeometryDocument,
     model: FeaModelDocument,
     run: FeaRunDocument,
+    #[serde(default)]
+    mesh: Option<FeaMeshDocument>,
     #[serde(default)]
     regions: BTreeMap<String, FeaRegionDocument>,
     #[serde(default)]
@@ -111,6 +118,97 @@ struct FeaModelDocument {
     frame: Option<ReferenceFrame>,
     #[serde(default)]
     defaults: FeaModelDefaultsMode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshDocument {
+    #[serde(default = "default_mesh_kind")]
+    kind: MeshKindRequest,
+    #[serde(default = "default_mesh_element")]
+    element: VolumeElementKind,
+    #[serde(default = "default_mesh_element_order")]
+    element_order: MeshElementOrder,
+    #[serde(default = "default_mesh_profile")]
+    profile: MeshProfile,
+    #[serde(default = "default_mesh_max_elements")]
+    max_elements: usize,
+    #[serde(default, deserialize_with = "deserialize_optional_mesh_target_size")]
+    target_size: Option<MeshTargetSize>,
+    #[serde(default)]
+    refinement: FeaMeshRefinementDocument,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshRefinementDocument {
+    #[serde(default = "default_refinement_strategy")]
+    strategy: RefinementStrategy,
+    #[serde(default = "default_refinement_max_iterations")]
+    max_iterations: usize,
+    #[serde(default)]
+    convergence: FeaRefinementConvergenceDocument,
+    #[serde(default)]
+    focus: FeaRefinementFocusDocument,
+}
+
+impl Default for FeaMeshRefinementDocument {
+    fn default() -> Self {
+        Self {
+            strategy: default_refinement_strategy(),
+            max_iterations: default_refinement_max_iterations(),
+            convergence: FeaRefinementConvergenceDocument::default(),
+            focus: FeaRefinementFocusDocument::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaRefinementConvergenceDocument {
+    #[serde(default = "default_field_change_tolerance")]
+    field_change_tolerance: f64,
+    #[serde(default = "default_energy_change_tolerance")]
+    energy_change_tolerance: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_auto_f64")]
+    residual_tolerance: Option<f64>,
+}
+
+impl Default for FeaRefinementConvergenceDocument {
+    fn default() -> Self {
+        Self {
+            field_change_tolerance: default_field_change_tolerance(),
+            energy_change_tolerance: default_energy_change_tolerance(),
+            residual_tolerance: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaRefinementFocusDocument {
+    #[serde(default = "default_focus_fine")]
+    loads: RefinementFocusLevel,
+    #[serde(default = "default_focus_fine")]
+    constraints: RefinementFocusLevel,
+    #[serde(default = "default_focus_normal")]
+    interfaces: RefinementFocusLevel,
+    #[serde(default = "default_true")]
+    curvature: bool,
+    #[serde(default = "default_true")]
+    small_features: bool,
+}
+
+impl Default for FeaRefinementFocusDocument {
+    fn default() -> Self {
+        Self {
+            loads: default_focus_fine(),
+            constraints: default_focus_fine(),
+            interfaces: default_focus_normal(),
+            curvature: true,
+            small_features: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -451,6 +549,7 @@ async fn resolve_study(
     let model = resolve_model(&study, &geometry, &intent)?;
     let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
     let run_options = resolve_run_options(&study.run, run_kind)?;
+    let mesh_options = resolve_mesh_options(study.mesh.as_ref())?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
@@ -458,6 +557,7 @@ async fn resolve_study(
         model,
         run_kind,
         backend: study.run.backend,
+        mesh_options,
         linear_static_run_options: run_options.linear_static,
         modal_run_options: run_options.modal,
         acoustic_run_options: run_options.acoustic,
@@ -470,6 +570,82 @@ async fn resolve_study(
         electromagnetic_run_options: run_options.electromagnetic,
     };
     Ok(ResolvedStudyParts { spec })
+}
+
+fn resolve_mesh_options(
+    mesh: Option<&FeaMeshDocument>,
+) -> Result<Option<VolumeMeshingOptions>, String> {
+    let Some(mesh) = mesh else {
+        return Ok(None);
+    };
+    if mesh.max_elements == 0 {
+        return Err("mesh.max_elements must be greater than zero".to_string());
+    }
+    if !mesh
+        .refinement
+        .convergence
+        .field_change_tolerance
+        .is_finite()
+        || mesh.refinement.convergence.field_change_tolerance <= 0.0
+    {
+        return Err(
+            "mesh.refinement.convergence.field_change_tolerance must be finite and positive"
+                .to_string(),
+        );
+    }
+    if !mesh
+        .refinement
+        .convergence
+        .energy_change_tolerance
+        .is_finite()
+        || mesh.refinement.convergence.energy_change_tolerance <= 0.0
+    {
+        return Err(
+            "mesh.refinement.convergence.energy_change_tolerance must be finite and positive"
+                .to_string(),
+        );
+    }
+    if let Some(residual_tolerance) = mesh.refinement.convergence.residual_tolerance {
+        if !residual_tolerance.is_finite() || residual_tolerance <= 0.0 {
+            return Err(
+                "mesh.refinement.convergence.residual_tolerance must be finite and positive"
+                    .to_string(),
+            );
+        }
+    }
+    if matches!(mesh.refinement.strategy, RefinementStrategy::None)
+        && mesh.refinement.max_iterations > 0
+    {
+        return Err(
+            "mesh.refinement.max_iterations must be 0 when mesh.refinement.strategy is none"
+                .to_string(),
+        );
+    }
+
+    Ok(Some(VolumeMeshingOptions {
+        kind: mesh.kind,
+        element: mesh.element,
+        element_order: mesh.element_order,
+        profile: mesh.profile,
+        max_elements: mesh.max_elements,
+        target_size: mesh.target_size.unwrap_or(MeshTargetSize::Auto),
+        refinement: MeshRefinementOptions {
+            strategy: mesh.refinement.strategy,
+            max_iterations: mesh.refinement.max_iterations,
+            convergence: RefinementConvergenceOptions {
+                field_change_tolerance: mesh.refinement.convergence.field_change_tolerance,
+                energy_change_tolerance: mesh.refinement.convergence.energy_change_tolerance,
+                residual_tolerance: mesh.refinement.convergence.residual_tolerance,
+            },
+            focus: RefinementFocusOptions {
+                loads: mesh.refinement.focus.loads,
+                constraints: mesh.refinement.focus.constraints,
+                interfaces: mesh.refinement.focus.interfaces,
+                curvature: mesh.refinement.focus.curvature,
+                small_features: mesh.refinement.focus.small_features,
+            },
+        },
+    }))
 }
 
 async fn load_geometry(
@@ -1107,12 +1283,114 @@ fn default_backend() -> ComputeBackend {
     ComputeBackend::Cpu
 }
 
+fn default_mesh_kind() -> MeshKindRequest {
+    MeshKindRequest::Solid
+}
+
+fn default_mesh_element() -> VolumeElementKind {
+    VolumeElementKind::Tet4
+}
+
+fn default_mesh_element_order() -> MeshElementOrder {
+    MeshElementOrder::Linear
+}
+
+fn default_mesh_profile() -> MeshProfile {
+    MeshProfile::AnalysisReady
+}
+
+fn default_mesh_max_elements() -> usize {
+    250_000
+}
+
+fn default_refinement_strategy() -> RefinementStrategy {
+    RefinementStrategy::Auto
+}
+
+fn default_refinement_max_iterations() -> usize {
+    4
+}
+
+fn default_field_change_tolerance() -> f64 {
+    0.05
+}
+
+fn default_energy_change_tolerance() -> f64 {
+    0.02
+}
+
+fn default_focus_fine() -> RefinementFocusLevel {
+    RefinementFocusLevel::Fine
+}
+
+fn default_focus_normal() -> RefinementFocusLevel {
+    RefinementFocusLevel::Normal
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn default_fail_fast() -> bool {
     true
 }
 
 fn default_assignment_confidence() -> EvidenceConfidence {
     EvidenceConfidence::Verified
+}
+
+fn deserialize_optional_mesh_target_size<'de, D>(
+    deserializer: D,
+) -> Result<Option<MeshTargetSize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_yaml::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        serde_yaml::Value::Null => Ok(None),
+        serde_yaml::Value::String(value) if value.eq_ignore_ascii_case("auto") => Ok(None),
+        serde_yaml::Value::Number(value) => {
+            let value = value
+                .as_f64()
+                .ok_or_else(|| D::Error::custom("mesh.target_size must be a finite number"))?;
+            if !value.is_finite() || value <= 0.0 {
+                return Err(D::Error::custom(
+                    "mesh.target_size must be finite and positive",
+                ));
+            }
+            Ok(Some(MeshTargetSize::LengthM(value)))
+        }
+        _ => Err(D::Error::custom(
+            "mesh.target_size must be auto, null, or a positive number in meters",
+        )),
+    }
+}
+
+fn deserialize_optional_auto_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_yaml::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        serde_yaml::Value::Null => Ok(None),
+        serde_yaml::Value::String(value) if value.eq_ignore_ascii_case("auto") => Ok(None),
+        serde_yaml::Value::Number(value) => {
+            let value = value
+                .as_f64()
+                .ok_or_else(|| D::Error::custom("value must be a finite number"))?;
+            if !value.is_finite() || value <= 0.0 {
+                return Err(D::Error::custom("value must be finite and positive"));
+            }
+            Ok(Some(value))
+        }
+        _ => Err(D::Error::custom(
+            "value must be auto, null, or a positive number",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1279,5 +1557,116 @@ units: n_m
         .expect_err("unknown moment load fields should be rejected");
 
         assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_auto_refinement_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+kind: solid
+element: tet4
+element_order: linear
+profile: adaptive
+max_elements: 250000
+target_size: auto
+refinement:
+  strategy: auto
+  max_iterations: 4
+  convergence:
+    field_change_tolerance: 0.05
+    energy_change_tolerance: 0.02
+    residual_tolerance: auto
+  focus:
+    loads: fine
+    constraints: fine
+    interfaces: normal
+    curvature: true
+    small_features: true
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.kind, MeshKindRequest::Solid);
+        assert_eq!(options.element, VolumeElementKind::Tet4);
+        assert_eq!(options.element_order, MeshElementOrder::Linear);
+        assert_eq!(options.profile, MeshProfile::Adaptive);
+        assert_eq!(options.max_elements, 250_000);
+        assert_eq!(options.target_size, MeshTargetSize::Auto);
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
+        assert_eq!(options.refinement.max_iterations, 4);
+        assert_eq!(options.refinement.convergence.field_change_tolerance, 0.05);
+        assert_eq!(options.refinement.convergence.energy_change_tolerance, 0.02);
+        assert_eq!(options.refinement.convergence.residual_tolerance, None);
+        assert_eq!(options.refinement.focus.loads, RefinementFocusLevel::Fine);
+        assert_eq!(
+            options.refinement.focus.constraints,
+            RefinementFocusLevel::Fine
+        );
+        assert_eq!(
+            options.refinement.focus.interfaces,
+            RefinementFocusLevel::Normal
+        );
+        assert!(options.refinement.focus.curvature);
+        assert!(options.refinement.focus.small_features);
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_numeric_size_and_residual() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+target_size: 0.002
+refinement:
+  strategy: adaptive
+  max_iterations: 2
+  convergence:
+    residual_tolerance: 1.0e-6
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.target_size, MeshTargetSize::LengthM(0.002));
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Adaptive);
+        assert_eq!(options.refinement.max_iterations, 2);
+        assert_eq!(
+            options.refinement.convergence.residual_tolerance,
+            Some(1.0e-6)
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_none_refinement_iterations() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  strategy: none
+  max_iterations: 1
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let err = resolve_mesh_options(Some(&mesh))
+            .expect_err("none refinement should reject positive iteration count");
+
+        assert!(err.contains("mesh.refinement.max_iterations"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_numeric_controls() {
+        let err = serde_yaml::from_str::<FeaMeshDocument>(
+            r#"
+target_size: -0.002
+"#,
+        )
+        .expect_err("negative target size should fail during parsing");
+
+        assert!(err.to_string().contains("mesh.target_size"));
     }
 }

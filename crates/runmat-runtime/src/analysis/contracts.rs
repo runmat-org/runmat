@@ -2,7 +2,7 @@ use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
-use runmat_meshing_core::RegionMeshMapping;
+use runmat_meshing_core::{RegionMeshMapping, VolumeMeshingOptions};
 use serde::{Deserialize, Serialize};
 
 fn default_prep_coordinate_span_m() -> f64 {
@@ -1690,6 +1690,8 @@ pub struct AnalysisStudySpec {
     pub model: Option<AnalysisModel>,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub mesh_options: Option<VolumeMeshingOptions>,
     #[serde(default)]
     pub linear_static_run_options: Option<AnalysisRunOptions>,
     #[serde(default)]
