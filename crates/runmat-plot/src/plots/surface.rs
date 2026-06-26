@@ -2,10 +2,14 @@
 //!
 //! High-performance GPU-accelerated 3D surface rendering.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::axis::OwnedAxisData;
+use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::sync::Arc;
 
 /// High-performance GPU-accelerated 3D surface plot
 #[derive(Debug, Clone)]
@@ -54,6 +58,27 @@ pub struct SurfacePlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<SurfaceGpuSource>,
+    gpu_color_grid_source: Option<SurfaceGpuColorGridSource>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SurfaceGpuSource {
+    pub x_axis: OwnedAxisData,
+    pub y_axis: OwnedAxisData,
+    pub z_buffer: Arc<wgpu::Buffer>,
+    pub x_len: usize,
+    pub y_len: usize,
+    pub scalar: ScalarType,
+}
+
+#[derive(Clone, Debug)]
+pub struct SurfaceGpuColorGridSource {
+    pub image_buffer: Arc<wgpu::Buffer>,
+    pub rows: usize,
+    pub cols: usize,
+    pub channels: usize,
+    pub scalar: ScalarType,
 }
 
 /// Color mapping schemes
@@ -146,6 +171,94 @@ impl Default for ShadingMode {
 }
 
 impl SurfacePlot {
+    pub async fn export_scene_grid_data(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<Vec<f64>>), String> {
+        if let Some(z) = &self.z_data {
+            return Ok((self.x_data.clone(), self.y_data.clone(), z.clone()));
+        }
+
+        if let Some(source) = &self.gpu_source {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "surface plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let x = source
+                .x_axis
+                .export_f64(&context.device, &context.queue, source.x_len, source.scalar)
+                .await?;
+            let y = source
+                .y_axis
+                .export_f64(&context.device, &context.queue, source.y_len, source.scalar)
+                .await?;
+            let z_flat = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.z_buffer,
+                source.x_len * source.y_len,
+                source.scalar,
+            )
+            .await?;
+            let mut z = Vec::with_capacity(source.x_len);
+            for row in 0..source.x_len {
+                let start = row * source.y_len;
+                z.push(
+                    z_flat
+                        .get(start..start + source.y_len)
+                        .ok_or_else(|| "surface GPU source grid is out of range".to_string())?
+                        .to_vec(),
+                );
+            }
+            return Ok((x, y, z));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "surface plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new(), Vec::new()))
+    }
+
+    pub async fn export_scene_color_grid(&self) -> Result<Option<Vec<Vec<Vec4>>>, String> {
+        if let Some(grid) = &self.color_grid {
+            return Ok(Some(grid.clone()));
+        }
+
+        let Some(source) = &self.gpu_color_grid_source else {
+            return Ok(None);
+        };
+        let context = shared_wgpu_context().ok_or_else(|| {
+            "surface image has GPU color data but no shared WGPU context is installed".to_string()
+        })?;
+        let values = readback_scalar_buffer_f64(
+            &context.device,
+            &context.queue,
+            &source.image_buffer,
+            source.rows * source.cols * source.channels,
+            source.scalar,
+        )
+        .await?;
+        let mut grid = vec![vec![Vec4::ZERO; source.rows]; source.cols];
+        let plane = source.rows * source.cols;
+        for (col, grid_row) in grid.iter_mut().enumerate() {
+            for (row, color) in grid_row.iter_mut().enumerate() {
+                let base = row + source.rows * col;
+                let r = values.get(base).copied().unwrap_or(0.0) as f32;
+                let g = values.get(base + plane).copied().unwrap_or(0.0) as f32;
+                let b = values.get(base + (2 * plane)).copied().unwrap_or(0.0) as f32;
+                let a = if source.channels == 4 {
+                    values.get(base + (3 * plane)).copied().unwrap_or(1.0) as f32
+                } else {
+                    1.0
+                };
+                *color = Vec4::new(r, g, b, a);
+            }
+        }
+        Ok(Some(grid))
+    }
+
     /// Create a new surface plot from meshgrid data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, z_data: Vec<Vec<f64>>) -> Result<Self, String> {
         // Validate dimensions
@@ -196,6 +309,8 @@ impl SurfacePlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
+            gpu_color_grid_source: None,
         })
     }
 
@@ -235,7 +350,19 @@ impl SurfacePlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
+            gpu_color_grid_source: None,
         }
+    }
+
+    pub fn with_gpu_source(mut self, source: SurfaceGpuSource) -> Self {
+        self.gpu_source = Some(source);
+        self
+    }
+
+    pub fn with_gpu_color_grid_source(mut self, source: SurfaceGpuColorGridSource) -> Self {
+        self.gpu_color_grid_source = Some(source);
+        self
     }
 
     fn drop_gpu_if_possible(&mut self) {
@@ -279,6 +406,7 @@ impl SurfacePlot {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+        self.gpu_source = None;
     }
 
     /// Set color mapping
@@ -346,6 +474,7 @@ impl SurfacePlot {
     /// Provide explicit per-vertex colors (RGB[A])
     pub fn with_color_grid(mut self, grid: Vec<Vec<Vec4>>) -> Self {
         self.color_grid = Some(grid);
+        self.gpu_color_grid_source = None;
         self.dirty = true;
         self.drop_gpu_if_possible();
         self

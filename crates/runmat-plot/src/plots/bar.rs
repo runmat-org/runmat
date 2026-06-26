@@ -2,9 +2,12 @@
 //!
 //! High-performance bar charts with GPU acceleration and MATLAB-compatible styling.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::bar::BarGpuInputs;
+use crate::gpu::util::readback_scalar_buffer_f64;
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,9 +56,52 @@ pub struct BarChart {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<BarGpuSource>,
+}
+
+#[derive(Clone, Debug)]
+struct BarGpuSource {
+    inputs: BarGpuInputs,
+    series_index: usize,
+    series_count: usize,
 }
 
 impl BarChart {
+    pub async fn export_scene_values(&self) -> Result<Vec<f64>, String> {
+        if let Some(values) = &self.values {
+            return Ok(values.clone());
+        }
+
+        if let Some(source) = &self.gpu_source {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "bar chart has GPU source data but no shared WGPU context is installed".to_string()
+            })?;
+            let row_count = source.inputs.row_count as usize;
+            let series_count = source.series_count.max(1);
+            let all_values = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.inputs.values_buffer,
+                row_count * series_count,
+                source.inputs.scalar,
+            )
+            .await?;
+            let offset = source.series_index * row_count;
+            return Ok(all_values
+                .get(offset..offset + row_count)
+                .ok_or_else(|| "bar chart GPU source series is out of range".to_string())?
+                .to_vec());
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "bar chart has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok(Vec::new())
+    }
+
     fn histogram_slot_geometry(&self, index: usize) -> Option<(f32, f32)> {
         let edges = self.histogram_bin_edges.as_ref()?;
         let left = *edges.get(index)? as f32;
@@ -114,6 +160,7 @@ impl BarChart {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
             per_bar_colors: None,
         })
     }
@@ -150,8 +197,23 @@ impl BarChart {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
             per_bar_colors: None,
         }
+    }
+
+    pub fn with_gpu_source(
+        mut self,
+        inputs: BarGpuInputs,
+        series_index: usize,
+        series_count: usize,
+    ) -> Self {
+        self.gpu_source = Some(BarGpuSource {
+            inputs,
+            series_index,
+            series_count: series_count.max(1),
+        });
+        self
     }
 
     pub fn set_data(&mut self, labels: Vec<String>, values: Vec<f64>) -> Result<(), String> {
@@ -169,14 +231,18 @@ impl BarChart {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+        self.gpu_source = None;
         self.dirty = true;
         Ok(())
     }
 
-    fn invalidate_gpu_data(&mut self) {
+    fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
-        self.gpu_bounds = None;
+    }
+
+    fn clear_gpu_source(&mut self) {
+        self.gpu_source = None;
     }
 
     /// Create a bar chart with custom styling
@@ -231,7 +297,7 @@ impl BarChart {
             self.per_bar_colors = Some(colors);
         }
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     pub fn clear_per_bar_colors(&mut self) {
@@ -259,7 +325,7 @@ impl BarChart {
         {
             self.stack_offsets = Some(offsets);
             self.dirty = true;
-            self.invalidate_gpu_data();
+            self.invalidate_gpu_render_cache();
         }
         self
     }
@@ -291,7 +357,9 @@ impl BarChart {
         self.vertices = None;
         self.indices = None;
         self.bounds = None;
-        self.invalidate_gpu_data();
+        self.gpu_bounds = None;
+        self.invalidate_gpu_render_cache();
+        self.clear_gpu_source();
         Ok(())
     }
 
@@ -336,7 +404,7 @@ impl BarChart {
             self.outline_color = Some(Vec4::new(0.0, 0.0, 0.0, 1.0));
         }
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Override outline styling while preserving GPU geometry when possible.
@@ -510,10 +578,9 @@ impl BarChart {
         }
 
         if self.dirty || self.bounds.is_none() {
-            let values = self
-                .values
-                .as_ref()
-                .expect("CPU bar bounds requested without host values");
+            let Some(values) = self.values.as_ref() else {
+                return self.gpu_bounds.or(self.bounds).unwrap_or_default();
+            };
             let num_bars = values.len();
             if num_bars == 0 {
                 self.bounds = Some(BoundingBox::default());
@@ -823,6 +890,24 @@ mod tests {
         // Y bounds should include negative and positive values
         assert_eq!(bounds.min.y, -2.0);
         assert_eq!(bounds.max.y, 8.0);
+    }
+
+    #[test]
+    fn style_invalidation_preserves_gpu_source_bounds_without_host_values() {
+        let expected = BoundingBox::new(Vec3::new(0.5, -2.0, 0.0), Vec3::new(3.5, 8.0, 0.0));
+        let mut chart =
+            BarChart::new(vec!["A".to_string(), "B".to_string()], vec![1.0, 2.0]).unwrap();
+        chart.values = None;
+        chart.value_count = 2;
+        chart.bounds = Some(expected);
+        chart.gpu_bounds = Some(expected);
+        chart.dirty = false;
+
+        chart.set_per_bar_colors(vec![Vec4::ONE, Vec4::new(0.0, 1.0, 0.0, 1.0)]);
+
+        let bounds = chart.bounds();
+        assert_eq!(bounds.min, expected.min);
+        assert_eq!(bounds.max, expected.max);
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub use scene::{
     decode_figure_scene_payload as import_figure_scene_payload,
     decode_figure_scene_payload_async as import_figure_scene_payload_async,
     encode_figure_scene_payload as export_figure_scene_payload,
+    encode_figure_scene_payload_with_limits as export_figure_scene_payload_with_limits,
 };
 pub use workspace::{
     export_workspace_state as runtime_export_workspace_state,

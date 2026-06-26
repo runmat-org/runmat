@@ -9,29 +9,56 @@ _June 17, 2026_
 ### Runtime
 
 #### Added
-- Add table and spreadsheet workflows — `readtable`, `spreadsheetImportOptions`, table objects, table `Properties`, dot/paren/brace table access and assignment, table variable renaming, `height`, `width`, `groupsummary`, table-aware `sortrows`, datetime import support, and spreadsheet/text import options now cover common MATLAB tabular scripts
-- Add and expand image, signal, control, and linear-algebra builtins — `imhist`, `butter`, `hilbert`, `unwrap`, `pulstran`, `rectpuls`, `tripuls`, `gauspuls`, `upsample`, `downsample`, `rref`, `null`, `heaviside`, and `rlocus` now execute through runtime, VM, docs metadata, and WebAssembly registry paths where applicable
-- Add MATLAB script and project utility support — `run`, `uigetfile`, `addpath`, related path commands, and provider-aware `cd` behavior now work across local, sandboxed, remote, and WASM filesystem providers
 - Add broader symbolic math coverage — `syms`, `sym`, symbolic function declarations such as `syms y(x)`, symbolic powers, and scalar `limit` workflows now execute through parser, HIR, runtime, VM, and WASM paths
-- Add control-system workflow coverage — SISO `tf` construction, `tf('s')`/`tf('z', Ts)`, transfer-function algebra, `feedback`, `dcgain`, `pole`, `isstable`, `stepinfo`, multi-system step plotting, and `rlocus` plotting/output forms now cover common control scripts
+- Add signal, linear-algebra, and math builtins — `hilbert`, `unwrap`, `pulstran`, `rectpuls`, `tripuls`, `gauspuls`, `upsample`, `downsample`, `null`, and `heaviside` now cover common signal-processing, numeric, and symbolic scripts
+- Add spreadsheet and file-selection workflows — `spreadsheetImportOptions`, `uigetfile`, expanded path commands, and provider-aware `cd` behavior now work across local, sandboxed, remote, and WASM filesystem providers
+- Add root-locus plotting and output forms for transfer-function models
 
 #### Changed
-- Resolve unshadowed bare builtin identifiers as zero-argument builtin calls in workspace-visible contexts, while preserving MATLAB-style variable shadowing for loaded or assigned workspace variables
 - Expand MATLAB command and call syntax support, including command-form path arguments, `grid minor`, `axis image`, and name-value call arguments written as `Name=value`
 - Improve plotting property compatibility for `figure`, `gca`, axes `FontSize`, figure `Name`, `NumberTitle`, `Visible`, `Color`, `BackgroundColor`, and get/set/dot-property access paths
-- Generate and validate the WASM builtin registry from source-backed metadata so browser/runtime builds fail early when builtin coverage drifts
 
 #### Fixed
 - Fix browser/WASM runtime traps in plotting and timing paths, including WebGPU plotting presentation, tic/toc handle encoding, and symptom-regression coverage for node and Chrome execution
 - Fix zero-output semantic function statement calls so direct, nested, persisted, and dynamic-eval functions do not request an output when MATLAB statement semantics require none
 - Fix `fzero` optional outputs so `[x,fval]`, `[x,fval,exitflag]`, and `[x,fval,exitflag,output]` return ordered MATLAB-compatible results
 - Fix byte-oriented `csvread` range reads so non-UTF-8 or nonnumeric content outside the selected numeric rectangle does not fail selected CSV imports
-- Fix production name-resolution regressions for common builtins such as `rand`, `randn`, `tic`, `toc`, `gca`, `whos`, `tf`, `rref`, `null`, and `butter`
+- Fix production name-resolution regressions for common builtins such as `rand`, `randn`, `tic`, `toc`, `gca`, `whos`, `tf`, and `null`
 
 ### Sandbox
 
 #### Changed
 - Keep filesystem and path operations provider-aware across native, sandboxed, remote, and WASM backends while preserving native process-cwd behavior where appropriate
+
+---
+
+## [v0.5.2](https://github.com/runmat-org/runmat/compare/v0.5.0...v0.5.2) - June 2026
+
+_June 13, 2026_
+
+### Runtime
+
+#### Added
+- Add sparse matrix support — `sparse` now introduces a sparse runtime value with display, metadata, `class`, `whos`, indexing, element-wise arithmetic, reductions, transposes, `find`, `nnz`, JSON/string conversion, WASM wire previews, and GPU fallback/residency integration
+- Add optimization and linear-algebra builtins — `linprog` and `rref` now execute through runtime, VM, docs metadata, and generated builtin registration paths
+- Add table and import workflows — `readtable`, table objects, table `Properties`, dot/paren/brace table access and assignment, variable renaming, `height`, `width`, `groupsummary`, table-aware `sortrows`, datetime import support, and spreadsheet/text import plumbing cover common MATLAB tabular scripts
+- Add image and signal builtins — `imhist` and `butter` now cover histogram and Butterworth-filter workflows with runtime, VM, docs metadata, and WebAssembly registry integration
+- Add SISO transfer-function control workflows — `tf('s')`, `tf('z', Ts)`, transfer-function algebra, `feedback`, `dcgain`, `pole`, `isstable`, `stepinfo`, and multi-system `step` plotting/output forms now cover common control scripts
+- Add MATLAB script execution support through `run`, including script side effects, plotting hooks, warnings, console output, and workspace updates across runtime and VM paths
+
+#### Changed
+- Generate and validate the WASM builtin registry from source-backed metadata, preserving proc-macro metadata so browser/runtime builds fail early when builtin coverage drifts
+- Refresh builtin documentation and reference metadata for the new sparse, optimization, table, image, signal, control, and script-execution builtins
+- Improve runtime dispatch, workspace, callable identity, and name-resolution plumbing needed by newly added builtins and workspace-visible zero-argument builtin calls
+
+#### Fixed
+- Fix workspace-first bare builtin reads so unshadowed builtins resolve correctly while assigned or loaded workspace variables still shadow builtin names
+- Harden sparse allocation and conversion paths, including extreme dimension checks, sparse triplet validation, sparse logical conversion, sparse preview truncation reporting, and sparse-to-dense guardrails before large tensors are materialized
+- Bound WASM wire payload previews so large values cannot exceed preview limits
+- Guard snapshot header bounds during snapshot loading
+- Fix a Windows CSV release issue in bytecode compilation paths
+
+---
 
 ## [v0.5.0 ](https://github.com/runmat-org/runmat/compare/v0.4.9...v0.5.0) - June 2026
 

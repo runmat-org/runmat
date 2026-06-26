@@ -556,12 +556,24 @@ fn build_quiver_gpu_plot(
             "quiver: U and V GPU inputs must match",
         ));
     }
+    if x_ref.precision != u_ref.precision || y_ref.precision != u_ref.precision {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: GPU X, Y, U, and V inputs must have matching precision",
+        ));
+    }
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
     let rows = u_ref.shape.first().copied().unwrap_or(u_ref.len).max(1);
     let cols = u_ref.shape.get(1).copied().unwrap_or(1).max(1);
     let count = u_ref.len;
+    if count == 0 {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: GPU U/V inputs must be non-empty",
+        ));
+    }
     let xy_mode = if x_ref.len == count && y_ref.len == count {
         0u32
     } else if x_ref.len == cols && y_ref.len == rows {
@@ -572,6 +584,20 @@ fn build_quiver_gpu_plot(
             "quiver: GPU X/Y inputs must match U/V as full coordinates or meshgrid vectors",
         ));
     };
+    if xy_mode == 1 && rows.checked_mul(cols) != Some(count) {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: meshgrid GPU metadata does not match U/V element count",
+        ));
+    }
+    let count_u32 = u32::try_from(count).map_err(|_| {
+        plotting_error(BUILTIN_NAME, "quiver: vector count exceeds supported range")
+    })?;
+    let rows_u32 = u32::try_from(rows)
+        .map_err(|_| plotting_error(BUILTIN_NAME, "quiver: row count exceeds supported range"))?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| {
+        plotting_error(BUILTIN_NAME, "quiver: column count exceeds supported range")
+    })?;
     let (min_x, max_x) = super::gpu_helpers::axis_bounds(u, BUILTIN_NAME)
         .map(|_| ())
         .err()
@@ -592,20 +618,32 @@ fn build_quiver_gpu_plot(
             0.0,
         ),
     );
+    let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
+        x_data: runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
+        y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
+        u_buffer: u_ref.buffer.clone(),
+        v_buffer: v_ref.buffer.clone(),
+        count: count_u32,
+        rows: rows_u32,
+        cols: cols_u32,
+        xy_mode,
+        scalar,
+    };
+    let gpu_source = runmat_plot::plots::QuiverGpuSource {
+        x_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_data),
+        y_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_data),
+        u_buffer: inputs.u_buffer.clone(),
+        v_buffer: inputs.v_buffer.clone(),
+        count,
+        rows,
+        cols,
+        xy_mode,
+        scalar,
+    };
     let gpu_vertices = runmat_plot::gpu::quiver::pack_vertices(
         &context.device,
         &context.queue,
-        &runmat_plot::gpu::quiver::QuiverGpuInputs {
-            x_data: runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
-            y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
-            u_buffer: u_ref.buffer.clone(),
-            v_buffer: v_ref.buffer.clone(),
-            count: count as u32,
-            rows: rows as u32,
-            cols: cols as u32,
-            xy_mode,
-            scalar,
-        },
+        &inputs,
         &runmat_plot::gpu::quiver::QuiverGpuParams {
             color: parsed.color,
             scale: parsed.scale,
@@ -627,6 +665,7 @@ fn build_quiver_gpu_plot(
         count * 6,
         bounds,
     )
+    .with_gpu_source(gpu_source)
     .with_label(label);
     plot.x = Vec::new();
     plot.y = Vec::new();

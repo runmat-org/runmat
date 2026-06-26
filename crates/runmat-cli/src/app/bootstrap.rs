@@ -256,8 +256,8 @@ fn gc_config_from_preset(preset: config::GcPreset) -> runmat_gc::GcConfig {
 
 fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
     use runmat_runtime::builtins::plotting::{
-        set_runtime_plotting_mode, set_scatter_target_points, set_surface_vertex_budget,
-        RuntimePlottingMode,
+        set_runtime_plotting_mode, set_scatter_target_points, set_scene_export_budget_bytes,
+        set_surface_vertex_budget, RuntimePlottingMode,
     };
 
     let runtime_mode = if config.plotting.force_headless {
@@ -276,6 +276,9 @@ fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
     }
     if let Some(budget) = config.plotting.surface_vertex_budget {
         set_surface_vertex_budget(budget);
+    }
+    if let Some(export) = config.plotting.export.as_ref() {
+        set_scene_export_budget_bytes(export.scene_budget_bytes);
     }
 }
 

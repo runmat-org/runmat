@@ -582,15 +582,16 @@ fn build_stem_gpu_plot(
             0.0,
         ),
     );
+    let inputs = StemGpuInputs {
+        x_buffer: x_ref.buffer.clone(),
+        y_buffer: y_ref.buffer.clone(),
+        len: x_ref.len as u32,
+        scalar,
+    };
     let gpu_vertices = runmat_plot::gpu::stem::pack_vertices_from_xy(
         &context.device,
         &context.queue,
-        &StemGpuInputs {
-            x_buffer: x_ref.buffer.clone(),
-            y_buffer: y_ref.buffer.clone(),
-            len: x_ref.len as u32,
-            scalar,
-        },
+        &inputs,
         &StemGpuParams {
             color: parsed.appearance.color,
             baseline_color: parsed.appearance.color,
@@ -613,6 +614,7 @@ fn build_stem_gpu_plot(
         (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len as usize * 2),
         bounds,
     )
+    .with_gpu_source_inputs(inputs)
     .with_label(label);
     if let Some(marker) = parsed.marker.clone() {
         let mut marker = marker;

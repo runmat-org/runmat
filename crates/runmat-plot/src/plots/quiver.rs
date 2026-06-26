@@ -1,9 +1,13 @@
 //! Quiver plot (vector field) implementation
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::axis::OwnedAxisData;
+use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct QuiverPlot {
@@ -26,9 +30,160 @@ pub struct QuiverPlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<QuiverGpuSource>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QuiverGpuSource {
+    pub x_data: OwnedAxisData,
+    pub y_data: OwnedAxisData,
+    pub u_buffer: Arc<wgpu::Buffer>,
+    pub v_buffer: Arc<wgpu::Buffer>,
+    pub count: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub xy_mode: u32,
+    pub scalar: ScalarType,
+}
+
+fn validate_gpu_source_metadata(
+    count: usize,
+    rows: usize,
+    cols: usize,
+    xy_mode: u32,
+) -> Result<(), String> {
+    match xy_mode {
+        0 => {
+            if count == 0 {
+                return Err("quiver plot GPU source has no vectors".to_string());
+            }
+        }
+        1 => {
+            if rows == 0 || cols == 0 || rows.checked_mul(cols) != Some(count) {
+                return Err("quiver plot GPU source has invalid meshgrid dimensions".to_string());
+            }
+        }
+        mode => {
+            return Err(format!(
+                "quiver plot GPU source has unsupported xy_mode {mode}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl QuiverPlot {
+    pub async fn export_scene_vector_data(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
+        if !self.x.is_empty()
+            && self.x.len() == self.y.len()
+            && self.x.len() == self.u.len()
+            && self.x.len() == self.v.len()
+        {
+            return Ok((
+                self.x.clone(),
+                self.y.clone(),
+                self.u.clone(),
+                self.v.clone(),
+            ));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() || !self.u.is_empty() || !self.v.is_empty() {
+            return Err(format!(
+                "quiver plot has incomplete CPU data: x={}, y={}, u={}, v={}",
+                self.x.len(),
+                self.y.len(),
+                self.u.len(),
+                self.v.len()
+            ));
+        }
+
+        if let Some(source) = &self.gpu_source {
+            validate_gpu_source_metadata(source.count, source.rows, source.cols, source.xy_mode)?;
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "quiver plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let u = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.u_buffer,
+                source.count,
+                source.scalar,
+            )
+            .await?;
+            let v = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.v_buffer,
+                source.count,
+                source.scalar,
+            )
+            .await?;
+            let x_axis_len = if source.xy_mode == 0 {
+                source.count
+            } else {
+                source.cols
+            };
+            let y_axis_len = if source.xy_mode == 0 {
+                source.count
+            } else {
+                source.rows
+            };
+            let x_axis = source
+                .x_data
+                .export_f64(&context.device, &context.queue, x_axis_len, source.scalar)
+                .await?;
+            let y_axis = source
+                .y_data
+                .export_f64(&context.device, &context.queue, y_axis_len, source.scalar)
+                .await?;
+            let (x, y) = match source.xy_mode {
+                0 => {
+                    if x_axis.len() != source.count || y_axis.len() != source.count {
+                        return Err(format!(
+                            "quiver plot GPU full-coordinate axes have lengths x={}, y={}, expected {}",
+                            x_axis.len(),
+                            y_axis.len(),
+                            source.count
+                        ));
+                    }
+                    (x_axis, y_axis)
+                }
+                1 => {
+                    if x_axis.len() != source.cols || y_axis.len() != source.rows {
+                        return Err(format!(
+                            "quiver plot GPU meshgrid axes have lengths x={}, y={}, expected x={}, y={}",
+                            x_axis.len(),
+                            y_axis.len(),
+                            source.cols,
+                            source.rows
+                        ));
+                    }
+                    let mut x = Vec::with_capacity(source.count);
+                    let mut y = Vec::with_capacity(source.count);
+                    for i in 0..source.count {
+                        let col = i / source.rows;
+                        let row = i % source.rows;
+                        x.push(x_axis[col]);
+                        y.push(y_axis[row]);
+                    }
+                    (x, y)
+                }
+                _ => unreachable!("xy_mode was validated before GPU readback"),
+            };
+            return Ok((x, y, u, v));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "quiver plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()))
+    }
+
     pub fn new(x: Vec<f64>, y: Vec<f64>, u: Vec<f64>, v: Vec<f64>) -> Result<Self, String> {
         let n = x.len();
         if n == 0 || y.len() != n || u.len() != n || v.len() != n {
@@ -51,6 +206,7 @@ impl QuiverPlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
         })
     }
     pub fn from_gpu_buffer(
@@ -79,7 +235,12 @@ impl QuiverPlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
         }
+    }
+    pub fn with_gpu_source(mut self, source: QuiverGpuSource) -> Self {
+        self.gpu_source = Some(source);
+        self
     }
     pub fn with_style(mut self, color: Vec4, line_width: f32, scale: f32, head_size: f32) -> Self {
         self.color = color;
@@ -206,5 +367,24 @@ impl QuiverPlot {
         self.vertices
             .as_ref()
             .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_meshgrid_metadata_validation_rejects_invalid_dimensions() {
+        validate_gpu_source_metadata(6, 2, 3, 1).unwrap();
+
+        let err = validate_gpu_source_metadata(5, 2, 3, 1).unwrap_err();
+        assert!(err.contains("invalid meshgrid dimensions"));
+
+        let err = validate_gpu_source_metadata(6, 0, 3, 1).unwrap_err();
+        assert!(err.contains("invalid meshgrid dimensions"));
+
+        let err = validate_gpu_source_metadata(6, 2, 3, 7).unwrap_err();
+        assert!(err.contains("unsupported xy_mode 7"));
     }
 }

@@ -430,7 +430,8 @@ fn build_bar_gpu_series(
             bounds,
             params.color,
             params.bar_width,
-        );
+        )
+        .with_gpu_source(inputs.clone(), 0, 1);
         return Ok(vec![chart]);
     }
     build_bar_gpu_matrix_charts(&context, values, &inputs, shape, style)
@@ -489,7 +490,8 @@ fn build_bar_gpu_matrix_charts(
             bounds,
             params.color,
             params.bar_width,
-        );
+        )
+        .with_gpu_source(inputs.clone(), col, shape.cols);
         chart = if style.layout == BarLayout::Stacked {
             chart.with_group(0, 1)
         } else {

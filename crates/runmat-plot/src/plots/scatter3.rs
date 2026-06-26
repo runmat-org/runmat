@@ -1,9 +1,13 @@
 //! 3D scatter plot implementation for MATLAB's `scatter3`.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::gpu::scatter2::ScatterColorBuffer;
+use crate::gpu::scatter3::Scatter3GpuInputs;
+use crate::gpu::util::{copy_readback_bytes, readback_scalar_buffer_f64};
 use crate::plots::scatter::MarkerStyle;
 use glam::{Vec3, Vec4};
 
@@ -47,10 +51,144 @@ pub struct Scatter3Plot {
     bounds: Option<BoundingBox>,
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_point_count: Option<usize>,
+    gpu_inputs: Option<Scatter3GpuInputs>,
     gpu_has_per_point_colors: bool,
 }
 
 impl Scatter3Plot {
+    pub async fn export_scene_points(&self) -> Result<Vec<Vec3>, String> {
+        if !self.points.is_empty() {
+            return Ok(self.points.clone());
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "scatter3 plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let z = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.z_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let points = x
+                .into_iter()
+                .zip(y)
+                .zip(z)
+                .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
+                .collect();
+            return Ok(points);
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "scatter3 plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok(Vec::new())
+    }
+
+    pub async fn export_scene_colors(&self, point_count: usize) -> Result<Vec<Vec4>, String> {
+        if self.colors.len() == point_count {
+            return Ok(self.colors.clone());
+        }
+        if self.colors.len() == 1 && !self.gpu_has_per_point_colors {
+            return Ok(vec![self.colors[0]; point_count]);
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            match &inputs.colors {
+                ScatterColorBuffer::None => {
+                    let color = self.colors.first().copied().unwrap_or(Vec4::ONE);
+                    return Ok(vec![color; point_count]);
+                }
+                ScatterColorBuffer::Host(colors) => {
+                    if colors.len() != point_count {
+                        return Err(format!(
+                            "scatter3 color count ({}) does not match point count ({point_count})",
+                            colors.len()
+                        ));
+                    }
+                    return Ok(colors
+                        .iter()
+                        .map(|color| Vec4::from_array(*color))
+                        .collect());
+                }
+                ScatterColorBuffer::Gpu { buffer, components } => {
+                    let context = shared_wgpu_context().ok_or_else(|| {
+                        "scatter3 plot has GPU color data but no shared WGPU context is installed"
+                            .to_string()
+                    })?;
+                    let components = *components as usize;
+                    if components != 3 && components != 4 {
+                        return Err(format!(
+                            "scatter3 GPU color source has unsupported component count {components}"
+                        ));
+                    }
+                    let value_count = point_count
+                        .checked_mul(components)
+                        .ok_or_else(|| "scatter3 GPU color source size overflowed".to_string())?;
+                    let byte_len = value_count
+                        .checked_mul(std::mem::size_of::<f32>())
+                        .ok_or_else(|| {
+                            "scatter3 GPU color source byte size overflowed".to_string()
+                        })?;
+                    let bytes =
+                        copy_readback_bytes(&context.device, &context.queue, buffer, byte_len)
+                            .await?;
+                    let values: &[f32] = bytemuck::try_cast_slice(&bytes)
+                        .map_err(|err| format!("scatter3 GPU color readback failed: {err}"))?;
+                    if values.len() != value_count {
+                        return Err(format!(
+                            "scatter3 GPU color readback returned {} values, expected {value_count}",
+                            values.len()
+                        ));
+                    }
+                    let mut colors = Vec::with_capacity(point_count);
+                    for chunk in values.chunks_exact(components) {
+                        let alpha = if components == 4 { chunk[3] } else { 1.0 };
+                        colors.push(Vec4::new(chunk[0], chunk[1], chunk[2], alpha));
+                    }
+                    return Ok(colors);
+                }
+            }
+        }
+
+        if self.gpu_has_per_point_colors {
+            return Err(
+                "scatter3 plot has GPU per-point colors but no exportable color source".to_string(),
+            );
+        }
+        if self.colors.is_empty() {
+            return Ok(vec![Vec4::ONE; point_count]);
+        }
+        Err(format!(
+            "scatter3 color count ({}) does not match point count {point_count}",
+            self.colors.len()
+        ))
+    }
+
     /// Create a new scatter3 plot. Colors default to a blue colormap.
     pub fn new(points: Vec<Vec3>) -> Result<Self, String> {
         let default_color = Vec4::new(0.1, 0.7, 0.3, 1.0);
@@ -71,6 +209,7 @@ impl Scatter3Plot {
             bounds: None,
             gpu_vertices: None,
             gpu_point_count: None,
+            gpu_inputs: None,
             gpu_has_per_point_colors: false,
         })
     }
@@ -99,16 +238,35 @@ impl Scatter3Plot {
             bounds: Some(bounds),
             gpu_vertices: Some(buffer),
             gpu_point_count: Some(point_count),
+            gpu_inputs: None,
             gpu_has_per_point_colors: style.has_per_point_colors,
         }
     }
 
-    /// Override all point colors with a single RGBA value.
-    pub fn with_color(mut self, color: Vec4) -> Self {
-        self.colors = vec![color; self.points.len()];
+    pub fn with_gpu_source_inputs(mut self, inputs: Scatter3GpuInputs) -> Self {
+        self.gpu_inputs = Some(inputs);
+        self
+    }
+
+    fn invalidate_gpu_vertices(&mut self) {
         self.vertices = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+    }
+
+    fn clear_gpu_source_inputs(&mut self) {
+        self.gpu_inputs = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    /// Override all point colors with a single RGBA value.
+    pub fn with_color(mut self, color: Vec4) -> Self {
+        self.colors = if self.points.is_empty() {
+            vec![color]
+        } else {
+            vec![color; self.points.len()]
+        };
+        self.invalidate_gpu_vertices();
         self.gpu_has_per_point_colors = false;
         self
     }
@@ -123,10 +281,8 @@ impl Scatter3Plot {
             ));
         }
         self.colors = colors;
-        self.vertices = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
+        self.clear_gpu_source_inputs();
         Ok(self)
     }
 
@@ -140,45 +296,33 @@ impl Scatter3Plot {
     pub fn with_point_size(mut self, size: f32) -> Self {
         self.point_size = size.max(1.0);
         self.point_sizes = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
         self
     }
 
     pub fn set_marker_style(&mut self, style: MarkerStyle) {
         self.marker_style = style;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_filled(&mut self, filled: bool) {
         self.filled = filled;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_color(&mut self, color: Vec4) {
         self.edge_color = color;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_thickness(&mut self, px: f32) {
         self.edge_thickness = px.max(0.0);
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     pub fn set_edge_color_from_vertex(&mut self, enabled: bool) {
         self.edge_color_from_vertex_colors = enabled;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     /// Enable or disable visibility.
@@ -192,17 +336,14 @@ impl Scatter3Plot {
         self.gpu_vertices = Some(buffer);
         self.gpu_point_count = Some(point_count);
         self.vertices = None;
-        self.gpu_has_per_point_colors = false;
+        self.clear_gpu_source_inputs();
         self
     }
 
     /// Supply per-point sizes in pixels.
     pub fn set_point_sizes(&mut self, sizes: Vec<f32>) {
         self.point_sizes = Some(sizes);
-        self.vertices = None;
-        self.gpu_vertices = None;
-        self.gpu_point_count = None;
-        self.gpu_has_per_point_colors = false;
+        self.invalidate_gpu_vertices();
     }
 
     fn ensure_vertices(&mut self) {

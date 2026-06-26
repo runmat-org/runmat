@@ -393,11 +393,11 @@ mod tests {
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
             panic!("expected surface")
         };
-        assert_eq!(surface.x_data, vec![10.0, 15.0, 20.0]);
         assert_eq!(
-            surface.y_data,
-            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+            surface.x_data,
+            vec![10.0, 13.333333333333332, 16.666666666666664, 20.0]
         );
+        assert_eq!(surface.y_data, vec![1.0, 3.0, 5.0]);
     }
 
     #[test]

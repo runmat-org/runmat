@@ -149,7 +149,9 @@ pub(crate) mod zlabel;
 #[path = "ops/zlim.rs"]
 pub(crate) mod zlim;
 
-pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
+pub use perf::{
+    set_scatter_target_points, set_scene_export_budget_bytes, set_surface_vertex_budget,
+};
 pub use properties::resolve_plot_handle;
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
@@ -224,12 +226,39 @@ pub(crate) fn plotting_error_with_source(
 }
 
 #[cfg(feature = "plot-core")]
-pub fn export_figure_scene(handle: FigureHandle) -> crate::BuiltinResult<Option<Vec<u8>>> {
+pub async fn export_figure_scene(handle: FigureHandle) -> crate::BuiltinResult<Option<Vec<u8>>> {
+    export_figure_scene_with_policy(
+        handle,
+        runmat_plot::event::resolve_scene_export_policy(Some(perf::scene_export_budget_bytes())),
+    )
+    .await
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn export_figure_scene_with_policy(
+    handle: FigureHandle,
+    policy: runmat_plot::event::SceneExportPolicy,
+) -> crate::BuiltinResult<Option<Vec<u8>>> {
     let Some(figure) = clone_figure(handle) else {
         return Ok(None);
     };
-    let scene = runmat_plot::event::FigureScene::capture(&figure);
-    crate::replay::export_figure_scene_payload(&scene).map(Some)
+    let scene = runmat_plot::event::FigureScene::capture_for_export(&figure, policy)
+        .await
+        .map_err(|err| {
+            crate::replay_error_with_source(
+                crate::ReplayErrorKind::ExportRejected,
+                "invalid figure scene content",
+                err,
+            )
+        })?;
+    crate::replay::export_figure_scene_payload_with_limits(
+        &scene,
+        crate::replay::limits::ReplayLimits {
+            max_scene_payload_bytes: policy.max_scene_bytes,
+            ..crate::replay::limits::ReplayLimits::default()
+        },
+    )
+    .map(Some)
 }
 
 #[cfg(feature = "plot-core")]

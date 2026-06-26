@@ -23,7 +23,7 @@ pub mod stem;
 pub mod surface;
 pub mod volume;
 
-pub use area::AreaPlot;
+pub use area::{AreaGpuSource, AreaPlot};
 pub use bar::BarChart;
 pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
@@ -39,11 +39,14 @@ pub use mesh::{
 };
 pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
-pub use quiver::QuiverPlot;
+pub use quiver::{QuiverGpuSource, QuiverPlot};
 pub use reference_line::{ReferenceLine, ReferenceLineOrientation};
 pub use scatter::{MarkerStyle, ScatterPlot};
 pub use scatter3::Scatter3Plot;
 pub use stairs::StairsPlot;
 pub use stem::StemPlot;
-pub use surface::{ColorMap, ShadingMode, SurfacePlot, SurfaceStatistics};
+pub use surface::{
+    ColorMap, ShadingMode, SurfaceGpuColorGridSource, SurfaceGpuSource, SurfacePlot,
+    SurfaceStatistics,
+};
 pub use volume::*;

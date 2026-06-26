@@ -601,6 +601,7 @@ fn build_stairs_gpu_plot(
     let mut plot =
         StairsPlot::from_gpu_buffer(appearance.color, gpu_vertices, vertex_count, bounds)
             .with_style(appearance.color, appearance.line_width)
+            .with_gpu_source_inputs(inputs)
             .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
     plot.set_marker_gpu_vertices(marker_gpu);

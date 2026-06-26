@@ -851,6 +851,7 @@ fn build_scatter_gpu_plot(
     };
 
     let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
+        .with_gpu_source_inputs(inputs)
         .with_label(style.label.clone());
     scatter.colormap = style.colormap;
     scatter.set_edge_color_from_vertex(style.marker_edge_flat);

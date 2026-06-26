@@ -911,6 +911,7 @@ fn build_scatter3_gpu_plot(
         z_buffer: z_ref.buffer.clone(),
         len: len_u32,
         scalar,
+        colors: color_buffer.clone(),
     };
     let params = Scatter3GpuParams {
         color: style.uniform_color,
@@ -946,6 +947,7 @@ fn build_scatter3_gpu_plot(
         style.point_size,
         bounds,
     )
+    .with_gpu_source_inputs(inputs)
     .with_label(style.label.clone()))
 }
 

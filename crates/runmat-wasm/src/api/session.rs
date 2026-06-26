@@ -12,7 +12,6 @@ use runmat_core::{
 };
 use runmat_runtime::builtins::plotting::{
     close_figure as runtime_close_figure, close_geometry_scene as runtime_close_geometry_scene,
-    current_figure_handle as runtime_current_figure_handle,
     export_geometry_scene as runtime_export_geometry_scene,
     figure_handles as runtime_figure_handles, import_figure as runtime_import_figure,
     import_geometry_scene as runtime_import_geometry_scene,
@@ -26,8 +25,8 @@ use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
 };
 use runmat_runtime::{
-    runtime_plot_export_figure_scene, runtime_plot_import_figure_scene_async,
-    runtime_plot_import_figure_scene_from_path_async, ReplayErrorKind,
+    runtime_plot_import_figure_scene_async, runtime_plot_import_figure_scene_from_path_async,
+    ReplayErrorKind,
 };
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -1640,10 +1639,30 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = exportFigureScene)]
-    pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
+    pub async fn export_figure_scene(
+        &self,
+        handle: u32,
+        scene_budget_bytes: Option<u32>,
+    ) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;
         log::debug!("RunMat wasm: exportFigureScene start handle={handle}");
-        match runtime_plot_export_figure_scene(FigureHandle::from(handle)) {
+        let export_scene = |figure_handle: FigureHandle| async move {
+            match scene_budget_bytes {
+                Some(bytes) => {
+                    let policy =
+                        runmat_plot::event::resolve_scene_export_policy(Some(bytes as usize));
+                    runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
+                        figure_handle,
+                        policy,
+                    )
+                    .await
+                }
+                None => {
+                    runmat_runtime::builtins::plotting::export_figure_scene(figure_handle).await
+                }
+            }
+        };
+        match export_scene(FigureHandle::from(handle)).await {
             Ok(Some(payload)) => {
                 log::debug!(
                     "RunMat wasm: exportFigureScene ok handle={} bytes={}",
@@ -1654,29 +1673,11 @@ impl RunMatWasm {
             }
             Ok(None) => {
                 log::debug!("RunMat wasm: exportFigureScene empty handle={}", handle);
-                let current = runtime_current_figure_handle();
-                if current.as_u32() == handle {
-                    return Ok(None);
-                }
-                match runtime_plot_export_figure_scene(current) {
-                    Ok(payload) => {
-                        log::debug!(
-                            "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",
-                            handle,
-                            current.as_u32(),
-                            payload.as_ref().map(|bytes| bytes.len()).unwrap_or(0)
-                        );
-                        Ok(payload)
-                    }
-                    Err(err) => {
-                        warn!("RunMat wasm: fallback figure scene export rejected: {err}");
-                        Ok(None)
-                    }
-                }
+                Ok(None)
             }
             Err(err) => {
                 warn!("RunMat wasm: figure scene export rejected: {err}");
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }
