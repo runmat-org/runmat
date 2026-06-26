@@ -121,11 +121,22 @@ impl Line3Plot {
     }
 
     pub async fn export_scene_xyz_data(&self) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), String> {
-        if !self.x_data.is_empty() || !self.y_data.is_empty() || !self.z_data.is_empty() {
+        if !self.x_data.is_empty()
+            && self.x_data.len() == self.y_data.len()
+            && self.x_data.len() == self.z_data.len()
+        {
             return Ok((
                 self.x_data.clone(),
                 self.y_data.clone(),
                 self.z_data.clone(),
+            ));
+        }
+        if !self.x_data.is_empty() || !self.y_data.is_empty() || !self.z_data.is_empty() {
+            return Err(format!(
+                "plot3 line has incomplete CPU data: x={}, y={}, z={}",
+                self.x_data.len(),
+                self.y_data.len(),
+                self.z_data.len()
             ));
         }
 

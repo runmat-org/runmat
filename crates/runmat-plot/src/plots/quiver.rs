@@ -50,12 +50,25 @@ impl QuiverPlot {
     pub async fn export_scene_vector_data(
         &self,
     ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
-        if !self.x.is_empty() || !self.y.is_empty() || !self.u.is_empty() || !self.v.is_empty() {
+        if !self.x.is_empty()
+            && self.x.len() == self.y.len()
+            && self.x.len() == self.u.len()
+            && self.x.len() == self.v.len()
+        {
             return Ok((
                 self.x.clone(),
                 self.y.clone(),
                 self.u.clone(),
                 self.v.clone(),
+            ));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() || !self.u.is_empty() || !self.v.is_empty() {
+            return Err(format!(
+                "quiver plot has incomplete CPU data: x={}, y={}, u={}, v={}",
+                self.x.len(),
+                self.y.len(),
+                self.u.len(),
+                self.v.len()
             ));
         }
 

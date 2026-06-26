@@ -7,6 +7,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Optional per-point scalar attribute buffer (marker sizes).
+#[derive(Clone, Debug)]
 pub enum ScatterAttributeBuffer {
     None,
     Host(Vec<f32>),
@@ -21,6 +22,7 @@ impl ScatterAttributeBuffer {
 
 /// Optional per-point color buffer. Host data is supplied as RGBA tuples; GPU buffers
 /// may contain RGB (3 floats) or RGBA (4 floats) sequences.
+#[derive(Clone, Debug)]
 pub enum ScatterColorBuffer {
     None,
     Host(Vec<[f32; 4]>),
@@ -196,7 +198,8 @@ pub fn pack_vertices_from_xy(
         size: output_size,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
 
@@ -205,7 +208,8 @@ pub fn pack_vertices_from_xy(
         size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
     let init = DrawIndirectArgsRaw {
@@ -301,7 +305,9 @@ fn prepare_size_buffer(
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("scatter2-size-fallback"),
                     contents: bytemuck::cast_slice(&[0.0f32]),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                 }),
             ),
             false,
@@ -313,7 +319,9 @@ fn prepare_size_buffer(
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("scatter2-size-fallback"),
                             contents: bytemuck::cast_slice(&[0.0f32]),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
                         }),
                     ),
                     false,
@@ -324,7 +332,9 @@ fn prepare_size_buffer(
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("scatter2-size-host"),
                             contents: bytemuck::cast_slice(data.as_slice()),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
                         }),
                     ),
                     true,
@@ -350,7 +360,9 @@ fn prepare_color_buffer(
                         params.color.z,
                         params.color.w,
                     ]),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                 }),
             ),
             false,
@@ -368,7 +380,9 @@ fn prepare_color_buffer(
                                 params.color.z,
                                 params.color.w,
                             ]),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
                         }),
                     ),
                     false,
@@ -380,7 +394,9 @@ fn prepare_color_buffer(
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("scatter2-color-host"),
                             contents: bytemuck::cast_slice(colors.as_slice()),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
                         }),
                     ),
                     true,
@@ -455,14 +471,14 @@ mod stress_tests {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scatter2-test-x"),
                 contents: bytemuck::cast_slice(&x_data),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             }),
         );
         let y_buffer = Arc::new(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scatter2-test-y"),
                 contents: bytemuck::cast_slice(&y_data),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             }),
         );
 

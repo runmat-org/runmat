@@ -109,7 +109,8 @@ pub fn pack_vertices_from_xy(
         size: output_size,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
 

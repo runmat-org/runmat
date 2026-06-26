@@ -464,7 +464,7 @@ fn build_area_gpu_plots(
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         y_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
-    let (x_axis, x_bounds) = match x {
+    let (x_axis, x_source, x_bounds) = match x {
         NumericInput::Gpu(handle) => {
             let x_ref = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
                 area_error_with_detail(&AREA_ERROR_INTERNAL, "unable to export GPU X data")
@@ -479,6 +479,7 @@ fn build_area_gpu_plots(
                 super::gpu_helpers::axis_bounds(handle, BUILTIN_NAME).unwrap_or((0.0, 0.0));
             (
                 runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
+                runmat_plot::gpu::axis::OwnedAxisData::Buffer(x_ref.buffer.clone()),
                 bounds,
             )
         }
@@ -494,31 +495,30 @@ fn build_area_gpu_plots(
                 runmat_plot::gpu::ScalarType::F32 => {
                     let values_f32: Vec<f32> = values.iter().map(|v| *v as f32).collect();
                     let axis = runmat_plot::gpu::axis::AxisData::F32(&values_f32);
-                    runmat_plot::gpu::axis::AxisData::Buffer(
-                        runmat_plot::gpu::axis::axis_storage_buffer(
-                            &context.device,
-                            "area host x axis",
-                            &axis,
-                            scalar,
-                        )
-                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?,
+                    let buffer = runmat_plot::gpu::axis::axis_storage_buffer(
+                        &context.device,
+                        "area host x axis",
+                        &axis,
+                        scalar,
                     )
+                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
                 }
                 runmat_plot::gpu::ScalarType::F64 => {
                     let axis = runmat_plot::gpu::axis::AxisData::F64(&values);
-                    runmat_plot::gpu::axis::AxisData::Buffer(
-                        runmat_plot::gpu::axis::axis_storage_buffer(
-                            &context.device,
-                            "area host x axis",
-                            &axis,
-                            scalar,
-                        )
-                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?,
+                    let buffer = runmat_plot::gpu::axis::axis_storage_buffer(
+                        &context.device,
+                        "area host x axis",
+                        &axis,
+                        scalar,
                     )
+                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
                 }
             };
             (
                 axis,
+                runmat_plot::gpu::axis::OwnedAxisData::F64(values.clone()),
                 (
                     values.first().copied().unwrap_or(0.0) as f32,
                     values.last().copied().unwrap_or(0.0) as f32,
@@ -549,7 +549,7 @@ fn build_area_gpu_plots(
             scalar,
         };
         let gpu_source = runmat_plot::plots::AreaGpuSource {
-            x_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_axis),
+            x_axis: x_source.clone(),
             y_buffer: inputs.y_buffer.clone(),
             rows,
             cols,

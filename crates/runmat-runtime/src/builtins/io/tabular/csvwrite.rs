@@ -565,6 +565,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
 
     fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         futures::executor::block_on(super::csvwrite_builtin(filename, data, rest))
     }
 

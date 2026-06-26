@@ -70,7 +70,9 @@ pub fn pack_surface_vertices(
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("surface-color-table"),
             contents: bytemuck::cast_slice(inputs.color_table),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         }),
     );
 
@@ -85,7 +87,8 @@ pub fn pack_surface_vertices(
         size: output_size,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
 

@@ -74,7 +74,8 @@ pub fn pack_vertices_from_xy(
         size: vertex_count * std::mem::size_of::<Vertex>() as u64,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
     let uniforms = StemUniforms {

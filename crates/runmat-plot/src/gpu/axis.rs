@@ -64,7 +64,9 @@ pub fn axis_storage_buffer(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(label),
                     contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                 },
             )))
         }
@@ -76,7 +78,9 @@ pub fn axis_storage_buffer(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(label),
                     contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
                 },
             )))
         }

@@ -1647,15 +1647,23 @@ impl RunMatWasm {
     ) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;
         log::debug!("RunMat wasm: exportFigureScene start handle={handle}");
-        let policy = runmat_plot::event::resolve_scene_export_policy(
-            scene_budget_bytes.map(|bytes| bytes as usize),
-        );
-        match runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
-            FigureHandle::from(handle),
-            policy,
-        )
-        .await
-        {
+        let export_scene = |figure_handle: FigureHandle| async move {
+            match scene_budget_bytes {
+                Some(bytes) => {
+                    let policy =
+                        runmat_plot::event::resolve_scene_export_policy(Some(bytes as usize));
+                    runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
+                        figure_handle,
+                        policy,
+                    )
+                    .await
+                }
+                None => {
+                    runmat_runtime::builtins::plotting::export_figure_scene(figure_handle).await
+                }
+            }
+        };
+        match export_scene(FigureHandle::from(handle)).await {
             Ok(Some(payload)) => {
                 log::debug!(
                     "RunMat wasm: exportFigureScene ok handle={} bytes={}",
@@ -1670,11 +1678,7 @@ impl RunMatWasm {
                 if current.as_u32() == handle {
                     return Ok(None);
                 }
-                match runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
-                    current, policy,
-                )
-                .await
-                {
+                match export_scene(current).await {
                     Ok(payload) => {
                         log::debug!(
                             "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",

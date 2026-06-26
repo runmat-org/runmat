@@ -556,6 +556,12 @@ fn build_quiver_gpu_plot(
             "quiver: U and V GPU inputs must match",
         ));
     }
+    if x_ref.precision != u_ref.precision || y_ref.precision != u_ref.precision {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: GPU X, Y, U, and V inputs must have matching precision",
+        ));
+    }
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
@@ -572,6 +578,14 @@ fn build_quiver_gpu_plot(
             "quiver: GPU X/Y inputs must match U/V as full coordinates or meshgrid vectors",
         ));
     };
+    let count_u32 = u32::try_from(count).map_err(|_| {
+        plotting_error(BUILTIN_NAME, "quiver: vector count exceeds supported range")
+    })?;
+    let rows_u32 = u32::try_from(rows)
+        .map_err(|_| plotting_error(BUILTIN_NAME, "quiver: row count exceeds supported range"))?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| {
+        plotting_error(BUILTIN_NAME, "quiver: column count exceeds supported range")
+    })?;
     let (min_x, max_x) = super::gpu_helpers::axis_bounds(u, BUILTIN_NAME)
         .map(|_| ())
         .err()
@@ -597,9 +611,9 @@ fn build_quiver_gpu_plot(
         y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
         u_buffer: u_ref.buffer.clone(),
         v_buffer: v_ref.buffer.clone(),
-        count: count as u32,
-        rows: rows as u32,
-        cols: cols as u32,
+        count: count_u32,
+        rows: rows_u32,
+        cols: cols_u32,
         xy_mode,
         scalar,
     };

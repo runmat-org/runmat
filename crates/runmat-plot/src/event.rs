@@ -1793,13 +1793,13 @@ impl ScenePlot {
                         "scatter3 plot has no exportable scene data",
                     ));
                 }
+                let colors = scatter3
+                    .export_scene_colors(points.len())
+                    .await
+                    .map_err(SceneExportError::readback)?;
                 Ok(Self::Scatter3 {
                     points: points.into_iter().map(vec3_to_xyz).collect(),
-                    colors_rgba: scatter3
-                        .colors
-                        .iter()
-                        .map(|color| vec4_to_rgba(*color))
-                        .collect(),
+                    colors_rgba: colors.into_iter().map(vec4_to_rgba).collect(),
                     point_size: scatter3.point_size,
                     point_sizes: scatter3.point_sizes.clone(),
                     axes_index,

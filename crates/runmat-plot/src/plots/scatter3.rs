@@ -5,8 +5,9 @@ use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::gpu::scatter2::ScatterColorBuffer;
 use crate::gpu::scatter3::Scatter3GpuInputs;
-use crate::gpu::util::readback_scalar_buffer_f64;
+use crate::gpu::util::{copy_readback_bytes, readback_scalar_buffer_f64};
 use crate::plots::scatter::MarkerStyle;
 use glam::{Vec3, Vec4};
 
@@ -106,6 +107,86 @@ impl Scatter3Plot {
         }
 
         Ok(Vec::new())
+    }
+
+    pub async fn export_scene_colors(&self, point_count: usize) -> Result<Vec<Vec4>, String> {
+        if self.colors.len() == point_count {
+            return Ok(self.colors.clone());
+        }
+        if self.colors.len() == 1 && !self.gpu_has_per_point_colors {
+            return Ok(vec![self.colors[0]; point_count]);
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            match &inputs.colors {
+                ScatterColorBuffer::None => {
+                    let color = self.colors.first().copied().unwrap_or(Vec4::ONE);
+                    return Ok(vec![color; point_count]);
+                }
+                ScatterColorBuffer::Host(colors) => {
+                    if colors.len() != point_count {
+                        return Err(format!(
+                            "scatter3 color count ({}) does not match point count ({point_count})",
+                            colors.len()
+                        ));
+                    }
+                    return Ok(colors
+                        .iter()
+                        .map(|color| Vec4::from_array(*color))
+                        .collect());
+                }
+                ScatterColorBuffer::Gpu { buffer, components } => {
+                    let context = shared_wgpu_context().ok_or_else(|| {
+                        "scatter3 plot has GPU color data but no shared WGPU context is installed"
+                            .to_string()
+                    })?;
+                    let components = *components as usize;
+                    if components != 3 && components != 4 {
+                        return Err(format!(
+                            "scatter3 GPU color source has unsupported component count {components}"
+                        ));
+                    }
+                    let value_count = point_count
+                        .checked_mul(components)
+                        .ok_or_else(|| "scatter3 GPU color source size overflowed".to_string())?;
+                    let byte_len = value_count
+                        .checked_mul(std::mem::size_of::<f32>())
+                        .ok_or_else(|| {
+                            "scatter3 GPU color source byte size overflowed".to_string()
+                        })?;
+                    let bytes =
+                        copy_readback_bytes(&context.device, &context.queue, buffer, byte_len)
+                            .await?;
+                    let values: &[f32] = bytemuck::try_cast_slice(&bytes)
+                        .map_err(|err| format!("scatter3 GPU color readback failed: {err}"))?;
+                    if values.len() != value_count {
+                        return Err(format!(
+                            "scatter3 GPU color readback returned {} values, expected {value_count}",
+                            values.len()
+                        ));
+                    }
+                    let mut colors = Vec::with_capacity(point_count);
+                    for chunk in values.chunks_exact(components) {
+                        let alpha = if components == 4 { chunk[3] } else { 1.0 };
+                        colors.push(Vec4::new(chunk[0], chunk[1], chunk[2], alpha));
+                    }
+                    return Ok(colors);
+                }
+            }
+        }
+
+        if self.gpu_has_per_point_colors {
+            return Err(
+                "scatter3 plot has GPU per-point colors but no exportable color source".to_string(),
+            );
+        }
+        if self.colors.is_empty() {
+            return Ok(vec![Vec4::ONE; point_count]);
+        }
+        Err(format!(
+            "scatter3 color count ({}) does not match point count {point_count}",
+            self.colors.len()
+        ))
     }
 
     /// Create a new scatter3 plot. Colors default to a blue colormap.
