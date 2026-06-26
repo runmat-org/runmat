@@ -271,7 +271,6 @@ impl LinePlot {
     fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
-        self.bounds = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self.gpu_topology = None;
@@ -320,6 +319,7 @@ impl LinePlot {
         self.x_data = x_data;
         self.y_data = y_data;
         self.dirty = true;
+        self.bounds = None;
         self.invalidate_gpu_render_cache();
         self.clear_gpu_source_inputs();
         self.invalidate_marker_data();
@@ -487,6 +487,11 @@ impl LinePlot {
     pub fn bounds(&mut self) -> BoundingBox {
         if self.bounds.is_some() && self.x_data.is_empty() && self.y_data.is_empty() {
             return self.bounds.unwrap_or_default();
+        }
+        if self.x_data.is_empty() && self.y_data.is_empty() {
+            let bounds = BoundingBox::new(Vec3::ZERO, Vec3::ZERO);
+            self.bounds = Some(bounds);
+            return bounds;
         }
         if self.dirty || self.bounds.is_none() {
             let points: Vec<Vec3> = self
@@ -1069,6 +1074,8 @@ mod tests {
         plot.update_data(Vec::new(), Vec::new()).unwrap();
         assert!(plot.is_empty());
         assert_eq!(plot.render_data().vertices.len(), 0);
+        assert_eq!(plot.bounds().min, Vec3::ZERO);
+        assert_eq!(plot.bounds().max, Vec3::ZERO);
     }
 
     #[test]
@@ -1114,6 +1121,20 @@ mod tests {
         assert_eq!(bounds.max.x, 2.0);
         assert_eq!(bounds.min.y, -2.0);
         assert_eq!(bounds.max.y, 3.0);
+    }
+
+    #[test]
+    fn style_invalidation_preserves_gpu_source_bounds() {
+        let expected = BoundingBox::new(Vec3::new(-2.0, -1.0, 0.0), Vec3::new(3.0, 4.0, 0.0));
+        let mut plot = LinePlot::new(Vec::new(), Vec::new()).unwrap();
+        plot.bounds = Some(expected);
+        plot.dirty = false;
+
+        plot.set_line_width(3.0);
+
+        let bounds = plot.bounds();
+        assert_eq!(bounds.min, expected.min);
+        assert_eq!(bounds.max, expected.max);
     }
 
     #[test]

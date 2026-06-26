@@ -853,7 +853,7 @@ interface RunMatNativeSession {
     array: string,
     options?: MaterializeVariableOptionsWire
   ) => MaterializedVariable | Promise<MaterializedVariable>;
-  exportFigureScene?: (handle: number) => Uint8Array | null;
+  exportFigureScene?: (handle: number) => Uint8Array | null | Promise<Uint8Array | null>;
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
@@ -967,7 +967,7 @@ interface RunMatNativeModule {
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
-  exportFigureScene?: (handle: number) => Uint8Array | null;
+  exportFigureScene?: (handle: number) => Uint8Array | null | Promise<Uint8Array | null>;
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
@@ -1452,7 +1452,7 @@ export async function exportFigureScene(handle: number): Promise<Uint8Array | nu
     return null;
   }
   try {
-    const scene = native.exportFigureScene(handle);
+    const scene = await native.exportFigureScene(handle);
     if (!scene) {
       return null;
     }
@@ -1703,9 +1703,9 @@ class WebRunMatSession implements RunMatSessionHandle {
       return null;
     }
     try {
-      return this.native.exportFigureScene(handle) ?? null;
-    } catch {
-      return null;
+      return (await this.native.exportFigureScene(handle)) ?? null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 

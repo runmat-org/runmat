@@ -559,8 +559,8 @@ describe("figure scene bindings", () => {
     vi.restoreAllMocks();
   });
 
-  it("exports figure scenes as Uint8Array", async () => {
-    const spy = vi.fn(() => new Uint8Array([7, 8, 9]));
+  it("exports figure scenes from async native bindings as Uint8Array", async () => {
+    const spy = vi.fn(async () => new Uint8Array([7, 8, 9]));
     const native: NativeModule = {
       default: async () => {},
       exportFigureScene: spy

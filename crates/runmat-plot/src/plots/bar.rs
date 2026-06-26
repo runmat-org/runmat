@@ -239,7 +239,6 @@ impl BarChart {
     fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
-        self.gpu_bounds = None;
     }
 
     fn clear_gpu_source(&mut self) {
@@ -358,6 +357,7 @@ impl BarChart {
         self.vertices = None;
         self.indices = None;
         self.bounds = None;
+        self.gpu_bounds = None;
         self.invalidate_gpu_render_cache();
         self.clear_gpu_source();
         Ok(())
@@ -578,10 +578,9 @@ impl BarChart {
         }
 
         if self.dirty || self.bounds.is_none() {
-            let values = self
-                .values
-                .as_ref()
-                .expect("CPU bar bounds requested without host values");
+            let Some(values) = self.values.as_ref() else {
+                return self.gpu_bounds.or(self.bounds).unwrap_or_default();
+            };
             let num_bars = values.len();
             if num_bars == 0 {
                 self.bounds = Some(BoundingBox::default());
@@ -891,6 +890,24 @@ mod tests {
         // Y bounds should include negative and positive values
         assert_eq!(bounds.min.y, -2.0);
         assert_eq!(bounds.max.y, 8.0);
+    }
+
+    #[test]
+    fn style_invalidation_preserves_gpu_source_bounds_without_host_values() {
+        let expected = BoundingBox::new(Vec3::new(0.5, -2.0, 0.0), Vec3::new(3.5, 8.0, 0.0));
+        let mut chart =
+            BarChart::new(vec!["A".to_string(), "B".to_string()], vec![1.0, 2.0]).unwrap();
+        chart.values = None;
+        chart.value_count = 2;
+        chart.bounds = Some(expected);
+        chart.gpu_bounds = Some(expected);
+        chart.dirty = false;
+
+        chart.set_per_bar_colors(vec![Vec4::ONE, Vec4::new(0.0, 1.0, 0.0, 1.0)]);
+
+        let bounds = chart.bounds();
+        assert_eq!(bounds.min, expected.min);
+        assert_eq!(bounds.max, expected.max);
     }
 
     #[test]

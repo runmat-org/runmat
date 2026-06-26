@@ -409,7 +409,7 @@ fn build_truecolor_image_surface_gpu(
             0.0,
         ),
     );
-    let mut surface = SurfacePlot::from_gpu_buffer(rows, cols, gpu_vertices, rows * cols, bounds)
+    let mut surface = SurfacePlot::from_gpu_buffer(cols, rows, gpu_vertices, rows * cols, bounds)
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_shading(ShadingMode::None)
@@ -422,7 +422,7 @@ fn build_truecolor_image_surface_gpu(
         });
     surface.x_data = x_host;
     surface.y_data = y_host;
-    surface.z_data = Some(vec![vec![0.0; cols]; rows]);
+    surface.z_data = Some(vec![vec![0.0; rows]; cols]);
     Ok(surface)
 }
 

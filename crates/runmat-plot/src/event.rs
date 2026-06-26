@@ -1560,19 +1560,19 @@ fn validate_surface_grid<T>(
             "{kind} is missing required grid rows"
         )));
     }
-    if grid.len() != y.len() {
+    if grid.len() != x.len() {
         return Err(SceneExportError::unexportable(format!(
-            "{kind} row count ({}) must match y length ({})",
+            "{kind} row count ({}) must match x length ({})",
             grid.len(),
-            y.len()
+            x.len()
         )));
     }
     for (row_idx, row) in grid.iter().enumerate() {
-        if row.len() != x.len() {
+        if row.len() != y.len() {
             return Err(SceneExportError::unexportable(format!(
-                "{kind} row {row_idx} length ({}) must match x length ({})",
+                "{kind} row {row_idx} length ({}) must match y length ({})",
                 row.len(),
-                x.len()
+                y.len()
             )));
         }
     }
@@ -1584,7 +1584,7 @@ impl ScenePlot {
         plot: &PlotElement,
         axes_index: u32,
     ) -> Result<Self, SceneExportError> {
-        match plot {
+        let scene_plot = match plot {
             PlotElement::Line(line) => {
                 let (x, y) = line
                     .export_scene_xy_data()
@@ -1595,7 +1595,7 @@ impl ScenePlot {
                         "line plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Line {
+                Self::Line {
                     x,
                     y,
                     color_rgba: vec4_to_rgba(line.color),
@@ -1604,13 +1604,9 @@ impl ScenePlot {
                     axes_index,
                     label: line.label.clone(),
                     visible: line.visible,
-                })
+                }
             }
-            PlotElement::ReferenceLine(_) => {
-                let scene_plot = Self::from_plot(plot, axes_index);
-                scene_plot.validate_exportable()?;
-                Ok(scene_plot)
-            }
+            PlotElement::ReferenceLine(_) => Self::from_plot(plot, axes_index),
             PlotElement::Scatter(scatter) => {
                 let (x, y) = scatter
                     .export_scene_xy_data()
@@ -1621,7 +1617,7 @@ impl ScenePlot {
                         "scatter plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Scatter {
+                Self::Scatter {
                     x,
                     y,
                     color_rgba: vec4_to_rgba(scatter.color),
@@ -1630,7 +1626,7 @@ impl ScenePlot {
                     axes_index,
                     label: scatter.label.clone(),
                     visible: scatter.visible,
-                })
+                }
             }
             PlotElement::Bar(bar) => {
                 let values = bar
@@ -1642,7 +1638,7 @@ impl ScenePlot {
                         "bar chart has no exportable scene data",
                     ));
                 }
-                Ok(Self::Bar {
+                Self::Bar {
                     labels: bar.labels.clone(),
                     values,
                     histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
@@ -1657,7 +1653,7 @@ impl ScenePlot {
                     axes_index,
                     label: bar.label.clone(),
                     visible: bar.visible,
-                })
+                }
             }
             PlotElement::ErrorBar(error) => {
                 let (x, y, y_neg, y_pos, x_neg, x_pos) = error
@@ -1669,7 +1665,7 @@ impl ScenePlot {
                         "errorbar plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::ErrorBar {
+                Self::ErrorBar {
                     x,
                     y,
                     err_low: y_neg,
@@ -1689,7 +1685,7 @@ impl ScenePlot {
                     axes_index,
                     label: error.label.clone(),
                     visible: error.visible,
-                })
+                }
             }
             PlotElement::Stairs(stairs) => {
                 let (x, y) = stairs
@@ -1701,7 +1697,7 @@ impl ScenePlot {
                         "stairs plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Stairs {
+                Self::Stairs {
                     x,
                     y,
                     color_rgba: vec4_to_rgba(stairs.color),
@@ -1709,7 +1705,7 @@ impl ScenePlot {
                     axes_index,
                     label: stairs.label.clone(),
                     visible: stairs.visible,
-                })
+                }
             }
             PlotElement::Stem(stem) => {
                 let (x, y) = stem
@@ -1721,7 +1717,7 @@ impl ScenePlot {
                         "stem plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Stem {
+                Self::Stem {
                     x,
                     y,
                     baseline: stem.baseline,
@@ -1741,7 +1737,7 @@ impl ScenePlot {
                     axes_index,
                     label: stem.label.clone(),
                     visible: stem.visible,
-                })
+                }
             }
             PlotElement::Area(area) => {
                 let (x, y) = area
@@ -1753,7 +1749,7 @@ impl ScenePlot {
                         "area plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Area {
+                Self::Area {
                     x,
                     y,
                     lower_y: area.lower_y.clone(),
@@ -1762,7 +1758,7 @@ impl ScenePlot {
                     axes_index,
                     label: area.label.clone(),
                     visible: area.visible,
-                })
+                }
             }
             PlotElement::Quiver(quiver) => {
                 let (x, y, u, v) = quiver
@@ -1774,7 +1770,7 @@ impl ScenePlot {
                         "quiver plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Quiver {
+                Self::Quiver {
                     x,
                     y,
                     u,
@@ -1786,7 +1782,7 @@ impl ScenePlot {
                     axes_index,
                     label: quiver.label.clone(),
                     visible: quiver.visible,
-                })
+                }
             }
             PlotElement::Surface(surface) => {
                 let (x, y, z) = surface
@@ -1802,7 +1798,7 @@ impl ScenePlot {
                     .export_scene_color_grid()
                     .await
                     .map_err(SceneExportError::readback)?;
-                Ok(Self::Surface {
+                Self::Surface {
                     x,
                     y,
                     z,
@@ -1821,12 +1817,10 @@ impl ScenePlot {
                     axes_index,
                     label: surface.label.clone(),
                     visible: surface.visible,
-                })
+                }
             }
             PlotElement::Patch(_) | PlotElement::Mesh(_) | PlotElement::Pie(_) => {
-                let scene_plot = Self::from_plot(plot, axes_index);
-                scene_plot.validate_exportable()?;
-                Ok(scene_plot)
+                Self::from_plot(plot, axes_index)
             }
             PlotElement::Line3(line) => {
                 let (x, y, z) = line
@@ -1838,7 +1832,7 @@ impl ScenePlot {
                         "plot3 line has no exportable scene data",
                     ));
                 }
-                Ok(Self::Line3 {
+                Self::Line3 {
                     x,
                     y,
                     z,
@@ -1848,7 +1842,7 @@ impl ScenePlot {
                     axes_index,
                     label: line.label.clone(),
                     visible: line.visible,
-                })
+                }
             }
             PlotElement::Scatter3(scatter3) => {
                 let points = scatter3
@@ -1864,7 +1858,7 @@ impl ScenePlot {
                     .export_scene_colors(points.len())
                     .await
                     .map_err(SceneExportError::readback)?;
-                Ok(Self::Scatter3 {
+                Self::Scatter3 {
                     points: points.into_iter().map(vec3_to_xyz).collect(),
                     colors_rgba: colors.into_iter().map(vec4_to_rgba).collect(),
                     point_size: scatter3.point_size,
@@ -1872,7 +1866,7 @@ impl ScenePlot {
                     axes_index,
                     label: scatter3.label.clone(),
                     visible: scatter3.visible,
-                })
+                }
             }
             PlotElement::Contour(contour) => {
                 let vertices = contour
@@ -1884,7 +1878,7 @@ impl ScenePlot {
                         "contour plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::Contour {
+                Self::Contour {
                     vertices: vertices.into_iter().map(Into::into).collect(),
                     bounds_min: vec3_to_xyz(contour.bounds().min),
                     bounds_max: vec3_to_xyz(contour.bounds().max),
@@ -1894,7 +1888,7 @@ impl ScenePlot {
                     label: contour.label.clone(),
                     visible: contour.visible,
                     force_3d: contour.force_3d,
-                })
+                }
             }
             PlotElement::ContourFill(fill) => {
                 let vertices = fill
@@ -1906,16 +1900,18 @@ impl ScenePlot {
                         "filled contour plot has no exportable scene data",
                     ));
                 }
-                Ok(Self::ContourFill {
+                Self::ContourFill {
                     vertices: vertices.into_iter().map(Into::into).collect(),
                     bounds_min: vec3_to_xyz(fill.bounds().min),
                     bounds_max: vec3_to_xyz(fill.bounds().max),
                     axes_index,
                     label: fill.label.clone(),
                     visible: fill.visible,
-                })
+                }
             }
-        }
+        };
+        scene_plot.validate_exportable()?;
+        Ok(scene_plot)
     }
 
     fn validate_exportable(&self) -> Result<(), SceneExportError> {
@@ -3332,6 +3328,100 @@ mod tests {
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
         assert!(!snapshot.metadata.grid_enabled);
+    }
+
+    #[test]
+    fn surface_scene_validation_uses_surface_plot_orientation() {
+        let scene_plot = ScenePlot::Surface {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![10.0, 20.0],
+            z: vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            colormap: "Parula".to_string(),
+            shading_mode: "Smooth".to_string(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_grid_rgba: Some(vec![
+                vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                vec![[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
+                vec![[1.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 1.0]],
+            ]),
+            color_limits: None,
+            axes_index: 0,
+            label: None,
+            visible: true,
+        };
+        scene_plot.validate_exportable().unwrap();
+
+        let transposed = ScenePlot::Surface {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![10.0, 20.0],
+            z: vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+            colormap: "Parula".to_string(),
+            shading_mode: "Smooth".to_string(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_grid_rgba: None,
+            color_limits: None,
+            axes_index: 0,
+            label: None,
+            visible: true,
+        };
+        let err = transposed.validate_exportable().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("row count (2) must match x length (3)"));
+    }
+
+    #[test]
+    fn image_mode_surface_scene_roundtrip_preserves_color_grid() {
+        let snapshot = FigureSnapshot::capture(&Figure::new());
+        let scene = FigureScene {
+            schema_version: FigureScene::SCHEMA_VERSION,
+            layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots: vec![ScenePlot::Surface {
+                x: vec![0.0, 1.0],
+                y: vec![10.0, 20.0, 30.0],
+                z: vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
+                colormap: "Parula".to_string(),
+                shading_mode: "None".to_string(),
+                wireframe: false,
+                alpha: 1.0,
+                flatten_z: true,
+                image_mode: true,
+                color_grid_rgba: Some(vec![
+                    vec![
+                        [1.0, 0.0, 0.0, 1.0],
+                        [0.0, 1.0, 0.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                    ],
+                    vec![
+                        [1.0, 1.0, 0.0, 1.0],
+                        [1.0, 0.0, 1.0, 1.0],
+                        [0.0, 1.0, 1.0, 1.0],
+                    ],
+                ]),
+                color_limits: None,
+                axes_index: 0,
+                label: None,
+                visible: true,
+            }],
+        };
+
+        let rebuilt = scene.into_figure().expect("image surface scene restores");
+        let Some(PlotElement::Surface(surface)) = rebuilt.plots().next() else {
+            panic!("expected surface plot");
+        };
+        assert!(surface.image_mode);
+        assert!(surface.flatten_z);
+        let grid = surface.color_grid.as_ref().expect("color grid");
+        assert_eq!(grid.len(), 2);
+        assert_eq!(grid[0].len(), 3);
+        assert_eq!(grid[1][2], Vec4::new(0.0, 1.0, 1.0, 1.0));
     }
 
     #[test]

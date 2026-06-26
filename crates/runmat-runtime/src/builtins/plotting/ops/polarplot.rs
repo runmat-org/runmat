@@ -803,8 +803,8 @@ mod tests {
         };
         assert!(line.is_empty());
         let bounds = figure.bounds();
-        assert!(bounds.min.x.is_infinite());
-        assert!(bounds.max.x.is_infinite());
+        assert_eq!(bounds.min.x, 0.0);
+        assert_eq!(bounds.max.x, 0.0);
     }
 
     #[test]

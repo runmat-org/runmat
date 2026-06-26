@@ -240,10 +240,10 @@ impl SurfacePlot {
             source.scalar,
         )
         .await?;
-        let mut grid = vec![vec![Vec4::ZERO; source.cols]; source.rows];
+        let mut grid = vec![vec![Vec4::ZERO; source.rows]; source.cols];
         let plane = source.rows * source.cols;
-        for (row, grid_row) in grid.iter_mut().enumerate() {
-            for (col, color) in grid_row.iter_mut().enumerate() {
+        for (col, grid_row) in grid.iter_mut().enumerate() {
+            for (row, color) in grid_row.iter_mut().enumerate() {
                 let base = row + source.rows * col;
                 let r = values.get(base).copied().unwrap_or(0.0) as f32;
                 let g = values.get(base + plane).copied().unwrap_or(0.0) as f32;
@@ -407,7 +407,6 @@ impl SurfacePlot {
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
         self.gpu_source = None;
-        self.gpu_color_grid_source = None;
     }
 
     /// Set color mapping

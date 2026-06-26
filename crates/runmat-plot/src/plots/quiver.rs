@@ -46,6 +46,32 @@ pub struct QuiverGpuSource {
     pub scalar: ScalarType,
 }
 
+fn validate_gpu_source_metadata(
+    count: usize,
+    rows: usize,
+    cols: usize,
+    xy_mode: u32,
+) -> Result<(), String> {
+    match xy_mode {
+        0 => {
+            if count == 0 {
+                return Err("quiver plot GPU source has no vectors".to_string());
+            }
+        }
+        1 => {
+            if rows == 0 || cols == 0 || rows.checked_mul(cols) != Some(count) {
+                return Err("quiver plot GPU source has invalid meshgrid dimensions".to_string());
+            }
+        }
+        mode => {
+            return Err(format!(
+                "quiver plot GPU source has unsupported xy_mode {mode}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl QuiverPlot {
     pub async fn export_scene_vector_data(
         &self,
@@ -73,6 +99,7 @@ impl QuiverPlot {
         }
 
         if let Some(source) = &self.gpu_source {
+            validate_gpu_source_metadata(source.count, source.rows, source.cols, source.xy_mode)?;
             let context = shared_wgpu_context().ok_or_else(|| {
                 "quiver plot has GPU source data but no shared WGPU context is installed"
                     .to_string()
@@ -111,18 +138,39 @@ impl QuiverPlot {
                 .y_data
                 .export_f64(&context.device, &context.queue, y_axis_len, source.scalar)
                 .await?;
-            let (x, y) = if source.xy_mode == 0 {
-                (x_axis, y_axis)
-            } else {
-                let mut x = Vec::with_capacity(source.count);
-                let mut y = Vec::with_capacity(source.count);
-                for i in 0..source.count {
-                    let col = i / source.rows;
-                    let row = i % source.rows;
-                    x.push(*x_axis.get(col).unwrap_or(&0.0));
-                    y.push(*y_axis.get(row).unwrap_or(&0.0));
+            let (x, y) = match source.xy_mode {
+                0 => {
+                    if x_axis.len() != source.count || y_axis.len() != source.count {
+                        return Err(format!(
+                            "quiver plot GPU full-coordinate axes have lengths x={}, y={}, expected {}",
+                            x_axis.len(),
+                            y_axis.len(),
+                            source.count
+                        ));
+                    }
+                    (x_axis, y_axis)
                 }
-                (x, y)
+                1 => {
+                    if x_axis.len() != source.cols || y_axis.len() != source.rows {
+                        return Err(format!(
+                            "quiver plot GPU meshgrid axes have lengths x={}, y={}, expected x={}, y={}",
+                            x_axis.len(),
+                            y_axis.len(),
+                            source.cols,
+                            source.rows
+                        ));
+                    }
+                    let mut x = Vec::with_capacity(source.count);
+                    let mut y = Vec::with_capacity(source.count);
+                    for i in 0..source.count {
+                        let col = i / source.rows;
+                        let row = i % source.rows;
+                        x.push(x_axis[col]);
+                        y.push(y_axis[row]);
+                    }
+                    (x, y)
+                }
+                _ => unreachable!("xy_mode was validated before GPU readback"),
             };
             return Ok((x, y, u, v));
         }
@@ -319,5 +367,24 @@ impl QuiverPlot {
         self.vertices
             .as_ref()
             .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_meshgrid_metadata_validation_rejects_invalid_dimensions() {
+        validate_gpu_source_metadata(6, 2, 3, 1).unwrap();
+
+        let err = validate_gpu_source_metadata(5, 2, 3, 1).unwrap_err();
+        assert!(err.contains("invalid meshgrid dimensions"));
+
+        let err = validate_gpu_source_metadata(6, 0, 3, 1).unwrap_err();
+        assert!(err.contains("invalid meshgrid dimensions"));
+
+        let err = validate_gpu_source_metadata(6, 2, 3, 7).unwrap_err();
+        assert!(err.contains("unsupported xy_mode 7"));
     }
 }

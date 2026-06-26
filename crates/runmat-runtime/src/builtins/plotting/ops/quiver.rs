@@ -568,6 +568,12 @@ fn build_quiver_gpu_plot(
     let rows = u_ref.shape.first().copied().unwrap_or(u_ref.len).max(1);
     let cols = u_ref.shape.get(1).copied().unwrap_or(1).max(1);
     let count = u_ref.len;
+    if count == 0 {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: GPU U/V inputs must be non-empty",
+        ));
+    }
     let xy_mode = if x_ref.len == count && y_ref.len == count {
         0u32
     } else if x_ref.len == cols && y_ref.len == rows {
@@ -578,6 +584,12 @@ fn build_quiver_gpu_plot(
             "quiver: GPU X/Y inputs must match U/V as full coordinates or meshgrid vectors",
         ));
     };
+    if xy_mode == 1 && rows.checked_mul(cols) != Some(count) {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: meshgrid GPU metadata does not match U/V element count",
+        ));
+    }
     let count_u32 = u32::try_from(count).map_err(|_| {
         plotting_error(BUILTIN_NAME, "quiver: vector count exceeds supported range")
     })?;

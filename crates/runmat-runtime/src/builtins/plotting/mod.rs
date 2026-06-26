@@ -251,7 +251,14 @@ pub async fn export_figure_scene_with_policy(
                 err,
             )
         })?;
-    crate::replay::export_figure_scene_payload(&scene).map(Some)
+    crate::replay::export_figure_scene_payload_with_limits(
+        &scene,
+        crate::replay::limits::ReplayLimits {
+            max_scene_payload_bytes: policy.max_scene_bytes,
+            ..crate::replay::limits::ReplayLimits::default()
+        },
+    )
+    .map(Some)
 }
 
 #[cfg(feature = "plot-core")]
