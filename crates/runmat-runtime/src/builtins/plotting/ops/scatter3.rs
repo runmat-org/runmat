@@ -946,6 +946,7 @@ fn build_scatter3_gpu_plot(
         style.point_size,
         bounds,
     )
+    .with_gpu_source_inputs(inputs)
     .with_label(style.label.clone()))
 }
 

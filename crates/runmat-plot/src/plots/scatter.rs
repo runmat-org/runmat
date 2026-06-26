@@ -2,10 +2,13 @@
 //!
 //! High-performance scatter plotting with GPU acceleration.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::gpu::scatter2::Scatter2GpuInputs;
+use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::surface::ColorMap;
 use glam::{Vec3, Vec4};
 
@@ -40,6 +43,7 @@ pub struct ScatterPlot {
     dirty: bool,
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_point_count: Option<usize>,
+    gpu_inputs: Option<Scatter2GpuInputs>,
     gpu_has_per_point_sizes: bool,
     gpu_has_per_point_colors: bool,
 }
@@ -77,6 +81,45 @@ pub struct ScatterGpuStyle {
 }
 
 impl ScatterPlot {
+    pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
+        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+            return Ok((self.x_data.clone(), self.y_data.clone()));
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "scatter plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            return Ok((x, y));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "scatter plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new()))
+    }
+
     /// Create a new scatter plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
@@ -113,6 +156,7 @@ impl ScatterPlot {
             dirty: true,
             gpu_vertices: None,
             gpu_point_count: None,
+            gpu_inputs: None,
             gpu_has_per_point_sizes: false,
             gpu_has_per_point_colors: false,
         })
@@ -147,14 +191,21 @@ impl ScatterPlot {
             dirty: false,
             gpu_vertices: Some(buffer),
             gpu_point_count: Some(point_count),
+            gpu_inputs: None,
             gpu_has_per_point_sizes: style.has_per_point_sizes,
             gpu_has_per_point_colors: style.has_per_point_colors,
         }
     }
 
+    pub fn with_gpu_source_inputs(mut self, inputs: Scatter2GpuInputs) -> Self {
+        self.gpu_inputs = Some(inputs);
+        self
+    }
+
     fn invalidate_gpu_vertices(&mut self) {
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+        self.gpu_inputs = None;
     }
 
     /// Create a scatter plot with custom styling

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack scatter3 vertices directly on the GPU.
+#[derive(Clone, Debug)]
 pub struct Scatter3GpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,

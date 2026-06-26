@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 const VERTICES_PER_BAR: u32 = 6;
 
 /// Inputs required to pack bar vertices directly on the GPU.
+#[derive(Clone, Debug)]
 pub struct BarGpuInputs {
     pub values_buffer: Arc<wgpu::Buffer>,
     pub row_count: u32,
@@ -15,6 +16,7 @@ pub struct BarGpuInputs {
 }
 
 /// Parameters describing how the GPU vertices should be generated.
+#[derive(Clone, Copy, Debug)]
 pub struct BarGpuParams {
     pub color: Vec4,
     pub bar_width: f32,

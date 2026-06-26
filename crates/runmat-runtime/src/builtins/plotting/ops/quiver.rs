@@ -592,20 +592,32 @@ fn build_quiver_gpu_plot(
             0.0,
         ),
     );
+    let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
+        x_data: runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
+        y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
+        u_buffer: u_ref.buffer.clone(),
+        v_buffer: v_ref.buffer.clone(),
+        count: count as u32,
+        rows: rows as u32,
+        cols: cols as u32,
+        xy_mode,
+        scalar,
+    };
+    let gpu_source = runmat_plot::plots::QuiverGpuSource {
+        x_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_data),
+        y_data: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_data),
+        u_buffer: inputs.u_buffer.clone(),
+        v_buffer: inputs.v_buffer.clone(),
+        count,
+        rows,
+        cols,
+        xy_mode,
+        scalar,
+    };
     let gpu_vertices = runmat_plot::gpu::quiver::pack_vertices(
         &context.device,
         &context.queue,
-        &runmat_plot::gpu::quiver::QuiverGpuInputs {
-            x_data: runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
-            y_data: runmat_plot::gpu::axis::AxisData::Buffer(y_ref.buffer.clone()),
-            u_buffer: u_ref.buffer.clone(),
-            v_buffer: v_ref.buffer.clone(),
-            count: count as u32,
-            rows: rows as u32,
-            cols: cols as u32,
-            xy_mode,
-            scalar,
-        },
+        &inputs,
         &runmat_plot::gpu::quiver::QuiverGpuParams {
             color: parsed.color,
             scale: parsed.scale,
@@ -627,6 +639,7 @@ fn build_quiver_gpu_plot(
         count * 6,
         bounds,
     )
+    .with_gpu_source(gpu_source)
     .with_label(label);
     plot.x = Vec::new();
     plot.y = Vec::new();

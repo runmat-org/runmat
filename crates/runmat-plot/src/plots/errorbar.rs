@@ -1,10 +1,12 @@
 //! Error bar plot implementation.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext,
     GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
 use crate::gpu::errorbar::{ErrorBarGpuInputs, ErrorBarGpuParams};
+use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
 use log::warn;
@@ -239,6 +241,107 @@ impl ErrorBar {
             marker_gpu_vertices: None,
             marker_dirty: true,
         }
+    }
+
+    pub async fn export_scene_data(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
+        if !self.x.is_empty()
+            || !self.y.is_empty()
+            || !self.y_neg.is_empty()
+            || !self.y_pos.is_empty()
+            || !self.x_neg.is_empty()
+            || !self.x_pos.is_empty()
+        {
+            return Ok((
+                self.x.clone(),
+                self.y.clone(),
+                self.y_neg.clone(),
+                self.y_pos.clone(),
+                self.x_neg.clone(),
+                self.x_pos.clone(),
+            ));
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "errorbar plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y_neg = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_neg_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y_pos = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_pos_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let x_neg = if let Some(buffer) = &inputs.x_neg_buffer {
+                readback_scalar_buffer_f64(
+                    &context.device,
+                    &context.queue,
+                    buffer,
+                    len,
+                    inputs.scalar,
+                )
+                .await?
+            } else {
+                vec![0.0; len]
+            };
+            let x_pos = if let Some(buffer) = &inputs.x_pos_buffer {
+                readback_scalar_buffer_f64(
+                    &context.device,
+                    &context.queue,
+                    buffer,
+                    len,
+                    inputs.scalar,
+                )
+                .await?
+            } else {
+                vec![0.0; len]
+            };
+            return Ok((x, y, y_neg, y_pos, x_neg, x_pos));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "errorbar plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ))
     }
 
     fn cap_half_width_data(&self, bounds: &BoundingBox, viewport_px: Option<(u32, u32)>) -> f32 {

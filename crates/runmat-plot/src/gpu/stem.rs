@@ -7,6 +7,7 @@ use glam::Vec4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+#[derive(Clone, Debug)]
 pub struct StemGpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,

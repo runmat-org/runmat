@@ -1,3 +1,4 @@
+use crate::gpu::ScalarType;
 use bytemuck::cast_slice;
 use futures::channel::oneshot;
 use std::sync::Arc;
@@ -72,4 +73,67 @@ pub async fn readback_f32_buffer(
     drop(data);
     buffer.unmap();
     Ok(out)
+}
+
+pub async fn copy_readback_bytes(
+    device: &Arc<wgpu::Device>,
+    queue: &Arc<wgpu::Queue>,
+    buffer: &wgpu::Buffer,
+    byte_len: usize,
+) -> Result<Vec<u8>, String> {
+    if byte_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("runmat-plot-readback-staging"),
+        size: byte_len as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("runmat-plot-readback-encoder"),
+    });
+    encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, byte_len as u64);
+    queue.submit(Some(encoder.finish()));
+
+    let slice = staging.slice(0..byte_len as u64);
+    map_read_async(device, &slice).await?;
+    let data = slice.get_mapped_range();
+    if data.len() < byte_len {
+        drop(data);
+        staging.unmap();
+        return Err("GPU readback staging buffer too small".to_string());
+    }
+    let out = data[..byte_len].to_vec();
+    drop(data);
+    staging.unmap();
+    Ok(out)
+}
+
+pub async fn readback_scalar_buffer_f64(
+    device: &Arc<wgpu::Device>,
+    queue: &Arc<wgpu::Queue>,
+    buffer: &wgpu::Buffer,
+    element_count: usize,
+    scalar: ScalarType,
+) -> Result<Vec<f64>, String> {
+    if element_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    match scalar {
+        ScalarType::F32 => {
+            let byte_len = element_count * std::mem::size_of::<f32>();
+            let bytes = copy_readback_bytes(device, queue, buffer, byte_len).await?;
+            let values: &[f32] = cast_slice(&bytes);
+            Ok(values.iter().map(|value| f64::from(*value)).collect())
+        }
+        ScalarType::F64 => {
+            let byte_len = element_count * std::mem::size_of::<f64>();
+            let bytes = copy_readback_bytes(device, queue, buffer, byte_len).await?;
+            let values: &[f64] = cast_slice(&bytes);
+            Ok(values.to_vec())
+        }
+    }
 }

@@ -1,3 +1,4 @@
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
@@ -6,6 +7,7 @@ use crate::geometry::stroke3d::{
     create_line_vertices_dashed, tessellate_polyline_tube, StrokeCap3D, StrokeStyle3D,
 };
 use crate::gpu::line3::{Line3GpuInputs, Line3GpuParams};
+use crate::gpu::util::readback_scalar_buffer_f64;
 use glam::{Vec3, Vec4};
 use log::warn;
 
@@ -116,6 +118,56 @@ impl Line3Plot {
         self.gpu_line_inputs = Some(inputs);
         self.bounds = Some(bounds);
         self
+    }
+
+    pub async fn export_scene_xyz_data(&self) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), String> {
+        if !self.x_data.is_empty() || !self.y_data.is_empty() || !self.z_data.is_empty() {
+            return Ok((
+                self.x_data.clone(),
+                self.y_data.clone(),
+                self.z_data.clone(),
+            ));
+        }
+
+        if let Some(inputs) = &self.gpu_line_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "plot3 line has GPU source data but no shared WGPU context is installed".to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let z = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.z_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            return Ok((x, y, z));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "plot3 line has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new(), Vec::new()))
     }
 
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {

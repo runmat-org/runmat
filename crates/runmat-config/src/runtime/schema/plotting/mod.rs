@@ -59,6 +59,9 @@ pub struct ExportConfig {
     pub dpi: u32,
     /// Default output directory
     pub output_dir: Option<PathBuf>,
+    /// Maximum serialized figure scene payload size.
+    #[serde(default = "default_scene_budget_bytes")]
+    pub scene_budget_bytes: usize,
 }
 
 /// Plotting mode enumeration
@@ -128,6 +131,7 @@ impl Default for ExportConfig {
             format: ExportFormat::Png,
             dpi: default_dpi(),
             output_dir: None,
+            scene_budget_bytes: default_scene_budget_bytes(),
         }
     }
 }
@@ -160,4 +164,8 @@ fn default_window_height() -> u32 {
 
 fn default_dpi() -> u32 {
     300
+}
+
+fn default_scene_budget_bytes() -> usize {
+    8 * 1024 * 1024
 }

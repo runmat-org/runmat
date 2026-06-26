@@ -412,9 +412,17 @@ fn build_truecolor_image_surface_gpu(
     let mut surface = SurfacePlot::from_gpu_buffer(rows, cols, gpu_vertices, rows * cols, bounds)
         .with_flatten_z(true)
         .with_image_mode(true)
-        .with_shading(ShadingMode::None);
+        .with_shading(ShadingMode::None)
+        .with_gpu_color_grid_source(runmat_plot::plots::SurfaceGpuColorGridSource {
+            image_buffer: image_ref.buffer.clone(),
+            rows,
+            cols,
+            channels: channels as usize,
+            scalar,
+        });
     surface.x_data = x_host;
     surface.y_data = y_host;
+    surface.z_data = Some(vec![vec![0.0; cols]; rows]);
     Ok(surface)
 }
 

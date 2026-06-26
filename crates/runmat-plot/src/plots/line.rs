@@ -2,11 +2,13 @@
 //!
 //! High-performance line plotting with GPU acceleration.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material,
     PipelineType, RenderData, Vertex,
 };
 use crate::gpu::line::LineGpuInputs;
+use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
 use glam::{Vec3, Vec4};
 use log::{trace, warn};
@@ -112,6 +114,44 @@ impl LinePlot {
 
     pub(crate) fn has_gpu_vertices(&self) -> bool {
         self.gpu_vertices.is_some()
+    }
+
+    pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
+        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+            return Ok((self.x_data.clone(), self.y_data.clone()));
+        }
+
+        if let Some(inputs) = &self.gpu_line_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "line plot has GPU source data but no shared WGPU context is installed".to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            return Ok((x, y));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "line plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new()))
     }
 
     /// Create a new line plot with data

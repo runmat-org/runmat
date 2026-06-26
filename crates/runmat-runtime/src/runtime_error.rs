@@ -8,6 +8,7 @@ pub enum ReplayErrorKind {
     UnsupportedSchema,
     PayloadTooLarge,
     DecodeFailed,
+    ExportRejected,
     ImportRejected,
 }
 
@@ -17,6 +18,7 @@ impl ReplayErrorKind {
             Self::UnsupportedSchema => "RunMat:ReplayUnsupportedSchema",
             Self::PayloadTooLarge => "RunMat:ReplayPayloadTooLarge",
             Self::DecodeFailed => "RunMat:ReplayDecodeFailed",
+            Self::ExportRejected => "RunMat:ReplayExportRejected",
             Self::ImportRejected => "RunMat:ReplayImportRejected",
         }
     }

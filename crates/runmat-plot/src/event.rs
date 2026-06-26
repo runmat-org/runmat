@@ -9,6 +9,7 @@ use crate::plots::{
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt};
 
 /// High-level event emitted whenever a figure changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +50,118 @@ pub struct FigureScene {
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
     pub plots: Vec<ScenePlot>,
+}
+
+pub const DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneExportPolicy {
+    pub max_scene_bytes: usize,
+}
+
+impl Default for SceneExportPolicy {
+    fn default() -> Self {
+        Self {
+            max_scene_bytes: DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES,
+        }
+    }
+}
+
+pub fn resolve_scene_export_policy(max_scene_bytes: Option<usize>) -> SceneExportPolicy {
+    SceneExportPolicy {
+        max_scene_bytes: max_scene_bytes
+            .filter(|bytes| *bytes > 0)
+            .unwrap_or(DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneExportErrorKind {
+    BudgetExceeded,
+    UnexportableGpuData,
+    Serialization,
+    Readback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneExportError {
+    pub kind: SceneExportErrorKind,
+    pub message: String,
+}
+
+impl SceneExportError {
+    fn budget_exceeded(used: usize, added: usize, max: usize) -> Self {
+        Self {
+            kind: SceneExportErrorKind::BudgetExceeded,
+            message: format!(
+                "figure scene export exceeds budget: {} + {} bytes > {} bytes",
+                used, added, max
+            ),
+        }
+    }
+
+    fn unexportable(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::UnexportableGpuData,
+            message: message.into(),
+        }
+    }
+
+    fn serialization(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::Serialization,
+            message: message.into(),
+        }
+    }
+
+    fn readback(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::Readback,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for SceneExportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for SceneExportError {}
+
+#[derive(Debug, Clone, Copy)]
+struct SceneExportBudget {
+    max_bytes: usize,
+    used_bytes: usize,
+}
+
+impl SceneExportBudget {
+    fn new(policy: SceneExportPolicy) -> Self {
+        Self {
+            max_bytes: policy.max_scene_bytes,
+            used_bytes: 0,
+        }
+    }
+
+    fn reserve_plot(&mut self, plot: &ScenePlot) -> Result<(), SceneExportError> {
+        let bytes = serde_json::to_vec(plot)
+            .map_err(|err| SceneExportError::serialization(err.to_string()))?;
+        self.reserve_bytes(bytes.len())
+    }
+
+    fn reserve_bytes(&mut self, byte_len: usize) -> Result<(), SceneExportError> {
+        let next = self.used_bytes.saturating_add(byte_len);
+        if next > self.max_bytes {
+            return Err(SceneExportError::budget_exceeded(
+                self.used_bytes,
+                byte_len,
+                self.max_bytes,
+            ));
+        }
+        self.used_bytes = next;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +510,29 @@ impl FigureScene {
             metadata: snapshot.metadata,
             plots,
         }
+    }
+
+    pub async fn capture_for_export(
+        figure: &Figure,
+        policy: SceneExportPolicy,
+    ) -> Result<Self, SceneExportError> {
+        let snapshot = FigureSnapshot::capture(figure);
+        let mut budget = SceneExportBudget::new(policy);
+        let mut plots = Vec::new();
+
+        for (idx, plot) in figure.plots().enumerate() {
+            let scene_plot =
+                ScenePlot::from_plot_for_export(plot, figure_axis_index(figure, idx)).await?;
+            budget.reserve_plot(&scene_plot)?;
+            plots.push(scene_plot);
+        }
+
+        Ok(Self {
+            schema_version: Self::SCHEMA_VERSION,
+            layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots,
+        })
     }
 
     pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
@@ -1377,6 +1513,443 @@ impl PlotDescriptor {
 }
 
 impl ScenePlot {
+    async fn from_plot_for_export(
+        plot: &PlotElement,
+        axes_index: u32,
+    ) -> Result<Self, SceneExportError> {
+        match plot {
+            PlotElement::Line(line) => {
+                let (x, y) = line
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "line plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Line {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                })
+            }
+            PlotElement::ReferenceLine(_) => {
+                let scene_plot = Self::from_plot(plot, axes_index);
+                scene_plot.validate_exportable()?;
+                Ok(scene_plot)
+            }
+            PlotElement::Scatter(scatter) => {
+                let (x, y) = scatter
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Scatter {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(scatter.color),
+                    marker_size: scatter.marker_size,
+                    marker_style: format!("{:?}", scatter.marker_style),
+                    axes_index,
+                    label: scatter.label.clone(),
+                    visible: scatter.visible,
+                })
+            }
+            PlotElement::Bar(bar) => {
+                let values = bar
+                    .export_scene_values()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if values.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "bar chart has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Bar {
+                    labels: bar.labels.clone(),
+                    values,
+                    histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
+                    color_rgba: vec4_to_rgba(bar.color),
+                    outline_color_rgba: bar.outline_color.map(vec4_to_rgba),
+                    bar_width: bar.bar_width,
+                    outline_width: bar.outline_width,
+                    orientation: format!("{:?}", bar.orientation),
+                    group_index: bar.group_index as u32,
+                    group_count: bar.group_count as u32,
+                    stack_offsets: bar.stack_offsets().map(|offsets| offsets.to_vec()),
+                    axes_index,
+                    label: bar.label.clone(),
+                    visible: bar.visible,
+                })
+            }
+            PlotElement::ErrorBar(error) => {
+                let (x, y, y_neg, y_pos, x_neg, x_pos) = error
+                    .export_scene_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "errorbar plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::ErrorBar {
+                    x,
+                    y,
+                    err_low: y_neg,
+                    err_high: y_pos,
+                    x_err_low: x_neg,
+                    x_err_high: x_pos,
+                    orientation: format!("{:?}", error.orientation),
+                    color_rgba: vec4_to_rgba(error.color),
+                    line_width: error.line_width,
+                    line_style: format!("{:?}", error.line_style),
+                    cap_width: error.cap_size,
+                    marker_style: error.marker.as_ref().map(|m| format!("{:?}", m.kind)),
+                    marker_size: error.marker.as_ref().map(|m| m.size),
+                    marker_face_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.face_color)),
+                    marker_edge_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.edge_color)),
+                    marker_filled: error.marker.as_ref().map(|m| m.filled),
+                    axes_index,
+                    label: error.label.clone(),
+                    visible: error.visible,
+                })
+            }
+            PlotElement::Stairs(stairs) => {
+                let (x, y) = stairs
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "stairs plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Stairs {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(stairs.color),
+                    line_width: stairs.line_width,
+                    axes_index,
+                    label: stairs.label.clone(),
+                    visible: stairs.visible,
+                })
+            }
+            PlotElement::Stem(stem) => {
+                let (x, y) = stem
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "stem plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Stem {
+                    x,
+                    y,
+                    baseline: stem.baseline,
+                    color_rgba: vec4_to_rgba(stem.color),
+                    line_width: stem.line_width,
+                    line_style: format!("{:?}", stem.line_style),
+                    baseline_color_rgba: vec4_to_rgba(stem.baseline_color),
+                    baseline_visible: stem.baseline_visible,
+                    marker_color_rgba: vec4_to_rgba(
+                        stem.marker
+                            .as_ref()
+                            .map(|m| m.face_color)
+                            .unwrap_or(stem.color),
+                    ),
+                    marker_size: stem.marker.as_ref().map(|m| m.size).unwrap_or(0.0),
+                    marker_filled: stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
+                    axes_index,
+                    label: stem.label.clone(),
+                    visible: stem.visible,
+                })
+            }
+            PlotElement::Area(area) => {
+                let (x, y) = area
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "area plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Area {
+                    x,
+                    y,
+                    lower_y: area.lower_y.clone(),
+                    baseline: area.baseline,
+                    color_rgba: vec4_to_rgba(area.color),
+                    axes_index,
+                    label: area.label.clone(),
+                    visible: area.visible,
+                })
+            }
+            PlotElement::Quiver(quiver) => {
+                let (x, y, u, v) = quiver
+                    .export_scene_vector_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "quiver plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Quiver {
+                    x,
+                    y,
+                    u,
+                    v,
+                    color_rgba: vec4_to_rgba(quiver.color),
+                    line_width: quiver.line_width,
+                    scale: quiver.scale,
+                    head_size: quiver.head_size,
+                    axes_index,
+                    label: quiver.label.clone(),
+                    visible: quiver.visible,
+                })
+            }
+            PlotElement::Surface(surface) => {
+                let (x, y, z) = surface
+                    .export_scene_grid_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "surface plot has no exportable scene data",
+                    ));
+                }
+                let color_grid = surface
+                    .export_scene_color_grid()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                Ok(Self::Surface {
+                    x,
+                    y,
+                    z,
+                    colormap: format!("{:?}", surface.colormap),
+                    shading_mode: format!("{:?}", surface.shading_mode),
+                    wireframe: surface.wireframe,
+                    alpha: surface.alpha,
+                    flatten_z: surface.flatten_z,
+                    image_mode: surface.image_mode,
+                    color_grid_rgba: color_grid.as_ref().map(|grid| {
+                        grid.iter()
+                            .map(|row| row.iter().map(|color| vec4_to_rgba(*color)).collect())
+                            .collect()
+                    }),
+                    color_limits: surface.color_limits.map(|(lo, hi)| [lo, hi]),
+                    axes_index,
+                    label: surface.label.clone(),
+                    visible: surface.visible,
+                })
+            }
+            PlotElement::Patch(_) | PlotElement::Mesh(_) | PlotElement::Pie(_) => {
+                let scene_plot = Self::from_plot(plot, axes_index);
+                scene_plot.validate_exportable()?;
+                Ok(scene_plot)
+            }
+            PlotElement::Line3(line) => {
+                let (x, y, z) = line
+                    .export_scene_xyz_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "plot3 line has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Line3 {
+                    x,
+                    y,
+                    z,
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                })
+            }
+            PlotElement::Scatter3(scatter3) => {
+                let points = scatter3
+                    .export_scene_points()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if points.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter3 plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Scatter3 {
+                    points: points.into_iter().map(vec3_to_xyz).collect(),
+                    colors_rgba: scatter3
+                        .colors
+                        .iter()
+                        .map(|color| vec4_to_rgba(*color))
+                        .collect(),
+                    point_size: scatter3.point_size,
+                    point_sizes: scatter3.point_sizes.clone(),
+                    axes_index,
+                    label: scatter3.label.clone(),
+                    visible: scatter3.visible,
+                })
+            }
+            PlotElement::Contour(contour) => {
+                let vertices = contour
+                    .export_scene_vertices()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "contour plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::Contour {
+                    vertices: vertices.into_iter().map(Into::into).collect(),
+                    bounds_min: vec3_to_xyz(contour.bounds().min),
+                    bounds_max: vec3_to_xyz(contour.bounds().max),
+                    base_z: contour.base_z,
+                    line_width: contour.line_width,
+                    axes_index,
+                    label: contour.label.clone(),
+                    visible: contour.visible,
+                    force_3d: contour.force_3d,
+                })
+            }
+            PlotElement::ContourFill(fill) => {
+                let vertices = fill
+                    .export_scene_vertices()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "filled contour plot has no exportable scene data",
+                    ));
+                }
+                Ok(Self::ContourFill {
+                    vertices: vertices.into_iter().map(Into::into).collect(),
+                    bounds_min: vec3_to_xyz(fill.bounds().min),
+                    bounds_max: vec3_to_xyz(fill.bounds().max),
+                    axes_index,
+                    label: fill.label.clone(),
+                    visible: fill.visible,
+                })
+            }
+        }
+    }
+
+    fn validate_exportable(&self) -> Result<(), SceneExportError> {
+        match self {
+            ScenePlot::Line { x, y, .. }
+            | ScenePlot::Scatter { x, y, .. }
+            | ScenePlot::Stairs { x, y, .. }
+            | ScenePlot::Stem { x, y, .. }
+            | ScenePlot::Area { x, y, .. } => {
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "plot has no exportable X/Y scene data",
+                    ));
+                }
+            }
+            ScenePlot::ErrorBar { x, y, .. } => {
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "errorbar plot has no exportable scene data",
+                    ));
+                }
+            }
+            ScenePlot::Quiver { x, y, u, v, .. } => {
+                if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "quiver plot has no exportable vector field scene data",
+                    ));
+                }
+            }
+            ScenePlot::Bar { labels, values, .. } => {
+                if labels.is_empty() && values.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "bar plot has no exportable value scene data",
+                    ));
+                }
+            }
+            ScenePlot::Surface { x, y, z, .. } => {
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "surface plot has no exportable grid scene data",
+                    ));
+                }
+            }
+            ScenePlot::Patch {
+                vertices, faces, ..
+            } => {
+                if vertices.is_empty() || faces.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "patch plot has no exportable mesh scene data",
+                    ));
+                }
+            }
+            ScenePlot::Mesh {
+                vertices,
+                triangles,
+                ..
+            } => {
+                if vertices.is_empty() || triangles.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "mesh plot has no exportable mesh scene data",
+                    ));
+                }
+            }
+            ScenePlot::Line3 { x, y, z, .. } => {
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "plot3 line has no exportable scene data",
+                    ));
+                }
+            }
+            ScenePlot::Scatter3 { points, .. } => {
+                if points.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter3 plot has no exportable point scene data",
+                    ));
+                }
+            }
+            ScenePlot::Contour { vertices, .. } | ScenePlot::ContourFill { vertices, .. } => {
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "contour plot has no exportable vertex scene data",
+                    ));
+                }
+            }
+            ScenePlot::Pie { values, .. } => {
+                if values.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "pie plot has no exportable value scene data",
+                    ));
+                }
+            }
+            ScenePlot::ReferenceLine { .. } => {}
+            ScenePlot::Unsupported { plot_kind, .. } => {
+                return Err(SceneExportError::unexportable(format!(
+                    "unsupported plot kind cannot be exported: {plot_kind:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn from_plot(plot: &PlotElement, axes_index: u32) -> Self {
         match plot {
             PlotElement::Line(line) => Self::Line {
@@ -2453,9 +3026,151 @@ where
 mod tests {
     use super::*;
     use crate::plots::{
-        Figure, Line3Plot, LinePlot, PatchPlot, Scatter3Plot, ScatterPlot, SurfacePlot,
+        AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
+        MeshPlot, PatchPlot, PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation,
+        Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
     };
     use glam::{Vec3, Vec4};
+
+    #[test]
+    fn async_scene_export_covers_every_plot_element_variant() {
+        let bounds = BoundingBox::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0));
+        let cases: Vec<(&str, PlotElement)> = vec![
+            (
+                "line",
+                PlotElement::Line(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "scatter",
+                PlotElement::Scatter(ScatterPlot::new(vec![0.0, 1.0], vec![2.0, 3.0]).unwrap()),
+            ),
+            (
+                "bar",
+                PlotElement::Bar(
+                    BarChart::new(vec!["A".into(), "B".into()], vec![1.0, 2.0]).unwrap(),
+                ),
+            ),
+            (
+                "errorbar",
+                PlotElement::ErrorBar(Box::new(
+                    ErrorBar::new_vertical(
+                        vec![0.0, 1.0],
+                        vec![1.0, 2.0],
+                        vec![0.1, 0.2],
+                        vec![0.3, 0.4],
+                    )
+                    .unwrap(),
+                )),
+            ),
+            (
+                "stairs",
+                PlotElement::Stairs(StairsPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "stem",
+                PlotElement::Stem(StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "area",
+                PlotElement::Area(AreaPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "quiver",
+                PlotElement::Quiver(
+                    QuiverPlot::new(vec![0.0], vec![0.0], vec![1.0], vec![1.0]).unwrap(),
+                ),
+            ),
+            (
+                "pie",
+                PlotElement::Pie(PieChart::new(vec![1.0, 2.0], None).unwrap()),
+            ),
+            (
+                "surface",
+                PlotElement::Surface(
+                    SurfacePlot::new(
+                        vec![0.0, 1.0],
+                        vec![0.0, 1.0],
+                        vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+                    )
+                    .unwrap(),
+                ),
+            ),
+            (
+                "mesh",
+                PlotElement::Mesh(Box::new(
+                    MeshPlot::new(
+                        vec![
+                            Vec3::new(0.0, 0.0, 0.0),
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                        ],
+                        vec![[0, 1, 2]],
+                    )
+                    .unwrap(),
+                )),
+            ),
+            (
+                "patch",
+                PlotElement::Patch(
+                    PatchPlot::new(
+                        vec![
+                            Vec3::new(0.0, 0.0, 0.0),
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                        ],
+                        vec![vec![0, 1, 2]],
+                    )
+                    .unwrap(),
+                ),
+            ),
+            (
+                "line3",
+                PlotElement::Line3(
+                    Line3Plot::new(vec![0.0, 1.0], vec![1.0, 2.0], vec![2.0, 3.0]).unwrap(),
+                ),
+            ),
+            (
+                "scatter3",
+                PlotElement::Scatter3(Scatter3Plot::new(vec![Vec3::new(0.0, 0.0, 0.0)]).unwrap()),
+            ),
+            (
+                "contour",
+                PlotElement::Contour(ContourPlot::from_vertices(
+                    vec![
+                        Vertex::new(Vec3::new(0.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(1.0, 1.0, 0.0), Vec4::ONE),
+                    ],
+                    0.0,
+                    bounds,
+                )),
+            ),
+            (
+                "contour_fill",
+                PlotElement::ContourFill(ContourFillPlot::from_vertices(
+                    vec![
+                        Vertex::new(Vec3::new(0.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(1.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(0.0, 1.0, 0.0), Vec4::ONE),
+                    ],
+                    bounds,
+                )),
+            ),
+            (
+                "reference_line",
+                PlotElement::ReferenceLine(
+                    ReferenceLine::new(ReferenceLineOrientation::Vertical, 0.5).unwrap(),
+                ),
+            ),
+        ];
+
+        for (name, plot) in cases {
+            let scene_plot = futures::executor::block_on(ScenePlot::from_plot_for_export(&plot, 0))
+                .unwrap_or_else(|err| panic!("{name} export failed: {err}"));
+            scene_plot
+                .validate_exportable()
+                .unwrap_or_else(|err| panic!("{name} validation failed: {err}"));
+        }
+    }
 
     #[test]
     fn capture_snapshot_reflects_layout_and_metadata() {

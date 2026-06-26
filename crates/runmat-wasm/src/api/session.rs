@@ -26,8 +26,8 @@ use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
 };
 use runmat_runtime::{
-    runtime_plot_export_figure_scene, runtime_plot_import_figure_scene_async,
-    runtime_plot_import_figure_scene_from_path_async, ReplayErrorKind,
+    runtime_plot_import_figure_scene_async, runtime_plot_import_figure_scene_from_path_async,
+    ReplayErrorKind,
 };
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -1640,10 +1640,22 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = exportFigureScene)]
-    pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
+    pub async fn export_figure_scene(
+        &self,
+        handle: u32,
+        scene_budget_bytes: Option<u32>,
+    ) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;
         log::debug!("RunMat wasm: exportFigureScene start handle={handle}");
-        match runtime_plot_export_figure_scene(FigureHandle::from(handle)) {
+        let policy = runmat_plot::event::resolve_scene_export_policy(
+            scene_budget_bytes.map(|bytes| bytes as usize),
+        );
+        match runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
+            FigureHandle::from(handle),
+            policy,
+        )
+        .await
+        {
             Ok(Some(payload)) => {
                 log::debug!(
                     "RunMat wasm: exportFigureScene ok handle={} bytes={}",
@@ -1658,7 +1670,11 @@ impl RunMatWasm {
                 if current.as_u32() == handle {
                     return Ok(None);
                 }
-                match runtime_plot_export_figure_scene(current) {
+                match runmat_runtime::builtins::plotting::export_figure_scene_with_policy(
+                    current, policy,
+                )
+                .await
+                {
                     Ok(payload) => {
                         log::debug!(
                             "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",

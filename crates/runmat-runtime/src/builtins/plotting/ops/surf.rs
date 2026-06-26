@@ -537,6 +537,14 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         y_len: y_len as u32,
         scalar,
     };
+    let gpu_source = runmat_plot::plots::SurfaceGpuSource {
+        x_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_axis),
+        y_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_axis),
+        z_buffer: inputs.z_buffer.clone(),
+        x_len,
+        y_len,
+        scalar,
+    };
     let lod = compute_surface_lod(x_len, y_len, extent_hint);
     let params = runmat_plot::gpu::surface::SurfaceGpuParams {
         min_z,
@@ -563,7 +571,8 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     let lod_y_len = usize::try_from(lod.lod_y_len)
         .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
     let mut surface =
-        SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds);
+        SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds)
+            .with_gpu_source(gpu_source);
     surface.colormap = colormap;
     surface.alpha = alpha;
     surface.flatten_z = flatten_z;

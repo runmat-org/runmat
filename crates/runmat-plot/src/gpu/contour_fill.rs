@@ -100,7 +100,8 @@ pub fn pack_contour_fill_vertices(
         size: output_size,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
 
@@ -109,7 +110,8 @@ pub fn pack_contour_fill_vertices(
         size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
     let init = DrawIndirectArgsRaw {

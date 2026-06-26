@@ -1,9 +1,13 @@
 //! Quiver plot (vector field) implementation
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::axis::OwnedAxisData;
+use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct QuiverPlot {
@@ -26,9 +30,99 @@ pub struct QuiverPlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<QuiverGpuSource>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QuiverGpuSource {
+    pub x_data: OwnedAxisData,
+    pub y_data: OwnedAxisData,
+    pub u_buffer: Arc<wgpu::Buffer>,
+    pub v_buffer: Arc<wgpu::Buffer>,
+    pub count: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub xy_mode: u32,
+    pub scalar: ScalarType,
 }
 
 impl QuiverPlot {
+    pub async fn export_scene_vector_data(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
+        if !self.x.is_empty() || !self.y.is_empty() || !self.u.is_empty() || !self.v.is_empty() {
+            return Ok((
+                self.x.clone(),
+                self.y.clone(),
+                self.u.clone(),
+                self.v.clone(),
+            ));
+        }
+
+        if let Some(source) = &self.gpu_source {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "quiver plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let u = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.u_buffer,
+                source.count,
+                source.scalar,
+            )
+            .await?;
+            let v = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.v_buffer,
+                source.count,
+                source.scalar,
+            )
+            .await?;
+            let x_axis_len = if source.xy_mode == 0 {
+                source.count
+            } else {
+                source.cols
+            };
+            let y_axis_len = if source.xy_mode == 0 {
+                source.count
+            } else {
+                source.rows
+            };
+            let x_axis = source
+                .x_data
+                .export_f64(&context.device, &context.queue, x_axis_len, source.scalar)
+                .await?;
+            let y_axis = source
+                .y_data
+                .export_f64(&context.device, &context.queue, y_axis_len, source.scalar)
+                .await?;
+            let (x, y) = if source.xy_mode == 0 {
+                (x_axis, y_axis)
+            } else {
+                let mut x = Vec::with_capacity(source.count);
+                let mut y = Vec::with_capacity(source.count);
+                for i in 0..source.count {
+                    let col = i / source.rows;
+                    let row = i % source.rows;
+                    x.push(*x_axis.get(col).unwrap_or(&0.0));
+                    y.push(*y_axis.get(row).unwrap_or(&0.0));
+                }
+                (x, y)
+            };
+            return Ok((x, y, u, v));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "quiver plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()))
+    }
+
     pub fn new(x: Vec<f64>, y: Vec<f64>, u: Vec<f64>, v: Vec<f64>) -> Result<Self, String> {
         let n = x.len();
         if n == 0 || y.len() != n || u.len() != n || v.len() != n {
@@ -51,6 +145,7 @@ impl QuiverPlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
         })
     }
     pub fn from_gpu_buffer(
@@ -79,7 +174,12 @@ impl QuiverPlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
         }
+    }
+    pub fn with_gpu_source(mut self, source: QuiverGpuSource) -> Self {
+        self.gpu_source = Some(source);
+        self
     }
     pub fn with_style(mut self, color: Vec4, line_width: f32, scale: f32, head_size: f32) -> Self {
         self.color = color;

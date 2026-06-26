@@ -540,17 +540,26 @@ fn build_area_gpu_plots(
         parsed.base_value as f32
     };
     for idx in 0..cols {
+        let inputs = runmat_plot::gpu::area::AreaGpuInputs {
+            x_axis: x_axis.clone(),
+            y_buffer: y_ref.buffer.clone(),
+            rows: rows as u32,
+            cols: cols as u32,
+            target_col: idx as u32,
+            scalar,
+        };
+        let gpu_source = runmat_plot::plots::AreaGpuSource {
+            x_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_axis),
+            y_buffer: inputs.y_buffer.clone(),
+            rows,
+            cols,
+            target_col: idx,
+            scalar,
+        };
         let gpu_vertices = runmat_plot::gpu::area::pack_vertices(
             &context.device,
             &context.queue,
-            &runmat_plot::gpu::area::AreaGpuInputs {
-                x_axis: x_axis.clone(),
-                y_buffer: y_ref.buffer.clone(),
-                rows: rows as u32,
-                cols: cols as u32,
-                target_col: idx as u32,
-                scalar,
-            },
+            &inputs,
             &runmat_plot::gpu::area::AreaGpuParams {
                 color: parsed
                     .color
@@ -576,7 +585,8 @@ fn build_area_gpu_plots(
                 glam::Vec3::new(x_bounds.0, min_stack, 0.0),
                 glam::Vec3::new(x_bounds.1, max_stack, 0.0),
             ),
-        );
+        )
+        .with_gpu_source(gpu_source);
         plot.label = Some(
             parsed
                 .label

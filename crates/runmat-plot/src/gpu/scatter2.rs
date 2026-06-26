@@ -52,6 +52,7 @@ impl ScatterColorBuffer {
 }
 
 /// Inputs required to pack scatter vertices directly on the GPU.
+#[derive(Clone, Debug)]
 pub struct Scatter2GpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,
