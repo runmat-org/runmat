@@ -200,6 +200,7 @@ impl StructuredTetMesher {
             boundary_edges: Vec::new(),
             quality,
             sizing: mesh_sizing,
+            backend: Default::default(),
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
                 algorithm: "structured_bbox_tet/v1".to_string(),

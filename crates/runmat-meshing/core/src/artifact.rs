@@ -54,6 +54,51 @@ pub struct AnalysisBoundaryEdge {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBackendSummary {
+    pub backend: String,
+    pub algorithm: String,
+    #[serde(default)]
+    pub source_topology_vertex_count: usize,
+    #[serde(default)]
+    pub source_topology_edge_count: usize,
+    #[serde(default)]
+    pub source_topology_face_count: usize,
+    #[serde(default)]
+    pub curve_element_count: usize,
+    #[serde(default)]
+    pub surface_element_count: usize,
+    #[serde(default)]
+    pub volume_candidate_count: usize,
+    #[serde(default)]
+    pub interior_seed_point_count: usize,
+    #[serde(default)]
+    pub tet_candidate_count: usize,
+    #[serde(default)]
+    pub boundary_face_recovery_ratio: f64,
+    #[serde(default)]
+    pub boundary_edge_recovery_ratio: f64,
+}
+
+impl Default for MeshBackendSummary {
+    fn default() -> Self {
+        Self {
+            backend: "unknown".to_string(),
+            algorithm: "unknown".to_string(),
+            source_topology_vertex_count: 0,
+            source_topology_edge_count: 0,
+            source_topology_face_count: 0,
+            curve_element_count: 0,
+            surface_element_count: 0,
+            volume_candidate_count: 0,
+            interior_seed_point_count: 0,
+            tet_candidate_count: 0,
+            boundary_face_recovery_ratio: 0.0,
+            boundary_edge_recovery_ratio: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisMeshArtifact {
     pub schema_version: String,
     pub mesh_id: String,
@@ -65,6 +110,8 @@ pub struct AnalysisMeshArtifact {
     pub boundary_edges: Vec<AnalysisBoundaryEdge>,
     pub quality: AnalysisMeshQualityReport,
     pub sizing: MeshSizingField,
+    #[serde(default)]
+    pub backend: MeshBackendSummary,
     #[serde(default)]
     pub adaptive_iterations: Vec<AdaptiveIterationSummary>,
     pub provenance: AnalysisMeshProvenance,

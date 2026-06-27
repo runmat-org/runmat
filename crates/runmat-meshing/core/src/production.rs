@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     artifact::{
         AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-        AnalysisVolumeElement, ANALYSIS_MESH_SCHEMA_VERSION,
+        AnalysisVolumeElement, MeshBackendSummary, ANALYSIS_MESH_SCHEMA_VERSION,
     },
     curve::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
@@ -259,6 +259,7 @@ fn analysis_mesh_from_preparation(
         .collect::<Result<Vec<_>, ProductionMeshError>>()?;
 
     let boundary_edges = boundary_edges_from_faces(&boundary_faces, preparation);
+    let backend = production_backend_summary(preparation, &boundary_faces, &boundary_edges);
 
     let mesh = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -275,6 +276,7 @@ fn analysis_mesh_from_preparation(
             },
             ..MeshSizingField::default()
         },
+        backend,
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
             algorithm: "production_topology_tet_candidate/v1".to_string(),
@@ -286,6 +288,73 @@ fn analysis_mesh_from_preparation(
     validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation, options))
         .map_err(ProductionMeshError::Validation)?;
     Ok(mesh)
+}
+
+fn production_backend_summary(
+    preparation: &ProductionMeshPreparation,
+    boundary_faces: &[AnalysisBoundaryFace],
+    boundary_edges: &[AnalysisBoundaryEdge],
+) -> MeshBackendSummary {
+    MeshBackendSummary {
+        backend: "production".to_string(),
+        algorithm: "production_topology_tet_candidate/v1".to_string(),
+        source_topology_vertex_count: preparation.topology.vertices.len(),
+        source_topology_edge_count: preparation.topology.edges.len(),
+        source_topology_face_count: preparation.topology.faces.len(),
+        curve_element_count: preparation.curves.elements.len(),
+        surface_element_count: preparation.surface.elements.len(),
+        volume_candidate_count: preparation.volume_candidates.components.len(),
+        interior_seed_point_count: preparation.tet_candidates.interior_seed_points.len(),
+        tet_candidate_count: preparation.tet_candidates.tets.len(),
+        boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
+        boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
+    }
+}
+
+fn boundary_face_recovery_ratio(boundary_faces: &[AnalysisBoundaryFace]) -> f64 {
+    if boundary_faces.is_empty() {
+        return 1.0;
+    }
+    let recovered_count = boundary_faces
+        .iter()
+        .filter(|face| !face.adjacent_volume_element_ids.is_empty())
+        .count();
+    recovered_count as f64 / boundary_faces.len() as f64
+}
+
+fn boundary_edge_recovery_ratio(
+    boundary_faces: &[AnalysisBoundaryFace],
+    boundary_edges: &[AnalysisBoundaryEdge],
+) -> f64 {
+    let expected_edges = boundary_face_edge_set(boundary_faces);
+    if expected_edges.is_empty() {
+        return 1.0;
+    }
+    let recovered_edges = boundary_edges
+        .iter()
+        .filter(|edge| !edge.adjacent_boundary_face_ids.is_empty())
+        .map(|edge| sorted_edge(edge.node_ids[0], edge.node_ids[1]))
+        .collect::<BTreeSet<_>>();
+    expected_edges
+        .iter()
+        .filter(|edge| recovered_edges.contains(*edge))
+        .count() as f64
+        / expected_edges.len() as f64
+}
+
+fn boundary_face_edge_set(boundary_faces: &[AnalysisBoundaryFace]) -> BTreeSet<[u32; 2]> {
+    let mut edges = BTreeSet::<[u32; 2]>::new();
+    for face in boundary_faces {
+        if face.node_ids.len() != 3 {
+            continue;
+        }
+        edges.extend(triangle_edges([
+            face.node_ids[0],
+            face.node_ids[1],
+            face.node_ids[2],
+        ]));
+    }
+    edges
 }
 
 fn boundary_edges_from_faces(
@@ -457,6 +526,17 @@ mod tests {
             .boundary_edges
             .iter()
             .all(|edge| !edge.adjacent_boundary_face_ids.is_empty()));
+        assert_eq!(mesh.backend.backend, "production");
+        assert_eq!(
+            mesh.backend.algorithm,
+            "production_topology_tet_candidate/v1"
+        );
+        assert_eq!(mesh.backend.source_topology_face_count, 12);
+        assert_eq!(mesh.backend.surface_element_count, 12);
+        assert_eq!(mesh.backend.volume_candidate_count, 1);
+        assert_eq!(mesh.backend.tet_candidate_count, 12);
+        assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+        assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(
             mesh.provenance.algorithm,
             "production_topology_tet_candidate/v1"

@@ -3249,6 +3249,7 @@ mod tests {
             boundary_edges: Vec::new(),
             quality: AnalysisMeshQualityReport::default(),
             sizing: MeshSizingField::default(),
+            backend: Default::default(),
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
                 algorithm: "test".to_string(),

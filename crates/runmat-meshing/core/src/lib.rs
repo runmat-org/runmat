@@ -27,7 +27,7 @@ pub use adaptive::{
 };
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-    AnalysisVolumeElement,
+    AnalysisVolumeElement, MeshBackendSummary,
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
