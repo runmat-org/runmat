@@ -9296,10 +9296,23 @@ pub fn analysis_run_linear_static_with_options(
     });
     let field_topology_reasons =
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
+    let solid_mesh_reasons = solid_mesh_quality_reasons(analysis_mesh.as_ref());
+    let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
+        matches!(
+            reason.code,
+            QualityReasonCode::SolidMeshNoVolumeElements
+                | QualityReasonCode::SolidMeshUnsupportedElementKind
+                | QualityReasonCode::SolidMeshQualityMinJacobianFailed
+        )
+    });
     let result_quality = if run.fields_are_empty() {
+        QualityGate::Fail
+    } else if solid_mesh_has_failure {
         QualityGate::Fail
     } else if !field_topology_reasons.is_empty() {
         QualityGate::Fail
+    } else if !solid_mesh_reasons.is_empty() {
+        QualityGate::Warn
     } else if has_material_assignment_conflict {
         QualityGate::Warn
     } else {
@@ -9313,6 +9326,7 @@ pub fn analysis_run_linear_static_with_options(
             detail: "material assignment confidence conflict detected".to_string(),
         });
     }
+    quality_reasons.extend(solid_mesh_reasons);
     quality_reasons.extend(field_topology_reasons);
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
@@ -9435,6 +9449,56 @@ fn field_topology_quality_reasons(
             })
         })
         .collect()
+}
+
+fn solid_mesh_quality_reasons(analysis_mesh: Option<&AnalysisMeshArtifact>) -> Vec<QualityReason> {
+    let Some(mesh) = analysis_mesh else {
+        return Vec::new();
+    };
+    let mut reasons = Vec::new();
+    if mesh.volume_elements.is_empty() {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshNoVolumeElements,
+            detail: "analysis mesh has no volume elements".to_string(),
+        });
+    }
+    if let Some(element) = mesh
+        .volume_elements
+        .iter()
+        .find(|element| !element.kind.is_supported_for_solid_solve())
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshUnsupportedElementKind,
+            detail: format!(
+                "analysis mesh contains unsupported solid element kind {:?} at element {}",
+                element.kind, element.element_id
+            ),
+        });
+    }
+    let thresholds = runmat_meshing_core::QualityThresholds::default();
+    if !mesh.quality.min_scaled_jacobian.is_finite()
+        || mesh.quality.min_scaled_jacobian < thresholds.min_scaled_jacobian
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshQualityMinJacobianFailed,
+            detail: format!(
+                "analysis mesh min_scaled_jacobian={} is below threshold {}",
+                mesh.quality.min_scaled_jacobian, thresholds.min_scaled_jacobian
+            ),
+        });
+    }
+    if !mesh.quality.max_aspect_ratio.is_finite()
+        || mesh.quality.max_aspect_ratio > thresholds.max_aspect_ratio
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshQualityAspectRatioWarn,
+            detail: format!(
+                "analysis mesh max_aspect_ratio={} exceeds warning threshold {}",
+                mesh.quality.max_aspect_ratio, thresholds.max_aspect_ratio
+            ),
+        });
+    }
+    reasons
 }
 
 fn primary_solver_mesh_field_expected_count(

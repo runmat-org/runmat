@@ -4723,7 +4723,51 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
 
 #[test]
 fn field_topology_quality_reasons_detect_primary_solver_field_mismatch() {
-    let mesh = AnalysisMeshArtifact {
+    let mesh = minimal_analysis_mesh();
+    let fields = vec![
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![4, 3], vec![0.0; 12]),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], vec![0.0; 12]),
+    ];
+
+    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
+
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
+    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
+    assert!(reasons[0].detail.contains("expected_entity_count=1"));
+    assert!(reasons[0].detail.contains("actual_entity_count=2"));
+}
+
+#[test]
+fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
+    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
+    mesh.quality.min_scaled_jacobian = 0.01;
+    mesh.quality.max_aspect_ratio = 30.0;
+
+    let reasons = solid_mesh_quality_reasons(Some(&mesh));
+
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshUnsupportedElementKind));
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityMinJacobianFailed));
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityAspectRatioWarn));
+
+    let mut empty = minimal_analysis_mesh();
+    empty.volume_elements.clear();
+    let empty_reasons = solid_mesh_quality_reasons(Some(&empty));
+    assert!(empty_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshNoVolumeElements));
+}
+
+fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
+    AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: "unit_tet".to_string(),
         nodes: vec![
@@ -4749,19 +4793,7 @@ fn field_topology_quality_reasons_detect_primary_solver_field_mismatch() {
             source_geometry_revision: 1,
             source_geometry_sha256: None,
         },
-    };
-    let fields = vec![
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![4, 3], vec![0.0; 12]),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], vec![0.0; 12]),
-    ];
-
-    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
-
-    assert_eq!(reasons.len(), 1);
-    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
-    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
-    assert!(reasons[0].detail.contains("expected_entity_count=1"));
-    assert!(reasons[0].detail.contains("actual_entity_count=2"));
+    }
 }
 
 fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
