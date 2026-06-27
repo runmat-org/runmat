@@ -13383,13 +13383,20 @@ fn attach_initial_adaptive_mesh_summary(
     options: &runmat_meshing_core::VolumeMeshingOptions,
     mesh: &mut AnalysisMeshArtifact,
 ) {
-    let defaults = match spec.create_model_intent.profile {
-        AnalysisCreateModelProfile::LinearStaticStructural => {
-            structural_static_default_refinement_indicators()
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        match spec.create_model_intent.profile {
+            AnalysisCreateModelProfile::LinearStaticStructural => {
+                structural_static_default_refinement_indicators()
+            }
+            _ => Vec::new(),
         }
-        _ => Vec::new(),
     };
-    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+    if defaults.is_empty()
+        && options.refinement.indicators.namespaces.is_empty()
+        && !matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
         return;
     }
     let availability = defaults
@@ -13444,8 +13451,15 @@ fn append_solved_adaptive_mesh_summary(
         return Ok(());
     };
 
-    let defaults = structural_static_default_refinement_indicators();
-    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        structural_static_default_refinement_indicators()
+    };
+    if defaults.is_empty()
+        && options.refinement.indicators.namespaces.is_empty()
+        && !matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
         return Ok(());
     }
 
@@ -13484,6 +13498,18 @@ fn append_solved_adaptive_mesh_summary(
 
     let mut markers = Vec::new();
     let mut sizing_update = SizingFieldUpdate::default();
+    if !element_budget_reached && matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
+        let samples = uniform_refinement_samples(&mesh);
+        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+            &samples,
+            "mesh.uniform_refinement",
+            RefinementMarkerOptions::default(),
+        )
+        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+        markers.extend(new_markers);
+        merge_sizing_update(&mut sizing_update, new_sizing_update);
+    }
     if !element_budget_reached && indicator_was_used(&indicators, "structural", "stress_gradient")
     {
         if let Some(values) = von_mises_values {
@@ -13618,6 +13644,20 @@ fn structural_element_scalar_gradient_samples(
                 entity_id: element.element_id.clone(),
                 position_m: element_centroid_m(mesh, &element.node_ids)?,
                 indicator_value: indicator,
+                current_size_m: element_characteristic_size_m(mesh, &element.node_ids)?,
+            })
+        })
+        .collect()
+}
+
+fn uniform_refinement_samples(mesh: &AnalysisMeshArtifact) -> Vec<RefinementIndicatorSample> {
+    mesh.volume_elements
+        .iter()
+        .filter_map(|element| {
+            Some(RefinementIndicatorSample {
+                entity_id: element.element_id.clone(),
+                position_m: element_centroid_m(mesh, &element.node_ids)?,
+                indicator_value: 1.0,
                 current_size_m: element_characteristic_size_m(mesh, &element.node_ids)?,
             })
         })
