@@ -730,6 +730,8 @@ pub struct FeaNonlinearRunResult {
 pub enum FeaRunError {
     #[error("FEA_MODEL_INVALID: {0}")]
     InvalidModel(String),
+    #[error("FEA_ASSEMBLY_FAILED: {0}")]
+    Assembly(String),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
 }

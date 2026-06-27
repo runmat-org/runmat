@@ -3,6 +3,8 @@ pub mod elements;
 pub mod legacy_surrogate;
 pub mod solid;
 
+use std::fmt;
+
 use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
     StructuralElementKind, StructuralModel,
@@ -22,7 +24,9 @@ use self::{
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
     legacy_surrogate::legacy_surrogate_topology,
-    solid::{assemble_solid_stiffness_dense, solid_topology_from_analysis_mesh},
+    solid::{
+        assemble_solid_stiffness_dense, solid_topology_from_analysis_mesh, SolidAssemblyError,
+    },
 };
 
 use crate::operator::OperatorSystem;
@@ -79,6 +83,23 @@ pub struct AssemblySummary {
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: OperatorSystem,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinearAssemblyError {
+    SolidStiffness(SolidAssemblyError),
+}
+
+impl fmt::Display for LinearAssemblyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LinearAssemblyError::SolidStiffness(err) => {
+                write!(f, "solid stiffness assembly failed: {err:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LinearAssemblyError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StructuralMaterialSummary {
@@ -305,8 +326,44 @@ pub fn assemble_linear_system(
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
+    assemble_linear_system_impl(
+        model,
+        prep_context,
+        analysis_mesh,
+        thermo_mechanical_context,
+        electro_thermal_context,
+        false,
+    )
+    .expect("non-strict assembly should preserve legacy fallback behavior")
+}
+
+pub fn try_assemble_linear_system(
+    model: &AnalysisModel,
+    prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_linear_system_impl(
+        model,
+        prep_context,
+        analysis_mesh,
+        thermo_mechanical_context,
+        electro_thermal_context,
+        true,
+    )
+}
+
+fn assemble_linear_system_impl(
+    model: &AnalysisModel,
+    prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+    strict_analysis_mesh_stiffness: bool,
+) -> Result<AssemblySummary, LinearAssemblyError> {
     if let Some(summary) = assemble_beam_system(model) {
-        return summary;
+        return Ok(summary);
     }
 
     let base_dof_count = (model.loads.len() * 3).max(3);
@@ -937,17 +994,23 @@ pub fn assemble_linear_system(
         }
     }
 
-    let mut stiffness_dense = analysis_mesh.as_ref().and_then(|mesh| {
-        assemble_solid_stiffness_dense(
+    let mut stiffness_dense = match analysis_mesh.as_ref() {
+        Some(mesh) => match assemble_solid_stiffness_dense(
             mesh,
             SolidMaterial {
                 youngs_modulus_pa: structural_material.youngs_modulus_pa,
                 poisson_ratio: structural_material.poisson_ratio,
             },
             base_dof_count,
-        )
-        .ok()
-    });
+        ) {
+            Ok(dense) => Some(dense),
+            Err(err) if strict_analysis_mesh_stiffness => {
+                return Err(LinearAssemblyError::SolidStiffness(err));
+            }
+            Err(_) => None,
+        },
+        None => None,
+    };
     if let Some(dense) = stiffness_dense.as_ref() {
         for i in 0..dof_count {
             stiffness_diag[i] = dense[i * dof_count + i].abs().max(1.0e-12);
@@ -955,7 +1018,7 @@ pub fn assemble_linear_system(
         stiffness_upper.fill(0.0);
     }
 
-    AssemblySummary {
+    Ok(AssemblySummary {
         dof_count,
         structural_node_count: structural_dof_layout.node_count(),
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
@@ -999,7 +1062,7 @@ pub fn assemble_linear_system(
             damping_diag,
             rhs,
         },
-    }
+    })
 }
 
 fn electro_thermal_fingerprint(
@@ -2957,6 +3020,21 @@ mod tests {
                     <= 1.0e-8
             );
         }
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_invalid_tet4_stiffness() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut mesh = tet4_mesh();
+        mesh.volume_elements[0].node_ids = vec![1, 3, 2, 4];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
+            .expect_err("strict analysis mesh assembly should reject inverted Tet4 stiffness");
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::SolidStiffness(SolidAssemblyError::ElementStiffness { .. })
+        ));
     }
 
     fn tet4_mesh() -> AnalysisMeshArtifact {
