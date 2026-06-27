@@ -2446,6 +2446,22 @@ fn field_to_object(
         Value::String(descriptor.quantity.clone()),
     );
     object.properties.insert(
+        "topology_id".to_string(),
+        descriptor
+            .topology_id
+            .as_ref()
+            .map(|value| Value::String(value.clone()))
+            .unwrap_or_else(empty_double_value),
+    );
+    object.properties.insert(
+        "element_kind".to_string(),
+        descriptor
+            .element_kind
+            .as_ref()
+            .map(|value| Value::String(value.clone()))
+            .unwrap_or_else(empty_double_value),
+    );
+    object.properties.insert(
         "component_count".to_string(),
         descriptor
             .component_count
@@ -3891,6 +3907,14 @@ run:
         assert_eq!(
             field_object.properties.get("location"),
             Some(&Value::String("element".to_string()))
+        );
+        assert_eq!(
+            field_object.properties.get("topology_id"),
+            Some(&Value::String("analysis_mesh".to_string()))
+        );
+        assert_eq!(
+            field_object.properties.get("element_kind"),
+            Some(&Value::String("tet4".to_string()))
         );
         let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
             panic!("expected values tensor");
