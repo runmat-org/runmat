@@ -4964,6 +4964,21 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
         .iter()
         .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityAspectRatioWarn));
 
+    let mut projected = minimal_analysis_mesh();
+    projected.sizing.global_target_size_m = Some(0.1);
+    projected.quality.max_boundary_projection_error_m = 0.05;
+    let projection_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&projected));
+    let projection_reason = projection_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshBoundaryProjectionWarn)
+        .expect("boundary projection error should be reported");
+    assert!(projection_reason
+        .detail
+        .contains("max_boundary_projection_error_m=0.05"));
+    assert!(projection_reason
+        .detail
+        .contains("warning threshold 0.025"));
+
     let mut empty = minimal_analysis_mesh();
     empty.volume_elements.clear();
     let empty_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&empty));

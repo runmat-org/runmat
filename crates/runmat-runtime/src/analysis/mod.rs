@@ -9585,7 +9585,27 @@ fn solid_mesh_quality_reasons(
             ),
         });
     }
+    if let Some(threshold_m) = boundary_projection_warning_threshold_m(mesh) {
+        if !mesh.quality.max_boundary_projection_error_m.is_finite()
+            || mesh.quality.max_boundary_projection_error_m > threshold_m
+        {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshBoundaryProjectionWarn,
+                detail: format!(
+                    "analysis mesh max_boundary_projection_error_m={} exceeds warning threshold {}; boundary faces are a carved-grid approximation of the source surface",
+                    mesh.quality.max_boundary_projection_error_m, threshold_m
+                ),
+            });
+        }
+    }
     reasons
+}
+
+fn boundary_projection_warning_threshold_m(mesh: &AnalysisMeshArtifact) -> Option<f64> {
+    mesh.sizing
+        .global_target_size_m
+        .filter(|target_size_m| target_size_m.is_finite() && *target_size_m > 0.0)
+        .map(|target_size_m| target_size_m * 0.25)
 }
 
 fn legacy_surrogate_mesh_basis_reasons(
