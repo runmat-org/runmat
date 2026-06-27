@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -126,31 +126,53 @@ pub fn form_tet_candidates(
     for component in &volume_candidates.components {
         let component_seed_points =
             sample_component_interior_points(component, surface, &surface_elements, options)?;
-        let fan_seed_point = select_component_fan_seed_point(
+
+        let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
+        for point in &component_seed_points {
+            let node_id = next_node_id;
+            next_node_id = next_node_id.saturating_add(1);
+            component_seed_node_ids.push(node_id);
+            nodes.push(TetCandidateNode {
+                node_id,
+                coordinates_m: *point,
+                source: TetCandidateNodeSource::InteriorSeed,
+            });
+        }
+        interior_seed_points.extend(component_seed_points.iter().copied());
+
+        let insertion_start = tets.len();
+        append_component_insertion_tets(
             component,
+            &component_seed_node_ids,
             &component_seed_points,
             &surface_nodes,
             &surface_elements,
-            options,
-        )?;
-        interior_seed_points.extend(component_seed_points);
-
-        let interior_node_id = next_node_id;
-        next_node_id = next_node_id.saturating_add(1);
-        nodes.push(TetCandidateNode {
-            node_id: interior_node_id,
-            coordinates_m: fan_seed_point,
-            source: TetCandidateNodeSource::InteriorSeed,
-        });
-        append_component_tets(
-            component,
-            interior_node_id,
-            fan_seed_point,
-            &surface_nodes,
-            &surface_elements,
+            surface,
             options,
             &mut tets,
         )?;
+        if tets.len() == insertion_start {
+            let fan_seed_point = select_component_fan_seed_point(
+                component,
+                &component_seed_points,
+                &surface_nodes,
+                &surface_elements,
+                options,
+            )?;
+            let fan_seed_node_id = component_seed_node_ids[component_seed_points
+                .iter()
+                .position(|point| distance(*point, fan_seed_point) <= 1.0e-12)
+                .unwrap_or(0)];
+            append_component_tets(
+                component,
+                fan_seed_node_id,
+                fan_seed_point,
+                &surface_nodes,
+                &surface_elements,
+                options,
+                &mut tets,
+            )?;
+        }
     }
 
     if tets.is_empty() {
@@ -227,6 +249,341 @@ fn append_component_tets(
         });
     }
     Ok(())
+}
+
+fn append_component_insertion_tets(
+    component: &VolumeCandidateComponent,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    surface: &SurfaceDiscretization,
+    options: TetCandidateOptions,
+    tets: &mut Vec<TetCandidate>,
+) -> Result<(), TetCandidateError> {
+    if seed_node_ids.is_empty() || seed_node_ids.len() != seed_points.len() {
+        return Ok(());
+    }
+
+    let mut points = Vec::<ConnectivityPoint>::new();
+    for node_id in &component.node_ids {
+        let coordinates_m = *surface_nodes
+            .get(node_id)
+            .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?;
+        points.push(ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m,
+            is_super: false,
+        });
+    }
+    for (node_id, point) in seed_node_ids.iter().zip(seed_points.iter()) {
+        points.push(ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: *point,
+            is_super: false,
+        });
+    }
+
+    let candidate_tets = tetrahedralize_points(&points);
+    let mut accepted_tets = Vec::<TetCandidate>::new();
+    for candidate in candidate_tets {
+        let tet_points = candidate.vertices.map(|index| points[index].coordinates_m);
+        let centroid = tet_centroid(tet_points);
+        if !point_is_inside_component(centroid, component, surface, surface_elements)? {
+            continue;
+        }
+        let mut node_ids = candidate.vertices.map(|index| points[index].node_id);
+        let mut signed_volume_m3 = tet_signed_volume(tet_points);
+        if signed_volume_m3 < 0.0 {
+            node_ids.swap(1, 2);
+            signed_volume_m3 = -signed_volume_m3;
+        }
+        let volume_m3 = signed_volume_m3.abs();
+        if volume_m3 < options.min_volume_m3 {
+            continue;
+        }
+        let aspect_ratio = tet_aspect_ratio(tet_points);
+        if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
+            continue;
+        }
+        let source_surface_element_id =
+            nearest_surface_element_id(centroid, component, surface, surface_elements)?;
+        let region_ids = surface_elements
+            .get(&source_surface_element_id)
+            .map(|element| element.region_ids.clone())
+            .unwrap_or_default();
+        accepted_tets.push(TetCandidate {
+            tet_id: 0,
+            component_id: component.component_id,
+            node_ids,
+            source_surface_element_id,
+            region_ids,
+            volume_m3,
+            aspect_ratio,
+        });
+    }
+    if insertion_tets_are_acceptable(component, &accepted_tets) {
+        for mut tet in accepted_tets {
+            tet.tet_id = tets.len() as u32;
+            tets.push(tet);
+        }
+    }
+    Ok(())
+}
+
+fn insertion_tets_are_acceptable(
+    component: &VolumeCandidateComponent,
+    tets: &[TetCandidate],
+) -> bool {
+    if tets.is_empty() || component.volume_m3 <= f64::EPSILON {
+        return false;
+    }
+    let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+    let volume_ratio = total_volume_m3 / component.volume_m3;
+    let max_aspect_ratio = tets
+        .iter()
+        .map(|tet| tet.aspect_ratio)
+        .fold(0.0_f64, f64::max);
+    (0.90..=1.10).contains(&volume_ratio) && max_aspect_ratio <= 1.0 / 0.15
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ConnectivityPoint {
+    node_id: u32,
+    coordinates_m: [f64; 3],
+    is_super: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConnectivityTet {
+    vertices: [usize; 4],
+}
+
+fn tetrahedralize_points(input_points: &[ConnectivityPoint]) -> Vec<ConnectivityTet> {
+    if input_points.len() < 4 {
+        return Vec::new();
+    }
+    let mut points = input_points.to_vec();
+    let super_start = points.len();
+    points.extend(super_tetrahedron_points(input_points));
+    let mut tets = vec![ConnectivityTet {
+        vertices: [
+            super_start,
+            super_start + 1,
+            super_start + 2,
+            super_start + 3,
+        ],
+    }];
+
+    for point_index in 0..input_points.len() {
+        let point = points[point_index].coordinates_m;
+        let mut bad_indices = Vec::<usize>::new();
+        for (tet_index, tet) in tets.iter().enumerate() {
+            if tet_circumsphere_contains_point(
+                tet.vertices.map(|index| points[index].coordinates_m),
+                point,
+            ) {
+                bad_indices.push(tet_index);
+            }
+        }
+        if bad_indices.is_empty() {
+            continue;
+        }
+
+        let bad_set = bad_indices.iter().copied().collect::<BTreeSet<_>>();
+        let mut face_counts = BTreeMap::<[usize; 3], usize>::new();
+        for tet_index in &bad_indices {
+            for face in tet_faces(tets[*tet_index].vertices) {
+                *face_counts.entry(sorted_face(face)).or_default() += 1;
+            }
+        }
+        let cavity_faces = face_counts
+            .into_iter()
+            .filter_map(|(face, count)| (count == 1).then_some(face))
+            .collect::<Vec<_>>();
+
+        tets = tets
+            .into_iter()
+            .enumerate()
+            .filter_map(|(tet_index, tet)| (!bad_set.contains(&tet_index)).then_some(tet))
+            .collect();
+        for face in cavity_faces {
+            let vertices = [face[0], face[1], face[2], point_index];
+            let points_for_tet = vertices.map(|index| points[index].coordinates_m);
+            if tet_signed_volume(points_for_tet).abs() > 1.0e-24 {
+                tets.push(ConnectivityTet { vertices });
+            }
+        }
+    }
+
+    tets.into_iter()
+        .filter(|tet| !tet.vertices.iter().any(|index| points[*index].is_super))
+        .collect()
+}
+
+fn super_tetrahedron_points(points: &[ConnectivityPoint]) -> [ConnectivityPoint; 4] {
+    let mut min = points[0].coordinates_m;
+    let mut max = points[0].coordinates_m;
+    for point in points {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(point.coordinates_m[axis]);
+            max[axis] = max[axis].max(point.coordinates_m[axis]);
+        }
+    }
+    let center = [
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    ];
+    let span = (0..3)
+        .map(|axis| max[axis] - min[axis])
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let radius = span * 16.0;
+    [
+        ConnectivityPoint {
+            node_id: u32::MAX - 3,
+            coordinates_m: [center[0] + radius, center[1], center[2] - radius],
+            is_super: true,
+        },
+        ConnectivityPoint {
+            node_id: u32::MAX - 2,
+            coordinates_m: [center[0] - radius, center[1] + radius, center[2] - radius],
+            is_super: true,
+        },
+        ConnectivityPoint {
+            node_id: u32::MAX - 1,
+            coordinates_m: [center[0] - radius, center[1] - radius, center[2] - radius],
+            is_super: true,
+        },
+        ConnectivityPoint {
+            node_id: u32::MAX,
+            coordinates_m: [center[0], center[1], center[2] + radius],
+            is_super: true,
+        },
+    ]
+}
+
+fn tet_faces(vertices: [usize; 4]) -> [[usize; 3]; 4] {
+    [
+        [vertices[0], vertices[1], vertices[2]],
+        [vertices[0], vertices[1], vertices[3]],
+        [vertices[0], vertices[2], vertices[3]],
+        [vertices[1], vertices[2], vertices[3]],
+    ]
+}
+
+fn sorted_face(mut face: [usize; 3]) -> [usize; 3] {
+    face.sort();
+    face
+}
+
+fn tet_circumsphere_contains_point(tet_points: [[f64; 3]; 4], point: [f64; 3]) -> bool {
+    let Some((center, radius_squared)) = tet_circumsphere(tet_points) else {
+        return false;
+    };
+    distance_squared(center, point) <= radius_squared * (1.0 + 1.0e-10)
+}
+
+fn tet_circumsphere(points: [[f64; 3]; 4]) -> Option<([f64; 3], f64)> {
+    let a = [
+        [
+            2.0 * (points[1][0] - points[0][0]),
+            2.0 * (points[1][1] - points[0][1]),
+            2.0 * (points[1][2] - points[0][2]),
+        ],
+        [
+            2.0 * (points[2][0] - points[0][0]),
+            2.0 * (points[2][1] - points[0][1]),
+            2.0 * (points[2][2] - points[0][2]),
+        ],
+        [
+            2.0 * (points[3][0] - points[0][0]),
+            2.0 * (points[3][1] - points[0][1]),
+            2.0 * (points[3][2] - points[0][2]),
+        ],
+    ];
+    let b = [
+        dot(points[1], points[1]) - dot(points[0], points[0]),
+        dot(points[2], points[2]) - dot(points[0], points[0]),
+        dot(points[3], points[3]) - dot(points[0], points[0]),
+    ];
+    let center = solve_3x3(a, b)?;
+    Some((center, distance_squared(center, points[0])))
+}
+
+fn solve_3x3(mut a: [[f64; 3]; 3], mut b: [f64; 3]) -> Option<[f64; 3]> {
+    for pivot in 0..3 {
+        let mut pivot_row = pivot;
+        for row in (pivot + 1)..3 {
+            if a[row][pivot].abs() > a[pivot_row][pivot].abs() {
+                pivot_row = row;
+            }
+        }
+        if a[pivot_row][pivot].abs() <= 1.0e-14 {
+            return None;
+        }
+        if pivot_row != pivot {
+            a.swap(pivot, pivot_row);
+            b.swap(pivot, pivot_row);
+        }
+        let pivot_value = a[pivot][pivot];
+        for column in pivot..3 {
+            a[pivot][column] /= pivot_value;
+        }
+        b[pivot] /= pivot_value;
+        for row in 0..3 {
+            if row == pivot {
+                continue;
+            }
+            let factor = a[row][pivot];
+            for column in pivot..3 {
+                a[row][column] -= factor * a[pivot][column];
+            }
+            b[row] -= factor * b[pivot];
+        }
+    }
+    Some(b)
+}
+
+fn nearest_surface_element_id(
+    point: [f64; 3],
+    component: &VolumeCandidateComponent,
+    surface: &SurfaceDiscretization,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+) -> Result<u32, TetCandidateError> {
+    let mut best = None::<(u32, f64)>;
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let centroid = triangle_centroid(surface_element_points(surface, element)?);
+        let distance_squared = distance_squared(point, centroid);
+        if best.is_none_or(|(_, best_distance)| distance_squared < best_distance) {
+            best = Some((element.element_id, distance_squared));
+        }
+    }
+    best.map(|(element_id, _)| element_id)
+        .ok_or(TetCandidateError::MissingSurfaceElement { element_id: 0 })
+}
+
+fn triangle_centroid(points: [[f64; 3]; 3]) -> [f64; 3] {
+    [
+        (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+        (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+        (points[0][2] + points[1][2] + points[2][2]) / 3.0,
+    ]
+}
+
+fn tet_centroid(points: [[f64; 3]; 4]) -> [f64; 3] {
+    [
+        (points[0][0] + points[1][0] + points[2][0] + points[3][0]) * 0.25,
+        (points[0][1] + points[1][1] + points[2][1] + points[3][1]) * 0.25,
+        (points[0][2] + points[1][2] + points[2][2] + points[3][2]) * 0.25,
+    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -547,8 +904,11 @@ fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
 }
 
 fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
-    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
-        .sqrt()
+    distance_squared(left, right).sqrt()
+}
+
+fn distance_squared(left: [f64; 3], right: [f64; 3]) -> f64 {
+    (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2)
 }
 
 #[cfg(test)]
@@ -608,8 +968,13 @@ mod tests {
                 .iter()
                 .all(|coordinate| *coordinate > 0.0 && *coordinate < 1.0)
         }));
-        assert_eq!(candidates.nodes.len(), 9);
-        assert_eq!(candidates.tets.len(), 12);
+        assert_eq!(candidates.nodes.len(), 16);
+        assert!(candidates.tets.len() > 12);
+        assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+        assert!(candidates
+            .tets
+            .iter()
+            .all(|tet| tet.volume_m3 > 0.0 && tet.aspect_ratio <= 1.0 / 0.15));
     }
 
     #[test]

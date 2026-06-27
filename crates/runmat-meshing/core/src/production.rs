@@ -1,6 +1,6 @@
 use runmat_geometry_core::GeometryAsset;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     artifact::{
@@ -129,7 +129,7 @@ fn tet_candidate_options_for_mesh(
 ) -> TetCandidateOptions {
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
-        max_interior_seed_points: options.max_elements.max(1).min(4096),
+        max_interior_seed_points: options.max_elements.max(1).min(128),
         ..TetCandidateOptions::default()
     }
 }
@@ -152,10 +152,12 @@ fn analysis_mesh_from_preparation(
     options: &VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
     let mut node_id_map = BTreeMap::<u32, u32>::new();
+    let referenced_candidate_node_ids = referenced_candidate_node_ids(preparation);
     let nodes = preparation
         .tet_candidates
         .nodes
         .iter()
+        .filter(|node| referenced_candidate_node_ids.contains(&node.node_id))
         .enumerate()
         .map(|(index, node)| {
             let node_id = index as u32 + 1;
@@ -282,6 +284,17 @@ fn analysis_mesh_from_preparation(
     validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation))
         .map_err(ProductionMeshError::Validation)?;
     Ok(mesh)
+}
+
+fn referenced_candidate_node_ids(preparation: &ProductionMeshPreparation) -> BTreeSet<u32> {
+    let mut node_ids = BTreeSet::<u32>::new();
+    for tet in &preparation.tet_candidates.tets {
+        node_ids.extend(tet.node_ids);
+    }
+    for element in &preparation.surface.elements {
+        node_ids.extend(element.node_ids);
+    }
+    node_ids
 }
 
 fn production_validation_options(
