@@ -9302,6 +9302,8 @@ pub fn analysis_run_linear_static_with_options(
             reason.code,
             QualityReasonCode::SolidMeshNoVolumeElements
                 | QualityReasonCode::SolidMeshUnsupportedElementKind
+                | QualityReasonCode::SolidMeshUnmappedLoadRegion
+                | QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
                 | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
         )
@@ -9485,6 +9487,7 @@ fn solid_mesh_quality_reasons(
             detail,
         });
     }
+    reasons.extend(boundary_region_mapping_reasons(model, mesh));
     let thresholds = runmat_meshing_core::QualityThresholds::default();
     if !mesh.quality.min_scaled_jacobian.is_finite()
         || mesh.quality.min_scaled_jacobian < thresholds.min_scaled_jacobian
@@ -9509,6 +9512,54 @@ fn solid_mesh_quality_reasons(
         });
     }
     reasons
+}
+
+fn boundary_region_mapping_reasons(
+    model: &AnalysisModel,
+    mesh: &AnalysisMeshArtifact,
+) -> Vec<QualityReason> {
+    let boundary_region_ids = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.region_ids.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let mut reasons = Vec::new();
+    for load in &model.loads {
+        if !load_requires_boundary_region(&load.kind) {
+            continue;
+        }
+        if !boundary_region_ids.contains(load.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
+                detail: format!(
+                    "load `{}` references region `{}` but the analysis mesh has no matching boundary faces",
+                    load.load_id, load.region_id
+                ),
+            });
+        }
+    }
+    for boundary_condition in &model.boundary_conditions {
+        if !boundary_region_ids.contains(boundary_condition.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion,
+                detail: format!(
+                    "boundary condition `{}` references region `{}` but the analysis mesh has no matching boundary faces",
+                    boundary_condition.bc_id, boundary_condition.region_id
+                ),
+            });
+        }
+    }
+    reasons
+}
+
+fn load_requires_boundary_region(kind: &LoadKind) -> bool {
+    matches!(
+        kind,
+        LoadKind::Force { .. }
+            | LoadKind::Moment { .. }
+            | LoadKind::Wrench { .. }
+            | LoadKind::Pressure { .. }
+    )
 }
 
 fn material_coverage_gap_detail(

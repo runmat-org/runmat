@@ -326,6 +326,8 @@ pub enum QualityReasonCode {
     FieldTopologyMismatch,
     SolidMeshNoVolumeElements,
     SolidMeshUnsupportedElementKind,
+    SolidMeshUnmappedLoadRegion,
+    SolidMeshUnmappedBoundaryConditionRegion,
     SolidMeshMaterialCoverageIncomplete,
     SolidMeshQualityMinJacobianFailed,
     SolidMeshQualityAspectRatioWarn,

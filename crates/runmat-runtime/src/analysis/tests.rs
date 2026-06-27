@@ -72,9 +72,9 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
-    artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
-    AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
-    VolumeElementKind,
+    artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
+    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
+    BoundaryElementKind, MeshSizingField, VolumeElementKind,
 };
 
 use super::*;
@@ -4806,6 +4806,85 @@ fn solid_mesh_material_coverage_uses_region_assignments() {
         .find(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete)
         .expect("uncovered mesh material region should be reported");
     assert!(reason.detail.contains("solid"));
+}
+
+#[test]
+fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
+    let model = sample_model();
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
+        .iter()
+        .all(
+            |reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion
+                && reason.code != QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
+        ));
+
+    let missing_load = analysis_mesh_with_boundary_regions(&["root"], &["other_tip"]);
+    let missing_load_reasons = solid_mesh_quality_reasons(&model, Some(&missing_load));
+    let load_reason = missing_load_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedLoadRegion)
+        .expect("unmapped load region should be reported");
+    assert!(load_reason.detail.contains("load_tip"));
+    assert!(load_reason.detail.contains("tip"));
+
+    let missing_constraint = analysis_mesh_with_boundary_regions(&["other_root"], &["tip"]);
+    let missing_constraint_reasons = solid_mesh_quality_reasons(&model, Some(&missing_constraint));
+    let bc_reason = missing_constraint_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion)
+        .expect("unmapped boundary condition region should be reported");
+    assert!(bc_reason.detail.contains("bc_root"));
+    assert!(bc_reason.detail.contains("root"));
+}
+
+#[test]
+fn solid_mesh_boundary_region_mapping_ignores_volumetric_loads() {
+    let mut model = sample_model();
+    model.loads = vec![LoadCase {
+        load_id: "gravity".to_string(),
+        region_id: "volume_region".to_string(),
+        kind: LoadKind::BodyForce {
+            gx: 0.0,
+            gy: 0.0,
+            gz: -9.81,
+        },
+    }];
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
+    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion));
+}
+
+fn analysis_mesh_with_boundary_regions(
+    fixed_region_ids: &[&str],
+    load_region_ids: &[&str],
+) -> AnalysisMeshArtifact {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.boundary_faces = vec![
+        analysis_boundary_face("face_fixed", vec![1, 2, 3], fixed_region_ids),
+        analysis_boundary_face("face_load", vec![1, 2, 4], load_region_ids),
+    ];
+    mesh
+}
+
+fn analysis_boundary_face(
+    face_id: &str,
+    node_ids: Vec<u32>,
+    region_ids: &[&str],
+) -> AnalysisBoundaryFace {
+    AnalysisBoundaryFace {
+        face_id: face_id.to_string(),
+        kind: BoundaryElementKind::Tri3,
+        node_ids,
+        adjacent_volume_element_ids: vec!["tet_1".to_string()],
+        region_ids: region_ids
+            .iter()
+            .map(|region| (*region).to_string())
+            .collect(),
+        provenance: Vec::new(),
+    }
 }
 
 fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
