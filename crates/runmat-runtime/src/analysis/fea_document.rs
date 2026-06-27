@@ -682,10 +682,8 @@ fn default_mesh_options_for_study(
     profile: AnalysisCreateModelProfile,
     run_kind: AnalysisRunKind,
 ) -> Option<VolumeMeshingOptions> {
-    (matches!(
-        profile,
-        AnalysisCreateModelProfile::LinearStaticStructural
-    ) && matches!(run_kind, AnalysisRunKind::LinearStatic))
+    (matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
+        && matches!(run_kind, AnalysisRunKind::LinearStatic))
     .then(VolumeMeshingOptions::default)
 }
 
@@ -2162,10 +2160,7 @@ refinement:
     fn fea_document_refinement_indicator_applicability_matches_profile_context() {
         let structural = BTreeMap::from([(
             "structural".to_string(),
-            BTreeMap::from([(
-                "stress_gradient".to_string(),
-                RefinementIndicatorMode::Auto,
-            )]),
+            BTreeMap::from([("stress_gradient".to_string(), RefinementIndicatorMode::Auto)]),
         )]);
         validate_refinement_indicator_applicability(
             &structural,
@@ -2194,10 +2189,7 @@ refinement:
 
         let coupled = BTreeMap::from([(
             "thermo_mechanical".to_string(),
-            BTreeMap::from([(
-                "thermal_stress".to_string(),
-                RefinementIndicatorMode::On,
-            )]),
+            BTreeMap::from([("thermal_stress".to_string(), RefinementIndicatorMode::On)]),
         )]);
         validate_refinement_indicator_applicability(
             &coupled,

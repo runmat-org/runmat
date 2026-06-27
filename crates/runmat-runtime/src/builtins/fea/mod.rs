@@ -2727,9 +2727,7 @@ fn plot_overlay_option_mesh_source(
         other => Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,
-            format!(
-                "unsupported fea.plot overlay option `{other}`; expected auto, solver, or cad"
-            ),
+            format!("unsupported fea.plot overlay option `{other}`; expected auto, solver, or cad"),
         )),
     }
 }

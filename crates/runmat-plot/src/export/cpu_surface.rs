@@ -1799,12 +1799,7 @@ mod tests {
             let mut colorbar_colors = BTreeSet::new();
             for y in 40..(height - 40) {
                 let idx = ((y * width + x) * 4) as usize;
-                colorbar_colors.insert([
-                    rgba[idx],
-                    rgba[idx + 1],
-                    rgba[idx + 2],
-                    rgba[idx + 3],
-                ]);
+                colorbar_colors.insert([rgba[idx], rgba[idx + 1], rgba[idx + 2], rgba[idx + 3]]);
             }
             max_vertical_color_variation = max_vertical_color_variation.max(colorbar_colors.len());
         }

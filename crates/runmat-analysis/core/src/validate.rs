@@ -26,7 +26,9 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_INVALID_WRENCH: wrench load {load_id} must have finite force, moment, and point components"
     )]
     InvalidWrench { load_id: String },
-    #[error("ANALYSIS_VALIDATION_ZERO_WRENCH: wrench load {load_id} must have nonzero force or moment")]
+    #[error(
+        "ANALYSIS_VALIDATION_ZERO_WRENCH: wrench load {load_id} must have nonzero force or moment"
+    )]
     ZeroWrench { load_id: String },
     #[error(
         "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"

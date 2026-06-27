@@ -191,7 +191,7 @@ fn mesh_result_figures(
                     AnalysisGeneratedFigureKind::MeshResult,
                     "FEA result visualization",
                     "Solver render topology and geometry preview are unavailable".to_string(),
-                )]
+                )];
             }
         };
     let mesh_counts = collect_mesh_counts_with_topology(&probe, render_topology);
@@ -1247,9 +1247,7 @@ fn warning_line_figure(
     }
 }
 
-fn topology_ids_for_fields<'a>(
-    fields: impl IntoIterator<Item = &'a AnalysisField>,
-) -> Vec<String> {
+fn topology_ids_for_fields<'a>(fields: impl IntoIterator<Item = &'a AnalysisField>) -> Vec<String> {
     let mut ids = Vec::new();
     for field in fields {
         if let Some(topology_id) = AnalysisFieldDescriptor::from_field(field).topology_id {
@@ -1710,12 +1708,8 @@ mod tests {
             triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
         }];
 
-        let overlay = scalar_overlay(
-            &field,
-            &meshes,
-            AnalysisFigureGenerationOptions::default(),
-        )
-        .expect("element scalar field should project to boundary triangles");
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("element scalar field should project to boundary triangles");
 
         assert_eq!(overlay.location, MeshFieldLocation::Triangle);
         assert_eq!(overlay.chunks, vec![vec![10.0, 42.0, 42.0]]);

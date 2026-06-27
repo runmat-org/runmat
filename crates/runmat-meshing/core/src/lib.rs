@@ -10,12 +10,13 @@ pub mod validation;
 pub mod volume;
 
 pub use adaptive::{
-    AdaptiveConvergenceMetrics, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
-    RefinementIndicatorAvailability, RefinementIndicatorKey, RefinementIndicatorSample,
-    RefinementIndicatorStatus, RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError,
-    RefinementMarkerOptions, SizingFieldUpdate, build_refinement_markers_from_samples,
-    default_refinement_indicators_for_analysis, evaluate_adaptive_convergence,
-    plan_refinement_indicators, structural_static_default_refinement_indicators,
+    build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
+    evaluate_adaptive_convergence, plan_refinement_indicators,
+    structural_static_default_refinement_indicators, AdaptiveConvergenceMetrics,
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorAvailability,
+    RefinementIndicatorKey, RefinementIndicatorSample, RefinementIndicatorStatus,
+    RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
+    SizingFieldUpdate,
 };
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
@@ -32,10 +33,10 @@ pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityK
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection};
 pub use topology::{BoundaryElementKind, VolumeElementKind};
-pub use validation::{AnalysisMeshValidationError, validate_analysis_mesh};
+pub use validation::{validate_analysis_mesh, AnalysisMeshValidationError};
 pub use volume::{
-    MeshingError, StructuredTetMesher, VolumeMesher, generate_analysis_mesh,
-    generate_analysis_mesh_with_sizing,
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
+    VolumeMesher,
 };
 
 use runmat_geometry_core::{GeometryAsset, MeshKind};

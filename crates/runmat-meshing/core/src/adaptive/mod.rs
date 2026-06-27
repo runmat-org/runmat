@@ -853,16 +853,14 @@ mod tests {
         let mut options = MeshRefinementOptions::default();
         options.strategy = RefinementStrategy::None;
 
-        assert!(
-            plan_refinement_indicators(
-                &options,
-                &[key("structural", "stress_gradient")],
-                &[available("structural", "stress_gradient")],
-                false,
-                false
-            )
-            .is_empty()
-        );
+        assert!(plan_refinement_indicators(
+            &options,
+            &[key("structural", "stress_gradient")],
+            &[available("structural", "stress_gradient")],
+            false,
+            false
+        )
+        .is_empty());
     }
 
     #[test]
@@ -876,16 +874,14 @@ mod tests {
             )]),
         };
 
-        assert!(
-            plan_refinement_indicators(
-                &options,
-                &[key("structural", "strain_energy_density")],
-                &[available("structural", "stress_gradient")],
-                false,
-                false,
-            )
-            .is_empty()
-        );
+        assert!(plan_refinement_indicators(
+            &options,
+            &[key("structural", "strain_energy_density")],
+            &[available("structural", "stress_gradient")],
+            false,
+            false,
+        )
+        .is_empty());
     }
 
     #[test]
@@ -941,21 +937,13 @@ mod tests {
                 "acoustic",
                 key("acoustic", "wavelength"),
             ),
-            (
-                "cfd_steady_state",
-                "cfd",
-                key("cfd", "boundary_layer"),
-            ),
+            ("cfd_steady_state", "cfd", key("cfd", "boundary_layer")),
             (
                 "cht_coupled",
                 "cht",
                 key("cht", "interface_temperature_jump"),
             ),
-            (
-                "fsi_coupled",
-                "fsi",
-                key("fsi", "interface_traction_jump"),
-            ),
+            ("fsi_coupled", "fsi", key("fsi", "interface_traction_jump")),
         ];
 
         for (profile, run_kind, expected) in cases {
