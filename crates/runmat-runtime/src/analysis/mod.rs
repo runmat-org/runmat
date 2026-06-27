@@ -13424,6 +13424,7 @@ fn generate_and_persist_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "sizing_applications": sizing_application_summary(&mesh),
             "sizing_rejections": sizing_rejection_summary(&mesh),
             "mesh": mesh,
         }),
@@ -13607,6 +13608,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "sizing_applications": sizing_application_summary(&refined_mesh),
             "sizing_rejections": sizing_rejection_summary(&refined_mesh),
             "refinement_effect": refinement_effect.clone(),
             "mesh": refined_mesh,
@@ -14418,6 +14420,28 @@ fn merge_sizing_update(target: &mut SizingFieldUpdate, update: SizingFieldUpdate
         (None, Some(right)) => Some(right),
         (None, None) => None,
     };
+}
+
+fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    let mut inserted_breakpoints_by_reason = BTreeMap::<String, usize>::new();
+    let mut inserted_breakpoint_count = 0_usize;
+    for application in &mesh.sizing.applied_samples {
+        let reason = application
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *by_reason.entry(reason.clone()).or_default() += 1;
+        *inserted_breakpoints_by_reason.entry(reason).or_default() +=
+            application.inserted_breakpoint_count;
+        inserted_breakpoint_count += application.inserted_breakpoint_count;
+    }
+    serde_json::json!({
+        "total": mesh.sizing.applied_samples.len(),
+        "inserted_breakpoint_count": inserted_breakpoint_count,
+        "by_reason": by_reason,
+        "inserted_breakpoints_by_reason": inserted_breakpoints_by_reason,
+    })
 }
 
 fn sizing_rejection_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {

@@ -6083,6 +6083,52 @@ fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_f
 }
 
 #[test]
+fn sizing_application_summary_groups_reasons_and_breakpoints() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.sizing.applied_samples = vec![
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.1, 0.2, 0.3],
+            target_size_m: 0.01,
+            inserted_breakpoint_count: 3,
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: Some("inserted 3 local sizing breakpoints".to_string()),
+        },
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.2, 0.2, 0.3],
+            target_size_m: 0.02,
+            inserted_breakpoint_count: 2,
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: None,
+        },
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.5, 0.2, 0.3],
+            target_size_m: 0.01,
+            inserted_breakpoint_count: 1,
+            reason: None,
+            detail: None,
+        },
+    ];
+
+    let summary = sizing_application_summary(&mesh);
+
+    assert_eq!(summary["total"].as_u64(), Some(3));
+    assert_eq!(summary["inserted_breakpoint_count"].as_u64(), Some(6));
+    assert_eq!(
+        summary["by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
+    assert_eq!(
+        summary["inserted_breakpoints_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        summary["inserted_breakpoints_by_reason"]["unspecified"].as_u64(),
+        Some(1)
+    );
+}
+
+#[test]
 fn sizing_rejection_summary_groups_statuses_and_reasons() {
     let mut mesh = minimal_analysis_mesh();
     mesh.sizing.rejected_samples = vec![
