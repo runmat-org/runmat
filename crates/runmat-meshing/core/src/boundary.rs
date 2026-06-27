@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{EntityKind, GeometryAsset};
+use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use serde::{Deserialize, Serialize};
 
 use crate::provenance::{MeshEntityProvenance, SourceEntityKind};
@@ -122,9 +122,22 @@ impl BoundaryMeshInput {
             });
         }
 
-        let mut min = surface.vertices[0];
-        let mut max = surface.vertices[0];
-        for (vertex_index, vertex) in surface.vertices.iter().copied().enumerate() {
+        let coordinate_scale = geometry_unit_scale_to_meters(geometry.units);
+        let vertices_m = surface
+            .vertices
+            .iter()
+            .map(|vertex| {
+                [
+                    vertex[0] * coordinate_scale,
+                    vertex[1] * coordinate_scale,
+                    vertex[2] * coordinate_scale,
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        let mut min = vertices_m[0];
+        let mut max = vertices_m[0];
+        for (vertex_index, vertex) in vertices_m.iter().copied().enumerate() {
             if vertex.iter().any(|coordinate| !coordinate.is_finite()) {
                 return Err(BoundaryMeshInputError::NonFiniteVertex {
                     mesh_id: surface.mesh_id.clone(),
@@ -142,7 +155,7 @@ impl BoundaryMeshInput {
             });
         }
 
-        let (vertices, vertex_map) = weld_surface_vertices(&surface.vertices, min, max);
+        let (vertices, vertex_map) = weld_surface_vertices(&vertices_m, min, max);
         let mut welded_triangles = Vec::with_capacity(surface.triangles.len());
         let mut edge_incidence = BTreeMap::<[u32; 2], u32>::new();
         for (triangle_id, triangle) in surface.triangles.iter().copied().enumerate() {
@@ -243,6 +256,14 @@ impl BoundaryMeshInput {
             bounds_max_m: max,
             region_ids,
         })
+    }
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
+    match units {
+        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
+        UnitSystem::Millimeter => 0.001,
+        UnitSystem::Inch => 0.0254,
     }
 }
 
@@ -414,6 +435,27 @@ mod tests {
             err,
             BoundaryMeshInputError::OpenBoundaryEdge { .. }
         ));
+    }
+
+    #[test]
+    fn boundary_input_converts_millimeter_vertices_to_meters() {
+        let mut geometry = cube_geometry_with_shared_vertices();
+        geometry.units = UnitSystem::Millimeter;
+        for vertex in &mut geometry.surface_meshes[0].vertices {
+            for coordinate in vertex {
+                *coordinate *= 1000.0;
+            }
+        }
+
+        let input = BoundaryMeshInput::from_geometry(&geometry)
+            .expect("millimeter cube should convert to meter boundary input");
+
+        assert_eq!(input.bounds_min_m, [0.0, 0.0, 0.0]);
+        assert_eq!(input.bounds_max_m, [1.0, 1.0, 1.0]);
+        assert!(input
+            .vertices
+            .iter()
+            .any(|vertex| *vertex == [1.0, 1.0, 1.0]));
     }
 
     fn cube_geometry_with_shared_vertices() -> GeometryAsset {

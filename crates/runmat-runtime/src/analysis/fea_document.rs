@@ -1626,7 +1626,7 @@ where
             Ok(Some(MeshTargetSize::LengthM(value)))
         }
         _ => Err(D::Error::custom(
-            "mesh.target_size must be auto, null, or a positive number in meters",
+            "mesh.target_size must be auto, null, or a positive number in geometry units",
         )),
     }
 }

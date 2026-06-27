@@ -779,6 +779,21 @@ run:
 }
 
 #[test]
+fn mesh_options_convert_study_unit_lengths_to_si_before_meshing() {
+    let options = runmat_meshing_core::VolumeMeshingOptions {
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(15.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+
+    let converted = mesh_options_in_si_units(options, UnitSystem::Millimeter);
+
+    assert_eq!(
+        converted.target_size,
+        runmat_meshing_core::MeshTargetSize::LengthM(0.015)
+    );
+}
+
+#[test]
 fn fea_document_rejects_legacy_run_kind_profile_mismatch() {
     let _guard = analysis_test_guard();
     let tmp = tempfile::tempdir().expect("tempdir should be created");

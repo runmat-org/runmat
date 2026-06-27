@@ -41,9 +41,9 @@ use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
     validate_analysis_mesh, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
-    AnalysisMeshArtifact, ElementFamilyHint, MeshConnectivityClass,
+    AnalysisMeshArtifact, ElementFamilyHint, MeshConnectivityClass, MeshTargetSize,
     RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
-    RefinementStrategy, SizingFieldUpdate,
+    RefinementStrategy, SizingFieldUpdate, VolumeMeshingOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13435,6 +13435,7 @@ fn generate_and_persist_study_analysis_mesh(
     let Some(options) = spec.mesh_options.clone() else {
         return Ok(None);
     };
+    let options = mesh_options_in_si_units(options, spec.geometry.units);
     let mut mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -13510,6 +13511,25 @@ fn generate_and_persist_study_analysis_mesh(
             ]),
         )
     })
+}
+
+fn mesh_options_in_si_units(
+    mut options: VolumeMeshingOptions,
+    geometry_units: UnitSystem,
+) -> VolumeMeshingOptions {
+    if let MeshTargetSize::LengthM(length) = options.target_size {
+        options.target_size =
+            MeshTargetSize::LengthM(length * geometry_unit_scale_to_meters(geometry_units));
+    }
+    options
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
+    match units {
+        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
+        UnitSystem::Millimeter => 0.001,
+        UnitSystem::Inch => 0.0254,
+    }
 }
 
 fn attach_requested_boundary_regions_to_analysis_mesh(
