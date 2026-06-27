@@ -82,6 +82,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_closed_shell_count: usize,
     #[serde(default)]
+    pub cad_evaluation_source: String,
+    #[serde(default)]
+    pub cad_face_frame_count: usize,
+    #[serde(default)]
+    pub cad_projection_query_count: usize,
+    #[serde(default)]
+    pub cad_max_projection_error_m: f64,
+    #[serde(default)]
+    pub cad_max_normal_deviation: f64,
+    #[serde(default)]
     pub curve_element_count: usize,
     #[serde(default)]
     pub surface_element_count: usize,
@@ -142,6 +152,11 @@ impl Default for MeshBackendSummary {
             cad_semantic_face_count: 0,
             cad_generic_face_count: 0,
             cad_closed_shell_count: 0,
+            cad_evaluation_source: "unknown".to_string(),
+            cad_face_frame_count: 0,
+            cad_projection_query_count: 0,
+            cad_max_projection_error_m: 0.0,
+            cad_max_normal_deviation: 0.0,
             curve_element_count: 0,
             surface_element_count: 0,
             surface_source_edge_loop_count: 0,

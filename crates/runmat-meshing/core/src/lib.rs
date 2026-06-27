@@ -2,6 +2,7 @@ pub mod adaptive;
 pub mod artifact;
 pub mod backend;
 pub mod boundary;
+pub mod cad_eval;
 pub mod cad_topology;
 pub mod curve;
 pub mod evidence;
@@ -38,6 +39,11 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use cad_eval::{
+    build_cad_evaluation_model, project_to_face, summarize_cad_evaluation, CadEvaluationError,
+    CadEvaluationModel, CadEvaluationReport, CadEvaluationSource, CadFaceEvaluationFrame,
+    CadFaceProjection,
+};
 pub use cad_topology::{
     build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
