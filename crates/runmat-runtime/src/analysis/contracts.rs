@@ -323,6 +323,7 @@ pub enum QualityReasonCode {
     SolverNotConverged,
     SolverBackendFallback,
     FieldPromotionFallback,
+    FieldTopologyMismatch,
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,

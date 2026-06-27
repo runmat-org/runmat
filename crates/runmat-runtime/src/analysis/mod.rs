@@ -33,6 +33,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
@@ -9244,7 +9246,7 @@ pub fn analysis_run_linear_static_with_options(
                 options.prep_calibration_profile,
             ),
             analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
-            analysis_mesh,
+            analysis_mesh: analysis_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -9292,7 +9294,11 @@ pub fn analysis_run_linear_static_with_options(
         diag.code
             .starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_")
     });
+    let field_topology_reasons =
+        field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
     let result_quality = if run.fields_are_empty() {
+        QualityGate::Fail
+    } else if !field_topology_reasons.is_empty() {
         QualityGate::Fail
     } else if has_material_assignment_conflict {
         QualityGate::Warn
@@ -9307,6 +9313,7 @@ pub fn analysis_run_linear_static_with_options(
             detail: "material assignment confidence conflict detected".to_string(),
         });
     }
+    quality_reasons.extend(field_topology_reasons);
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
@@ -9399,6 +9406,63 @@ pub fn analysis_run_linear_static_with_options(
         &context,
         result,
     ))
+}
+
+fn field_topology_quality_reasons(
+    fields: &[AnalysisField],
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+) -> Vec<QualityReason> {
+    let Some(mesh) = analysis_mesh else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|field| primary_solver_mesh_field_expected_count(field, mesh).map(|expected| (field, expected)))
+        .filter_map(|(field, expected)| {
+            let descriptor = AnalysisFieldDescriptor::from_field(field);
+            let actual = descriptor_entity_count(field, &descriptor);
+            (actual != expected).then(|| QualityReason {
+                code: QualityReasonCode::FieldTopologyMismatch,
+                detail: format!(
+                    "field {} topology mismatch: topology_id={} location={:?} element_kind={} expected_entity_count={} actual_entity_count={}",
+                    field.field_id,
+                    descriptor.topology_id.as_deref().unwrap_or("none"),
+                    descriptor.location,
+                    descriptor.element_kind.as_deref().unwrap_or("none"),
+                    expected,
+                    actual
+                ),
+            })
+        })
+        .collect()
+}
+
+fn primary_solver_mesh_field_expected_count(
+    field: &AnalysisField,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<usize> {
+    match field.field_id.as_str() {
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT => Some(mesh.nodes.len()),
+        FEA_FIELD_STRUCTURAL_STRAIN
+        | FEA_FIELD_STRUCTURAL_STRESS
+        | FEA_FIELD_STRUCTURAL_VON_MISES => Some(mesh.volume_elements.len()),
+        _ => None,
+    }
+}
+
+fn descriptor_entity_count(field: &AnalysisField, descriptor: &AnalysisFieldDescriptor) -> usize {
+    if matches!(
+        descriptor.location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return field.element_count();
+    }
+    if let Some(first_dim) = field.shape.first().copied() {
+        if field.shape.len() > 1 || descriptor.component_count.is_some() {
+            return first_dim;
+        }
+    }
+    field.element_count()
 }
 
 pub fn analysis_run_electromagnetic_op(
