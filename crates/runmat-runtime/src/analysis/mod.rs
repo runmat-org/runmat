@@ -13760,6 +13760,18 @@ fn append_solved_adaptive_mesh_summary(
     let has_strain_energy_density = strain_energy_density_values
         .map(|values| values.len() == mesh.volume_elements.len())
         .unwrap_or(false);
+    let temperature_gradient_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "thermal.temperature_gradient.",
+        mesh.volume_elements.len(),
+    );
+    let has_temperature_gradient = temperature_gradient_values.is_some();
+    let heat_flux_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "thermal.heat_flux.",
+        mesh.volume_elements.len(),
+    );
+    let has_heat_flux = heat_flux_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
@@ -13784,7 +13796,10 @@ fn append_solved_adaptive_mesh_summary(
             let field_available = field_available
                 || (key.namespace == "structural"
                     && ((key.name == "load_regions" && has_boundary_load_regions)
-                        || (key.name == "constraint_regions" && has_boundary_constraint_regions)));
+                        || (key.name == "constraint_regions" && has_boundary_constraint_regions)))
+                || (key.namespace == "thermal"
+                    && ((key.name == "temperature_gradient" && has_temperature_gradient)
+                        || (key.name == "heat_flux_gradient" && has_heat_flux)));
             RefinementIndicatorAvailability {
                 key,
                 applicable,
@@ -13822,6 +13837,9 @@ fn append_solved_adaptive_mesh_summary(
     let load_regions_used = indicator_was_used(&indicators, "structural", "load_regions");
     let constraint_regions_used =
         indicator_was_used(&indicators, "structural", "constraint_regions");
+    let temperature_gradient_used =
+        indicator_was_used(&indicators, "thermal", "temperature_gradient");
+    let heat_flux_gradient_used = indicator_was_used(&indicators, "thermal", "heat_flux_gradient");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -13876,6 +13894,32 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
+    if !element_budget_reached && temperature_gradient_used {
+        if let Some(values) = temperature_gradient_values.as_deref() {
+            let samples = thermal_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "thermal.temperature_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && heat_flux_gradient_used {
+        if let Some(values) = heat_flux_values.as_deref() {
+            let samples = thermal_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "thermal.heat_flux_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
     {
         if element_budget_reached {
@@ -13898,7 +13942,10 @@ fn append_solved_adaptive_mesh_summary(
                 completed_iterations: mesh.adaptive_iterations.len(),
                 element_budget_reached,
                 field_change: stress_gradient_used.then_some(marker_change),
-                energy_change: strain_energy_density_used.then_some(marker_change),
+                energy_change: (strain_energy_density_used
+                    || temperature_gradient_used
+                    || heat_flux_gradient_used)
+                    .then_some(marker_change),
                 residual: None,
             },
         )
@@ -13928,6 +13975,39 @@ fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Opt
         .iter()
         .find(|field| field.field_id == field_id)
         .and_then(AnalysisField::as_host_f64)
+}
+
+fn latest_prefixed_vector_field_magnitudes(
+    fields: &[AnalysisField],
+    field_id_prefix: &str,
+    entity_count: usize,
+) -> Option<Vec<f64>> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let suffix = field.field_id.strip_prefix(field_id_prefix)?;
+            let snapshot_index = suffix.parse::<usize>().ok()?;
+            let values = field.as_host_f64()?;
+            let magnitudes = vector_field_magnitudes(values, entity_count)?;
+            Some((snapshot_index, magnitudes))
+        })
+        .max_by_key(|(snapshot_index, _)| *snapshot_index)
+        .map(|(_, magnitudes)| magnitudes)
+}
+
+fn vector_field_magnitudes(values: &[f64], entity_count: usize) -> Option<Vec<f64>> {
+    if values.len() == entity_count {
+        return Some(values.to_vec());
+    }
+    if entity_count == 0 || values.len() != entity_count * 3 {
+        return None;
+    }
+    Some(
+        values
+            .chunks_exact(3)
+            .map(|chunk| (chunk[0].powi(2) + chunk[1].powi(2) + chunk[2].powi(2)).sqrt())
+            .collect(),
+    )
 }
 
 fn refinement_context_region_ids(payload: &serde_json::Value, key: &str) -> Vec<String> {
@@ -14013,6 +14093,13 @@ fn structural_strain_energy_density_samples(
     strain_energy_density_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
     structural_element_scalar_gradient_samples(mesh, strain_energy_density_values)
+}
+
+fn thermal_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
 }
 
 fn structural_boundary_region_samples(
