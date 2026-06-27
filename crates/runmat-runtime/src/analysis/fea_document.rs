@@ -561,7 +561,7 @@ async fn resolve_study(
             &study.domains,
         )?;
     }
-    let mesh_options = resolve_mesh_options(study.mesh.as_ref())?;
+    let mesh_options = resolve_mesh_options(study.mesh.as_ref(), study.model.profile, run_kind)?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
@@ -586,9 +586,11 @@ async fn resolve_study(
 
 fn resolve_mesh_options(
     mesh: Option<&FeaMeshDocument>,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
 ) -> Result<Option<VolumeMeshingOptions>, String> {
     let Some(mesh) = mesh else {
-        return Ok(None);
+        return Ok(default_mesh_options_for_study(profile, run_kind));
     };
     if mesh.max_elements == 0 {
         return Err("mesh.max_elements must be greater than zero".to_string());
@@ -674,6 +676,17 @@ fn resolve_mesh_options(
             },
         },
     }))
+}
+
+fn default_mesh_options_for_study(
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+) -> Option<VolumeMeshingOptions> {
+    (matches!(
+        profile,
+        AnalysisCreateModelProfile::LinearStaticStructural
+    ) && matches!(run_kind, AnalysisRunKind::LinearStatic))
+    .then(VolumeMeshingOptions::default)
 }
 
 fn validate_refinement_indicators(
@@ -1691,6 +1704,16 @@ mod tests {
         }
     }
 
+    fn resolve_linear_static_mesh_options(
+        mesh: Option<&FeaMeshDocument>,
+    ) -> Result<Option<VolumeMeshingOptions>, String> {
+        resolve_mesh_options(
+            mesh,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+        )
+    }
+
     #[test]
     fn fea_document_resolves_moment_and_torque_loads() {
         let geometry = sample_geometry();
@@ -1848,7 +1871,7 @@ refinement:
         )
         .expect("mesh document should parse");
 
-        let options = resolve_mesh_options(Some(&mesh))
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
@@ -1902,6 +1925,26 @@ refinement:
     }
 
     #[test]
+    fn fea_document_defaults_linear_static_structural_mesh_options() {
+        let options = resolve_linear_static_mesh_options(None)
+            .expect("default structural mesh options should resolve")
+            .expect("linear static structural study should default a solid analysis mesh");
+
+        assert_eq!(options.kind, MeshKindRequest::Solid);
+        assert_eq!(options.element, VolumeElementKind::Tet4);
+        assert_eq!(options.profile, MeshProfile::AnalysisReady);
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
+
+        let modal_default = resolve_mesh_options(
+            None,
+            AnalysisCreateModelProfile::ModalStructural,
+            AnalysisRunKind::Modal,
+        )
+        .expect("modal default should resolve");
+        assert!(modal_default.is_none());
+    }
+
+    #[test]
     fn fea_document_mesh_options_accept_physics_refinement_namespaces() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
@@ -1947,7 +1990,7 @@ refinement:
         )
         .expect("mesh document should parse");
 
-        let options = resolve_mesh_options(Some(&mesh))
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
@@ -1992,7 +2035,7 @@ refinement:
         )
         .expect("mesh document should parse");
 
-        let options = resolve_mesh_options(Some(&mesh))
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
@@ -2016,7 +2059,7 @@ refinement:
         )
         .expect("mesh document should parse");
 
-        let err = resolve_mesh_options(Some(&mesh))
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
             .expect_err("none refinement should reject positive iteration count");
 
         assert!(err.contains("mesh.refinement.max_iterations"));
@@ -2043,8 +2086,8 @@ kind: surrogate
         )
         .expect("mesh document should parse");
 
-        let err =
-            resolve_mesh_options(Some(&mesh)).expect_err("surrogate mesh kind is unsupported");
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("surrogate mesh kind is unsupported");
 
         assert!(err.contains("mesh.kind"));
         assert!(err.contains("solid"));
@@ -2059,7 +2102,7 @@ element: hex8
         )
         .expect("mesh document should parse");
 
-        let err = resolve_mesh_options(Some(&mesh))
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
             .expect_err("hex8 solid element is not supported yet");
 
         assert!(err.contains("mesh.element"));
@@ -2079,7 +2122,7 @@ refinement:
         )
         .expect("mesh document should parse before semantic validation");
 
-        let err = resolve_mesh_options(Some(&mesh))
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
             .expect_err("unknown refinement indicator should fail validation");
 
         assert!(err.contains("mesh.refinement.indicators.structural.made_up_indicator"));
@@ -2094,7 +2137,7 @@ refinement:
         )
         .expect("mesh document should parse before semantic validation");
 
-        let err = resolve_mesh_options(Some(&mesh))
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
             .expect_err("unknown refinement namespace should fail validation");
 
         assert!(err.contains("mesh.refinement.indicators namespace `made_up_physics`"));
@@ -2109,7 +2152,7 @@ refinement:
         )
         .expect("mesh document should parse before semantic validation");
 
-        let err = resolve_mesh_options(Some(&mesh))
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
             .expect_err("generic coupling namespace should fail validation");
 
         assert!(err.contains("mesh.refinement.indicators namespace `coupling`"));

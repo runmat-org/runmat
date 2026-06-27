@@ -752,6 +752,19 @@ run:
     assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(spec.backend, ComputeBackend::Cpu);
     assert!(spec.model.is_none());
+    let mesh_options = spec
+        .mesh_options
+        .as_ref()
+        .expect("linear static structural studies should default to solid analysis mesh options");
+    assert_eq!(mesh_options.kind, runmat_meshing_core::MeshKindRequest::Solid);
+    assert_eq!(
+        mesh_options.element,
+        runmat_meshing_core::VolumeElementKind::Tet4
+    );
+    assert_eq!(
+        mesh_options.profile,
+        runmat_meshing_core::MeshProfile::AnalysisReady
+    );
 
     let options = spec
         .linear_static_run_options
