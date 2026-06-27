@@ -2154,6 +2154,25 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
 }
 
 #[test]
+fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    spec.geometry.units = UnitSystem::Millimeter;
+    spec.model = Some(sample_model());
+
+    let options = analysis_mesh_validation_options_for_study(&spec);
+
+    assert_eq!(
+        options.expected_bounds_m,
+        Some([[0.0, 0.0, 0.0], [0.001, 0.001, 0.001]])
+    );
+    assert_eq!(
+        options.required_boundary_region_ids,
+        vec!["root".to_string(), "tip".to_string()]
+    );
+}
+
+#[test]
 fn analysis_run_study_honors_electromagnetic_run_options() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();

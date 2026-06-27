@@ -41,9 +41,9 @@ use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
     validate_analysis_mesh, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
-    AnalysisMeshArtifact, ElementFamilyHint, MeshConnectivityClass, MeshTargetSize,
-    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
-    RefinementStrategy, SizingFieldUpdate, VolumeMeshingOptions,
+    AnalysisMeshArtifact, AnalysisMeshValidationOptions, ElementFamilyHint, MeshConnectivityClass,
+    MeshTargetSize, RefinementIndicatorAvailability, RefinementIndicatorSample,
+    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, VolumeMeshingOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13456,25 +13456,28 @@ fn generate_and_persist_study_analysis_mesh(
     })?;
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
-    validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.MESH_VALIDATION_FAILED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("generated analysis mesh failed validation: {err:?}"),
-            BTreeMap::from([
-                ("study_id".to_string(), spec.study_id.clone()),
-                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
-                ("mesh_id".to_string(), mesh.mesh_id.clone()),
-            ]),
-        )
-    })?;
+    let validation_options = analysis_mesh_validation_options_for_study(spec);
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options).map_err(
+        |err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.MESH_VALIDATION_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("generated analysis mesh failed validation: {err:?}"),
+                BTreeMap::from([
+                    ("study_id".to_string(), spec.study_id.clone()),
+                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                    ("mesh_id".to_string(), mesh.mesh_id.clone()),
+                ]),
+            )
+        },
+    )?;
     persist_study_evidence(
         study_fingerprint,
         "analysis_mesh",
@@ -13522,6 +13525,62 @@ fn mesh_options_in_si_units(
             MeshTargetSize::LengthM(length * geometry_unit_scale_to_meters(geometry_units));
     }
     options
+}
+
+fn analysis_mesh_validation_options_for_study(
+    spec: &AnalysisStudySpec,
+) -> AnalysisMeshValidationOptions {
+    AnalysisMeshValidationOptions {
+        expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
+        required_boundary_region_ids: required_boundary_region_ids_for_study(spec),
+        ..AnalysisMeshValidationOptions::default()
+    }
+}
+
+fn geometry_surface_bounds_m(geometry: &GeometryAsset) -> Option<[[f64; 3]; 2]> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut bounds = None::<[[f64; 3]; 2]>;
+    for vertex in geometry
+        .surface_meshes
+        .iter()
+        .flat_map(|surface| surface.vertices.iter())
+    {
+        let point = [vertex[0] * scale, vertex[1] * scale, vertex[2] * scale];
+        if point.iter().any(|coordinate| !coordinate.is_finite()) {
+            continue;
+        }
+        match bounds.as_mut() {
+            Some(bounds) => {
+                for axis in 0..3 {
+                    bounds[0][axis] = bounds[0][axis].min(point[axis]);
+                    bounds[1][axis] = bounds[1][axis].max(point[axis]);
+                }
+            }
+            None => bounds = Some([point, point]),
+        }
+    }
+    bounds
+}
+
+fn required_boundary_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<String> {
+    let Some(model) = spec.model.as_ref() else {
+        return Vec::new();
+    };
+    let mut region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .chain(
+            model
+                .boundary_conditions
+                .iter()
+                .map(|condition| condition.region_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    region_ids.sort();
+    region_ids.dedup();
+    region_ids
 }
 
 fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
@@ -13827,25 +13886,27 @@ fn generate_and_persist_refined_study_analysis_mesh(
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
-    validate_analysis_mesh(&refined_mesh, Default::default()).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("refined analysis mesh failed validation: {err:?}"),
-            BTreeMap::from([
-                ("study_id".to_string(), spec.study_id.clone()),
-                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
-                ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
-            ]),
-        )
-    })?;
+    let validation_options = analysis_mesh_validation_options_for_study(spec);
+    runmat_meshing_core::validate_analysis_mesh_with_options(&refined_mesh, validation_options)
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("refined analysis mesh failed validation: {err:?}"),
+                BTreeMap::from([
+                    ("study_id".to_string(), spec.study_id.clone()),
+                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                    ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
+                ]),
+            )
+        })?;
 
     persist_study_evidence(
         study_fingerprint,

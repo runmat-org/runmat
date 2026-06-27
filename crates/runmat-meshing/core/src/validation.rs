@@ -5,6 +5,27 @@ use crate::{
     quality::QualityThresholds,
 };
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalysisMeshValidationOptions {
+    pub quality: QualityThresholds,
+    pub expected_bounds_m: Option<[[f64; 3]; 2]>,
+    pub min_bounds_coverage_ratio: f64,
+    pub required_boundary_region_ids: Vec<String>,
+    pub required_material_region_ids: Vec<String>,
+}
+
+impl Default for AnalysisMeshValidationOptions {
+    fn default() -> Self {
+        Self {
+            quality: QualityThresholds::default(),
+            expected_bounds_m: None,
+            min_bounds_coverage_ratio: 0.90,
+            required_boundary_region_ids: Vec::new(),
+            required_material_region_ids: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnalysisMeshValidationError {
     UnsupportedSchema {
@@ -64,11 +85,35 @@ pub enum AnalysisMeshValidationError {
     QualityThresholdFailed {
         reason: String,
     },
+    BoundsCoverageFailed {
+        axis: usize,
+        coverage_ratio: String,
+        required_ratio: String,
+    },
+    MissingRequiredBoundaryRegion {
+        region_id: String,
+    },
+    MissingRequiredMaterialRegion {
+        region_id: String,
+    },
 }
 
 pub fn validate_analysis_mesh(
     mesh: &AnalysisMeshArtifact,
     thresholds: QualityThresholds,
+) -> Result<(), AnalysisMeshValidationError> {
+    validate_analysis_mesh_with_options(
+        mesh,
+        AnalysisMeshValidationOptions {
+            quality: thresholds,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+}
+
+pub fn validate_analysis_mesh_with_options(
+    mesh: &AnalysisMeshArtifact,
+    options: AnalysisMeshValidationOptions,
 ) -> Result<(), AnalysisMeshValidationError> {
     if mesh.schema_version != ANALYSIS_MESH_SCHEMA_VERSION {
         return Err(AnalysisMeshValidationError::UnsupportedSchema {
@@ -189,7 +234,14 @@ pub fn validate_analysis_mesh(
         }
     }
 
-    validate_quality(mesh, thresholds)
+    validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
+    validate_required_material_regions(mesh, &options.required_material_region_ids)?;
+    validate_bounds_coverage(
+        mesh,
+        options.expected_bounds_m,
+        options.min_bounds_coverage_ratio,
+    )?;
+    validate_quality(mesh, options.quality)
 }
 
 fn validate_quality(
@@ -216,6 +268,103 @@ fn validate_quality(
         });
     }
     Ok(())
+}
+
+fn validate_required_boundary_regions(
+    mesh: &AnalysisMeshArtifact,
+    required_region_ids: &[String],
+) -> Result<(), AnalysisMeshValidationError> {
+    if required_region_ids.is_empty() {
+        return Ok(());
+    }
+    let present = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.region_ids.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>();
+    for region_id in required_region_ids {
+        if !present.contains(region_id.as_str()) {
+            return Err(AnalysisMeshValidationError::MissingRequiredBoundaryRegion {
+                region_id: region_id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_material_regions(
+    mesh: &AnalysisMeshArtifact,
+    required_region_ids: &[String],
+) -> Result<(), AnalysisMeshValidationError> {
+    if required_region_ids.is_empty() {
+        return Ok(());
+    }
+    let present = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    for region_id in required_region_ids {
+        if !present.contains(region_id.as_str()) {
+            return Err(AnalysisMeshValidationError::MissingRequiredMaterialRegion {
+                region_id: region_id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_bounds_coverage(
+    mesh: &AnalysisMeshArtifact,
+    expected_bounds_m: Option<[[f64; 3]; 2]>,
+    min_bounds_coverage_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    let Some(expected) = expected_bounds_m else {
+        return Ok(());
+    };
+    if !min_bounds_coverage_ratio.is_finite() || min_bounds_coverage_ratio <= 0.0 {
+        return Ok(());
+    }
+    let Some(actual) = mesh_bounds_m(mesh) else {
+        return Ok(());
+    };
+    for axis in 0..3 {
+        let expected_min = expected[0][axis].min(expected[1][axis]);
+        let expected_max = expected[0][axis].max(expected[1][axis]);
+        if !expected_min.is_finite() || !expected_max.is_finite() {
+            continue;
+        }
+        let expected_span = expected_max - expected_min;
+        if expected_span <= f64::EPSILON {
+            continue;
+        }
+        let actual_min = actual[0][axis].min(actual[1][axis]);
+        let actual_max = actual[0][axis].max(actual[1][axis]);
+        let overlap = (actual_max.min(expected_max) - actual_min.max(expected_min)).max(0.0);
+        let coverage = overlap / expected_span;
+        if coverage + 1.0e-9 < min_bounds_coverage_ratio {
+            return Err(AnalysisMeshValidationError::BoundsCoverageFailed {
+                axis,
+                coverage_ratio: format!("{coverage:.6}"),
+                required_ratio: format!("{min_bounds_coverage_ratio:.6}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn mesh_bounds_m(mesh: &AnalysisMeshArtifact) -> Option<[[f64; 3]; 2]> {
+    let mut nodes = mesh.nodes.iter();
+    let first = nodes.next()?.coordinates_m;
+    let mut min = first;
+    let mut max = first;
+    for node in nodes {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(node.coordinates_m[axis]);
+            max[axis] = max[axis].max(node.coordinates_m[axis]);
+        }
+    }
+    Some([min, max])
 }
 
 #[cfg(test)]
@@ -355,6 +504,65 @@ mod tests {
             err,
             AnalysisMeshValidationError::QualityThresholdFailed {
                 reason: "min_scaled_jacobian".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_mesh_that_underfills_expected_bounds() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                expected_bounds_m: Some([[0.0, 0.0, 0.0], [4.0, 1.0, 1.0]]),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("mesh should fail bounds coverage");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::BoundsCoverageFailed {
+                axis: 0,
+                coverage_ratio: "0.250000".to_string(),
+                required_ratio: "0.900000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_missing_required_boundary_region() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                required_boundary_region_ids: vec!["loaded".to_string()],
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("missing boundary region should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::MissingRequiredBoundaryRegion {
+                region_id: "loaded".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_missing_required_material_region() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                required_material_region_ids: vec!["rib".to_string()],
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("missing material region should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::MissingRequiredMaterialRegion {
+                region_id: "rib".to_string()
             }
         );
     }

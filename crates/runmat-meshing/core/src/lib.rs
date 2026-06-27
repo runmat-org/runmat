@@ -33,7 +33,10 @@ pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityK
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection};
 pub use topology::{BoundaryElementKind, VolumeElementKind};
-pub use validation::{validate_analysis_mesh, AnalysisMeshValidationError};
+pub use validation::{
+    validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationError,
+    AnalysisMeshValidationOptions,
+};
 pub use volume::{
     generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
     VolumeMesher,
