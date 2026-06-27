@@ -10,6 +10,7 @@ use runmat_analysis_core::{
 use runmat_meshing_core::AnalysisMeshArtifact;
 use serde::{Deserialize, Serialize};
 
+use self::elements::solid::SolidMaterial;
 use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::beam::{
@@ -21,7 +22,7 @@ use self::{
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
     legacy_surrogate::legacy_surrogate_topology,
-    solid::solid_topology_from_analysis_mesh,
+    solid::{assemble_solid_stiffness_dense, solid_topology_from_analysis_mesh},
 };
 
 use crate::operator::OperatorSystem;
@@ -936,6 +937,24 @@ pub fn assemble_linear_system(
         }
     }
 
+    let mut stiffness_dense = analysis_mesh.as_ref().and_then(|mesh| {
+        assemble_solid_stiffness_dense(
+            mesh,
+            SolidMaterial {
+                youngs_modulus_pa: structural_material.youngs_modulus_pa,
+                poisson_ratio: structural_material.poisson_ratio,
+            },
+            base_dof_count,
+        )
+        .ok()
+    });
+    if let Some(dense) = stiffness_dense.as_ref() {
+        for i in 0..dof_count {
+            stiffness_diag[i] = dense[i * dof_count + i].abs().max(1.0e-12);
+        }
+        stiffness_upper.fill(0.0);
+    }
+
     AssemblySummary {
         dof_count,
         structural_node_count: structural_dof_layout.node_count(),
@@ -973,7 +992,7 @@ pub fn assemble_linear_system(
         operator: OperatorSystem {
             dof_count,
             constrained,
-            stiffness_dense: None,
+            stiffness_dense: stiffness_dense.take(),
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -2902,4 +2921,79 @@ fn region_hash(region_id: &str) -> u64 {
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::{fixture_model, FixtureId};
+    use runmat_meshing_core::{
+        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
+        AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
+        VolumeElementKind,
+    };
+
+    #[test]
+    fn analysis_mesh_populates_dense_solid_stiffness_operator() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+
+        assert_eq!(summary.dof_count, 12);
+        assert_eq!(summary.structural_solid_element_count, 1);
+        let dense = summary
+            .operator
+            .stiffness_dense
+            .as_ref()
+            .expect("analysis mesh should assemble a dense solid stiffness matrix");
+        assert_eq!(dense.len(), summary.dof_count * summary.dof_count);
+        assert!(summary
+            .operator
+            .stiffness_diag
+            .iter()
+            .all(|value| *value > 0.0));
+        for row in 0..summary.dof_count {
+            assert!(
+                (summary.operator.stiffness_diag[row] - dense[row * summary.dof_count + row].abs())
+                    <= 1.0e-8
+            );
+        }
+    }
+
+    fn tet4_mesh() -> AnalysisMeshArtifact {
+        AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "unit_tet".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![AnalysisVolumeElement {
+                element_id: "tet_1".to_string(),
+                kind: VolumeElementKind::Tet4,
+                node_ids: vec![1, 2, 3, 4],
+                material_region_id: "solid".to_string(),
+                provenance: Vec::new(),
+            }],
+            boundary_faces: Vec::new(),
+            boundary_edges: Vec::new(),
+            quality: AnalysisMeshQualityReport::default(),
+            sizing: MeshSizingField::default(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
+        }
+    }
+
+    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+        AnalysisMeshNode {
+            node_id,
+            coordinates_m,
+            provenance: Vec::new(),
+        }
+    }
 }
