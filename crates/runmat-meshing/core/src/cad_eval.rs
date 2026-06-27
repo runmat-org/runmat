@@ -12,6 +12,7 @@ use crate::{
 #[serde(rename_all = "snake_case")]
 pub enum CadEvaluationSource {
     ParametricCad,
+    ImportedEvaluatorSamples,
     PlanarFacetApproximation,
 }
 
@@ -24,6 +25,8 @@ pub struct CadFaceEvaluationFrame {
     pub v_axis: Point3,
     pub unit_normal: Point3,
     pub area_m2: f64,
+    #[serde(default)]
+    pub evaluator_backed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -112,13 +115,17 @@ pub fn build_cad_evaluation_model(
             face.entity_id.id.clone(),
             source_face_id,
             points,
-            source_face.unit_normal,
+            face.evaluator_unit_normal
+                .unwrap_or(source_face.unit_normal),
             source_face.area_m2,
+            face.evaluator_reference_point_m,
+            face.evaluator_unit_normal.is_some(),
         )?;
         frames.push(frame);
     }
+    let evaluator_backed_frame_count = frames.iter().filter(|frame| frame.evaluator_backed).count();
     let report = CadEvaluationReport {
-        source: evaluation_source(cad_topology),
+        source: evaluation_source(evaluator_backed_frame_count),
         face_frame_count: frames.len(),
         evaluator_face_count: cad_topology.report.evaluator_face_count,
         normal_query_count: frames.len(),
@@ -199,6 +206,8 @@ fn face_frame(
     points: Triangle3,
     unit_normal: Point3,
     area_m2: f64,
+    evaluator_reference_point_m: Option<Point3>,
+    evaluator_backed: bool,
 ) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
     let edge = sub(points[1], points[0]);
     let edge_length = norm(edge);
@@ -214,16 +223,21 @@ fn face_frame(
     Ok(CadFaceEvaluationFrame {
         face_id,
         source_face_id,
-        origin_m: triangle_centroid(points),
+        origin_m: evaluator_reference_point_m.unwrap_or_else(|| triangle_centroid(points)),
         u_axis,
         v_axis: scale(v_axis, 1.0 / v_length),
         unit_normal,
         area_m2,
+        evaluator_backed,
     })
 }
 
-fn evaluation_source(_cad_topology: &CadTopologyModel) -> CadEvaluationSource {
-    CadEvaluationSource::PlanarFacetApproximation
+fn evaluation_source(evaluator_backed_frame_count: usize) -> CadEvaluationSource {
+    if evaluator_backed_frame_count > 0 {
+        CadEvaluationSource::ImportedEvaluatorSamples
+    } else {
+        CadEvaluationSource::PlanarFacetApproximation
+    }
 }
 
 fn topology_vertex(
@@ -242,6 +256,10 @@ fn topology_vertex(
 mod tests {
     use super::*;
     use crate::{build_cad_topology, source_topology_from_boundary_input, BoundaryMeshInput};
+    use runmat_geometry_core::{
+        CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership, CadSemanticKind,
+        EntityIdRange, EntityKind, Region, RegionEntityMapping,
+    };
 
     #[test]
     fn builds_planar_face_evaluation_frames() {
@@ -272,6 +290,21 @@ mod tests {
 
         assert!(projection.distance_m > 0.0);
         assert!(dot(projection.unit_normal, model.face_frames[0].unit_normal) > 0.999);
+    }
+
+    #[test]
+    fn uses_imported_evaluator_face_samples_when_available() {
+        let topology = cube_topology();
+        let geometry = geometry_with_face_evaluator();
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+
+        assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
+        assert_eq!(model.report.evaluator_face_count, 2);
+        assert!(model.face_frames.iter().any(|frame| frame.evaluator_backed
+            && frame.origin_m == [0.25, 0.25, 0.75]
+            && frame.unit_normal == [0.0, 0.0, 1.0]));
     }
 
     fn cube_topology() -> SourceTopologyModel {
@@ -345,5 +378,52 @@ mod tests {
             region_entity_mappings: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn geometry_with_face_evaluator() -> runmat_geometry_core::GeometryAsset {
+        let mut geometry = geometry_for_topology();
+        geometry.regions = vec![Region {
+            region_id: "face_000001".to_string(),
+            name: "face".to_string(),
+            tag: Some("cad_face".to_string()),
+            cad_ownership: Some(CadRegionOwnership {
+                face_id: Some(1),
+                label: Some(CadLabelRef {
+                    label_entry: "0:1:1".to_string(),
+                    name: "face".to_string(),
+                    kind: CadSemanticKind::Face,
+                }),
+                owner_path: Vec::new(),
+                layers: Vec::new(),
+                color: None,
+                material: None,
+            }),
+        }];
+        geometry.region_entity_mappings = vec![RegionEntityMapping::new(
+            "face_000001",
+            "mesh_1",
+            EntityKind::Face,
+            vec![EntityIdRange::new(2, 2)],
+        )];
+        geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
+            evaluator_id: "cad_evaluator_test".to_string(),
+            backend: "test".to_string(),
+            format_name: "step".to_string(),
+            requires_source_geometry: true,
+            faces: vec![CadFaceEvaluator {
+                evaluator_id: "cad_face_1".to_string(),
+                imported_face_id: 1,
+                name: "face".to_string(),
+                supports_point_evaluation: true,
+                supports_projection: true,
+                supports_normal: true,
+                supports_derivatives: true,
+                supports_curvature: true,
+                reference_point_m: Some([0.25, 0.25, 0.75]),
+                reference_unit_normal: Some([0.0, 0.0, 1.0]),
+            }],
+            curves: Vec::new(),
+        }];
+        geometry
     }
 }

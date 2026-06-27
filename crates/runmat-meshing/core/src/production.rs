@@ -429,6 +429,7 @@ fn cad_topology_source_label(source: CadTopologySource) -> &'static str {
 fn cad_evaluation_source_label(source: CadEvaluationSource) -> &'static str {
     match source {
         CadEvaluationSource::ParametricCad => "parametric_cad",
+        CadEvaluationSource::ImportedEvaluatorSamples => "imported_evaluator_samples",
         CadEvaluationSource::PlanarFacetApproximation => "planar_facet_approximation",
     }
 }

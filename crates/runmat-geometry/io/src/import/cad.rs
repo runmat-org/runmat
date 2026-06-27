@@ -233,6 +233,7 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
     if topology.faces.is_empty() {
         return Vec::new();
     }
+    let samples = face_evaluator_samples(topology);
     vec![CadEvaluatorSet {
         evaluator_id: format!("cad_evaluator_{}", topology.backend),
         backend: topology.backend.clone(),
@@ -242,6 +243,12 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
             .faces
             .iter()
             .map(|face| CadFaceEvaluator {
+                reference_point_m: samples
+                    .get(&face.face_id)
+                    .map(|sample| sample.reference_point_m),
+                reference_unit_normal: samples
+                    .get(&face.face_id)
+                    .and_then(|sample| sample.reference_unit_normal),
                 evaluator_id: format!("cad_face_{}", face.face_id),
                 imported_face_id: face.face_id,
                 name: face.name.clone(),
@@ -254,6 +261,106 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
             .collect(),
         curves: Vec::new(),
     }]
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FaceEvaluatorSample {
+    reference_point_m: [f64; 3],
+    reference_unit_normal: Option<[f64; 3]>,
+}
+
+fn face_evaluator_samples(topology: &OcctCadTopology) -> BTreeMap<u64, FaceEvaluatorSample> {
+    let mut accumulators = BTreeMap::<u64, FaceSampleAccumulator>::new();
+    for (triangle_index, triangle) in topology.triangles.iter().enumerate() {
+        let Some(face_id) = topology.triangle_face_ids.get(triangle_index).copied() else {
+            continue;
+        };
+        let Some(points) = triangle_points(&topology.vertices, *triangle) else {
+            continue;
+        };
+        accumulators
+            .entry(face_id)
+            .or_default()
+            .add_triangle(points);
+    }
+    accumulators
+        .into_iter()
+        .filter_map(|(face_id, accumulator)| accumulator.finish().map(|sample| (face_id, sample)))
+        .collect()
+}
+
+#[derive(Debug, Default, Clone)]
+struct FaceSampleAccumulator {
+    weighted_centroid: [f64; 3],
+    normal_sum: [f64; 3],
+    area_sum: f64,
+}
+
+impl FaceSampleAccumulator {
+    fn add_triangle(&mut self, points: [[f64; 3]; 3]) {
+        let cross = cross(sub(points[1], points[0]), sub(points[2], points[0]));
+        let double_area = norm(cross);
+        if !double_area.is_finite() || double_area <= f64::EPSILON {
+            return;
+        }
+        let centroid = [
+            (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+            (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+            (points[0][2] + points[1][2] + points[2][2]) / 3.0,
+        ];
+        self.area_sum += double_area;
+        for axis in 0..3 {
+            self.weighted_centroid[axis] += centroid[axis] * double_area;
+            self.normal_sum[axis] += cross[axis];
+        }
+    }
+
+    fn finish(self) -> Option<FaceEvaluatorSample> {
+        if !self.area_sum.is_finite() || self.area_sum <= f64::EPSILON {
+            return None;
+        }
+        let reference_point_m = [
+            self.weighted_centroid[0] / self.area_sum,
+            self.weighted_centroid[1] / self.area_sum,
+            self.weighted_centroid[2] / self.area_sum,
+        ];
+        Some(FaceEvaluatorSample {
+            reference_point_m,
+            reference_unit_normal: unit(self.normal_sum),
+        })
+    }
+}
+
+fn triangle_points(vertices: &[[f64; 3]], triangle: [u32; 3]) -> Option<[[f64; 3]; 3]> {
+    Some([
+        *vertices.get(triangle[0] as usize)?,
+        *vertices.get(triangle[1] as usize)?,
+        *vertices.get(triangle[2] as usize)?,
+    ])
+}
+
+fn sub(lhs: [f64; 3], rhs: [f64; 3]) -> [f64; 3] {
+    [lhs[0] - rhs[0], lhs[1] - rhs[1], lhs[2] - rhs[2]]
+}
+
+fn cross(lhs: [f64; 3], rhs: [f64; 3]) -> [f64; 3] {
+    [
+        lhs[1] * rhs[2] - lhs[2] * rhs[1],
+        lhs[2] * rhs[0] - lhs[0] * rhs[2],
+        lhs[0] * rhs[1] - lhs[1] * rhs[0],
+    ]
+}
+
+fn norm(vector: [f64; 3]) -> f64 {
+    (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt()
+}
+
+fn unit(vector: [f64; 3]) -> Option<[f64; 3]> {
+    let length = norm(vector);
+    if !length.is_finite() || length <= f64::EPSILON {
+        return None;
+    }
+    Some([vector[0] / length, vector[1] / length, vector[2] / length])
 }
 
 fn topology_regions(topology: &OcctCadTopology) -> (Vec<Region>, Vec<RegionEntityMapping>) {
@@ -655,6 +762,14 @@ mod tests {
             0
         );
         assert!(result.asset.source_geometry.cad_evaluators[0].faces[0].supports_projection);
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].reference_point_m,
+            Some([1.0 / 3.0, 1.0 / 3.0, 0.0])
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].reference_unit_normal,
+            Some([0.0, 0.0, 1.0])
+        );
         assert!(result
             .asset
             .diagnostics

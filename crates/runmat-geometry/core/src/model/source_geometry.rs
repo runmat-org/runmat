@@ -9,7 +9,7 @@ pub enum SourceGeometryKind {
     Cad,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceGeometry {
     pub kind: SourceGeometryKind,
     pub assembly: Option<AssemblyNode>,
@@ -18,7 +18,7 @@ pub struct SourceGeometry {
     pub cad_evaluators: Vec<CadEvaluatorSet>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadEvaluatorSet {
     pub evaluator_id: String,
@@ -31,7 +31,7 @@ pub struct CadEvaluatorSet {
     pub curves: Vec<CadCurveEvaluator>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadFaceEvaluator {
     pub evaluator_id: String,
@@ -42,9 +42,13 @@ pub struct CadFaceEvaluator {
     pub supports_normal: bool,
     pub supports_derivatives: bool,
     pub supports_curvature: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_point_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_unit_normal: Option<[f64; 3]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadCurveEvaluator {
     pub evaluator_id: String,
