@@ -15,6 +15,7 @@ pub struct AnalysisMeshValidationOptions {
     pub min_volume_coverage_ratio: f64,
     pub expected_boundary_area_m2: Option<f64>,
     pub min_boundary_area_ratio: f64,
+    pub min_boundary_face_recovery_ratio: f64,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
 }
@@ -29,6 +30,7 @@ impl Default for AnalysisMeshValidationOptions {
             min_volume_coverage_ratio: 0.90,
             expected_boundary_area_m2: None,
             min_boundary_area_ratio: 0.90,
+            min_boundary_face_recovery_ratio: 0.0,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
         }
@@ -105,6 +107,10 @@ pub enum AnalysisMeshValidationError {
     },
     BoundaryAreaCoverageFailed {
         area_ratio: String,
+        required_ratio: String,
+    },
+    BoundaryFaceRecoveryFailed {
+        recovery_ratio: String,
         required_ratio: String,
     },
     MissingRequiredBoundaryRegion {
@@ -268,6 +274,7 @@ pub fn validate_analysis_mesh_with_options(
         options.expected_boundary_area_m2,
         options.min_boundary_area_ratio,
     )?;
+    validate_boundary_face_recovery(mesh, options.min_boundary_face_recovery_ratio)?;
     validate_quality(mesh, options.quality)
 }
 
@@ -445,6 +452,31 @@ fn validate_boundary_area_coverage(
         return Err(AnalysisMeshValidationError::BoundaryAreaCoverageFailed {
             area_ratio: format!("{area_ratio:.6}"),
             required_ratio: format!("{min_boundary_area_ratio:.6}"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_boundary_face_recovery(
+    mesh: &AnalysisMeshArtifact,
+    min_boundary_face_recovery_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    if mesh.boundary_faces.is_empty()
+        || !min_boundary_face_recovery_ratio.is_finite()
+        || min_boundary_face_recovery_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let recovered_count = mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| !face.adjacent_volume_element_ids.is_empty())
+        .count();
+    let recovery_ratio = recovered_count as f64 / mesh.boundary_faces.len() as f64;
+    if recovery_ratio + 1.0e-9 < min_boundary_face_recovery_ratio {
+        return Err(AnalysisMeshValidationError::BoundaryFaceRecoveryFailed {
+            recovery_ratio: format!("{recovery_ratio:.6}"),
+            required_ratio: format!("{min_boundary_face_recovery_ratio:.6}"),
         });
     }
     Ok(())
@@ -717,6 +749,27 @@ mod tests {
             AnalysisMeshValidationError::BoundaryAreaCoverageFailed {
                 area_ratio: "0.250000".to_string(),
                 required_ratio: "0.900000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unrecovered_boundary_faces_when_required() {
+        let mut mesh = valid_tet_mesh();
+        mesh.boundary_faces[0].adjacent_volume_element_ids.clear();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                min_boundary_face_recovery_ratio: 1.0,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("missing boundary recovery should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::BoundaryFaceRecoveryFailed {
+                recovery_ratio: "0.000000".to_string(),
+                required_ratio: "1.000000".to_string(),
             }
         );
     }
