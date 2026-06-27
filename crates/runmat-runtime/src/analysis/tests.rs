@@ -5180,6 +5180,119 @@ fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_honors_boundary_focus_levels() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Normal;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    let load_target = samples
+        .iter()
+        .find(|sample| sample["reason"].as_str() == Some("structural.load_regions"))
+        .and_then(|sample| sample["target_size_m"].as_f64())
+        .expect("load-region target size");
+    let constraint_target = samples
+        .iter()
+        .find(|sample| sample["reason"].as_str() == Some("structural.constraint_regions"))
+        .and_then(|sample| sample["target_size_m"].as_f64())
+        .expect("constraint-region target size");
+
+    assert!(
+        constraint_target < load_target,
+        "fine constraint focus should request a smaller target size than normal load focus"
+    );
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-off-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Normal;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("structural")
+            && indicator["name"].as_str() == Some("load_regions")
+            && indicator["status"].as_str() == Some("skipped_not_applicable")
+    ));
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("structural")
+            && indicator["name"].as_str() == Some("constraint_regions")
+            && indicator["status"].as_str() == Some("used")
+    ));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert!(!samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
     let root = temp_artifact_root("append-solved-adaptive-energy-summary");
     let _ = fs::remove_dir_all(&root);

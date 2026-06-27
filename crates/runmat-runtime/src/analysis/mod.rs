@@ -13764,22 +13764,30 @@ fn append_solved_adaptive_mesh_summary(
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
         refinement_context_region_ids(&payload, "boundary_constraint_region_ids");
-    let has_boundary_load_regions =
-        has_boundary_faces_for_regions(&mesh, boundary_load_region_ids.as_slice());
-    let has_boundary_constraint_regions =
-        has_boundary_faces_for_regions(&mesh, boundary_constraint_region_ids.as_slice());
+    let load_focus_options = refinement_marker_options_for_focus(options.refinement.focus.loads);
+    let constraint_focus_options =
+        refinement_marker_options_for_focus(options.refinement.focus.constraints);
+    let has_boundary_load_regions = load_focus_options.is_some()
+        && has_boundary_faces_for_regions(&mesh, boundary_load_region_ids.as_slice());
+    let has_boundary_constraint_regions = constraint_focus_options.is_some()
+        && has_boundary_faces_for_regions(&mesh, boundary_constraint_region_ids.as_slice());
     let availability = defaults
         .iter()
         .cloned()
         .map(|key| {
             let field_available = key.namespace == "structural"
                 && ((key.name == "stress_gradient" && has_von_mises)
-                    || (key.name == "strain_energy_density" && has_strain_energy_density)
-                    || (key.name == "load_regions" && has_boundary_load_regions)
-                    || (key.name == "constraint_regions" && has_boundary_constraint_regions));
+                    || (key.name == "strain_energy_density" && has_strain_energy_density));
+            let applicable = key.namespace != "structural"
+                || (key.name != "load_regions" || load_focus_options.is_some())
+                    && (key.name != "constraint_regions" || constraint_focus_options.is_some());
+            let field_available = field_available
+                || (key.namespace == "structural"
+                    && ((key.name == "load_regions" && has_boundary_load_regions)
+                        || (key.name == "constraint_regions" && has_boundary_constraint_regions)));
             RefinementIndicatorAvailability {
                 key,
-                applicable: true,
+                applicable,
                 field_available,
             }
         })
@@ -13830,26 +13838,30 @@ fn append_solved_adaptive_mesh_summary(
     if !element_budget_reached && load_regions_used {
         let samples =
             structural_boundary_region_samples(&mesh, boundary_load_region_ids.as_slice());
-        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
-            &samples,
-            "structural.load_regions",
-            RefinementMarkerOptions::default(),
-        )
-        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
-        markers.extend(new_markers);
-        merge_sizing_update(&mut sizing_update, new_sizing_update);
+        if let Some(options) = load_focus_options {
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.load_regions",
+                options,
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
     }
     if !element_budget_reached && constraint_regions_used {
         let samples =
             structural_boundary_region_samples(&mesh, boundary_constraint_region_ids.as_slice());
-        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
-            &samples,
-            "structural.constraint_regions",
-            RefinementMarkerOptions::default(),
-        )
-        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
-        markers.extend(new_markers);
-        merge_sizing_update(&mut sizing_update, new_sizing_update);
+        if let Some(options) = constraint_focus_options {
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.constraint_regions",
+                options,
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
     }
     if !element_budget_reached && strain_energy_density_used {
         if let Some(values) = strain_energy_density_values {
@@ -13943,6 +13955,22 @@ fn has_boundary_faces_for_regions(mesh: &AnalysisMeshArtifact, region_ids: &[Str
                 .iter()
                 .any(|region_id| region_ids.iter().any(|target| target == region_id))
         })
+}
+
+fn refinement_marker_options_for_focus(
+    focus: runmat_meshing_core::RefinementFocusLevel,
+) -> Option<RefinementMarkerOptions> {
+    match focus {
+        runmat_meshing_core::RefinementFocusLevel::Off => None,
+        runmat_meshing_core::RefinementFocusLevel::Normal => {
+            Some(RefinementMarkerOptions::default())
+        }
+        runmat_meshing_core::RefinementFocusLevel::Fine => Some(RefinementMarkerOptions {
+            target_size_scale: 0.35,
+            max_markers: 96,
+            ..RefinementMarkerOptions::default()
+        }),
+    }
 }
 
 fn indicator_was_used(
