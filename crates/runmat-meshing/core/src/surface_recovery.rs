@@ -56,6 +56,11 @@ pub enum SurfaceRecoveryError {
         relative_error: f64,
         max_relative_error: f64,
     },
+    SourceFaceAreaMismatch {
+        source_face_id: u32,
+        relative_error: f64,
+        max_relative_error: f64,
+    },
     NormalMismatch {
         element_id: u32,
         alignment: f64,
@@ -106,6 +111,14 @@ impl std::fmt::Display for SurfaceRecoveryError {
                 formatter,
                 "surface element {element_id} area relative error {relative_error:.6e} exceeds {max_relative_error:.6e}"
             ),
+            Self::SourceFaceAreaMismatch {
+                source_face_id,
+                relative_error,
+                max_relative_error,
+            } => write!(
+                formatter,
+                "source face {source_face_id} recovered area relative error {relative_error:.6e} exceeds {max_relative_error:.6e}"
+            ),
             Self::NormalMismatch {
                 element_id,
                 alignment,
@@ -154,6 +167,7 @@ pub fn validate_surface_recovery(
         .collect::<BTreeMap<_, _>>();
     let mut covered_source_faces = BTreeSet::<u32>::new();
     let mut edge_incidence = BTreeMap::<[u32; 2], usize>::new();
+    let mut recovered_area_by_source_face = BTreeMap::<u32, f64>::new();
     let mut max_area_relative_error = 0.0_f64;
     let mut min_normal_alignment = f64::INFINITY;
 
@@ -171,7 +185,7 @@ pub fn validate_surface_recovery(
             });
         }
 
-        let expected_area = source_face.area_m2.max(element.area_m2);
+        let expected_area = element.area_m2;
         let relative_error = if expected_area > 0.0 && expected_area.is_finite() {
             (area_m2 - expected_area).abs() / expected_area
         } else {
@@ -186,6 +200,9 @@ pub fn validate_surface_recovery(
             });
         }
 
+        *recovered_area_by_source_face
+            .entry(element.source_face_id)
+            .or_default() += area_m2;
         let actual_normal =
             triangle_unit_normal(points).ok_or(SurfaceRecoveryError::DegenerateElement {
                 element_id: element.element_id,
@@ -223,6 +240,27 @@ pub fn validate_surface_recovery(
         if !covered_source_faces.contains(source_face) {
             return Err(SurfaceRecoveryError::UncoveredSourceFace {
                 source_face_id: *source_face,
+            });
+        }
+    }
+
+    for source_face in topology.faces.iter() {
+        let recovered_area = recovered_area_by_source_face
+            .get(&source_face.face_id)
+            .copied()
+            .unwrap_or(0.0);
+        let expected_area = source_face.area_m2;
+        let relative_error = if expected_area > 0.0 && expected_area.is_finite() {
+            (recovered_area - expected_area).abs() / expected_area
+        } else {
+            0.0
+        };
+        max_area_relative_error = max_area_relative_error.max(relative_error);
+        if relative_error > options.max_area_relative_error {
+            return Err(SurfaceRecoveryError::SourceFaceAreaMismatch {
+                source_face_id: source_face.face_id,
+                relative_error,
+                max_relative_error: options.max_area_relative_error,
             });
         }
     }

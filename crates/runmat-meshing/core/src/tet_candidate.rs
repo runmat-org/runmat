@@ -404,14 +404,78 @@ fn append_component_insertion_tets(
         options,
         tolerance,
     )?;
-    let status = insertion_tet_status(component, &accepted_tets);
+    let status = insertion_tet_status(component, &accepted_tets, options);
     if status.accepted {
         for mut tet in accepted_tets {
             tet.tet_id = tets.len() as u32;
             tets.push(tet);
         }
+        return Ok(status);
+    }
+    if let Some(star_tets) = quality_recovery_star_tets(
+        component,
+        seed_node_ids,
+        seed_points,
+        surface_nodes,
+        surface_elements,
+        options,
+    )? {
+        for mut tet in star_tets {
+            tet.tet_id = tets.len() as u32;
+            tets.push(tet);
+        }
+        return Ok(InsertionStatus {
+            accepted: true,
+            volume_ratio: 1.0,
+            max_aspect_ratio: tets
+                .iter()
+                .filter(|tet| tet.component_id == component.component_id)
+                .map(|tet| tet.aspect_ratio)
+                .fold(0.0_f64, f64::max),
+        });
     }
     Ok(status)
+}
+
+fn quality_recovery_star_tets(
+    component: &VolumeCandidateComponent,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    if seed_node_ids.is_empty() || seed_node_ids.len() != seed_points.len() {
+        return Ok(None);
+    }
+    let fan_seed_point = select_component_fan_seed_point(
+        component,
+        seed_points,
+        surface_nodes,
+        surface_elements,
+        options,
+    )?;
+    let fan_seed_node_id = seed_node_ids[seed_points
+        .iter()
+        .position(|point| {
+            distance_squared(*point, fan_seed_point)
+                <= MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m)
+                    .absolute_m
+                    .powi(2)
+        })
+        .unwrap_or(0)];
+    let mut tets = Vec::<TetCandidate>::new();
+    append_component_tets(
+        component,
+        fan_seed_node_id,
+        fan_seed_point,
+        surface_nodes,
+        surface_elements,
+        options,
+        &mut tets,
+    )?;
+    let status = insertion_tet_status(component, &tets, options);
+    Ok(status.accepted.then_some(tets))
 }
 
 fn component_insertion_tet_drafts(
@@ -498,7 +562,7 @@ fn component_insertion_tet_drafts(
         });
     }
     Ok((
-        insertion_tet_status(component, &accepted_tets),
+        insertion_tet_status(component, &accepted_tets, options),
         accepted_tets,
     ))
 }
@@ -995,6 +1059,7 @@ impl InsertionStatus {
 fn insertion_tet_status(
     component: &VolumeCandidateComponent,
     tets: &[TetCandidate],
+    options: TetCandidateOptions,
 ) -> InsertionStatus {
     if tets.is_empty() || component.volume_m3 <= f64::EPSILON {
         return InsertionStatus::rejected(0.0, 0.0);
@@ -1005,8 +1070,10 @@ fn insertion_tet_status(
         .iter()
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
+    let validation_aspect_limit = options.sliver_aspect_ratio.min(1.0 / 0.15);
     InsertionStatus {
-        accepted: (0.90..=1.10).contains(&volume_ratio) && max_aspect_ratio <= 1.0 / 0.15,
+        accepted: (0.90..=1.10).contains(&volume_ratio)
+            && max_aspect_ratio <= validation_aspect_limit,
         volume_ratio,
         max_aspect_ratio,
     }
