@@ -79,9 +79,12 @@ pub fn prepare_production_mesh(
         .map_err(ProductionMeshError::Surface)?;
     let volume_candidates = prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
         .map_err(ProductionMeshError::VolumeCandidate)?;
-    let tet_candidates =
-        form_tet_candidates(&surface, &volume_candidates, TetCandidateOptions::default())
-            .map_err(ProductionMeshError::TetCandidate)?;
+    let tet_candidates = form_tet_candidates(
+        &surface,
+        &volume_candidates,
+        tet_candidate_options_for_mesh(&topology, options),
+    )
+    .map_err(ProductionMeshError::TetCandidate)?;
 
     Ok(ProductionMeshPreparation {
         topology,
@@ -104,6 +107,26 @@ fn curve_options_for_mesh(
     topology: &SourceTopologyModel,
     options: &VolumeMeshingOptions,
 ) -> CurveDiscretizationOptions {
+    let target_size_m = target_size_for_mesh(topology, options);
+    CurveDiscretizationOptions {
+        target_size_m,
+        min_segments_per_edge: 1,
+        max_segments_per_edge: options.max_elements.max(1).min(4096),
+    }
+}
+
+fn tet_candidate_options_for_mesh(
+    topology: &SourceTopologyModel,
+    options: &VolumeMeshingOptions,
+) -> TetCandidateOptions {
+    TetCandidateOptions {
+        interior_target_size_m: Some(target_size_for_mesh(topology, options)),
+        max_interior_seed_points: options.max_elements.max(1).min(4096),
+        ..TetCandidateOptions::default()
+    }
+}
+
+fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingOptions) -> f64 {
     let target_size_m = match options.target_size {
         MeshTargetSize::LengthM(length_m) if length_m.is_finite() && length_m > 0.0 => length_m,
         MeshTargetSize::LengthM(_) | MeshTargetSize::Auto => {
@@ -113,11 +136,7 @@ fn curve_options_for_mesh(
             (span / 20.0).max(1.0e-6)
         }
     };
-    CurveDiscretizationOptions {
-        target_size_m,
-        min_segments_per_edge: 1,
-        max_segments_per_edge: options.max_elements.max(1).min(4096),
-    }
+    target_size_m
 }
 
 fn analysis_mesh_from_preparation(
