@@ -13475,17 +13475,34 @@ fn append_solved_adaptive_mesh_summary(
     let indicators =
         plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
 
-    let (markers, sizing_update) = if let Some(values) = von_mises_values {
-        let samples = structural_stress_gradient_samples(&mesh, values);
-        build_refinement_markers_from_samples(
-            &samples,
-            "structural.stress_gradient",
-            RefinementMarkerOptions::default(),
-        )
-        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?
-    } else {
-        (Vec::new(), SizingFieldUpdate::default())
-    };
+    let mut markers = Vec::new();
+    let mut sizing_update = SizingFieldUpdate::default();
+    if indicator_was_used(&indicators, "structural", "stress_gradient") {
+        if let Some(values) = von_mises_values {
+            let samples = structural_stress_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.stress_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if indicator_was_used(&indicators, "structural", "strain_energy_density") {
+        if let Some(values) = strain_energy_density_values {
+            let samples = structural_strain_energy_density_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.strain_energy_density",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if markers.is_empty() {
         AdaptiveConvergenceStatus::Converged
     } else {
@@ -13518,25 +13535,67 @@ fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Opt
         .and_then(AnalysisField::as_host_f64)
 }
 
+fn indicator_was_used(
+    indicators: &[runmat_meshing_core::RefinementIndicatorSummary],
+    namespace: &str,
+    name: &str,
+) -> bool {
+    indicators.iter().any(|indicator| {
+        indicator.namespace == namespace
+            && indicator.name == name
+            && indicator.status == runmat_meshing_core::RefinementIndicatorStatus::Used
+    })
+}
+
+fn merge_sizing_update(target: &mut SizingFieldUpdate, update: SizingFieldUpdate) {
+    target.samples.extend(update.samples);
+    target.min_size_m = match (target.min_size_m, update.min_size_m) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    target.max_size_m = match (target.max_size_m, update.max_size_m) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+}
+
 fn structural_stress_gradient_samples(
     mesh: &AnalysisMeshArtifact,
     von_mises_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
-    if von_mises_values.len() != mesh.volume_elements.len() {
+    structural_element_scalar_gradient_samples(mesh, von_mises_values)
+}
+
+fn structural_strain_energy_density_samples(
+    mesh: &AnalysisMeshArtifact,
+    strain_energy_density_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, strain_energy_density_values)
+}
+
+fn structural_element_scalar_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    if values.len() != mesh.volume_elements.len() {
         return Vec::new();
     }
     mesh.volume_elements
         .iter()
         .enumerate()
         .filter_map(|(index, element)| {
-            let value = *von_mises_values.get(index)?;
+            let value = *values.get(index)?;
             let mut indicator = 0.0_f64;
             for (other_index, other) in mesh.volume_elements.iter().enumerate() {
                 if index == other_index || shared_node_count(&element.node_ids, &other.node_ids) < 3
                 {
                     continue;
                 }
-                if let Some(other_value) = von_mises_values.get(other_index) {
+                if let Some(other_value) = values.get(other_index) {
                     indicator = indicator.max((value - *other_value).abs());
                 }
             }
