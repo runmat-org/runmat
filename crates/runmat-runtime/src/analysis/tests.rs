@@ -2018,19 +2018,53 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         adaptive_iterations[1]["convergence_status"].as_str(),
         Some("pending")
     );
-    assert!(adaptive_iterations[1]["indicators"]
-        .as_array()
-        .expect("solved adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    assert!(!adaptive_iterations[1]["markers"]
-        .as_array()
-        .expect("solved adaptive markers")
-        .is_empty());
+    assert!(
+        adaptive_iterations[1]["indicators"]
+            .as_array()
+            .expect("solved adaptive indicators")
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("structural")
+                    && indicator["name"].as_str() == Some("stress_gradient")
+                    && indicator["status"].as_str() == Some("used")
+            )
+    );
+    assert!(
+        !adaptive_iterations[1]["markers"]
+            .as_array()
+            .expect("solved adaptive markers")
+            .is_empty()
+    );
+    let refined_artifact_path = envelope
+        .data
+        .refined_analysis_mesh_artifact_path
+        .as_ref()
+        .expect("pending adaptive sizing should persist refined mesh artifact path");
+    assert!(refined_artifact_path.ends_with("analysis_mesh_refined.json"));
+    let refined_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(refined_artifact_path).expect("read refined mesh artifact"))
+            .expect("parse refined mesh artifact");
+    assert_eq!(
+        refined_payload["source_analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
+    assert!(
+        refined_payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("refined volume elements")
+            .len()
+            > payload["mesh"]["volume_elements"]
+                .as_array()
+                .expect("initial volume elements")
+                .len()
+    );
+    assert_eq!(
+        refined_payload["mesh"]["adaptive_iterations"]
+            .as_array()
+            .expect("refined adaptive iterations")
+            .len(),
+        adaptive_iterations.len()
+    );
 
     let run_payload: serde_json::Value = serde_json::from_slice(
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
@@ -2039,6 +2073,10 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     assert_eq!(
         run_payload["analysis_mesh_artifact_path"].as_str(),
         Some(artifact_path.as_str())
+    );
+    assert_eq!(
+        run_payload["refined_analysis_mesh_artifact_path"].as_str(),
+        Some(refined_artifact_path.as_str())
     );
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")

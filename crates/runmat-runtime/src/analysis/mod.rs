@@ -1327,6 +1327,18 @@ pub fn analysis_run_study_op(
         }
     }?;
 
+    let refined_analysis_mesh_artifact_path = if matches!(spec.run_kind, AnalysisRunKind::LinearStatic)
+    {
+        generate_and_persist_refined_study_analysis_mesh(
+            spec,
+            &study_fingerprint,
+            analysis_mesh_artifact_path.as_deref(),
+            &context,
+        )?
+    } else {
+        None
+    };
+
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "run",
@@ -1338,6 +1350,7 @@ pub fn analysis_run_study_op(
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
             "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
+            "refined_analysis_mesh_artifact_path": refined_analysis_mesh_artifact_path.clone(),
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -1384,6 +1397,7 @@ pub fn analysis_run_study_op(
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             prep_artifact_id: Some(study_prep_artifact_id),
             analysis_mesh_artifact_path,
+            refined_analysis_mesh_artifact_path,
             run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
@@ -13370,6 +13384,178 @@ fn generate_and_persist_study_analysis_mesh(
                 severity: OperationErrorSeverity::Error,
             },
             format!("failed to persist analysis mesh artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })
+}
+
+fn generate_and_persist_refined_study_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    study_fingerprint: &str,
+    analysis_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+) -> Result<Option<String>, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(None);
+    };
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact for refinement: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact for refinement: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let options = payload
+        .get("mesh_options")
+        .cloned()
+        .map(serde_json::from_value::<runmat_meshing_core::VolumeMeshingOptions>)
+        .transpose()
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh options for refinement: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    let mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh payload for refinement: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    let Some(latest_iteration) = mesh.adaptive_iterations.last() else {
+        return Ok(None);
+    };
+    if latest_iteration.convergence_status != AdaptiveConvergenceStatus::Pending
+        || mesh.sizing.samples.is_empty()
+        || mesh.adaptive_iterations.len() >= options.refinement.max_iterations
+    {
+        return Ok(None);
+    }
+
+    let mut refined_mesh = runmat_meshing_core::generate_analysis_mesh_with_sizing(
+        &spec.geometry,
+        options.clone(),
+        &mesh.sizing,
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_GENERATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to generate refined analysis mesh: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+            ]),
+        )
+    })?;
+    refined_mesh.mesh_id = format!(
+        "{}_refined_{}",
+        refined_mesh.mesh_id,
+        mesh.adaptive_iterations.len()
+    );
+    refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
+    validate_analysis_mesh(&refined_mesh, Default::default()).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("refined analysis mesh failed validation: {err:?}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
+            ]),
+        )
+    })?;
+
+    persist_study_evidence(
+        study_fingerprint,
+        "analysis_mesh_refined",
+        serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "source_analysis_mesh_artifact_path": path,
+            "mesh_options": options,
+            "mesh": refined_mesh,
+        }),
+    )
+    .map(Some)
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist refined analysis mesh artifact: {err}"),
             BTreeMap::from([
                 ("study_id".to_string(), spec.study_id.clone()),
                 ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
