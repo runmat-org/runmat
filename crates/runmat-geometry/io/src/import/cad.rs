@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    AssemblyNode, CadColorEvidence, CadEvaluatorSet, CadFaceEvaluator, CadLabelRef,
-    CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind,
-    Region, RegionEntityMapping, SourceGeometryKind, SurfaceMesh,
+    AssemblyNode, CadColorEvidence, CadEvaluatorSet, CadFaceEvaluationSample,
+    CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef, CadPhysicalMaterialEvidence,
+    CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, Region, RegionEntityMapping,
+    SourceGeometryKind, SurfaceMesh,
 };
 
 use crate::{
@@ -234,6 +235,7 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
         return Vec::new();
     }
     let samples = face_evaluator_samples(topology);
+    let backend_samples = backend_query_samples_by_face(topology);
     vec![CadEvaluatorSet {
         evaluator_id: format!("cad_evaluator_{}", topology.backend),
         backend: topology.backend.clone(),
@@ -257,11 +259,45 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
                 supports_normal: true,
                 supports_derivatives: true,
                 supports_curvature: true,
-                evaluation_samples: Vec::new(),
+                evaluation_samples: backend_samples
+                    .get(&face.face_id)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect(),
         curves: Vec::new(),
     }]
+}
+
+fn backend_query_samples_by_face(
+    topology: &OcctCadTopology,
+) -> BTreeMap<u64, Vec<CadFaceEvaluationSample>> {
+    let mut by_face = BTreeMap::<u64, Vec<CadFaceEvaluationSample>>::new();
+    for sample in &topology.face_evaluation_samples {
+        if !sample.projection_error_m.is_finite() || sample.projection_error_m < 0.0 {
+            continue;
+        }
+        if sample
+            .point_m
+            .iter()
+            .chain(sample.unit_normal.iter())
+            .any(|value| !value.is_finite())
+        {
+            continue;
+        }
+        by_face
+            .entry(sample.face_id)
+            .or_default()
+            .push(CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: sample.point_m,
+                uv: Some([sample.u, sample.v]),
+                projected_point_m: Some(sample.point_m),
+                unit_normal: Some(sample.unit_normal),
+                projection_error_m: Some(sample.projection_error_m),
+            });
+    }
+    by_face
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -691,6 +727,7 @@ mod tests {
                     }),
                 }),
             }],
+            face_evaluation_samples: Vec::new(),
             assembly: Some(AssemblyNode {
                 node_id: "0:1".to_string(),
                 label: "Assembly A".to_string(),
@@ -741,6 +778,14 @@ mod tests {
                 name: "Face 1".to_string(),
                 ownership: None,
             }],
+            face_evaluation_samples: vec![crate::occt::OcctRawFaceEvaluationSample {
+                face_id: 0,
+                u: 0.25,
+                v: 0.5,
+                point_m: [0.25, 0.5, 0.0],
+                unit_normal: [0.0, 0.0, 1.0],
+                projection_error_m: 0.0,
+            }],
             assembly: None,
             warnings: Vec::new(),
         };
@@ -770,6 +815,16 @@ mod tests {
         assert_eq!(
             result.asset.source_geometry.cad_evaluators[0].faces[0].reference_unit_normal,
             Some([0.0, 0.0, 1.0])
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0]
+                .evaluation_samples
+                .len(),
+            1
+        );
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].evaluation_samples[0].source,
+            CadFaceEvaluationSampleSource::BackendQuery
         );
         assert!(result
             .asset

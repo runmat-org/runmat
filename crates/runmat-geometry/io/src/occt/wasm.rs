@@ -210,6 +210,7 @@ pub(crate) fn import_cad_topology(
                     material_density_value_type: item.material_density_value_type,
                 })
                 .collect(),
+            face_evaluation_samples: Vec::new(),
             assembly_nodes: payload
                 .assembly_nodes
                 .into_iter()

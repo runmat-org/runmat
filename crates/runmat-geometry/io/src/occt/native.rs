@@ -1,6 +1,7 @@
 use super::{
     ffi, topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart,
-    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceSemantic, OcctRawTopology,
+    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic,
+    OcctRawTopology,
 };
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
@@ -154,6 +155,18 @@ fn payload_to_topology(
                     material_density: item.material_density,
                     material_density_name: item.material_density_name,
                     material_density_value_type: item.material_density_value_type,
+                })
+                .collect(),
+            face_evaluation_samples: payload
+                .face_evaluation_samples
+                .into_iter()
+                .map(|item| OcctRawFaceEvaluationSample {
+                    face_id: item.face_id,
+                    u: item.u,
+                    v: item.v,
+                    point_m: [item.point_x, item.point_y, item.point_z],
+                    unit_normal: [item.normal_x, item.normal_y, item.normal_z],
+                    projection_error_m: item.projection_error,
                 })
                 .collect(),
             assembly_nodes: payload

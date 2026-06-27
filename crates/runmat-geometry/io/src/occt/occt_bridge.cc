@@ -1,6 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 
 #include <BRep_Builder.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
@@ -42,9 +43,11 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -665,6 +668,64 @@ void push_triangle(OcctImportPayload& result,
   result.triangle_face_ids.push_back(face_id);
 }
 
+bool finite_value(double value) {
+  return std::isfinite(value);
+}
+
+void append_face_evaluation_sample(OcctImportPayload& result,
+                                   const TopoDS_Face& face,
+                                   std::uint64_t face_id,
+                                   const OcctImportOptions& options) {
+  check_cancelled(options);
+  Standard_Real u_min = 0.0;
+  Standard_Real u_max = 0.0;
+  Standard_Real v_min = 0.0;
+  Standard_Real v_max = 0.0;
+  BRepTools::UVBounds(face, u_min, u_max, v_min, v_max);
+  if (!finite_value(u_min) || !finite_value(u_max) || !finite_value(v_min) ||
+      !finite_value(v_max)) {
+    return;
+  }
+  const Standard_Real u = 0.5 * (u_min + u_max);
+  const Standard_Real v = 0.5 * (v_min + v_max);
+  if (!finite_value(u) || !finite_value(v)) {
+    return;
+  }
+
+  BRepAdaptor_Surface surface(face);
+  gp_Pnt point;
+  gp_Vec d_u;
+  gp_Vec d_v;
+  surface.D1(u, v, point, d_u, d_v);
+  gp_Vec normal = d_u.Crossed(d_v);
+  const Standard_Real normal_magnitude = normal.Magnitude();
+  if (!finite_value(normal_magnitude) || normal_magnitude <= 1.0e-15) {
+    return;
+  }
+  normal.Divide(normal_magnitude);
+  if (face.Orientation() == TopAbs_REVERSED) {
+    normal.Reverse();
+  }
+
+  OcctFaceEvaluationSamplePayload sample;
+  sample.face_id = face_id;
+  sample.u = u;
+  sample.v = v;
+  sample.point_x = point.X();
+  sample.point_y = point.Y();
+  sample.point_z = point.Z();
+  sample.normal_x = normal.X();
+  sample.normal_y = normal.Y();
+  sample.normal_z = normal.Z();
+  sample.projection_error = 0.0;
+  if (!finite_value(sample.point_x) || !finite_value(sample.point_y) ||
+      !finite_value(sample.point_z) || !finite_value(sample.normal_x) ||
+      !finite_value(sample.normal_y) || !finite_value(sample.normal_z)) {
+    return;
+  }
+  result.face_evaluation_samples.push_back(sample);
+}
+
 void append_face_mesh(OcctImportPayload& result,
                       const TopoDS_Face& face,
                       std::uint64_t face_id,
@@ -828,6 +889,7 @@ OcctImportPayload import_cad_bytes(rust::Str path,
                                   std::to_string(face_id + 1));
       }
     }
+    append_face_evaluation_sample(result, face, face_id, options);
     append_face_mesh(result, face, face_id, resolved_face_name, options);
     if (has_face_semantics(semantic)) {
       result.face_semantics.push_back(semantic);
@@ -945,6 +1007,7 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
       topology.warnings.push_back("OCCT preview tessellation did not complete for face " +
                                   std::to_string(face_id + 1));
     }
+    append_face_evaluation_sample(topology, face, face_id, options);
     append_face_mesh(topology, face, face_id, resolved_face_name, options);
     if (has_face_semantics(semantic)) {
       topology.face_semantics.push_back(semantic);
