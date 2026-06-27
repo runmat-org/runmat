@@ -2803,6 +2803,9 @@ fn select_generated_figure(
         ));
     }
     let Some(field_id) = field_id else {
+        if let Some(index) = default_generated_figure_index(figures) {
+            return Ok(figures.remove(index));
+        }
         return Ok(figures.remove(0));
     };
     if let Some(index) = figures.iter().position(|figure| {
@@ -2824,6 +2827,25 @@ fn select_generated_figure(
         &ERROR_INPUT,
         format!("FEA field `{field_id}` did not produce a mesh figure; available figure fields: {available}"),
     ))
+}
+
+#[cfg(feature = "plot-core")]
+fn default_generated_figure_index(
+    figures: &[crate::analysis::AnalysisGeneratedFigure],
+) -> Option<usize> {
+    const PREFERRED_FIELDS: &[&str] = &[
+        "structural.von_mises",
+        "structural.nodal_von_mises",
+        "structural.stress",
+    ];
+    PREFERRED_FIELDS.iter().find_map(|preferred| {
+        figures.iter().position(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == preferred)
+        })
+    })
 }
 
 #[cfg(feature = "plot-core")]
@@ -4073,6 +4095,36 @@ run:
             request.options.mesh_source,
             crate::analysis::AnalysisFigureMeshSource::Cad
         );
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn fea_plot_default_prefers_von_mises_scalar_figure() {
+        let mut figures = vec![
+            generated_test_figure("deformation", vec!["structural.displacement"]),
+            generated_test_figure("stress", vec!["structural.von_mises"]),
+            generated_test_figure("residual", vec!["structural.residual_norm"]),
+        ];
+
+        let selected =
+            select_generated_figure(&mut figures, None).expect("default figure should select");
+
+        assert_eq!(selected.title, "stress");
+    }
+
+    #[cfg(feature = "plot-core")]
+    fn generated_test_figure(
+        title: &str,
+        field_ids: Vec<&str>,
+    ) -> crate::analysis::AnalysisGeneratedFigure {
+        crate::analysis::AnalysisGeneratedFigure {
+            kind: crate::analysis::AnalysisGeneratedFigureKind::MeshResult,
+            title: title.to_string(),
+            field_ids: field_ids.into_iter().map(str::to_string).collect(),
+            topology_ids: Vec::new(),
+            warnings: Vec::new(),
+            figure: runmat_plot::plots::Figure::new(),
+        }
     }
 
     fn synthetic_plot_run_value() -> (Value, Value) {
