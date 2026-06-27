@@ -6,6 +6,7 @@ pub mod options;
 pub mod provenance;
 pub mod quality;
 pub mod sizing;
+pub mod source_topology;
 pub mod topology;
 pub mod validation;
 pub mod volume;
@@ -34,6 +35,10 @@ pub use options::{
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection};
+pub use source_topology::{
+    extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
+    SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
+};
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationError,
