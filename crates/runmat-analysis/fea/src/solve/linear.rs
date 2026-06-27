@@ -193,6 +193,11 @@ fn graph_tuned_preconditioner(
 }
 
 fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> usize {
+    if dense_stiffness(&summary.operator).is_some() {
+        return base_max_iters
+            .max(summary.dof_count.saturating_mul(2))
+            .max(256);
+    }
     if let Some(graph) = summary.prep_graph_assembly.as_ref() {
         if graph.ordering_reduction_ratio > 0.15 {
             return ((base_max_iters as f64) * 0.85).round() as usize;
@@ -216,4 +221,72 @@ fn graph_solver_traversal_order(summary: &AssemblySummary) -> Vec<usize> {
         });
     }
     order
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assembly::{AssemblySummary, StructuralMaterialSummary},
+        operator::OperatorSystem,
+    };
+
+    fn dense_summary(dof_count: usize) -> AssemblySummary {
+        AssemblySummary {
+            dof_count,
+            structural_node_count: dof_count / 3,
+            structural_translational_dof_count: dof_count,
+            structural_rotational_dof_count: 0,
+            structural_rotation_node_count: 0,
+            structural_moment_load_count: 0,
+            structural_direct_rotational_moment_load_count: 0,
+            structural_wrench_lowering: Vec::new(),
+            structural_rotational_constraint_count: 0,
+            structural_beam_element_count: 0,
+            structural_shell_element_count: 0,
+            structural_solid_element_count: dof_count / 12,
+            structural_solid_recovery: Vec::new(),
+            structural_dof_layout: Default::default(),
+            structural_beam_recovery: Vec::new(),
+            structural_shell_recovery: Vec::new(),
+            constrained_dof_count: 0,
+            load_count: 1,
+            structural_material: StructuralMaterialSummary {
+                youngs_modulus_pa: 1.0,
+                poisson_ratio: 0.3,
+                density_kg_per_m3: 1.0,
+                lame_lambda_pa: 1.0,
+                shear_modulus_pa: 1.0,
+            },
+            prep_assembly: None,
+            prep_operator_topology: None,
+            prep_region_topology: None,
+            prep_element_assembly: None,
+            prep_element_connectivity: None,
+            prep_graph_assembly: None,
+            prep_recovery_edges: Vec::new(),
+            prep_calibration: None,
+            prep_acceptance: None,
+            prep_coordinates: None,
+            thermo_mechanical: None,
+            electro_thermal: None,
+            operator: OperatorSystem {
+                dof_count,
+                constrained: vec![false; dof_count],
+                stiffness_dense: Some(vec![0.0; dof_count * dof_count]),
+                stiffness_diag: vec![1.0; dof_count],
+                stiffness_upper: vec![0.0; dof_count.saturating_sub(1)],
+                mass_diag: vec![1.0; dof_count],
+                damping_diag: vec![0.0; dof_count],
+                rhs: vec![1.0; dof_count],
+            },
+        }
+    }
+
+    #[test]
+    fn dense_stiffness_max_iterations_scale_with_dof_count() {
+        let summary = dense_summary(144);
+
+        assert_eq!(graph_tuned_max_iters(&summary, 64), 288);
+    }
 }
