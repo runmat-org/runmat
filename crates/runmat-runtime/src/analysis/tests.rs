@@ -2063,7 +2063,11 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
             .as_array()
             .expect("refined adaptive iterations")
             .len(),
-        adaptive_iterations.len()
+        adaptive_iterations.len() + 1
+    );
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(refined_artifact_path.as_str())
     );
 
     let run_payload: serde_json::Value = serde_json::from_slice(
@@ -2083,7 +2087,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .expect("run should be persisted");
     assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
-            && diagnostic.message.contains(artifact_path)
+            && diagnostic.message.contains(refined_artifact_path)
             && diagnostic
                 .message
                 .contains("analysis_mesh_volume_element_count=")

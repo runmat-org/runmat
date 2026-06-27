@@ -1208,9 +1208,12 @@ pub fn analysis_run_study_op(
         &ReferenceFrame::Global,
         context.clone(),
     )?;
-    let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) = match spec
-        .run_kind
-    {
+    let (
+        run_envelope,
+        resolved_run_options,
+        resolved_electromagnetic_run_options,
+        refined_analysis_mesh_artifact_path,
+    ) = match spec.run_kind {
         AnalysisRunKind::LinearStatic => {
             let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
             attach_prep_artifact_to_run_options(&mut options, &study_prep_artifact_id);
@@ -1218,13 +1221,41 @@ pub fn analysis_run_study_op(
                 &mut options,
                 analysis_mesh_artifact_path.as_deref(),
             );
-            let run = analysis_run_linear_static_with_options(
+            let initial_run = analysis_run_linear_static_with_options(
                 &model,
                 spec.backend,
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            let refined_analysis_mesh_artifact_path = generate_and_persist_refined_study_analysis_mesh(
+                spec,
+                &study_fingerprint,
+                analysis_mesh_artifact_path.as_deref(),
+                &context,
+            )?;
+            if let Some(refined_path) = refined_analysis_mesh_artifact_path.as_ref() {
+                let mut refined_options = options.clone();
+                refined_options.analysis_mesh_artifact_path = Some(refined_path.clone());
+                let refined_run = analysis_run_linear_static_with_options(
+                    &model,
+                    spec.backend,
+                    refined_options.clone(),
+                    context.clone(),
+                )?;
+                Ok((
+                    refined_run,
+                    run_options_to_json(&refined_options),
+                    None,
+                    refined_analysis_mesh_artifact_path,
+                ))
+            } else {
+                Ok((
+                    initial_run,
+                    run_options_to_json(&options),
+                    None,
+                    refined_analysis_mesh_artifact_path,
+                ))
+            }
         }
         AnalysisRunKind::Modal => {
             let mut options = spec.modal_run_options.clone().unwrap_or_default();
@@ -1235,7 +1266,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Acoustic => {
             let mut options = spec.acoustic_run_options.clone().unwrap_or_default();
@@ -1246,7 +1277,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Thermal => {
             let mut options = spec.thermal_run_options.clone().unwrap_or_default();
@@ -1257,7 +1288,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Transient => {
             let mut options = spec.transient_run_options.clone().unwrap_or_default();
@@ -1268,7 +1299,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Cfd => {
             let mut options = spec.cfd_run_options.clone().unwrap_or_default();
@@ -1279,7 +1310,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Cht => {
             let mut options = spec.cht_run_options.clone().unwrap_or_default();
@@ -1290,7 +1321,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Fsi => {
             let mut options = spec.fsi_run_options.clone().unwrap_or_default();
@@ -1301,7 +1332,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Nonlinear => {
             let mut options = spec.nonlinear_run_options.clone().unwrap_or_default();
@@ -1312,7 +1343,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Electromagnetic => {
             let mut options = spec.electromagnetic_run_options.clone().unwrap_or_default();
@@ -1323,21 +1354,9 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), Some(options)))
+            Ok((run, run_options_to_json(&options), Some(options), None))
         }
     }?;
-
-    let refined_analysis_mesh_artifact_path = if matches!(spec.run_kind, AnalysisRunKind::LinearStatic)
-    {
-        generate_and_persist_refined_study_analysis_mesh(
-            spec,
-            &study_fingerprint,
-            analysis_mesh_artifact_path.as_deref(),
-            &context,
-        )?
-    } else {
-        None
-    };
 
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
