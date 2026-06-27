@@ -4746,7 +4746,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
     mesh.quality.min_scaled_jacobian = 0.01;
     mesh.quality.max_aspect_ratio = 30.0;
 
-    let reasons = solid_mesh_quality_reasons(Some(&mesh));
+    let reasons = solid_mesh_quality_reasons(&sample_model(), Some(&mesh));
 
     assert!(reasons
         .iter()
@@ -4760,10 +4760,52 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 
     let mut empty = minimal_analysis_mesh();
     empty.volume_elements.clear();
-    let empty_reasons = solid_mesh_quality_reasons(Some(&empty));
+    let empty_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&empty));
     assert!(empty_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::SolidMeshNoVolumeElements));
+}
+
+#[test]
+fn solid_mesh_material_coverage_uses_region_assignments() {
+    let mesh = minimal_analysis_mesh();
+    let mut multi_material = sample_model();
+    multi_material.materials.push(MaterialModel {
+        material_id: "mat_aluminum".to_string(),
+        name: "Aluminum".to_string(),
+        mechanical: MaterialMechanicalModel {
+            youngs_modulus_pa: 70e9,
+            poisson_ratio: 0.33,
+            density_kg_per_m3: 2700.0,
+        },
+        thermal: MaterialThermalModel::default(),
+        acoustic: None,
+        electrical: None,
+        plastic: None,
+    });
+
+    let missing = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
+    assert!(missing
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
+    multi_material.material_assignments = vec![MaterialAssignment {
+        region_id: "solid".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert!(solid_mesh_quality_reasons(&multi_material, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
+    multi_material.material_assignments[0].region_id = "other_region".to_string();
+    let uncovered = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
+    let reason = uncovered
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete)
+        .expect("uncovered mesh material region should be reported");
+    assert!(reason.detail.contains("solid"));
 }
 
 fn minimal_analysis_mesh() -> AnalysisMeshArtifact {

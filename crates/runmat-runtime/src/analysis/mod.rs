@@ -9296,12 +9296,13 @@ pub fn analysis_run_linear_static_with_options(
     });
     let field_topology_reasons =
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
-    let solid_mesh_reasons = solid_mesh_quality_reasons(analysis_mesh.as_ref());
+    let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
         matches!(
             reason.code,
             QualityReasonCode::SolidMeshNoVolumeElements
                 | QualityReasonCode::SolidMeshUnsupportedElementKind
+                | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
         )
     });
@@ -9451,7 +9452,10 @@ fn field_topology_quality_reasons(
         .collect()
 }
 
-fn solid_mesh_quality_reasons(analysis_mesh: Option<&AnalysisMeshArtifact>) -> Vec<QualityReason> {
+fn solid_mesh_quality_reasons(
+    model: &AnalysisModel,
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+) -> Vec<QualityReason> {
     let Some(mesh) = analysis_mesh else {
         return Vec::new();
     };
@@ -9473,6 +9477,12 @@ fn solid_mesh_quality_reasons(analysis_mesh: Option<&AnalysisMeshArtifact>) -> V
                 "analysis mesh contains unsupported solid element kind {:?} at element {}",
                 element.kind, element.element_id
             ),
+        });
+    }
+    if let Some(detail) = material_coverage_gap_detail(model, mesh) {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshMaterialCoverageIncomplete,
+            detail,
         });
     }
     let thresholds = runmat_meshing_core::QualityThresholds::default();
@@ -9499,6 +9509,49 @@ fn solid_mesh_quality_reasons(analysis_mesh: Option<&AnalysisMeshArtifact>) -> V
         });
     }
     reasons
+}
+
+fn material_coverage_gap_detail(
+    model: &AnalysisModel,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<String> {
+    if mesh.volume_elements.is_empty() {
+        return None;
+    }
+    if model.material_assignments.is_empty() {
+        return (model.materials.len() != 1).then(|| {
+            format!(
+                "analysis mesh has {} material regions but model has {} materials and no material assignments",
+                mesh.volume_elements
+                    .iter()
+                    .map(|element| element.material_region_id.as_str())
+                    .collect::<HashSet<_>>()
+                    .len(),
+                model.materials.len()
+            )
+        });
+    }
+    let assigned_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut uncovered = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .filter(|region_id| !assigned_region_ids.contains(region_id))
+        .collect::<Vec<_>>();
+    uncovered.sort_unstable();
+    uncovered.dedup();
+    if uncovered.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "analysis mesh volume material regions are not covered by model material assignments: {}",
+            uncovered.join(",")
+        ))
+    }
 }
 
 fn primary_solver_mesh_field_expected_count(
