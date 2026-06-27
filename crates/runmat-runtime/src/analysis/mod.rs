@@ -180,13 +180,13 @@ pub use contracts::{
     TransientIntegrationMethod, TransientResultsData,
 };
 pub use fea_document::{
-    is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
-    FeaResolvedDocument,
+    FeaResolvedDocument, is_fea_file_path, load_fea_document_from_path_async,
+    parse_and_resolve_fea_document,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
-    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisGeneratedFigure,
-    AnalysisGeneratedFigureKind,
+    AnalysisFigureGenerationOptions, AnalysisFigureMeshSource, AnalysisGeneratedFigure,
+    AnalysisGeneratedFigureKind, analysis_generate_study_run_figures,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";

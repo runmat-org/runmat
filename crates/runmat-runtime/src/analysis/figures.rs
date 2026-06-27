@@ -36,12 +36,20 @@ pub struct AnalysisGeneratedFigure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisFigureMeshSource {
+    Auto,
+    Solver,
+    Cad,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnalysisFigureGenerationOptions {
     pub max_overlay_values: usize,
     pub max_vector_glyphs: usize,
     pub max_mesh_result_figures: usize,
     pub max_mesh_geometry_bytes: usize,
     pub edge_overlay_triangle_limit: usize,
+    pub mesh_source: AnalysisFigureMeshSource,
     pub show_solver_mesh_edges: bool,
     pub apply_deformation_overlay: bool,
     pub include_comparison: bool,
@@ -56,6 +64,7 @@ impl Default for AnalysisFigureGenerationOptions {
             max_mesh_result_figures: 4,
             max_mesh_geometry_bytes: 256 * 1024 * 1024,
             edge_overlay_triangle_limit: 250_000,
+            mesh_source: AnalysisFigureMeshSource::Auto,
             show_solver_mesh_edges: false,
             apply_deformation_overlay: true,
             include_comparison: true,
@@ -656,20 +665,36 @@ fn base_mesh_figure_for_run_source(
     options: AnalysisFigureGenerationOptions,
 ) -> Option<Figure> {
     let title = title.into();
-    if let Some(topology) = render_topology {
-        if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
-            return Some(figure);
+    match options.mesh_source {
+        AnalysisFigureMeshSource::Auto => {
+            if let Some(topology) = render_topology {
+                if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
+                    return Some(figure);
+                }
+            }
+            geometry_preview_figure(
+                geometry,
+                title,
+                GeometryPreviewFigureOptions {
+                    edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+                    ..GeometryPreviewFigureOptions::default()
+                },
+            )
+            .ok()
         }
+        AnalysisFigureMeshSource::Solver => render_topology
+            .and_then(|topology| render_topology_figure(topology, title, options).ok()),
+        AnalysisFigureMeshSource::Cad => geometry_preview_figure(
+            geometry,
+            title,
+            GeometryPreviewFigureOptions {
+                edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+                presentation: crate::geometry::GeometryPreviewPresentation::Cad,
+                ..GeometryPreviewFigureOptions::default()
+            },
+        )
+        .ok(),
     }
-    geometry_preview_figure(
-        geometry,
-        title,
-        GeometryPreviewFigureOptions {
-            edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
-            ..GeometryPreviewFigureOptions::default()
-        },
-    )
-    .ok()
 }
 
 fn render_topology_figure(

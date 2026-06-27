@@ -2594,6 +2594,7 @@ struct FeaPlotRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FeaPlotOptions {
     field_id: Option<String>,
+    mesh_source: crate::analysis::AnalysisFigureMeshSource,
     show_solver_mesh_edges: bool,
     apply_deformation_overlay: bool,
 }
@@ -2602,6 +2603,7 @@ impl Default for FeaPlotOptions {
     fn default() -> Self {
         Self {
             field_id: None,
+            mesh_source: crate::analysis::AnalysisFigureMeshSource::Auto,
             show_solver_mesh_edges: false,
             apply_deformation_overlay: true,
         }
@@ -2673,6 +2675,9 @@ fn split_plot_options(args: &[Value]) -> BuiltinResult<(&[Value], FeaPlotOptions
                 options.show_solver_mesh_edges =
                     plot_mesh_option_shows_solver_edges(&args[end - 1])?;
             }
+            "overlay" => {
+                options.mesh_source = plot_overlay_option_mesh_source(&args[end - 1])?;
+            }
             "deformed" => {
                 options.apply_deformation_overlay = bool_from_value(PLOT_NAME, &args[end - 1])?;
             }
@@ -2688,7 +2693,7 @@ fn is_plot_option_name(value: &Value) -> bool {
         .map(|name| {
             matches!(
                 name.to_ascii_lowercase().as_str(),
-                "field" | "fieldid" | "field_id" | "mesh" | "deformed"
+                "field" | "fieldid" | "field_id" | "mesh" | "overlay" | "deformed"
             )
         })
         .unwrap_or(false)
@@ -2704,6 +2709,26 @@ fn plot_mesh_option_shows_solver_edges(value: &Value) -> BuiltinResult<bool> {
             &ERROR_INPUT,
             format!(
                 "unsupported fea.plot mesh option `{other}`; expected solver, solver_edges, cad, geometry, surface, or none"
+            ),
+        )),
+    }
+}
+
+fn plot_overlay_option_mesh_source(
+    value: &Value,
+) -> BuiltinResult<crate::analysis::AnalysisFigureMeshSource> {
+    let overlay = scalar_string(value, PLOT_NAME, &ERROR_INPUT)?;
+    match overlay.to_ascii_lowercase().as_str() {
+        "auto" => Ok(crate::analysis::AnalysisFigureMeshSource::Auto),
+        "solver" | "mesh" | "boundary" | "solver_boundary" | "solverboundary" => {
+            Ok(crate::analysis::AnalysisFigureMeshSource::Solver)
+        }
+        "cad" | "geometry" | "surface" => Ok(crate::analysis::AnalysisFigureMeshSource::Cad),
+        other => Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_INPUT,
+            format!(
+                "unsupported fea.plot overlay option `{other}`; expected auto, solver, or cad"
             ),
         )),
     }
@@ -2758,6 +2783,7 @@ fn generate_plot_figures(
             include_comparison: false,
             include_trends: false,
             max_mesh_result_figures: 8,
+            mesh_source: options.mesh_source,
             show_solver_mesh_edges: options.show_solver_mesh_edges,
             apply_deformation_overlay: options.apply_deformation_overlay,
             ..crate::analysis::AnalysisFigureGenerationOptions::default()
@@ -4037,12 +4063,18 @@ run:
             Value::String("solver".to_string()),
             Value::String("deformed".to_string()),
             Value::Bool(false),
+            Value::String("overlay".to_string()),
+            Value::String("cad".to_string()),
         ])
-        .expect("plot request should parse mesh solver and deformation options");
+        .expect("plot request should parse mesh, deformation, and overlay options");
 
         assert_eq!(request.field_id.as_deref(), Some("von_mises"));
         assert!(request.options.show_solver_mesh_edges);
         assert!(!request.options.apply_deformation_overlay);
+        assert_eq!(
+            request.options.mesh_source,
+            crate::analysis::AnalysisFigureMeshSource::Cad
+        );
     }
 
     fn synthetic_plot_run_value() -> (Value, Value) {
