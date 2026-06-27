@@ -59,6 +59,8 @@ pub fn run_linear_static_with_options(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let analysis_mesh_present = options.analysis_mesh.is_some();
+    let prep_context_present = options.prep_context.is_some();
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -198,6 +200,14 @@ pub fn run_linear_static_with_options(
     if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
         diagnostics.push(diagnostic);
     }
+    if let Some(diagnostic) = structural_legacy_surrogate_diagnostic(
+        model,
+        &summary,
+        analysis_mesh_present,
+        prep_context_present,
+    ) {
+        diagnostics.push(diagnostic);
+    }
     if let (Some(residual_norm), Some(equation_scale)) = (
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),
@@ -312,6 +322,35 @@ pub fn run_linear_static_with_options(
         diagnostics,
         fields,
     })
+}
+
+fn structural_legacy_surrogate_diagnostic(
+    model: &AnalysisModel,
+    summary: &AssemblySummary,
+    analysis_mesh_present: bool,
+    prep_context_present: bool,
+) -> Option<FeaDiagnostic> {
+    if analysis_mesh_present || model_has_explicit_structural_elements(model) {
+        return None;
+    }
+
+    Some(FeaDiagnostic {
+        code: "FEA_STRUCTURAL_LEGACY_SURROGATE".to_string(),
+        severity: FeaDiagnosticSeverity::Warning,
+        message: format!(
+            "basis=legacy_surrogate_topology dof_count={} surrogate_element_count={} prep_context_present={} production_eligible=false recommendation=provide_analysis_mesh",
+            summary.dof_count,
+            summary.structural_solid_element_count,
+            prep_context_present
+        ),
+    })
+}
+
+fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
+    model
+        .structural
+        .as_ref()
+        .is_some_and(|structural| !structural.elements.is_empty())
 }
 
 fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {

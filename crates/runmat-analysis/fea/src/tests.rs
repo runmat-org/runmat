@@ -569,6 +569,14 @@ fn convergence_diagnostics_are_emitted() {
             && diag.message.contains("basis=operator_connectivity")
             && diag.message.contains("active_stiffness_edge_count=")
     }));
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_LEGACY_SURROGATE"
+            && diag.message.contains("basis=legacy_surrogate_topology")
+            && diag.message.contains("production_eligible=false")
+            && diag
+                .message
+                .contains("recommendation=provide_analysis_mesh")
+    }));
 }
 
 #[test]
@@ -598,6 +606,10 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
             && diag.message.contains("solver_mesh_node_count=4")
             && diag.message.contains("solver_mesh_element_count=1")
     }));
+    assert!(!result
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_STRUCTURAL_LEGACY_SURROGATE"));
 }
 
 #[test]
