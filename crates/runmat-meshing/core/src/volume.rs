@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     artifact::{
-        AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
-        ANALYSIS_MESH_SCHEMA_VERSION,
+        ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+        AnalysisVolumeElement,
     },
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
@@ -68,6 +68,17 @@ impl VolumeMesher for StructuredTetMesher {
         input: &BoundaryMeshInput,
         options: &VolumeMeshingOptions,
     ) -> Result<AnalysisMeshArtifact, MeshingError> {
+        self.mesh_with_sizing(input, options, None)
+    }
+}
+
+impl StructuredTetMesher {
+    pub fn mesh_with_sizing(
+        &self,
+        input: &BoundaryMeshInput,
+        options: &VolumeMeshingOptions,
+        sizing: Option<&MeshSizingField>,
+    ) -> Result<AnalysisMeshArtifact, MeshingError> {
         if !matches!(options.element, VolumeElementKind::Tet4) {
             return Err(MeshingError::UnsupportedElementKind(options.element));
         }
@@ -78,7 +89,7 @@ impl VolumeMesher for StructuredTetMesher {
             return Err(MeshingError::EmptyBoundaryRegions);
         }
 
-        let divisions = grid_divisions(input, options)?;
+        let divisions = grid_divisions(input, options, sizing)?;
         let nodes = grid_nodes(input, divisions);
         let node_id_at = |i: usize, j: usize, k: usize| -> u32 {
             (1 + i + (divisions + 1) * (j + (divisions + 1) * k)) as u32
@@ -144,6 +155,8 @@ impl VolumeMesher for StructuredTetMesher {
 
         let boundary_faces = grid_boundary_faces(input, divisions, &node_id_at);
         let quality = quality_report(element_quality);
+        let mut mesh_sizing = sizing.cloned().unwrap_or_default();
+        mesh_sizing.global_target_size_m = target_size_m(input, options, divisions);
 
         Ok(AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -153,12 +166,7 @@ impl VolumeMesher for StructuredTetMesher {
             boundary_faces,
             boundary_edges: Vec::new(),
             quality,
-            sizing: MeshSizingField {
-                global_target_size_m: target_size_m(input, options, divisions),
-                min_size_m: None,
-                max_size_m: None,
-                samples: Vec::new(),
-            },
+            sizing: mesh_sizing,
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
                 algorithm: "structured_bbox_tet/v1".to_string(),
@@ -178,9 +186,19 @@ pub fn generate_analysis_mesh(
     StructuredTetMesher.mesh(&input, &options)
 }
 
+pub fn generate_analysis_mesh_with_sizing(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    options: VolumeMeshingOptions,
+    sizing: &MeshSizingField,
+) -> Result<AnalysisMeshArtifact, MeshingError> {
+    let input = BoundaryMeshInput::from_geometry(geometry)?;
+    StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
+}
+
 fn grid_divisions(
     input: &BoundaryMeshInput,
     options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
 ) -> Result<usize, MeshingError> {
     let max_by_budget = ((options.max_elements / 6).max(1) as f64)
         .cbrt()
@@ -202,7 +220,29 @@ fn grid_divisions(
             (max_span / length_m).ceil().max(1.0) as usize
         }
     };
+    let requested = sizing
+        .and_then(sizing_target_size_m)
+        .map(|length_m| requested.max(divisions_for_target_size(input, length_m)))
+        .unwrap_or(requested);
     Ok(requested.clamp(1, max_by_budget))
+}
+
+fn divisions_for_target_size(input: &BoundaryMeshInput, length_m: f64) -> usize {
+    let max_span = (0..3)
+        .map(|axis| input.bounds_max_m[axis] - input.bounds_min_m[axis])
+        .fold(0.0_f64, f64::max);
+    (max_span / length_m).ceil().max(1.0) as usize
+}
+
+fn sizing_target_size_m(sizing: &MeshSizingField) -> Option<f64> {
+    sizing
+        .samples
+        .iter()
+        .map(|sample| sample.target_size_m)
+        .chain(sizing.min_size_m)
+        .chain(sizing.global_target_size_m)
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .reduce(f64::min)
 }
 
 fn grid_nodes(input: &BoundaryMeshInput, divisions: usize) -> Vec<AnalysisMeshNode> {
@@ -481,7 +521,7 @@ fn norm(value: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{validate_analysis_mesh, MeshKindRequest};
+    use crate::{MeshKindRequest, SizingSample, validate_analysis_mesh};
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
         SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
@@ -574,19 +614,22 @@ mod tests {
         assert_eq!(mesh.nodes.len(), 27);
         assert_eq!(mesh.volume_elements.len(), 48);
         assert_eq!(mesh.boundary_faces.len(), 48);
-        assert!(mesh.boundary_faces.iter().any(|face| face
-            .region_ids
-            .iter()
-            .any(|region| region == "region_fixed")));
-        assert!(mesh
-            .boundary_faces
-            .iter()
-            .any(|face| face.region_ids.iter().any(|region| region == "region_load")));
-        assert!(mesh
-            .quality
-            .elements
-            .iter()
-            .all(|quality| quality.volume_m3 > 0.0));
+        assert!(mesh.boundary_faces.iter().any(|face| {
+            face.region_ids
+                .iter()
+                .any(|region| region == "region_fixed")
+        }));
+        assert!(
+            mesh.boundary_faces
+                .iter()
+                .any(|face| face.region_ids.iter().any(|region| region == "region_load"))
+        );
+        assert!(
+            mesh.quality
+                .elements
+                .iter()
+                .all(|quality| quality.volume_m3 > 0.0)
+        );
         assert!(mesh.volume_elements.iter().all(|element| {
             tet_volume(
                 [
@@ -625,6 +668,63 @@ mod tests {
 
         assert!(fine.volume_elements.len() > coarse.volume_elements.len());
         assert!(fine.nodes.len() > coarse.nodes.len());
+    }
+
+    #[test]
+    fn sizing_field_controls_structured_tet_density() {
+        let geometry = cube_geometry();
+        let base_options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        let coarse = generate_analysis_mesh(&geometry, base_options.clone())
+            .expect("coarse mesh should generate");
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.5, 0.5],
+                target_size_m: 0.25,
+                reason: Some("structural.stress_gradient".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let refined = generate_analysis_mesh_with_sizing(&geometry, base_options, &sizing)
+            .expect("sizing-driven mesh should generate");
+
+        assert!(refined.volume_elements.len() > coarse.volume_elements.len());
+        assert_eq!(refined.sizing.samples.len(), 1);
+        assert_eq!(
+            refined.sizing.samples[0].reason.as_deref(),
+            Some("structural.stress_gradient")
+        );
+    }
+
+    #[test]
+    fn sizing_field_refinement_respects_element_budget() {
+        let geometry = cube_geometry();
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.5, 0.5],
+                target_size_m: 0.01,
+                reason: Some("structural.stress_gradient".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let mesh = generate_analysis_mesh_with_sizing(
+            &geometry,
+            VolumeMeshingOptions {
+                target_size: MeshTargetSize::LengthM(1.0),
+                max_elements: 48,
+                ..VolumeMeshingOptions::default()
+            },
+            &sizing,
+        )
+        .expect("budgeted sizing-driven mesh should generate");
+
+        assert!(mesh.volume_elements.len() <= 48);
+        assert_eq!(mesh.volume_elements.len(), 48);
     }
 
     #[test]

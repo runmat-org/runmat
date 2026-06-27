@@ -12,10 +12,10 @@ pub mod volume;
 pub use adaptive::{
     AdaptiveConvergenceMetrics, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
     RefinementIndicatorAvailability, RefinementIndicatorKey, RefinementIndicatorSample,
-    RefinementIndicatorStatus, RefinementIndicatorSummary, RefinementMarker,
-    RefinementMarkerError, RefinementMarkerOptions, SizingFieldUpdate,
-    build_refinement_markers_from_samples, evaluate_adaptive_convergence,
-    plan_refinement_indicators, structural_static_default_refinement_indicators,
+    RefinementIndicatorStatus, RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError,
+    RefinementMarkerOptions, SizingFieldUpdate, build_refinement_markers_from_samples,
+    evaluate_adaptive_convergence, plan_refinement_indicators,
+    structural_static_default_refinement_indicators,
 };
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
@@ -32,8 +32,11 @@ pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityK
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{MeshSizingField, SizingSample};
 pub use topology::{BoundaryElementKind, VolumeElementKind};
-pub use validation::{validate_analysis_mesh, AnalysisMeshValidationError};
-pub use volume::{generate_analysis_mesh, MeshingError, StructuredTetMesher, VolumeMesher};
+pub use validation::{AnalysisMeshValidationError, validate_analysis_mesh};
+pub use volume::{
+    MeshingError, StructuredTetMesher, VolumeMesher, generate_analysis_mesh,
+    generate_analysis_mesh_with_sizing,
+};
 
 use runmat_geometry_core::{GeometryAsset, MeshKind};
 use serde::{Deserialize, Serialize};
