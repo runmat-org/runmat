@@ -13817,6 +13817,21 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_cfd_wall_shear = cfd_wall_shear_values.is_some();
+    let cht_interface_heat_flux_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "cht.interface_heat_flux.",
+        mesh.volume_elements.len(),
+    );
+    let has_cht_interface_heat_flux = cht_interface_heat_flux_values.is_some();
+    let cht_interface_temperature_jump_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "cht.interface_temperature_jump.",
+        mesh.volume_elements.len(),
+    );
+    let has_cht_interface_temperature_jump = cht_interface_temperature_jump_values.is_some();
+    let cht_fluid_velocity_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CHT_FLUID_VELOCITY, mesh.volume_elements.len());
+    let has_cht_fluid_velocity = cht_fluid_velocity_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
@@ -13858,7 +13873,13 @@ fn append_solved_adaptive_mesh_summary(
                     && ((key.name == "velocity_gradient" && has_cfd_velocity)
                         || (key.name == "pressure_gradient" && has_cfd_pressure)
                         || (key.name == "vorticity" && has_cfd_vorticity)
-                        || (key.name == "wall_shear" && has_cfd_wall_shear)));
+                        || (key.name == "wall_shear" && has_cfd_wall_shear)))
+                || (key.namespace == "cht"
+                    && ((key.name == "interface_heat_flux_jump"
+                        && has_cht_interface_heat_flux)
+                        || (key.name == "interface_temperature_jump"
+                            && has_cht_interface_temperature_jump)
+                        || (key.name == "fluid_boundary_layer" && has_cht_fluid_velocity)));
             RefinementIndicatorAvailability {
                 key,
                 applicable,
@@ -13915,6 +13936,12 @@ fn append_solved_adaptive_mesh_summary(
     let cfd_pressure_gradient_used = indicator_was_used(&indicators, "cfd", "pressure_gradient");
     let cfd_vorticity_used = indicator_was_used(&indicators, "cfd", "vorticity");
     let cfd_wall_shear_used = indicator_was_used(&indicators, "cfd", "wall_shear");
+    let cht_interface_heat_flux_jump_used =
+        indicator_was_used(&indicators, "cht", "interface_heat_flux_jump");
+    let cht_interface_temperature_jump_used =
+        indicator_was_used(&indicators, "cht", "interface_temperature_jump");
+    let cht_fluid_boundary_layer_used =
+        indicator_was_used(&indicators, "cht", "fluid_boundary_layer");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -14125,6 +14152,45 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
+    if !element_budget_reached && cht_interface_heat_flux_jump_used {
+        if let Some(values) = cht_interface_heat_flux_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.interface_heat_flux_jump",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cht_interface_temperature_jump_used {
+        if let Some(values) = cht_interface_temperature_jump_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.interface_temperature_jump",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cht_fluid_boundary_layer_used {
+        if let Some(values) = cht_fluid_velocity_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.fluid_boundary_layer",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
     {
         if element_budget_reached {
@@ -14152,7 +14218,10 @@ fn append_solved_adaptive_mesh_summary(
                     || cfd_velocity_gradient_used
                     || cfd_pressure_gradient_used
                     || cfd_vorticity_used
-                    || cfd_wall_shear_used)
+                    || cfd_wall_shear_used
+                    || cht_interface_heat_flux_jump_used
+                    || cht_interface_temperature_jump_used
+                    || cht_fluid_boundary_layer_used)
                     .then_some(marker_change),
                 energy_change: (strain_energy_density_used
                     || temperature_gradient_used
@@ -14339,6 +14408,13 @@ fn acoustic_element_gradient_samples(
 }
 
 fn cfd_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn cht_element_gradient_samples(
     mesh: &AnalysisMeshArtifact,
     element_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {

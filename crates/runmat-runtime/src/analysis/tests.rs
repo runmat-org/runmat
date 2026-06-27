@@ -5721,6 +5721,103 @@ fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_uses_cht_element_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-cht-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "coupled".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "cht_coupled",
+            "run_kind": "cht",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            fea_cht_interface_heat_flux_field_id(0),
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 0.0, 12.0, 5.0],
+        ),
+        AnalysisField::host_f64(
+            fea_cht_interface_temperature_jump_field_id(0),
+            vec![2],
+            vec![0.5, 9.5],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CHT_FLUID_VELOCITY,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "interface_heat_flux_jump",
+        "interface_temperature_jump",
+        "fluid_boundary_layer",
+    ] {
+        assert!(indicators.iter().any(
+            |indicator| indicator["namespace"].as_str() == Some("cht")
+                && indicator["name"].as_str() == Some(name)
+                && indicator["status"].as_str() == Some("used")
+        ));
+    }
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("cht")
+            && indicator["name"].as_str() == Some("solid_heat_flux_gradient")
+            && indicator["status"].as_str() == Some("skipped_missing_field")
+    ));
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in [
+        "cht.interface_heat_flux_jump",
+        "cht.interface_temperature_jump",
+        "cht.fluid_boundary_layer",
+    ] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
     let root = temp_artifact_root("append-solved-adaptive-missing-fields-summary");
     let _ = fs::remove_dir_all(&root);
