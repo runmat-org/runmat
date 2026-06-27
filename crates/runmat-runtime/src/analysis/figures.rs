@@ -667,6 +667,22 @@ fn base_mesh_figure_for_run_source(
     let title = title.into();
     match options.mesh_source {
         AnalysisFigureMeshSource::Auto => {
+            if let Ok(mut figure) = geometry_preview_figure(
+                geometry,
+                title.clone(),
+                GeometryPreviewFigureOptions {
+                    edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+                    presentation: crate::geometry::GeometryPreviewPresentation::Cad,
+                    ..GeometryPreviewFigureOptions::default()
+                },
+            ) {
+                if let Some(topology) = render_topology {
+                    if let Ok(solver) = render_topology_figure(topology, title.clone(), options) {
+                        append_mesh_plots(&mut figure, &solver);
+                    }
+                }
+                return Some(figure);
+            }
             if let Some(topology) = render_topology {
                 if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
                     return Some(figure);
@@ -694,6 +710,14 @@ fn base_mesh_figure_for_run_source(
             },
         )
         .ok(),
+    }
+}
+
+fn append_mesh_plots(target: &mut Figure, source: &Figure) {
+    for plot in source.plots() {
+        if let PlotElement::Mesh(mesh) = plot {
+            target.add_mesh_plot((**mesh).clone());
+        }
     }
 }
 
@@ -774,8 +798,23 @@ fn collect_mesh_counts_with_topology(
     let mut mesh_ordinal = 0usize;
     for (plot_index, plot) in figure.plots().enumerate() {
         if let PlotElement::Mesh(mesh) = plot {
-            let triangle_volume_element_indices = topology
-                .and_then(|topology| topology.meshes.get(mesh_ordinal))
+            let topology_mesh = topology.and_then(|topology| {
+                topology
+                    .meshes
+                    .iter()
+                    .find(|render_mesh| mesh.mesh_id() == Some(render_mesh.mesh_id.as_str()))
+                    .or_else(|| {
+                        if mesh.mesh_id().is_none() {
+                            topology.meshes.get(mesh_ordinal)
+                        } else {
+                            None
+                        }
+                    })
+            });
+            if topology.is_some() && topology_mesh.is_none() {
+                continue;
+            }
+            let triangle_volume_element_indices = topology_mesh
                 .filter(|render_mesh| {
                     render_mesh.triangle_volume_element_indices.len() == mesh.triangles().len()
                 })
@@ -787,7 +826,9 @@ fn collect_mesh_counts_with_topology(
                 triangles: mesh.triangles().len(),
                 triangle_volume_element_indices,
             });
-            mesh_ordinal += 1;
+            if topology_mesh.is_some() {
+                mesh_ordinal += 1;
+            }
         }
     }
     counts
@@ -1596,6 +1637,47 @@ mod tests {
 
         let plot = first_mesh_plot(&figure);
         assert_eq!(plot.mesh_id(), Some("cad_surface"));
+    }
+
+    #[test]
+    fn base_mesh_figure_auto_layers_cad_context_and_solver_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let mesh_ids = figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+    }
+
+    #[test]
+    fn topology_mesh_counts_ignore_cad_context_meshes() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let counts = collect_mesh_counts_with_topology(&figure, Some(&topology));
+
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts[0].vertices, topology.meshes[0].vertices.len());
+        assert_eq!(counts[0].triangles, topology.meshes[0].triangles.len());
     }
 
     #[test]
