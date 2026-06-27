@@ -10,6 +10,7 @@ use crate::{
     backend::{select_volume_backend, MeshBackendKind},
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
+    production::generate_production_analysis_mesh,
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
@@ -32,7 +33,7 @@ pub enum MeshingError {
     InvalidElementBudget,
     InvalidTargetSize,
     EmptyBoundaryRegions,
-    ProductionBackendUnavailable,
+    ProductionBackend(String),
 }
 
 impl std::fmt::Display for MeshingError {
@@ -53,12 +54,7 @@ impl std::fmt::Display for MeshingError {
                 )
             }
             Self::EmptyBoundaryRegions => write!(formatter, "boundary mesh has no region ids"),
-            Self::ProductionBackendUnavailable => {
-                write!(
-                    formatter,
-                    "production volume meshing backend is not available yet"
-                )
-            }
+            Self::ProductionBackend(message) => write!(formatter, "{message}"),
         }
     }
 }
@@ -223,7 +219,8 @@ pub fn generate_analysis_mesh(
     let input = BoundaryMeshInput::from_geometry(geometry)?;
     match select_volume_backend(&options).selected {
         MeshBackendKind::StructuredTetFallback => StructuredTetMesher.mesh(&input, &options),
-        MeshBackendKind::Production => Err(MeshingError::ProductionBackendUnavailable),
+        MeshBackendKind::Production => generate_production_analysis_mesh(geometry, &options)
+            .map_err(|err| MeshingError::ProductionBackend(err.to_string())),
         MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
     }
 }
@@ -238,7 +235,8 @@ pub fn generate_analysis_mesh_with_sizing(
         MeshBackendKind::StructuredTetFallback => {
             StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
         }
-        MeshBackendKind::Production => Err(MeshingError::ProductionBackendUnavailable),
+        MeshBackendKind::Production => generate_production_analysis_mesh(geometry, &options)
+            .map_err(|err| MeshingError::ProductionBackend(err.to_string())),
         MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
     }
 }
@@ -2242,7 +2240,13 @@ mod tests {
         )
         .expect_err("production backend is not wired yet");
 
-        assert_eq!(err, MeshingError::ProductionBackendUnavailable);
+        match err {
+            MeshingError::ProductionBackend(message) => {
+                assert!(message.contains("production Tet generation is pending"));
+                assert!(message.contains("volume component"));
+            }
+            other => panic!("unexpected production error: {other:?}"),
+        }
     }
 
     #[test]

@@ -4,6 +4,7 @@ pub mod backend;
 pub mod boundary;
 pub mod curve;
 pub mod options;
+pub mod production;
 pub mod provenance;
 pub mod quality;
 pub mod sizing;
@@ -38,6 +39,10 @@ pub use options::{
     MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
     RefinementIndicatorMode, RefinementIndicatorOverrides, RefinementStrategy,
     VolumeMeshingOptions,
+};
+pub use production::{
+    generate_production_analysis_mesh, prepare_production_mesh, ProductionMeshError,
+    ProductionMeshPreparation,
 };
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
