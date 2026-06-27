@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     predicate::{
-        distance_squared, point_in_closed_triangle_surface, tet_centroid,
-        tet_circumsphere_contains_point, tet_edge_aspect_ratio, tet_signed_volume,
-        triangle_centroid, PointInClosedSurface,
+        distance, distance_squared, point_in_closed_triangle_surface, tet_centroid,
+        tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
+        tet_signed_volume, triangle_centroid, PointInClosedSurface,
     },
     spatial_index::{Aabb3, LinearSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
@@ -21,6 +21,9 @@ pub struct TetCandidateOptions {
     pub interior_target_size_m: Option<f64>,
     pub max_interior_seed_points: usize,
     pub allow_fan_fallback: bool,
+    pub max_refinement_passes: usize,
+    pub max_radius_edge_ratio: f64,
+    pub sizing_compliance_tolerance: f64,
 }
 
 impl Default for TetCandidateOptions {
@@ -31,6 +34,9 @@ impl Default for TetCandidateOptions {
             interior_target_size_m: None,
             max_interior_seed_points: 1,
             allow_fan_fallback: true,
+            max_refinement_passes: 0,
+            max_radius_edge_ratio: 3.0,
+            sizing_compliance_tolerance: 0.25,
         }
     }
 }
@@ -77,6 +83,10 @@ pub struct TetRecoveryReport {
     pub recovered_component_ratio: f64,
     pub total_candidate_volume_ratio: f64,
     pub max_aspect_ratio: f64,
+    pub refinement_pass_count: usize,
+    pub refinement_point_count: usize,
+    pub max_radius_edge_ratio: f64,
+    pub sizing_violation_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,16 +160,32 @@ pub fn form_tet_candidates(
     let mut interior_seed_points = Vec::<[f64; 3]>::new();
     let mut insertion_component_count = 0_usize;
     let mut fan_fallback_component_count = 0_usize;
+    let mut refinement_pass_count = 0_usize;
+    let mut refinement_point_count = 0_usize;
+    let mut sizing_violation_count = 0_usize;
     for component in &volume_candidates.components {
         let tolerance =
             MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
-        let component_seed_points = sample_component_interior_points(
+        let mut component_seed_points = sample_component_interior_points(
             component,
             surface,
             &surface_elements,
             options,
             tolerance,
         )?;
+        let refinement = refine_component_seed_points(
+            component,
+            &mut component_seed_points,
+            &surface_nodes,
+            &surface_elements,
+            surface,
+            options,
+            tolerance,
+            next_node_id,
+        )?;
+        refinement_pass_count += refinement.pass_count;
+        refinement_point_count += refinement.inserted_point_count;
+        sizing_violation_count += refinement.sizing_violation_count;
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -231,6 +257,7 @@ pub fn form_tet_candidates(
         .iter()
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
+    let max_radius_edge_ratio = max_tet_radius_edge_ratio(&nodes, &tets);
     let component_count = volume_candidates.components.len();
     Ok(TetCandidateSet {
         nodes,
@@ -247,6 +274,10 @@ pub fn form_tet_candidates(
             },
             total_candidate_volume_ratio,
             max_aspect_ratio,
+            refinement_pass_count,
+            refinement_point_count,
+            max_radius_edge_ratio,
+            sizing_violation_count,
         },
         total_volume_m3,
     })
@@ -258,6 +289,10 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || !options.max_aspect_ratio.is_finite()
         || options.max_aspect_ratio <= 0.0
         || options.max_interior_seed_points == 0
+        || !options.max_radius_edge_ratio.is_finite()
+        || options.max_radius_edge_ratio <= 0.0
+        || !options.sizing_compliance_tolerance.is_finite()
+        || options.sizing_compliance_tolerance < 0.0
         || options
             .interior_target_size_m
             .is_some_and(|size| !size.is_finite() || size <= 0.0)
@@ -327,8 +362,38 @@ fn append_component_insertion_tets(
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
+    let (_draft_status, accepted_tets) = component_insertion_tet_drafts(
+        component,
+        seed_node_ids,
+        seed_points,
+        surface_nodes,
+        surface_elements,
+        surface,
+        options,
+        tolerance,
+    )?;
+    let status = insertion_tet_status(component, &accepted_tets);
+    if status.accepted {
+        for mut tet in accepted_tets {
+            tet.tet_id = tets.len() as u32;
+            tets.push(tet);
+        }
+    }
+    Ok(status)
+}
+
+fn component_insertion_tet_drafts(
+    component: &VolumeCandidateComponent,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    surface: &SurfaceDiscretization,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+) -> Result<(InsertionStatus, Vec<TetCandidate>), TetCandidateError> {
     if seed_node_ids.is_empty() || seed_node_ids.len() != seed_points.len() {
-        return Ok(InsertionStatus::rejected(0.0, 0.0));
+        return Ok((InsertionStatus::rejected(0.0, 0.0), Vec::new()));
     }
 
     let mut points = Vec::<ConnectivityPoint>::new();
@@ -400,14 +465,283 @@ fn append_component_insertion_tets(
             aspect_ratio,
         });
     }
-    let status = insertion_tet_status(component, &accepted_tets);
-    if status.accepted {
-        for mut tet in accepted_tets {
-            tet.tet_id = tets.len() as u32;
-            tets.push(tet);
+    Ok((
+        insertion_tet_status(component, &accepted_tets),
+        accepted_tets,
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SeedRefinementSummary {
+    pass_count: usize,
+    inserted_point_count: usize,
+    sizing_violation_count: usize,
+}
+
+fn refine_component_seed_points(
+    component: &VolumeCandidateComponent,
+    seed_points: &mut Vec<[f64; 3]>,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    surface: &SurfaceDiscretization,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+    first_seed_node_id: u32,
+) -> Result<SeedRefinementSummary, TetCandidateError> {
+    if options.max_refinement_passes == 0
+        || seed_points.len() >= options.max_interior_seed_points
+        || options.interior_target_size_m.is_none()
+    {
+        return Ok(SeedRefinementSummary {
+            pass_count: 0,
+            inserted_point_count: 0,
+            sizing_violation_count: 0,
+        });
+    }
+
+    let surface_triangle_index =
+        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    let mut pass_count = 0_usize;
+    let mut inserted_point_count = 0_usize;
+    let mut sizing_violation_count = 0_usize;
+    for _ in 0..options.max_refinement_passes {
+        if seed_points.len() >= options.max_interior_seed_points {
+            break;
+        }
+        let seed_node_ids = seed_node_ids(first_seed_node_id, seed_points.len());
+        let (status, candidate_tets) = component_insertion_tet_drafts(
+            component,
+            &seed_node_ids,
+            seed_points,
+            surface_nodes,
+            surface_elements,
+            surface,
+            options,
+            tolerance,
+        )?;
+        if candidate_tets.is_empty() {
+            break;
+        }
+
+        let point_budget = options.max_interior_seed_points - seed_points.len();
+        let refinement_points = refinement_points_for_tets(
+            &candidate_tets,
+            surface_nodes,
+            &seed_node_ids,
+            seed_points,
+            surface,
+            surface_elements,
+            tolerance,
+            &surface_triangle_index,
+            options,
+            point_budget,
+        )?;
+        sizing_violation_count += refinement_points.sizing_violation_count;
+        if refinement_points.points.is_empty() {
+            break;
+        }
+        pass_count += 1;
+        for point in refinement_points.points {
+            if seed_points.len() >= options.max_interior_seed_points {
+                break;
+            }
+            if !contains_point(seed_points, point, tolerance) {
+                seed_points.push(point);
+                inserted_point_count += 1;
+            }
+        }
+        if status.accepted && inserted_point_count == 0 {
+            break;
         }
     }
-    Ok(status)
+
+    Ok(SeedRefinementSummary {
+        pass_count,
+        inserted_point_count,
+        sizing_violation_count,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RefinementPointSet {
+    points: Vec<[f64; 3]>,
+    sizing_violation_count: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refinement_points_for_tets(
+    tets: &[TetCandidate],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    surface: &SurfaceDiscretization,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    tolerance: MeshingTolerance,
+    surface_triangle_index: &LinearSpatialIndex<u32>,
+    options: TetCandidateOptions,
+    point_budget: usize,
+) -> Result<RefinementPointSet, TetCandidateError> {
+    let Some(target_size_m) = options.interior_target_size_m else {
+        return Ok(RefinementPointSet {
+            points: Vec::new(),
+            sizing_violation_count: 0,
+        });
+    };
+    let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
+    let mut ranked = Vec::<([f64; 3], f64, bool)>::new();
+    let mut sizing_violation_count = 0_usize;
+    for tet in tets {
+        let points = candidate_tet_points(tet, &all_nodes)?;
+        let radius_edge_ratio = tet_radius_edge_ratio(points, tolerance);
+        let max_edge_m = tet_max_edge_length(points);
+        let sizing_violation =
+            max_edge_m > target_size_m * (1.0 + options.sizing_compliance_tolerance);
+        if sizing_violation {
+            sizing_violation_count += 1;
+        }
+        if radius_edge_ratio <= options.max_radius_edge_ratio && !sizing_violation {
+            continue;
+        }
+        let point = tet_circumsphere(points, tolerance)
+            .map(|(center, _)| center)
+            .unwrap_or_else(|| tet_centroid(points));
+        let point = if point_is_inside_component(
+            point,
+            surface,
+            surface_elements,
+            tolerance,
+            surface_triangle_index,
+        )? {
+            point
+        } else {
+            tet_centroid(points)
+        };
+        if !point_is_inside_component(
+            point,
+            surface,
+            surface_elements,
+            tolerance,
+            surface_triangle_index,
+        )? {
+            continue;
+        }
+        ranked.push((
+            point,
+            radius_edge_ratio.max(max_edge_m / target_size_m),
+            sizing_violation,
+        ));
+    }
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+    });
+    let mut points = Vec::<[f64; 3]>::new();
+    for (point, _, _) in ranked {
+        if points.len() >= point_budget {
+            break;
+        }
+        if contains_point(seed_points, point, tolerance)
+            || contains_point(&points, point, tolerance)
+        {
+            continue;
+        }
+        points.push(point);
+    }
+    Ok(RefinementPointSet {
+        points,
+        sizing_violation_count,
+    })
+}
+
+fn seed_node_ids(first_seed_node_id: u32, seed_count: usize) -> Vec<u32> {
+    (0..seed_count)
+        .map(|offset| first_seed_node_id.saturating_add(offset as u32))
+        .collect()
+}
+
+fn candidate_node_coordinates(
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+) -> BTreeMap<u32, [f64; 3]> {
+    let mut nodes = surface_nodes.clone();
+    for (node_id, point) in seed_node_ids.iter().zip(seed_points.iter()) {
+        nodes.insert(*node_id, *point);
+    }
+    nodes
+}
+
+fn candidate_tet_points(
+    tet: &TetCandidate,
+    nodes: &BTreeMap<u32, [f64; 3]>,
+) -> Result<[[f64; 3]; 4], TetCandidateError> {
+    Ok([
+        *nodes
+            .get(&tet.node_ids[0])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: tet.node_ids[0],
+            })?,
+        *nodes
+            .get(&tet.node_ids[1])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: tet.node_ids[1],
+            })?,
+        *nodes
+            .get(&tet.node_ids[2])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: tet.node_ids[2],
+            })?,
+        *nodes
+            .get(&tet.node_ids[3])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: tet.node_ids[3],
+            })?,
+    ])
+}
+
+fn max_tet_radius_edge_ratio(nodes: &[TetCandidateNode], tets: &[TetCandidate]) -> f64 {
+    let nodes = nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    tets.iter()
+        .filter_map(|tet| candidate_tet_points(tet, &nodes).ok())
+        .map(|points| tet_radius_edge_ratio(points, MeshingTolerance::default()))
+        .filter(|ratio| ratio.is_finite())
+        .fold(0.0_f64, f64::max)
+}
+
+fn tet_radius_edge_ratio(points: [[f64; 3]; 4], tolerance: MeshingTolerance) -> f64 {
+    let Some((_, radius_squared)) = tet_circumsphere(points, tolerance) else {
+        return f64::INFINITY;
+    };
+    let min_edge = tet_min_edge_length(points);
+    if min_edge <= f64::EPSILON {
+        return f64::INFINITY;
+    }
+    radius_squared.sqrt() / min_edge
+}
+
+fn tet_min_edge_length(points: [[f64; 3]; 4]) -> f64 {
+    let mut min_edge = f64::INFINITY;
+    for left_index in 0..4 {
+        for right_index in (left_index + 1)..4 {
+            min_edge = min_edge.min(distance(points[left_index], points[right_index]));
+        }
+    }
+    min_edge
+}
+
+fn tet_max_edge_length(points: [[f64; 3]; 4]) -> f64 {
+    let mut max_edge = 0.0_f64;
+    for left_index in 0..4 {
+        for right_index in (left_index + 1)..4 {
+            max_edge = max_edge.max(distance(points[left_index], points[right_index]));
+        }
+    }
+    max_edge
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -983,6 +1317,32 @@ mod tests {
             .tets
             .iter()
             .all(|tet| tet.volume_m3 > 0.0 && tet.aspect_ratio <= 1.0 / 0.15));
+    }
+
+    #[test]
+    fn refinement_pass_adds_bounded_seed_points_for_candidate_quality() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(0.8),
+                max_interior_seed_points: 12,
+                max_refinement_passes: 1,
+                max_radius_edge_ratio: 1.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("Tet candidates should form with refinement");
+
+        assert!(candidates.interior_seed_points.len() > 9);
+        assert!(candidates.interior_seed_points.len() <= 12);
+        assert_eq!(candidates.recovery.refinement_pass_count, 1);
+        assert!(candidates.recovery.refinement_point_count > 0);
+        assert!(candidates.recovery.max_radius_edge_ratio.is_finite());
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }
 
     #[test]

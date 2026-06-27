@@ -142,6 +142,12 @@ fn tet_candidate_options_for_mesh(
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
         max_interior_seed_points: options.max_elements.max(1).min(128),
         allow_fan_fallback: false,
+        max_refinement_passes: match options.refinement.strategy {
+            crate::options::RefinementStrategy::None => 0,
+            _ => 2,
+        },
+        max_radius_edge_ratio: 2.5,
+        sizing_compliance_tolerance: 0.35,
         ..TetCandidateOptions::default()
     }
 }
@@ -330,6 +336,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .total_candidate_volume_ratio,
+        tet_refinement_pass_count: preparation.tet_candidates.recovery.refinement_pass_count,
+        tet_refinement_point_count: preparation.tet_candidates.recovery.refinement_point_count,
+        tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
+        tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }
@@ -580,6 +590,7 @@ mod tests {
         assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);
         assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
         assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
+        assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(

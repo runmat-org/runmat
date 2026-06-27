@@ -80,6 +80,14 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_candidate_volume_ratio: f64,
     #[serde(default)]
+    pub tet_refinement_pass_count: usize,
+    #[serde(default)]
+    pub tet_refinement_point_count: usize,
+    #[serde(default)]
+    pub tet_max_radius_edge_ratio: f64,
+    #[serde(default)]
+    pub tet_sizing_violation_count: usize,
+    #[serde(default)]
     pub boundary_face_recovery_ratio: f64,
     #[serde(default)]
     pub boundary_edge_recovery_ratio: f64,
@@ -101,6 +109,10 @@ impl Default for MeshBackendSummary {
             tet_recovered_component_ratio: 0.0,
             tet_fan_fallback_component_count: 0,
             tet_candidate_volume_ratio: 0.0,
+            tet_refinement_pass_count: 0,
+            tet_refinement_point_count: 0,
+            tet_max_radius_edge_ratio: 0.0,
+            tet_sizing_violation_count: 0,
             boundary_face_recovery_ratio: 0.0,
             boundary_edge_recovery_ratio: 0.0,
         }
