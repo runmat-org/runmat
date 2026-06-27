@@ -1,5 +1,7 @@
 pub mod dofs;
 pub mod elements;
+pub mod legacy_surrogate;
+pub mod solid;
 
 use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
@@ -18,6 +20,8 @@ use self::{
         global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
+    legacy_surrogate::legacy_surrogate_topology,
+    solid::solid_topology_from_analysis_mesh,
 };
 
 use crate::operator::OperatorSystem;
@@ -306,17 +310,14 @@ pub fn assemble_linear_system(
 
     let base_dof_count = (model.loads.len() * 3).max(3);
     let prep_context_ref = prep_context.as_ref();
-    let analysis_mesh_ref = analysis_mesh.as_ref();
-    let dof_count = if let Some(mesh) = analysis_mesh_ref {
-        mesh.nodes.len().saturating_mul(3).max(base_dof_count)
-    } else if let Some(prep) = prep_context_ref {
-        let prep_dof = ((prep.prepared_node_count as f64) * prep.topology_dof_multiplier)
-            .round()
-            .max(base_dof_count as f64) as usize;
-        prep_dof.clamp(base_dof_count, base_dof_count.saturating_mul(6).max(3))
-    } else {
-        base_dof_count
-    };
+    let solid_topology = analysis_mesh
+        .as_ref()
+        .and_then(|mesh| solid_topology_from_analysis_mesh(mesh, base_dof_count).ok());
+    let legacy_topology = legacy_surrogate_topology(base_dof_count, prep_context_ref);
+    let dof_count = solid_topology
+        .as_ref()
+        .map(|topology| topology.dof_count)
+        .unwrap_or(legacy_topology.dof_count);
 
     let avg_youngs_modulus = if model.materials.is_empty() {
         1.0e9
@@ -947,13 +948,10 @@ pub fn assemble_linear_system(
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
-        structural_solid_element_count: analysis_mesh_ref
-            .map(|mesh| mesh.volume_elements.len())
-            .or_else(|| {
-                prep_context_ref
-                    .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
-            })
-            .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
+        structural_solid_element_count: solid_topology
+            .as_ref()
+            .map(|topology| topology.volume_element_count)
+            .unwrap_or(legacy_topology.solid_element_count),
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
@@ -1041,10 +1039,6 @@ fn topology_fingerprint(
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
-}
-
-fn element_count_for_legacy_dofs(dof_count: usize) -> usize {
-    dof_count.div_ceil(3).max(1)
 }
 
 fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
