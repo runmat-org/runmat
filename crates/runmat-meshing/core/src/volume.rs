@@ -174,9 +174,16 @@ impl StructuredTetMesher {
 
         let boundary_faces =
             grid_boundary_faces(input, &grid, &occupied_cells, &cell_tet_ids, &node_id_at);
-        let quality = quality_report(
+        let original_quality = quality_report(
             element_quality,
             boundary_projection_errors(input, &boundary_faces, &nodes),
+        );
+        let (nodes, quality) = project_boundary_nodes_if_quality_improves(
+            input,
+            nodes,
+            &volume_elements,
+            &boundary_faces,
+            original_quality,
         );
         mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
 
@@ -1030,6 +1037,81 @@ fn boundary_projection_errors(
         .collect()
 }
 
+fn project_boundary_nodes_if_quality_improves(
+    input: &BoundaryMeshInput,
+    nodes: Vec<AnalysisMeshNode>,
+    volume_elements: &[AnalysisVolumeElement],
+    boundary_faces: &[AnalysisBoundaryFace],
+    original_quality: AnalysisMeshQualityReport,
+) -> (Vec<AnalysisMeshNode>, AnalysisMeshQualityReport) {
+    let mut projected_nodes = nodes.clone();
+    let mut projected_any = false;
+    for node_id in boundary_faces
+        .iter()
+        .flat_map(|face| face.node_ids.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let Some(node) = projected_nodes.get_mut(node_id.saturating_sub(1) as usize) else {
+            continue;
+        };
+        let Some(projected) = nearest_boundary_triangle_point(input, node.coordinates_m) else {
+            continue;
+        };
+        if distance(node.coordinates_m, projected) > 0.0 {
+            node.coordinates_m = projected;
+            projected_any = true;
+        }
+    }
+    if !projected_any {
+        return (nodes, original_quality);
+    }
+
+    let Some(projected_element_quality) =
+        element_quality_for_nodes(volume_elements, &projected_nodes)
+    else {
+        return (nodes, original_quality);
+    };
+    let projected_quality = quality_report(
+        projected_element_quality,
+        boundary_projection_errors(input, boundary_faces, &projected_nodes),
+    );
+    let thresholds = QualityThresholds::default();
+    let improved_projection =
+        projected_quality.max_boundary_projection_error_m < original_quality.max_boundary_projection_error_m;
+    let quality_ok = projected_quality.min_scaled_jacobian.is_finite()
+        && projected_quality.min_scaled_jacobian >= thresholds.min_scaled_jacobian
+        && projected_quality.max_aspect_ratio.is_finite()
+        && projected_quality.max_aspect_ratio <= thresholds.max_aspect_ratio
+        && projected_quality.inverted_element_count == 0;
+    if improved_projection && quality_ok {
+        (projected_nodes, projected_quality)
+    } else {
+        (nodes, original_quality)
+    }
+}
+
+fn element_quality_for_nodes(
+    volume_elements: &[AnalysisVolumeElement],
+    nodes: &[AnalysisMeshNode],
+) -> Option<Vec<ElementQuality>> {
+    let mut qualities = Vec::with_capacity(volume_elements.len());
+    for element in volume_elements {
+        let node_ids: [u32; 4] = element.node_ids.as_slice().try_into().ok()?;
+        let volume_m3 = tet_volume(node_ids, nodes);
+        if !volume_m3.is_finite() || volume_m3 <= 0.0 {
+            return None;
+        }
+        let aspect_ratio = tet_aspect_ratio(node_ids, nodes);
+        qualities.push(ElementQuality {
+            element_id: element.element_id.clone(),
+            scaled_jacobian: 1.0 / aspect_ratio.max(1.0),
+            aspect_ratio,
+            volume_m3,
+        });
+    }
+    Some(qualities)
+}
+
 fn nearest_boundary_triangle_distance(input: &BoundaryMeshInput, point: [f64; 3]) -> Option<f64> {
     input
         .triangles
@@ -1042,7 +1124,25 @@ fn nearest_boundary_triangle_distance(input: &BoundaryMeshInput, point: [f64; 3]
         .min_by(f64::total_cmp)
 }
 
+fn nearest_boundary_triangle_point(input: &BoundaryMeshInput, point: [f64; 3]) -> Option<[f64; 3]> {
+    input
+        .triangles
+        .iter()
+        .filter_map(|triangle| {
+            let vertices = triangle_vertices(input, triangle.node_ids)?;
+            let closest = closest_point_on_triangle(point, vertices);
+            Some((distance(point, closest), closest))
+        })
+        .filter(|(distance_m, _)| distance_m.is_finite())
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, closest)| closest)
+}
+
 fn point_triangle_distance(point: [f64; 3], vertices: [[f64; 3]; 3]) -> f64 {
+    distance(point, closest_point_on_triangle(point, vertices))
+}
+
+fn closest_point_on_triangle(point: [f64; 3], vertices: [[f64; 3]; 3]) -> [f64; 3] {
     let [a, b, c] = vertices;
     let ab = sub(b, a);
     let ac = sub(c, a);
@@ -1051,50 +1151,52 @@ fn point_triangle_distance(point: [f64; 3], vertices: [[f64; 3]; 3]) -> f64 {
     let d1 = dot(ab, ap);
     let d2 = dot(ac, ap);
     if d1 <= 0.0 && d2 <= 0.0 {
-        return distance(point, a);
+        return a;
     }
 
     let bp = sub(point, b);
     let d3 = dot(ab, bp);
     let d4 = dot(ac, bp);
     if d3 >= 0.0 && d4 <= d3 {
-        return distance(point, b);
+        return b;
     }
 
     let vc = d1 * d4 - d3 * d2;
     if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
         let v = d1 / (d1 - d3);
-        return distance(point, add(a, scale(ab, v)));
+        return add(a, scale(ab, v));
     }
 
     let cp = sub(point, c);
     let d5 = dot(ab, cp);
     let d6 = dot(ac, cp);
     if d6 >= 0.0 && d5 <= d6 {
-        return distance(point, c);
+        return c;
     }
 
     let vb = d5 * d2 - d1 * d6;
     if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
         let w = d2 / (d2 - d6);
-        return distance(point, add(a, scale(ac, w)));
+        return add(a, scale(ac, w));
     }
 
     let va = d3 * d6 - d5 * d4;
     if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
         let bc = sub(c, b);
         let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        return distance(point, add(b, scale(bc, w)));
+        return add(b, scale(bc, w));
     }
 
     let normal = cross(ab, ac);
-    let normal_length = norm(normal);
-    if normal_length <= f64::EPSILON {
-        return distance(point, a)
-            .min(distance(point, b))
-            .min(distance(point, c));
+    let normal_dot = dot(normal, normal);
+    if normal_dot <= f64::EPSILON {
+        return [a, b, c]
+            .into_iter()
+            .min_by(|left, right| distance(point, *left).total_cmp(&distance(point, *right)))
+            .unwrap_or(a);
     }
-    dot(ap, normal).abs() / normal_length
+    let signed_distance_scale = dot(ap, normal) / normal_dot;
+    sub(point, scale(normal, signed_distance_scale))
 }
 
 fn orient_tet(mut node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> [u32; 4] {
