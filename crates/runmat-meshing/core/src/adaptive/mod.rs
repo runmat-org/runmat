@@ -67,7 +67,10 @@ pub fn plan_refinement_indicators(
     element_budget_reached: bool,
     quality_blocked: bool,
 ) -> Vec<RefinementIndicatorSummary> {
-    if matches!(options.strategy, RefinementStrategy::None) {
+    if matches!(
+        options.strategy,
+        RefinementStrategy::None | RefinementStrategy::Uniform
+    ) {
         return Vec::new();
     }
 
@@ -505,6 +508,27 @@ mod tests {
             &[available("structural", "stress_gradient")],
             false,
             false
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn refinement_indicator_plan_is_empty_for_uniform_refinement() {
+        let mut options = MeshRefinementOptions::default();
+        options.strategy = RefinementStrategy::Uniform;
+        options.indicators = RefinementIndicatorOverrides {
+            namespaces: BTreeMap::from([(
+                "structural".to_string(),
+                BTreeMap::from([("stress_gradient".to_string(), RefinementIndicatorMode::On)]),
+            )]),
+        };
+
+        assert!(plan_refinement_indicators(
+            &options,
+            &[key("structural", "strain_energy_density")],
+            &[available("structural", "stress_gradient")],
+            false,
+            false,
         )
         .is_empty());
     }
