@@ -38,10 +38,11 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
-    generate_analysis_mesh, plan_refinement_indicators,
+    build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
     structural_static_default_refinement_indicators, validate_analysis_mesh,
     AdaptiveConvergenceStatus, AdaptiveIterationSummary, AnalysisMeshArtifact, ElementFamilyHint,
-    MeshConnectivityClass, RefinementIndicatorAvailability, RefinementStrategy, SizingFieldUpdate,
+    MeshConnectivityClass, RefinementIndicatorAvailability, RefinementIndicatorSample,
+    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1324,6 +1325,27 @@ pub fn analysis_run_study_op(
             Ok((run, run_options_to_json(&options), Some(options)))
         }
     }?;
+
+    append_solved_adaptive_mesh_summary(
+        spec,
+        analysis_mesh_artifact_path.as_deref(),
+        &run_envelope,
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to update analysis mesh adaptive summary: {err}"),
+            BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
+        )
+    })?;
 
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -13386,6 +13408,187 @@ fn attach_initial_adaptive_mesh_summary(
         markers: Vec::new(),
         sizing_update: SizingFieldUpdate::default(),
     });
+}
+
+fn append_solved_adaptive_mesh_summary(
+    spec: &AnalysisStudySpec,
+    analysis_mesh_artifact_path: Option<&str>,
+    run_envelope: &OperationEnvelope<AnalysisRunResult>,
+) -> Result<(), String> {
+    if spec.run_kind != AnalysisRunKind::LinearStatic {
+        return Ok(());
+    }
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(());
+    };
+    let Some(options) = spec.mesh_options.as_ref() else {
+        return Ok(());
+    };
+
+    let path_buf = PathBuf::from(path);
+    let mut payload: serde_json::Value = serde_json::from_slice(
+        &fs_read(&path_buf)
+            .map_err(|err| format!("failed to read analysis mesh artifact: {err}"))?,
+    )
+    .map_err(|err| format!("failed to parse analysis mesh artifact: {err}"))?;
+    let mut mesh: AnalysisMeshArtifact = serde_json::from_value(payload["mesh"].clone())
+        .map_err(|err| format!("failed to decode analysis mesh payload: {err}"))?;
+
+    let defaults = match spec.create_model_intent.profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => {
+            structural_static_default_refinement_indicators()
+        }
+        _ => Vec::new(),
+    };
+    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+        return Ok(());
+    }
+
+    let von_mises_values = analysis_field_values(
+        &run_envelope.data.run.fields,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+    );
+    let has_von_mises = von_mises_values
+        .map(|values| values.len() == mesh.volume_elements.len())
+        .unwrap_or(false);
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| {
+            let field_available =
+                key.namespace == "structural" && key.name == "stress_gradient" && has_von_mises;
+            RefinementIndicatorAvailability {
+                key,
+                applicable: true,
+                field_available,
+            }
+        })
+        .collect::<Vec<_>>();
+    let indicators =
+        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+
+    let (markers, sizing_update) = if let Some(values) = von_mises_values {
+        let samples = structural_stress_gradient_samples(&mesh, values);
+        build_refinement_markers_from_samples(
+            &samples,
+            "structural.stress_gradient",
+            RefinementMarkerOptions::default(),
+        )
+        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?
+    } else {
+        (Vec::new(), SizingFieldUpdate::default())
+    };
+    let convergence_status = if markers.is_empty() {
+        AdaptiveConvergenceStatus::Converged
+    } else {
+        AdaptiveConvergenceStatus::Pending
+    };
+
+    let mut updated_sizing = mesh.sizing.clone();
+    sizing_update.clone().apply_to(&mut updated_sizing);
+    mesh.sizing = updated_sizing;
+    mesh.adaptive_iterations.push(AdaptiveIterationSummary {
+        iteration_index: mesh.adaptive_iterations.len(),
+        node_count: mesh.nodes.len(),
+        element_count: mesh.volume_elements.len(),
+        convergence_status,
+        indicators,
+        markers,
+        sizing_update,
+    });
+    payload["mesh"] = serde_json::to_value(&mesh)
+        .map_err(|err| format!("failed to encode mesh payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| format!("failed to encode analysis mesh artifact: {err}"))?;
+    atomic_write_bytes(&path_buf, &bytes)
+}
+
+fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a [f64]> {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .and_then(AnalysisField::as_host_f64)
+}
+
+fn structural_stress_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    von_mises_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    if von_mises_values.len() != mesh.volume_elements.len() {
+        return Vec::new();
+    }
+    mesh.volume_elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            let value = *von_mises_values.get(index)?;
+            let mut indicator = 0.0_f64;
+            for (other_index, other) in mesh.volume_elements.iter().enumerate() {
+                if index == other_index || shared_node_count(&element.node_ids, &other.node_ids) < 3
+                {
+                    continue;
+                }
+                if let Some(other_value) = von_mises_values.get(other_index) {
+                    indicator = indicator.max((value - *other_value).abs());
+                }
+            }
+            if indicator <= 0.0 {
+                indicator = value.abs();
+            }
+            Some(RefinementIndicatorSample {
+                entity_id: element.element_id.clone(),
+                position_m: element_centroid_m(mesh, &element.node_ids)?,
+                indicator_value: indicator,
+                current_size_m: element_characteristic_size_m(mesh, &element.node_ids)?,
+            })
+        })
+        .collect()
+}
+
+fn shared_node_count(left: &[u32], right: &[u32]) -> usize {
+    left.iter().filter(|node| right.contains(node)).count()
+}
+
+fn element_centroid_m(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in node_ids {
+        let node = mesh.nodes.iter().find(|node| node.node_id == *node_id)?;
+        for (axis, value) in node.coordinates_m.iter().enumerate() {
+            centroid[axis] += *value;
+        }
+    }
+    for value in &mut centroid {
+        *value /= node_ids.len() as f64;
+    }
+    Some(centroid)
+}
+
+fn element_characteristic_size_m(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<f64> {
+    let mut max_edge = 0.0_f64;
+    for left_index in 0..node_ids.len() {
+        for right_index in (left_index + 1)..node_ids.len() {
+            let left = mesh
+                .nodes
+                .iter()
+                .find(|node| node.node_id == node_ids[left_index])?
+                .coordinates_m;
+            let right = mesh
+                .nodes
+                .iter()
+                .find(|node| node.node_id == node_ids[right_index])?
+                .coordinates_m;
+            max_edge = max_edge.max(vector_distance_m(left, right));
+        }
+    }
+    (max_edge > 0.0).then_some(max_edge)
+}
+
+fn vector_distance_m(left: [f64; 3], right: [f64; 3]) -> f64 {
+    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
+        .sqrt()
 }
 
 fn resolve_analysis_mesh_artifact(

@@ -1993,7 +1993,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
         .as_array()
         .expect("adaptive iteration summaries");
-    assert_eq!(adaptive_iterations.len(), 1);
+    assert_eq!(adaptive_iterations.len(), 2);
     assert_eq!(
         adaptive_iterations[0]["convergence_status"].as_str(),
         Some("pending")
@@ -2013,6 +2013,23 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
                 && indicator["name"].as_str() == Some("stress_gradient")
                 && indicator["status"].as_str() == Some("skipped_missing_field")
         ));
+    assert_eq!(
+        adaptive_iterations[1]["convergence_status"].as_str(),
+        Some("converged")
+    );
+    assert!(adaptive_iterations[1]["indicators"]
+        .as_array()
+        .expect("solved adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("skipped_missing_field")
+        ));
+    assert!(adaptive_iterations[1]["markers"]
+        .as_array()
+        .expect("solved adaptive markers")
+        .is_empty());
 
     let run_payload: serde_json::Value = serde_json::from_slice(
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
@@ -4878,6 +4895,30 @@ fn solid_mesh_boundary_region_mapping_ignores_volumetric_loads() {
     assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
         .iter()
         .all(|reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion));
+}
+
+#[test]
+fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    let samples = structural_stress_gradient_samples(&mesh, &[10.0, 25.0]);
+
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0].entity_id, "tet_1");
+    assert_eq!(samples[0].indicator_value, 15.0);
+    assert_eq!(samples[1].entity_id, "tet_2");
+    assert_eq!(samples[1].indicator_value, 15.0);
+    assert!(samples
+        .iter()
+        .all(|sample| sample.current_size_m.is_finite() && sample.current_size_m > 0.0));
 }
 
 fn analysis_mesh_with_boundary_regions(
