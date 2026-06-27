@@ -553,6 +553,14 @@ async fn resolve_study(
     let model = resolve_model(&study, &geometry, &intent)?;
     let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
     let run_options = resolve_run_options(&study.run, run_kind)?;
+    if let Some(mesh) = study.mesh.as_ref() {
+        validate_refinement_indicator_applicability(
+            &mesh.refinement.indicators,
+            study.model.profile,
+            run_kind,
+            &study.domains,
+        )?;
+    }
     let mesh_options = resolve_mesh_options(study.mesh.as_ref())?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
@@ -671,6 +679,132 @@ fn validate_refinement_indicators(
         }
     }
     Ok(())
+}
+
+fn validate_refinement_indicator_applicability(
+    indicators: &BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+    domains: &FeaDomainsDocument,
+) -> Result<(), String> {
+    for namespace in indicators.keys() {
+        if !refinement_indicator_namespace_applies(namespace, profile, run_kind, domains) {
+            return Err(format!(
+                "mesh.refinement.indicators.{namespace} does not apply to profile `{}` and run kind `{}`",
+                profile_refinement_label(profile),
+                run_kind_refinement_label(run_kind)
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn refinement_indicator_namespace_applies(
+    namespace: &str,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+    domains: &FeaDomainsDocument,
+) -> bool {
+    match namespace {
+        "structural" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::LinearStaticStructural
+                    | AnalysisCreateModelProfile::TransientStructural
+                    | AnalysisCreateModelProfile::NonlinearStructural
+                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            ) || matches!(
+                run_kind,
+                AnalysisRunKind::LinearStatic
+                    | AnalysisRunKind::Transient
+                    | AnalysisRunKind::Nonlinear
+                    | AnalysisRunKind::Fsi
+            )
+        }
+        "modal" => {
+            matches!(profile, AnalysisCreateModelProfile::ModalStructural)
+                || matches!(run_kind, AnalysisRunKind::Modal)
+        }
+        "thermal" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::ThermalStandalone
+                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::ChtCoupled
+            ) || matches!(run_kind, AnalysisRunKind::Thermal | AnalysisRunKind::Cht)
+                || domains.thermo_mechanical.is_some()
+                || domains.electro_thermal.is_some()
+        }
+        "thermo_mechanical" => {
+            matches!(profile, AnalysisCreateModelProfile::ThermoMechanicalCoupled)
+                || domains.thermo_mechanical.is_some()
+        }
+        "electro_thermal" => domains.electro_thermal.is_some(),
+        "electromagnetic" => {
+            matches!(profile, AnalysisCreateModelProfile::ElectromagneticStatic)
+                || matches!(run_kind, AnalysisRunKind::Electromagnetic)
+                || domains.electromagnetic.is_some()
+                || domains.electro_thermal.is_some()
+        }
+        "acoustic" => {
+            matches!(profile, AnalysisCreateModelProfile::AcousticHarmonic)
+                || matches!(run_kind, AnalysisRunKind::Acoustic)
+        }
+        "cfd" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::CfdSteadyState
+                    | AnalysisCreateModelProfile::CfdTransient
+                    | AnalysisCreateModelProfile::ChtCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            ) || matches!(
+                run_kind,
+                AnalysisRunKind::Cfd | AnalysisRunKind::Cht | AnalysisRunKind::Fsi
+            ) || domains.cfd.is_some()
+        }
+        "cht" => {
+            matches!(profile, AnalysisCreateModelProfile::ChtCoupled)
+                || matches!(run_kind, AnalysisRunKind::Cht)
+        }
+        "fsi" => {
+            matches!(profile, AnalysisCreateModelProfile::FsiCoupled)
+                || matches!(run_kind, AnalysisRunKind::Fsi)
+        }
+        _ => false,
+    }
+}
+
+fn profile_refinement_label(profile: AnalysisCreateModelProfile) -> &'static str {
+    match profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
+        AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
+        AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
+        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
+        AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
+        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
+        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
+        AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
+        AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
+        AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
+        AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
+        AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
+    }
+}
+
+fn run_kind_refinement_label(run_kind: AnalysisRunKind) -> &'static str {
+    match run_kind {
+        AnalysisRunKind::LinearStatic => "linear_static",
+        AnalysisRunKind::Modal => "modal",
+        AnalysisRunKind::Acoustic => "acoustic",
+        AnalysisRunKind::Thermal => "thermal",
+        AnalysisRunKind::Transient => "transient",
+        AnalysisRunKind::Cfd => "cfd",
+        AnalysisRunKind::Cht => "cht",
+        AnalysisRunKind::Fsi => "fsi",
+        AnalysisRunKind::Nonlinear => "nonlinear",
+        AnalysisRunKind::Electromagnetic => "electromagnetic",
+    }
 }
 
 fn allowed_refinement_indicator_names(namespace: &str) -> Option<&'static [&'static str]> {
@@ -1935,5 +2069,55 @@ refinement:
             .expect_err("generic coupling namespace should fail validation");
 
         assert!(err.contains("mesh.refinement.indicators namespace `coupling`"));
+    }
+
+    #[test]
+    fn fea_document_refinement_indicator_applicability_matches_profile_context() {
+        let structural = BTreeMap::from([(
+            "structural".to_string(),
+            BTreeMap::from([(
+                "stress_gradient".to_string(),
+                RefinementIndicatorMode::Auto,
+            )]),
+        )]);
+        validate_refinement_indicator_applicability(
+            &structural,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+            &FeaDomainsDocument::default(),
+        )
+        .expect("structural indicators should apply to linear static structural studies");
+
+        let unrelated = BTreeMap::from([(
+            "thermal".to_string(),
+            BTreeMap::from([(
+                "temperature_gradient".to_string(),
+                RefinementIndicatorMode::Auto,
+            )]),
+        )]);
+        let err = validate_refinement_indicator_applicability(
+            &unrelated,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+            &FeaDomainsDocument::default(),
+        )
+        .expect_err("thermal indicators should not apply to uncoupled structural studies");
+        assert!(err.contains("mesh.refinement.indicators.thermal"));
+        assert!(err.contains("linear_static_structural"));
+
+        let coupled = BTreeMap::from([(
+            "thermo_mechanical".to_string(),
+            BTreeMap::from([(
+                "thermal_stress".to_string(),
+                RefinementIndicatorMode::On,
+            )]),
+        )]);
+        validate_refinement_indicator_applicability(
+            &coupled,
+            AnalysisCreateModelProfile::ThermoMechanicalCoupled,
+            AnalysisRunKind::Transient,
+            &FeaDomainsDocument::default(),
+        )
+        .expect("thermo-mechanical indicators should apply to thermo-mechanical studies");
     }
 }
