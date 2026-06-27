@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cad_topology::{CadTopologyModel, CadTopologySource},
+    cad_topology::CadTopologyModel,
     predicate::{dot, norm, scale, sub, triangle_centroid, Point3, Triangle3},
     source_topology::SourceTopologyModel,
 };
@@ -38,6 +38,7 @@ pub struct CadFaceProjection {
 pub struct CadEvaluationReport {
     pub source: CadEvaluationSource,
     pub face_frame_count: usize,
+    pub evaluator_face_count: usize,
     pub normal_query_count: usize,
     pub projection_query_count: usize,
     pub max_projection_error_m: f64,
@@ -117,8 +118,9 @@ pub fn build_cad_evaluation_model(
         frames.push(frame);
     }
     let report = CadEvaluationReport {
-        source: evaluation_source(cad_topology.source),
+        source: evaluation_source(cad_topology),
         face_frame_count: frames.len(),
+        evaluator_face_count: cad_topology.report.evaluator_face_count,
         normal_query_count: frames.len(),
         projection_query_count: frames.len(),
         max_projection_error_m: 0.0,
@@ -183,6 +185,7 @@ pub fn summarize_cad_evaluation(
     Ok(CadEvaluationReport {
         source: model.source,
         face_frame_count: model.face_frames.len(),
+        evaluator_face_count: model.report.evaluator_face_count,
         normal_query_count: model.face_frames.len(),
         projection_query_count,
         max_projection_error_m,
@@ -219,13 +222,8 @@ fn face_frame(
     })
 }
 
-fn evaluation_source(source: CadTopologySource) -> CadEvaluationSource {
-    match source {
-        CadTopologySource::SemanticCad => CadEvaluationSource::ParametricCad,
-        CadTopologySource::GenericCadMesh | CadTopologySource::MeshFallback => {
-            CadEvaluationSource::PlanarFacetApproximation
-        }
-    }
+fn evaluation_source(_cad_topology: &CadTopologyModel) -> CadEvaluationSource {
+    CadEvaluationSource::PlanarFacetApproximation
 }
 
 fn topology_vertex(
@@ -256,6 +254,8 @@ mod tests {
 
         assert_eq!(model.face_frames.len(), topology.faces.len());
         assert_eq!(report.face_frame_count, topology.faces.len());
+        assert_eq!(report.source, CadEvaluationSource::PlanarFacetApproximation);
+        assert_eq!(report.evaluator_face_count, 0);
         assert_eq!(report.projection_query_count, topology.faces.len() * 3);
         assert_eq!(report.max_projection_error_m, 0.0);
         assert_eq!(report.max_normal_deviation, 0.0);

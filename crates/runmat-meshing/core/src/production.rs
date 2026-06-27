@@ -375,6 +375,7 @@ fn production_backend_summary(
         cad_evaluation_source: cad_evaluation_source_label(preparation.cad_evaluation.source)
             .to_string(),
         cad_face_frame_count: preparation.cad_evaluation_report.face_frame_count,
+        cad_evaluation_evaluator_face_count: preparation.cad_evaluation_report.evaluator_face_count,
         cad_projection_query_count: preparation.cad_evaluation_report.projection_query_count,
         cad_max_projection_error_m: preparation.cad_evaluation_report.max_projection_error_m,
         cad_max_normal_deviation: preparation.cad_evaluation_report.max_normal_deviation,
@@ -726,6 +727,7 @@ mod tests {
             "planar_facet_approximation"
         );
         assert_eq!(mesh.backend.cad_face_frame_count, 12);
+        assert_eq!(mesh.backend.cad_evaluation_evaluator_face_count, 0);
         assert_eq!(mesh.backend.cad_projection_query_count, 36);
         assert_eq!(mesh.backend.cad_max_projection_error_m, 0.0);
         assert_eq!(mesh.backend.surface_element_count, 12);
