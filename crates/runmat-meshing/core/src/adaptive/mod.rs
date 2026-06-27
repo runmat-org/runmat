@@ -18,6 +18,59 @@ pub enum AdaptiveConvergenceStatus {
     ElementBudgetReached,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AdaptiveConvergenceMetrics {
+    pub completed_iterations: usize,
+    pub element_budget_reached: bool,
+    pub field_change: Option<f64>,
+    pub energy_change: Option<f64>,
+    pub residual: Option<f64>,
+}
+
+pub fn evaluate_adaptive_convergence(
+    options: &MeshRefinementOptions,
+    metrics: AdaptiveConvergenceMetrics,
+) -> AdaptiveConvergenceStatus {
+    if matches!(
+        options.strategy,
+        RefinementStrategy::None | RefinementStrategy::Uniform
+    ) {
+        return AdaptiveConvergenceStatus::Disabled;
+    }
+    if metrics.element_budget_reached {
+        return AdaptiveConvergenceStatus::ElementBudgetReached;
+    }
+    if metrics.completed_iterations >= options.max_iterations {
+        return AdaptiveConvergenceStatus::MaxIterationsReached;
+    }
+
+    let mut considered_metric = false;
+    let mut converged = true;
+
+    if let Some(field_change) = metrics.field_change {
+        considered_metric = true;
+        converged &=
+            field_change.is_finite() && field_change <= options.convergence.field_change_tolerance;
+    }
+    if let Some(energy_change) = metrics.energy_change {
+        considered_metric = true;
+        converged &= energy_change.is_finite()
+            && energy_change <= options.convergence.energy_change_tolerance;
+    }
+    if let (Some(residual), Some(tolerance)) =
+        (metrics.residual, options.convergence.residual_tolerance)
+    {
+        considered_metric = true;
+        converged &= residual.is_finite() && residual <= tolerance;
+    }
+
+    if considered_metric && converged {
+        AdaptiveConvergenceStatus::Converged
+    } else {
+        AdaptiveConvergenceStatus::Pending
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefinementIndicatorStatus {
@@ -330,6 +383,157 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_convergence_is_disabled_for_nonadaptive_strategies() {
+        let mut options = MeshRefinementOptions {
+            strategy: RefinementStrategy::None,
+            ..MeshRefinementOptions::default()
+        };
+
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    field_change: Some(0.0),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Disabled
+        );
+
+        options.strategy = RefinementStrategy::Uniform;
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    field_change: Some(0.0),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Disabled
+        );
+    }
+
+    #[test]
+    fn adaptive_convergence_reports_hard_stop_statuses_first() {
+        let options = MeshRefinementOptions {
+            strategy: RefinementStrategy::Adaptive,
+            max_iterations: 2,
+            ..MeshRefinementOptions::default()
+        };
+
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    element_budget_reached: true,
+                    completed_iterations: 2,
+                    field_change: Some(0.0),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::ElementBudgetReached
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    completed_iterations: 2,
+                    field_change: Some(0.0),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::MaxIterationsReached
+        );
+    }
+
+    #[test]
+    fn adaptive_convergence_requires_finite_metric_within_tolerance() {
+        let options = MeshRefinementOptions {
+            strategy: RefinementStrategy::Adaptive,
+            ..MeshRefinementOptions::default()
+        };
+
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    field_change: Some(0.05),
+                    energy_change: Some(0.02),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Converged
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    field_change: Some(0.051),
+                    energy_change: Some(0.02),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Pending
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    field_change: Some(f64::NAN),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Pending
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(&options, AdaptiveConvergenceMetrics::default()),
+            AdaptiveConvergenceStatus::Pending
+        );
+    }
+
+    #[test]
+    fn adaptive_convergence_residual_metric_is_opt_in() {
+        let mut options = MeshRefinementOptions {
+            strategy: RefinementStrategy::Adaptive,
+            ..MeshRefinementOptions::default()
+        };
+
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    residual: Some(1.0e6),
+                    field_change: Some(0.0),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Converged
+        );
+
+        options.convergence.residual_tolerance = Some(1.0e-6);
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    residual: Some(1.0e-7),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Converged
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    residual: Some(1.0e-5),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Pending
+        );
+    }
+
+    #[test]
     fn sizing_field_update_merges_bounds_and_samples() {
         let mut sizing = MeshSizingField {
             global_target_size_m: Some(0.1),
@@ -502,14 +706,16 @@ mod tests {
         let mut options = MeshRefinementOptions::default();
         options.strategy = RefinementStrategy::None;
 
-        assert!(plan_refinement_indicators(
-            &options,
-            &[key("structural", "stress_gradient")],
-            &[available("structural", "stress_gradient")],
-            false,
-            false
-        )
-        .is_empty());
+        assert!(
+            plan_refinement_indicators(
+                &options,
+                &[key("structural", "stress_gradient")],
+                &[available("structural", "stress_gradient")],
+                false,
+                false
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -523,14 +729,16 @@ mod tests {
             )]),
         };
 
-        assert!(plan_refinement_indicators(
-            &options,
-            &[key("structural", "strain_energy_density")],
-            &[available("structural", "stress_gradient")],
-            false,
-            false,
-        )
-        .is_empty());
+        assert!(
+            plan_refinement_indicators(
+                &options,
+                &[key("structural", "strain_energy_density")],
+                &[available("structural", "stress_gradient")],
+                false,
+                false,
+            )
+            .is_empty()
+        );
     }
 
     #[test]
