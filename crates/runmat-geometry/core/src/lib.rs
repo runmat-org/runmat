@@ -6,11 +6,12 @@ pub mod selection;
 
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use model::{
-    AssemblyNode, CadColorEvidence, CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluator,
-    CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, EntityIdRange,
-    GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
-    TessellationProfile, UnitSystem,
+    AssemblyNode, CadColorEvidence, CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluationSample,
+    CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef, CadPhysicalMaterialEvidence,
+    CadRegionOwnership, CadSemanticKind, EntityIdRange, GeometryAsset, GeometrySource,
+    MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
 };
 pub use selection::{EntityKind, EntityRef};
 

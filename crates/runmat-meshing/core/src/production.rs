@@ -379,6 +379,10 @@ fn production_backend_summary(
             .to_string(),
         cad_face_frame_count: preparation.cad_evaluation_report.face_frame_count,
         cad_evaluation_evaluator_face_count: preparation.cad_evaluation_report.evaluator_face_count,
+        cad_evaluation_exact_query_face_count: preparation
+            .cad_evaluation_report
+            .exact_query_face_count,
+        cad_evaluation_sample_count: preparation.cad_evaluation_report.evaluator_sample_count,
         cad_projection_query_count: preparation.cad_evaluation_report.projection_query_count,
         cad_max_projection_error_m: preparation.cad_evaluation_report.max_projection_error_m,
         cad_max_normal_deviation: preparation.cad_evaluation_report.max_normal_deviation,

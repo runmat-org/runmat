@@ -92,6 +92,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_evaluation_evaluator_face_count: usize,
     #[serde(default)]
+    pub cad_evaluation_exact_query_face_count: usize,
+    #[serde(default)]
+    pub cad_evaluation_sample_count: usize,
+    #[serde(default)]
     pub cad_projection_query_count: usize,
     #[serde(default)]
     pub cad_max_projection_error_m: f64,
@@ -167,6 +171,8 @@ impl Default for MeshBackendSummary {
             cad_evaluation_source: "unknown".to_string(),
             cad_face_frame_count: 0,
             cad_evaluation_evaluator_face_count: 0,
+            cad_evaluation_exact_query_face_count: 0,
+            cad_evaluation_sample_count: 0,
             cad_projection_query_count: 0,
             cad_max_projection_error_m: 0.0,
             cad_max_normal_deviation: 0.0,

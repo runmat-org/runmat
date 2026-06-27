@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    CadFaceEvaluator, CadSemanticKind, EntityKind, GeometryAsset, SourceGeometryKind,
+    CadFaceEvaluationSample, CadFaceEvaluator, CadSemanticKind, EntityKind, GeometryAsset,
+    SourceGeometryKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +57,8 @@ pub struct CadFace {
     pub evaluator_reference_point_m: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_unit_normal: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evaluator_samples: Vec<CadFaceEvaluationSample>,
     pub source_face_ids: Vec<u32>,
     pub source_edge_ids: Vec<u32>,
     pub loop_edge_ids: Vec<String>,
@@ -173,6 +176,9 @@ pub fn build_cad_topology(
                 imported_face_id,
                 evaluator_reference_point_m: evaluator_face.and_then(|face| face.reference_point_m),
                 evaluator_unit_normal: evaluator_face.and_then(|face| face.reference_unit_normal),
+                evaluator_samples: evaluator_face
+                    .map(|face| face.evaluation_samples.clone())
+                    .unwrap_or_default(),
                 source_face_ids: vec![face.face_id],
                 source_edge_ids: face.edge_ids.to_vec(),
                 loop_edge_ids: face
@@ -489,6 +495,7 @@ mod tests {
                             supports_curvature: true,
                             reference_point_m: Some([0.5, 0.5, 0.0]),
                             reference_unit_normal: Some([0.0, 0.0, 1.0]),
+                            evaluation_samples: Vec::new(),
                         }],
                         curves: Vec::new(),
                     }]

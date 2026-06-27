@@ -257,6 +257,7 @@ fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
                 supports_normal: true,
                 supports_derivatives: true,
                 supports_curvature: true,
+                evaluation_samples: Vec::new(),
             })
             .collect(),
         curves: Vec::new(),

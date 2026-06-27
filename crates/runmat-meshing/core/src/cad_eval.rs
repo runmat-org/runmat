@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cad_topology::CadTopologyModel,
+    cad_topology::{CadFace, CadTopologyModel},
     predicate::{dot, norm, scale, sub, triangle_centroid, Point3, Triangle3},
     source_topology::SourceTopologyModel,
 };
+use runmat_geometry_core::{CadFaceEvaluationSample, CadFaceEvaluationSampleSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +28,10 @@ pub struct CadFaceEvaluationFrame {
     pub area_m2: f64,
     #[serde(default)]
     pub evaluator_backed: bool,
+    #[serde(default)]
+    pub exact_query_backed: bool,
+    #[serde(default)]
+    pub evaluator_sample_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -42,6 +47,10 @@ pub struct CadEvaluationReport {
     pub source: CadEvaluationSource,
     pub face_frame_count: usize,
     pub evaluator_face_count: usize,
+    #[serde(default)]
+    pub exact_query_face_count: usize,
+    #[serde(default)]
+    pub evaluator_sample_count: usize,
     pub normal_query_count: usize,
     pub projection_query_count: usize,
     pub max_projection_error_m: f64,
@@ -111,23 +120,44 @@ pub fn build_cad_evaluation_model(
             topology_vertex(topology, source_face.node_ids[1])?,
             topology_vertex(topology, source_face.node_ids[2])?,
         ];
+        let exact_sample = exact_backend_sample(face);
         let frame = face_frame(
             face.entity_id.id.clone(),
             source_face_id,
             points,
-            face.evaluator_unit_normal
+            exact_sample
+                .and_then(|sample| sample.unit_normal)
+                .or(face.evaluator_unit_normal)
                 .unwrap_or(source_face.unit_normal),
             source_face.area_m2,
-            face.evaluator_reference_point_m,
-            face.evaluator_unit_normal.is_some(),
+            exact_sample
+                .map(|sample| sample.point_m)
+                .or(face.evaluator_reference_point_m),
+            face.evaluator_unit_normal.is_some() || !face.evaluator_samples.is_empty(),
+            exact_sample.is_some(),
+            face.evaluator_samples.len(),
         )?;
         frames.push(frame);
     }
     let evaluator_backed_frame_count = frames.iter().filter(|frame| frame.evaluator_backed).count();
+    let exact_query_face_count = frames
+        .iter()
+        .filter(|frame| frame.exact_query_backed)
+        .count();
+    let evaluator_sample_count = frames
+        .iter()
+        .map(|frame| frame.evaluator_sample_count)
+        .sum();
     let report = CadEvaluationReport {
-        source: evaluation_source(evaluator_backed_frame_count),
+        source: evaluation_source(
+            frames.len(),
+            evaluator_backed_frame_count,
+            exact_query_face_count,
+        ),
         face_frame_count: frames.len(),
         evaluator_face_count: cad_topology.report.evaluator_face_count,
+        exact_query_face_count,
+        evaluator_sample_count,
         normal_query_count: frames.len(),
         projection_query_count: frames.len(),
         max_projection_error_m: 0.0,
@@ -193,6 +223,8 @@ pub fn summarize_cad_evaluation(
         source: model.source,
         face_frame_count: model.face_frames.len(),
         evaluator_face_count: model.report.evaluator_face_count,
+        exact_query_face_count: model.report.exact_query_face_count,
+        evaluator_sample_count: model.report.evaluator_sample_count,
         normal_query_count: model.face_frames.len(),
         projection_query_count,
         max_projection_error_m,
@@ -208,6 +240,8 @@ fn face_frame(
     area_m2: f64,
     evaluator_reference_point_m: Option<Point3>,
     evaluator_backed: bool,
+    exact_query_backed: bool,
+    evaluator_sample_count: usize,
 ) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
     let edge = sub(points[1], points[0]);
     let edge_length = norm(edge);
@@ -229,15 +263,40 @@ fn face_frame(
         unit_normal,
         area_m2,
         evaluator_backed,
+        exact_query_backed,
+        evaluator_sample_count,
     })
 }
 
-fn evaluation_source(evaluator_backed_frame_count: usize) -> CadEvaluationSource {
-    if evaluator_backed_frame_count > 0 {
+fn evaluation_source(
+    face_frame_count: usize,
+    evaluator_backed_frame_count: usize,
+    exact_query_face_count: usize,
+) -> CadEvaluationSource {
+    if face_frame_count > 0 && exact_query_face_count == face_frame_count {
+        CadEvaluationSource::ParametricCad
+    } else if evaluator_backed_frame_count > 0 {
         CadEvaluationSource::ImportedEvaluatorSamples
     } else {
         CadEvaluationSource::PlanarFacetApproximation
     }
+}
+
+fn exact_backend_sample(face: &CadFace) -> Option<&CadFaceEvaluationSample> {
+    face.evaluator_samples.iter().find(|sample| {
+        sample.source == CadFaceEvaluationSampleSource::BackendQuery
+            && finite_point(sample.point_m)
+            && sample
+                .unit_normal
+                .is_some_and(|normal| finite_point(normal) && norm(normal) > 0.0)
+            && sample
+                .projection_error_m
+                .is_none_or(|error| error.is_finite() && error >= 0.0)
+    })
+}
+
+fn finite_point(point: Point3) -> bool {
+    point.iter().all(|coordinate| coordinate.is_finite())
 }
 
 fn topology_vertex(
@@ -257,8 +316,9 @@ mod tests {
     use super::*;
     use crate::{build_cad_topology, source_topology_from_boundary_input, BoundaryMeshInput};
     use runmat_geometry_core::{
-        CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership, CadSemanticKind,
-        EntityIdRange, EntityKind, Region, RegionEntityMapping,
+        CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
+        CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, Region,
+        RegionEntityMapping,
     };
 
     #[test]
@@ -302,9 +362,40 @@ mod tests {
 
         assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
         assert_eq!(model.report.evaluator_face_count, 2);
+        assert_eq!(model.report.exact_query_face_count, 0);
+        assert_eq!(model.report.evaluator_sample_count, 0);
         assert!(model.face_frames.iter().any(|frame| frame.evaluator_backed
             && frame.origin_m == [0.25, 0.25, 0.75]
             && frame.unit_normal == [0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn exact_backend_query_samples_drive_parametric_cad_frames() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.5, 1.0],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            }];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+
+        assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
+        assert_eq!(model.report.evaluator_sample_count, 2);
+        assert_eq!(model.report.exact_query_face_count, 2);
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+        assert_eq!(frame.origin_m, [0.5, 0.5, 1.0]);
+        assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
     }
 
     fn cube_topology() -> SourceTopologyModel {
@@ -421,6 +512,7 @@ mod tests {
                 supports_curvature: true,
                 reference_point_m: Some([0.25, 0.25, 0.75]),
                 reference_unit_normal: Some([0.0, 0.0, 1.0]),
+                evaluation_samples: Vec::new(),
             }],
             curves: Vec::new(),
         }];

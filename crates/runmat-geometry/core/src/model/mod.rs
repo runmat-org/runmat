@@ -19,7 +19,8 @@ pub use regions::{
     CadSemanticKind, EntityIdRange, Region, RegionEntityMapping,
 };
 pub use source_geometry::{
-    CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluator, SourceGeometry, SourceGeometryKind,
+    CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource,
+    CadFaceEvaluator, SourceGeometry, SourceGeometryKind,
 };
 pub use tessellation_profile::{HealingMode, TessellationProfile};
 pub use topology::ElementKind;
