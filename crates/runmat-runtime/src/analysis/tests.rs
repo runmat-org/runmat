@@ -2249,12 +2249,20 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
         payload["mesh"]["provenance"]["algorithm"].as_str(),
         Some("production_topology_tet_candidate/v1")
     );
-    assert_eq!(
+    assert!(
         payload["mesh"]["volume_elements"]
             .as_array()
             .expect("volume elements")
-            .len(),
-        12
+            .len()
+            > 12
+    );
+    assert_eq!(
+        payload["mesh"]["backend"]["tet_fan_fallback_component_count"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        payload["mesh"]["backend"]["tet_recovered_component_ratio"].as_f64(),
+        Some(1.0)
     );
     let evidence_payload: serde_json::Value =
         serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))

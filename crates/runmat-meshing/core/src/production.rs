@@ -141,6 +141,7 @@ fn tet_candidate_options_for_mesh(
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
         max_interior_seed_points: options.max_elements.max(1).min(128),
+        allow_fan_fallback: false,
         ..TetCandidateOptions::default()
     }
 }
@@ -317,6 +318,18 @@ fn production_backend_summary(
         volume_candidate_count: preparation.volume_candidates.components.len(),
         interior_seed_point_count: preparation.tet_candidates.interior_seed_points.len(),
         tet_candidate_count: preparation.tet_candidates.tets.len(),
+        tet_recovered_component_ratio: preparation
+            .tet_candidates
+            .recovery
+            .recovered_component_ratio,
+        tet_fan_fallback_component_count: preparation
+            .tet_candidates
+            .recovery
+            .fan_fallback_component_count,
+        tet_candidate_volume_ratio: preparation
+            .tet_candidates
+            .recovery
+            .total_candidate_volume_ratio,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }
@@ -519,7 +532,21 @@ mod tests {
         assert_eq!(preparation.surface_recovery.nonmanifold_edge_count, 0);
         assert_eq!(preparation.surface_recovery.source_face_coverage_ratio, 1.0);
         assert_eq!(preparation.volume_candidates.components.len(), 1);
-        assert_eq!(preparation.tet_candidates.tets.len(), 12);
+        assert!(preparation.tet_candidates.tets.len() > 12);
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .fan_fallback_component_count,
+            0
+        );
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .recovered_component_ratio,
+            1.0
+        );
         assert!((preparation.volume_candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
         assert!((preparation.tet_candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
         assert!(!preparation.curves.elements.is_empty());
@@ -533,8 +560,8 @@ mod tests {
 
         crate::validate_analysis_mesh(&mesh, crate::QualityThresholds::default())
             .expect("production candidate mesh should validate");
-        assert_eq!(mesh.nodes.len(), 9);
-        assert_eq!(mesh.volume_elements.len(), 12);
+        assert!(mesh.nodes.len() > 9);
+        assert!(mesh.volume_elements.len() > 12);
         assert_eq!(mesh.boundary_faces.len(), 12);
         assert_eq!(mesh.boundary_edges.len(), 18);
         assert!(mesh
@@ -549,7 +576,10 @@ mod tests {
         assert_eq!(mesh.backend.source_topology_face_count, 12);
         assert_eq!(mesh.backend.surface_element_count, 12);
         assert_eq!(mesh.backend.volume_candidate_count, 1);
-        assert_eq!(mesh.backend.tet_candidate_count, 12);
+        assert!(mesh.backend.tet_candidate_count > 12);
+        assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);
+        assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
+        assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(

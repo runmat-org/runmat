@@ -79,7 +79,7 @@ pub use surface_recovery::{
 };
 pub use tet_candidate::{
     form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
-    TetCandidateOptions, TetCandidateSet,
+    TetCandidateOptions, TetCandidateSet, TetRecoveryReport,
 };
 pub use tolerance::MeshingTolerance;
 pub use topology::{BoundaryElementKind, VolumeElementKind};

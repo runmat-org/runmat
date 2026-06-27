@@ -20,6 +20,7 @@ pub struct TetCandidateOptions {
     pub max_aspect_ratio: f64,
     pub interior_target_size_m: Option<f64>,
     pub max_interior_seed_points: usize,
+    pub allow_fan_fallback: bool,
 }
 
 impl Default for TetCandidateOptions {
@@ -29,6 +30,7 @@ impl Default for TetCandidateOptions {
             max_aspect_ratio: 1.0e6,
             interior_target_size_m: None,
             max_interior_seed_points: 1,
+            allow_fan_fallback: true,
         }
     }
 }
@@ -63,7 +65,18 @@ pub struct TetCandidateSet {
     pub nodes: Vec<TetCandidateNode>,
     pub tets: Vec<TetCandidate>,
     pub interior_seed_points: Vec<[f64; 3]>,
+    pub recovery: TetRecoveryReport,
     pub total_volume_m3: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TetRecoveryReport {
+    pub component_count: usize,
+    pub insertion_component_count: usize,
+    pub fan_fallback_component_count: usize,
+    pub recovered_component_ratio: f64,
+    pub total_candidate_volume_ratio: f64,
+    pub max_aspect_ratio: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +84,7 @@ pub enum TetCandidateError {
     MissingSurfaceNode { node_id: u32 },
     MissingSurfaceElement { element_id: u32 },
     InvalidOptions,
+    RecoveryFailed { component_id: u32 },
     EmptyCandidateSet,
 }
 
@@ -86,6 +100,10 @@ impl std::fmt::Display for TetCandidateError {
             Self::InvalidOptions => write!(
                 formatter,
                 "Tet candidate options must use finite positive volume and aspect ratio limits"
+            ),
+            Self::RecoveryFailed { component_id } => write!(
+                formatter,
+                "Tet candidate recovery failed for component {component_id}"
             ),
             Self::EmptyCandidateSet => write!(formatter, "no valid Tet candidates were generated"),
         }
@@ -130,6 +148,8 @@ pub fn form_tet_candidates(
         .saturating_add(1);
 
     let mut interior_seed_points = Vec::<[f64; 3]>::new();
+    let mut insertion_component_count = 0_usize;
+    let mut fan_fallback_component_count = 0_usize;
     for component in &volume_candidates.components {
         let tolerance =
             MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
@@ -154,8 +174,7 @@ pub fn form_tet_candidates(
         }
         interior_seed_points.extend(component_seed_points.iter().copied());
 
-        let insertion_start = tets.len();
-        append_component_insertion_tets(
+        let insertion_status = append_component_insertion_tets(
             component,
             &component_seed_node_ids,
             &component_seed_points,
@@ -166,7 +185,15 @@ pub fn form_tet_candidates(
             tolerance,
             &mut tets,
         )?;
-        if tets.len() == insertion_start {
+        if insertion_status.accepted {
+            insertion_component_count += 1;
+        } else {
+            if !options.allow_fan_fallback {
+                return Err(TetCandidateError::RecoveryFailed {
+                    component_id: component.component_id,
+                });
+            }
+            fan_fallback_component_count += 1;
             let fan_seed_point = select_component_fan_seed_point(
                 component,
                 &component_seed_points,
@@ -194,10 +221,33 @@ pub fn form_tet_candidates(
         return Err(TetCandidateError::EmptyCandidateSet);
     }
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
+    let expected_volume_m3 = volume_candidates.total_volume_m3;
+    let total_candidate_volume_ratio = if expected_volume_m3 > f64::EPSILON {
+        total_volume_m3 / expected_volume_m3
+    } else {
+        1.0
+    };
+    let max_aspect_ratio = tets
+        .iter()
+        .map(|tet| tet.aspect_ratio)
+        .fold(0.0_f64, f64::max);
+    let component_count = volume_candidates.components.len();
     Ok(TetCandidateSet {
         nodes,
         tets,
         interior_seed_points,
+        recovery: TetRecoveryReport {
+            component_count,
+            insertion_component_count,
+            fan_fallback_component_count,
+            recovered_component_ratio: if component_count == 0 {
+                1.0
+            } else {
+                insertion_component_count as f64 / component_count as f64
+            },
+            total_candidate_volume_ratio,
+            max_aspect_ratio,
+        },
         total_volume_m3,
     })
 }
@@ -276,9 +326,9 @@ fn append_component_insertion_tets(
     options: TetCandidateOptions,
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
-) -> Result<(), TetCandidateError> {
+) -> Result<InsertionStatus, TetCandidateError> {
     if seed_node_ids.is_empty() || seed_node_ids.len() != seed_points.len() {
-        return Ok(());
+        return Ok(InsertionStatus::rejected(0.0, 0.0));
     }
 
     let mut points = Vec::<ConnectivityPoint>::new();
@@ -350,21 +400,39 @@ fn append_component_insertion_tets(
             aspect_ratio,
         });
     }
-    if insertion_tets_are_acceptable(component, &accepted_tets) {
+    let status = insertion_tet_status(component, &accepted_tets);
+    if status.accepted {
         for mut tet in accepted_tets {
             tet.tet_id = tets.len() as u32;
             tets.push(tet);
         }
     }
-    Ok(())
+    Ok(status)
 }
 
-fn insertion_tets_are_acceptable(
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InsertionStatus {
+    accepted: bool,
+    volume_ratio: f64,
+    max_aspect_ratio: f64,
+}
+
+impl InsertionStatus {
+    fn rejected(volume_ratio: f64, max_aspect_ratio: f64) -> Self {
+        Self {
+            accepted: false,
+            volume_ratio,
+            max_aspect_ratio,
+        }
+    }
+}
+
+fn insertion_tet_status(
     component: &VolumeCandidateComponent,
     tets: &[TetCandidate],
-) -> bool {
+) -> InsertionStatus {
     if tets.is_empty() || component.volume_m3 <= f64::EPSILON {
-        return false;
+        return InsertionStatus::rejected(0.0, 0.0);
     }
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
     let volume_ratio = total_volume_m3 / component.volume_m3;
@@ -372,7 +440,11 @@ fn insertion_tets_are_acceptable(
         .iter()
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
-    (0.90..=1.10).contains(&volume_ratio) && max_aspect_ratio <= 1.0 / 0.15
+    InsertionStatus {
+        accepted: (0.90..=1.10).contains(&volume_ratio) && max_aspect_ratio <= 1.0 / 0.15,
+        volume_ratio,
+        max_aspect_ratio,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -679,12 +751,12 @@ fn sample_component_interior_points(
             component.bounds_max_m[1] - component.bounds_min_m[1],
             component.bounds_max_m[2] - component.bounds_min_m[2],
         ];
-        let divisions = spans.map(|span| ((span / target_size_m).ceil() as usize).max(1));
-        'x_axis: for x_index in 0..divisions[0] {
+        let divisions = seed_grid_divisions(spans, target_size_m, options.max_interior_seed_points);
+        for x_index in 0..divisions[0] {
             for y_index in 0..divisions[1] {
                 for z_index in 0..divisions[2] {
                     if points.len() >= options.max_interior_seed_points {
-                        break 'x_axis;
+                        return Ok(points);
                     }
                     let point = [
                         grid_center(component.bounds_min_m[0], spans[0], divisions[0], x_index),
@@ -712,6 +784,19 @@ fn sample_component_interior_points(
         points.push(center);
     }
     Ok(points)
+}
+
+fn seed_grid_divisions(spans: [f64; 3], target_size_m: f64, max_seed_points: usize) -> [usize; 3] {
+    let max_grid_points = max_seed_points.max(1);
+    let mut divisions = spans.map(|span| ((span / target_size_m).ceil() as usize).max(1));
+    while divisions.iter().product::<usize>() > max_grid_points {
+        let axis = (0..3).max_by_key(|axis| divisions[*axis]).unwrap_or(0);
+        if divisions[axis] <= 1 {
+            break;
+        }
+        divisions[axis] -= 1;
+    }
+    divisions
 }
 
 fn grid_center(minimum: f64, span: f64, divisions: usize, index: usize) -> f64 {
@@ -844,6 +929,12 @@ mod tests {
         assert_eq!(candidates.nodes.len(), 9);
         assert_eq!(candidates.tets.len(), 12);
         assert_eq!(candidates.interior_seed_points.len(), 1);
+        assert_eq!(candidates.recovery.component_count, 1);
+        assert_eq!(
+            candidates.recovery.insertion_component_count
+                + candidates.recovery.fan_fallback_component_count,
+            1
+        );
         assert!(candidates
             .tets
             .iter()
@@ -870,20 +961,46 @@ mod tests {
         )
         .expect("Tet candidates should form");
 
-        assert_eq!(candidates.interior_seed_points.len(), 8);
+        assert!(candidates.interior_seed_points.len() > 1);
+        assert!(candidates.interior_seed_points.len() <= 8);
         assert_eq!(candidates.interior_seed_points[0], [0.5, 0.5, 0.5]);
         assert!(candidates.interior_seed_points.iter().all(|point| {
             point
                 .iter()
                 .all(|coordinate| *coordinate > 0.0 && *coordinate < 1.0)
         }));
-        assert_eq!(candidates.nodes.len(), 16);
+        assert_eq!(
+            candidates.nodes.len(),
+            8 + candidates.interior_seed_points.len()
+        );
         assert!(candidates.tets.len() > 12);
+        assert_eq!(candidates.recovery.insertion_component_count, 1);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
+        assert!((candidates.recovery.total_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
         assert!(candidates
             .tets
             .iter()
             .all(|tet| tet.volume_m3 > 0.0 && tet.aspect_ratio <= 1.0 / 0.15));
+    }
+
+    #[test]
+    fn rejects_unrecovered_insertion_when_fallback_is_disabled() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let err = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                max_aspect_ratio: 1.01,
+                allow_fan_fallback: false,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect_err("disabled fallback should expose recovery failure");
+
+        assert_eq!(err, TetCandidateError::RecoveryFailed { component_id: 0 });
     }
 
     #[test]
