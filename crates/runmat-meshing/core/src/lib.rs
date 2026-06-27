@@ -12,6 +12,7 @@ pub mod surface;
 pub mod topology;
 pub mod validation;
 pub mod volume;
+pub mod volume_candidate;
 
 pub use adaptive::{
     build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
@@ -57,6 +58,10 @@ pub use validation::{
 pub use volume::{
     generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
     VolumeMesher,
+};
+pub use volume_candidate::{
+    prepare_volume_candidates, VolumeCandidateComponent, VolumeCandidateError,
+    VolumeCandidateOptions, VolumeCandidateSet,
 };
 
 use runmat_geometry_core::{GeometryAsset, MeshKind};
