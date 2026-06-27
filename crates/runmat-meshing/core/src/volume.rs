@@ -10,7 +10,7 @@ use crate::{
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
-    quality::{AnalysisMeshQualityReport, ElementQuality},
+    quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{MeshSizingField, SizingSample},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
@@ -239,6 +239,25 @@ impl StructuredGrid {
         .flatten()
         .reduce(f64::min)
     }
+
+    fn max_cell_aspect_ratio(&self) -> Option<f64> {
+        let mut max_ratio = 0.0_f64;
+        let mut saw_cell = false;
+        for dx in axis_spacings(&self.x) {
+            for dy in axis_spacings(&self.y) {
+                for dz in axis_spacings(&self.z) {
+                    let min_edge = dx.min(dy).min(dz);
+                    if !min_edge.is_finite() || min_edge <= 0.0 {
+                        continue;
+                    }
+                    let diagonal = (dx * dx + dy * dy + dz * dz).sqrt();
+                    max_ratio = max_ratio.max(diagonal / min_edge);
+                    saw_cell = true;
+                }
+            }
+        }
+        saw_cell.then_some(max_ratio)
+    }
 }
 
 fn structured_grid(
@@ -326,7 +345,8 @@ fn insert_local_sizing_breakpoints(
             {
                 let mut candidate = grid.clone();
                 candidate.insert_axis_coordinate(axis, coordinate);
-                if candidate.element_count() <= max_elements {
+                if candidate.element_count() <= max_elements && candidate.satisfies_quality_guard()
+                {
                     *grid = candidate;
                 }
             }
@@ -468,6 +488,15 @@ impl StructuredGrid {
         coordinates.push(coordinate);
         coordinates.sort_by(f64::total_cmp);
     }
+
+    fn satisfies_quality_guard(&self) -> bool {
+        let thresholds = QualityThresholds::default();
+        let aspect_limit = thresholds
+            .max_aspect_ratio
+            .min(1.0 / thresholds.min_scaled_jacobian.max(f64::EPSILON));
+        self.max_cell_aspect_ratio()
+            .is_some_and(|ratio| ratio.is_finite() && ratio <= aspect_limit)
+    }
 }
 
 fn uniform_axis(min: f64, max: f64, divisions: usize) -> Vec<f64> {
@@ -477,10 +506,13 @@ fn uniform_axis(min: f64, max: f64, divisions: usize) -> Vec<f64> {
 }
 
 fn min_axis_spacing(axis: &[f64]) -> Option<f64> {
-    axis.windows(2)
-        .map(|pair| pair[1] - pair[0])
+    axis_spacings(axis)
         .filter(|value| value.is_finite() && *value > 0.0)
         .reduce(f64::min)
+}
+
+fn axis_spacings(axis: &[f64]) -> impl Iterator<Item = f64> + '_ {
+    axis.windows(2).map(|pair| pair[1] - pair[0])
 }
 
 fn grid_nodes(grid: &StructuredGrid) -> Vec<AnalysisMeshNode> {
@@ -1054,7 +1086,7 @@ mod tests {
         let sizing = MeshSizingField {
             samples: vec![SizingSample {
                 position_m: [0.4, 0.4, 0.4],
-                target_size_m: 0.2,
+                target_size_m: 0.25,
                 reason: Some("structural.load_regions".to_string()),
             }],
             ..MeshSizingField::default()
@@ -1072,8 +1104,42 @@ mod tests {
             .collect::<Vec<_>>();
         let min_spacing = spacings.iter().copied().fold(f64::INFINITY, f64::min);
         let max_spacing = spacings.iter().copied().fold(0.0_f64, f64::max);
-        assert!(min_spacing <= 0.2 + 1.0e-12);
+        assert!(min_spacing <= 0.25 + 1.0e-12);
         assert!(max_spacing > min_spacing * 1.5);
+    }
+
+    #[test]
+    fn sizing_field_skips_breakpoints_that_would_violate_quality() {
+        let geometry = cube_geometry();
+        let mut options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.2, 0.2, 0.2],
+                target_size_m: 0.01,
+                reason: Some("structural.stress_gradient".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let mesh = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+            .expect("quality-guarded local sizing mesh should generate");
+
+        validate_analysis_mesh(&mesh, Default::default())
+            .expect("quality-guarded local mesh should validate");
+        assert!(
+            mesh.quality.min_scaled_jacobian >= QualityThresholds::default().min_scaled_jacobian
+        );
+        let min_spacing = unique_axis_coordinates(&mesh, 0)
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .fold(f64::INFINITY, f64::min);
+        assert!(min_spacing > 0.01);
     }
 
     #[test]
