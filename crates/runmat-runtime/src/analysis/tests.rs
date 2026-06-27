@@ -3058,6 +3058,11 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     ));
     assert_eq!(displacement.topology_id.as_deref(), Some("analysis_mesh"));
     assert_eq!(displacement.element_kind, None);
+    assert_eq!(displacement.location, AnalysisFieldLocation::Node);
+    assert_eq!(displacement.entity_count, 4);
+    assert_eq!(displacement.value_count, 12);
+    assert_eq!(displacement.element_count, 12);
+    assert_eq!(displacement.component_count, Some(3));
     let solid_stress = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
         vec![1, 6],
@@ -3065,8 +3070,15 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     ));
     assert_eq!(solid_stress.topology_id.as_deref(), Some("analysis_mesh"));
     assert_eq!(solid_stress.element_kind.as_deref(), Some("tet4"));
+    assert_eq!(solid_stress.location, AnalysisFieldLocation::Element);
+    assert_eq!(solid_stress.entity_count, 1);
+    assert_eq!(solid_stress.value_count, 6);
+    assert_eq!(solid_stress.element_count, 6);
+    assert_eq!(solid_stress.component_count, Some(6));
     assert_eq!(membrane.topology_id.as_deref(), Some("analysis_mesh"));
     assert_eq!(membrane.element_kind.as_deref(), Some("tri3"));
+    assert_eq!(membrane.entity_count, 1);
+    assert_eq!(membrane.value_count, 3);
     let energy = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
         vec![1],
@@ -3074,6 +3086,8 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     ));
     assert_eq!(energy.topology_id, None);
     assert_eq!(energy.element_kind, None);
+    assert_eq!(energy.entity_count, 1);
+    assert_eq!(energy.value_count, 1);
 }
 
 #[test]

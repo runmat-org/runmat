@@ -2473,6 +2473,14 @@ fn field_to_object(
         Value::Num(descriptor.element_count as f64),
     );
     object.properties.insert(
+        "entity_count".to_string(),
+        Value::Num(descriptor.entity_count as f64),
+    );
+    object.properties.insert(
+        "value_count".to_string(),
+        Value::Num(descriptor.value_count as f64),
+    );
+    object.properties.insert(
         "storage".to_string(),
         Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
     );
@@ -3915,6 +3923,18 @@ run:
         assert_eq!(
             field_object.properties.get("element_kind"),
             Some(&Value::String("tet4".to_string()))
+        );
+        assert_eq!(
+            field_object.properties.get("entity_count"),
+            Some(&Value::Num(1.0))
+        );
+        assert_eq!(
+            field_object.properties.get("value_count"),
+            Some(&Value::Num(1.0))
+        );
+        assert_eq!(
+            field_object.properties.get("element_count"),
+            Some(&Value::Num(1.0))
         );
         let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
             panic!("expected values tensor");

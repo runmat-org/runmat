@@ -9647,6 +9647,9 @@ fn primary_solver_mesh_field_expected_count(
 }
 
 fn descriptor_entity_count(field: &AnalysisField, descriptor: &AnalysisFieldDescriptor) -> usize {
+    if descriptor.entity_count > 0 {
+        return descriptor.entity_count;
+    }
     if matches!(
         descriptor.location,
         AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode

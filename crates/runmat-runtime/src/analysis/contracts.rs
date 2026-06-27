@@ -1106,6 +1106,10 @@ pub struct AnalysisFieldDescriptor {
     pub location: AnalysisFieldLocation,
     pub shape: Vec<usize>,
     pub element_count: usize,
+    #[serde(default)]
+    pub entity_count: usize,
+    #[serde(default)]
+    pub value_count: usize,
     pub component_count: Option<usize>,
     pub residency: String,
     pub storage: AnalysisFieldStorage,
@@ -1131,8 +1135,10 @@ impl AnalysisFieldDescriptor {
             AnalysisFieldStorage::DeviceRef => "gpu",
         }
         .to_string();
-        let element_count = field.element_count();
         let location = infer_field_location(&field.field_id);
+        let component_count = infer_component_count(&field.field_id, &field.shape);
+        let value_count = field.element_count();
+        let entity_count = infer_entity_count(&field.shape, location, component_count);
         Self {
             field_id: field.field_id.clone(),
             family: infer_field_family(&field.field_id).to_string(),
@@ -1145,15 +1151,36 @@ impl AnalysisFieldDescriptor {
             unit: infer_field_unit(&field.field_id).map(str::to_string),
             location,
             shape: field.shape.clone(),
-            element_count,
-            component_count: infer_component_count(&field.field_id, &field.shape),
+            element_count: value_count,
+            entity_count,
+            value_count,
+            component_count,
             residency,
             storage,
-            size_bytes: element_count
+            size_bytes: value_count
                 .checked_mul(std::mem::size_of::<f64>())
                 .map(|bytes| bytes as u64),
         }
     }
+}
+
+fn infer_entity_count(
+    shape: &[usize],
+    location: AnalysisFieldLocation,
+    component_count: Option<usize>,
+) -> usize {
+    if matches!(
+        location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return shape.iter().product();
+    }
+    if let Some(first_dim) = shape.first().copied() {
+        if shape.len() > 1 || component_count.is_some() {
+            return first_dim;
+        }
+    }
+    shape.iter().product()
 }
 
 fn infer_field_family(field_id: &str) -> &str {
