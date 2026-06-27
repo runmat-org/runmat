@@ -6071,6 +6071,37 @@ fn sizing_rejection_summary_groups_statuses_and_reasons() {
     assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
 }
 
+#[test]
+fn refinement_effect_summary_reports_topology_deltas() {
+    let source_mesh = minimal_analysis_mesh();
+    let mut refined_mesh = minimal_analysis_mesh();
+    refined_mesh
+        .nodes
+        .push(analysis_mesh_node(5, [0.25, 0.25, 0.25]));
+    refined_mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![2, 3, 4, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    let summary = refinement_effect_summary(&source_mesh, &refined_mesh);
+
+    assert_eq!(summary["source_node_count"].as_u64(), Some(4));
+    assert_eq!(summary["source_element_count"].as_u64(), Some(1));
+    assert_eq!(summary["refined_node_count"].as_u64(), Some(5));
+    assert_eq!(summary["refined_element_count"].as_u64(), Some(2));
+    assert_eq!(summary["node_count_delta"].as_i64(), Some(1));
+    assert_eq!(summary["element_count_delta"].as_i64(), Some(1));
+    assert_eq!(summary["topology_changed"].as_bool(), Some(true));
+
+    let no_op = refinement_effect_summary(&source_mesh, &source_mesh);
+    assert_eq!(no_op["node_count_delta"].as_i64(), Some(0));
+    assert_eq!(no_op["element_count_delta"].as_i64(), Some(0));
+    assert_eq!(no_op["topology_changed"].as_bool(), Some(false));
+}
+
 fn analysis_mesh_with_boundary_regions(
     fixed_region_ids: &[&str],
     load_region_ids: &[&str],

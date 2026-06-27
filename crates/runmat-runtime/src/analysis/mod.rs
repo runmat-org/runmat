@@ -13568,6 +13568,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "sizing_rejections": sizing_rejection_summary(&refined_mesh),
+            "refinement_effect": refinement_effect_summary(&mesh, &refined_mesh),
             "mesh": refined_mesh,
         }),
     )
@@ -14389,6 +14390,26 @@ fn sizing_rejection_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
         "total": mesh.sizing.rejected_samples.len(),
         "by_status": by_status,
         "by_reason": by_reason,
+    })
+}
+
+fn refinement_effect_summary(
+    source_mesh: &AnalysisMeshArtifact,
+    refined_mesh: &AnalysisMeshArtifact,
+) -> serde_json::Value {
+    let source_node_count = source_mesh.nodes.len();
+    let source_element_count = source_mesh.volume_elements.len();
+    let refined_node_count = refined_mesh.nodes.len();
+    let refined_element_count = refined_mesh.volume_elements.len();
+    serde_json::json!({
+        "source_node_count": source_node_count,
+        "source_element_count": source_element_count,
+        "refined_node_count": refined_node_count,
+        "refined_element_count": refined_element_count,
+        "node_count_delta": refined_node_count as i64 - source_node_count as i64,
+        "element_count_delta": refined_element_count as i64 - source_element_count as i64,
+        "topology_changed": refined_node_count != source_node_count
+            || refined_element_count != source_element_count,
     })
 }
 
