@@ -2,6 +2,7 @@ pub mod adaptive;
 pub mod artifact;
 pub mod backend;
 pub mod boundary;
+pub mod curve;
 pub mod options;
 pub mod provenance;
 pub mod quality;
@@ -26,6 +27,10 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use curve::{
+    discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
+    CurveDiscretizationOptions, CurveElement, CurveNode,
+};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
