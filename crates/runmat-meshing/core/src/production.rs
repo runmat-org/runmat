@@ -20,6 +20,10 @@ use crate::{
         discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
         SurfaceDiscretizationOptions,
     },
+    surface_recovery::{
+        validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions,
+        SurfaceRecoveryReport,
+    },
     tet_candidate::{
         form_tet_candidates, TetCandidateError, TetCandidateNodeSource, TetCandidateOptions,
         TetCandidateSet,
@@ -39,15 +43,17 @@ pub struct ProductionMeshPreparation {
     pub topology: SourceTopologyModel,
     pub curves: CurveDiscretization,
     pub surface: SurfaceDiscretization,
+    pub surface_recovery: SurfaceRecoveryReport,
     pub volume_candidates: VolumeCandidateSet,
     pub tet_candidates: TetCandidateSet,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProductionMeshError {
     Topology(SourceTopologyError),
     Curve(CurveDiscretizationError),
     Surface(SurfaceDiscretizationError),
+    SurfaceRecovery(SurfaceRecoveryError),
     VolumeCandidate(VolumeCandidateError),
     TetCandidate(TetCandidateError),
     Validation(AnalysisMeshValidationError),
@@ -60,6 +66,7 @@ impl std::fmt::Display for ProductionMeshError {
             Self::Topology(err) => write!(formatter, "source topology extraction failed: {err}"),
             Self::Curve(err) => write!(formatter, "curve discretization failed: {err}"),
             Self::Surface(err) => write!(formatter, "surface discretization failed: {err}"),
+            Self::SurfaceRecovery(err) => write!(formatter, "surface recovery failed: {err}"),
             Self::VolumeCandidate(err) => {
                 write!(formatter, "volume candidate preparation failed: {err}")
             }
@@ -85,6 +92,9 @@ pub fn prepare_production_mesh(
         .map_err(ProductionMeshError::Curve)?;
     let surface = discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
         .map_err(ProductionMeshError::Surface)?;
+    let surface_recovery =
+        validate_surface_recovery(&topology, &surface, SurfaceRecoveryOptions::default())
+            .map_err(ProductionMeshError::SurfaceRecovery)?;
     let volume_candidates = prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
         .map_err(ProductionMeshError::VolumeCandidate)?;
     let tet_candidates = form_tet_candidates(
@@ -98,6 +108,7 @@ pub fn prepare_production_mesh(
         topology,
         curves,
         surface,
+        surface_recovery,
         volume_candidates,
         tet_candidates,
     })
@@ -503,6 +514,10 @@ mod tests {
 
         assert_eq!(preparation.topology.faces.len(), 12);
         assert_eq!(preparation.surface.elements.len(), 12);
+        assert_eq!(preparation.surface_recovery.surface_element_count, 12);
+        assert_eq!(preparation.surface_recovery.open_edge_count, 0);
+        assert_eq!(preparation.surface_recovery.nonmanifold_edge_count, 0);
+        assert_eq!(preparation.surface_recovery.source_face_coverage_ratio, 1.0);
         assert_eq!(preparation.volume_candidates.components.len(), 1);
         assert_eq!(preparation.tet_candidates.tets.len(), 12);
         assert!((preparation.volume_candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);

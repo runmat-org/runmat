@@ -13,6 +13,7 @@ pub mod sizing;
 pub mod source_topology;
 pub mod spatial_index;
 pub mod surface;
+pub mod surface_recovery;
 pub mod tet_candidate;
 pub mod tolerance;
 pub mod topology;
@@ -72,6 +73,9 @@ pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry};
 pub use surface::{
     discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
     SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
+};
+pub use surface_recovery::{
+    validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
 };
 pub use tet_candidate::{
     form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
