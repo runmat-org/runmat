@@ -3,7 +3,7 @@ pub mod elements;
 pub mod legacy_surrogate;
 pub mod solid;
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
@@ -60,6 +60,8 @@ pub struct AssemblySummary {
     pub structural_shell_element_count: usize,
     #[serde(default)]
     pub structural_solid_element_count: usize,
+    #[serde(default)]
+    pub structural_solid_recovery: Vec<SolidRecoveryElementSummary>,
     #[serde(default)]
     pub structural_dof_layout: StructuralDofLayout,
     #[serde(default)]
@@ -131,6 +133,14 @@ pub struct ShellRecoveryElementSummary {
     pub area_m2: f64,
     pub section: ShellSection,
     pub material: ShellMaterial,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SolidRecoveryElementSummary {
+    pub element_id: String,
+    pub region_id: String,
+    pub node_indices: [usize; 4],
+    pub coordinates_m: [[f64; 3]; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -376,6 +386,10 @@ fn assemble_linear_system_impl(
         .as_ref()
         .map(|topology| topology.dof_count)
         .unwrap_or(legacy_topology.dof_count);
+    let structural_solid_recovery = analysis_mesh
+        .as_ref()
+        .map(solid_recovery_from_analysis_mesh)
+        .unwrap_or_default();
 
     let avg_youngs_modulus = if model.materials.is_empty() {
         1.0e9
@@ -1034,6 +1048,7 @@ fn assemble_linear_system_impl(
             .as_ref()
             .map(|topology| topology.volume_element_count)
             .unwrap_or(legacy_topology.solid_element_count),
+        structural_solid_recovery,
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
@@ -1063,6 +1078,37 @@ fn assemble_linear_system_impl(
             rhs,
         },
     })
+}
+
+fn solid_recovery_from_analysis_mesh(
+    mesh: &AnalysisMeshArtifact,
+) -> Vec<SolidRecoveryElementSummary> {
+    let node_indices = mesh
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index))
+        .collect::<BTreeMap<_, _>>();
+
+    mesh.volume_elements
+        .iter()
+        .filter(|element| element.node_ids.len() == 4)
+        .filter_map(|element| {
+            let mut indices = [0_usize; 4];
+            let mut coordinates_m = [[0.0_f64; 3]; 4];
+            for (local, node_id) in element.node_ids.iter().copied().enumerate() {
+                let node_index = *node_indices.get(&node_id)?;
+                indices[local] = node_index;
+                coordinates_m[local] = mesh.nodes.get(node_index)?.coordinates_m;
+            }
+            Some(SolidRecoveryElementSummary {
+                element_id: element.element_id.clone(),
+                region_id: element.material_region_id.clone(),
+                node_indices: indices,
+                coordinates_m,
+            })
+        })
+        .collect()
 }
 
 fn electro_thermal_fingerprint(
@@ -1444,6 +1490,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
         structural_solid_element_count: 0,
+        structural_solid_recovery: Vec::new(),
         structural_dof_layout,
         structural_beam_recovery,
         structural_shell_recovery,
@@ -3003,6 +3050,20 @@ mod tests {
 
         assert_eq!(summary.dof_count, 12);
         assert_eq!(summary.structural_solid_element_count, 1);
+        assert_eq!(summary.structural_solid_recovery.len(), 1);
+        assert_eq!(
+            summary.structural_solid_recovery[0].node_indices,
+            [0, 1, 2, 3]
+        );
+        assert_eq!(
+            summary.structural_solid_recovery[0].coordinates_m,
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        );
         let dense = summary
             .operator
             .stiffness_dense

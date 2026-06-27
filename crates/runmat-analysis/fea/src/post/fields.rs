@@ -16,8 +16,10 @@ use crate::{
     assembly::{
         dofs::StructuralDofKind,
         elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
+        elements::solid::{strain_displacement_matrix, Tet4ElementGeometry},
         AssemblySummary, BeamRecoveryElementSummary, PrepCoordinateSummary,
-        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, StructuralMaterialSummary,
+        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, SolidRecoveryElementSummary,
+        StructuralMaterialSummary,
     },
     operator::{apply_k, apply_k_unconstrained},
     solve::linear::LinearSolveResult,
@@ -271,6 +273,7 @@ struct StructuralRecoveryEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuralRecoveryBasis {
+    SolidTet4ConstantStrain,
     PrepConstantStrainBMatrix,
     PrepElementConnectivity,
     OperatorConnectivity,
@@ -279,6 +282,7 @@ enum StructuralRecoveryBasis {
 impl StructuralRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::SolidTet4ConstantStrain => "solid_tet4_constant_strain",
             Self::PrepConstantStrainBMatrix => "prep_constant_strain_b_matrix",
             Self::PrepElementConnectivity => "prep_element_connectivity",
             Self::OperatorConnectivity => "operator_connectivity",
@@ -475,6 +479,14 @@ fn recover_structural_strain(
     summary: &AssemblySummary,
     displacement: &[f64],
 ) -> StructuralStrainRecovery {
+    if !summary.structural_solid_recovery.is_empty() {
+        return StructuralStrainRecovery {
+            values: recover_solid_tet4_strain(displacement, &summary.structural_solid_recovery),
+            element_count: summary.structural_solid_recovery.len().max(1),
+            basis: StructuralRecoveryBasis::SolidTet4ConstantStrain.as_str(),
+        };
+    }
+
     let b_matrix_elements = prep_b_matrix_recovery_elements(summary, displacement);
     if !b_matrix_elements.is_empty() {
         return StructuralStrainRecovery {
@@ -493,6 +505,36 @@ fn recover_structural_strain(
             .map(|edge| edge.basis.as_str())
             .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
     }
+}
+
+fn recover_solid_tet4_strain(
+    displacement: &[f64],
+    elements: &[SolidRecoveryElementSummary],
+) -> Vec<f64> {
+    let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
+    for (element_index, element) in elements.iter().enumerate() {
+        let Ok(b) = strain_displacement_matrix(Tet4ElementGeometry {
+            nodes_m: element.coordinates_m,
+        }) else {
+            continue;
+        };
+        let mut element_displacement = [0.0_f64; 12];
+        for (local_node, node_index) in element.node_indices.iter().copied().enumerate() {
+            let displacement_vector = nodal_displacement(displacement, node_index);
+            let base = local_node * VECTOR_COMPONENT_COUNT;
+            element_displacement[base..base + VECTOR_COMPONENT_COUNT]
+                .copy_from_slice(&displacement_vector);
+        }
+        let base = element_index * TENSOR_COMPONENT_COUNT;
+        for component in 0..TENSOR_COMPONENT_COUNT {
+            strain[base + component] = b[component]
+                .iter()
+                .zip(element_displacement.iter())
+                .map(|(shape, value)| shape * value)
+                .sum();
+        }
+    }
+    strain
 }
 
 fn prep_b_matrix_recovery_elements(
@@ -1382,5 +1424,99 @@ fn recover_residual_metrics(
     StructuralResidualMetrics {
         normalized_residual_norm: residual_norm / equation_scale,
         equation_scale,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assembly::assemble_linear_system,
+        fixtures::{fixture_model, FixtureId},
+    };
+    use runmat_meshing_core::{
+        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
+        AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
+        VolumeElementKind,
+    };
+
+    #[test]
+    fn solid_tet4_recovery_uses_solver_mesh_field_shapes() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let solve = LinearSolveResult {
+            iterations: 1,
+            residual_norm: 0.0,
+            converged: true,
+            host_sync_count: 0,
+            solver_backend: "test".to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            solution: vec![
+                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+            ],
+            solver_method: "test".to_string(),
+            preconditioner: "none".to_string(),
+            diagnostics: Vec::new(),
+        };
+
+        let fields = recover_result_fields(&summary, &solve);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+            &[4, 3]
+        );
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+        assert_eq!(
+            structural_field_recovery_metrics(&summary, &solve.solution).basis,
+            "solid_tet4_constant_strain"
+        );
+    }
+
+    fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {
+        fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .map(|field| field.shape.as_slice())
+            .expect("field should be present")
+    }
+
+    fn tet4_mesh() -> AnalysisMeshArtifact {
+        AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "unit_tet".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![AnalysisVolumeElement {
+                element_id: "tet_1".to_string(),
+                kind: VolumeElementKind::Tet4,
+                node_ids: vec![1, 2, 3, 4],
+                material_region_id: "solid".to_string(),
+                provenance: Vec::new(),
+            }],
+            boundary_faces: Vec::new(),
+            boundary_edges: Vec::new(),
+            quality: AnalysisMeshQualityReport::default(),
+            sizing: MeshSizingField::default(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
+        }
+    }
+
+    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+        AnalysisMeshNode {
+            node_id,
+            coordinates_m,
+            provenance: Vec::new(),
+        }
     }
 }
