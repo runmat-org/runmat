@@ -83,8 +83,9 @@ pub use source_topology::{
 };
 pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry};
 pub use surface::{
-    discretize_cad_surfaces, discretize_topology_surfaces, SurfaceDiscretization,
-    SurfaceDiscretizationError, SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
+    discretize_cad_surfaces, discretize_cad_surfaces_with_curves, discretize_topology_surfaces,
+    SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
+    SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
 pub use surface_recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,

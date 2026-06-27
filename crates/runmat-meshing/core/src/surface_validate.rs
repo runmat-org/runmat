@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     predicate::{dot, norm, point_triangle_distance, triangle_area, Triangle3},
     source_topology::{SourceTopologyEdge, SourceTopologyModel},
-    surface::{SurfaceDiscretization, SurfaceElement},
+    surface::{SurfaceDiscretization, SurfaceElement, INTERNAL_SOURCE_EDGE_ID},
     tolerance::MeshingTolerance,
 };
 
@@ -210,14 +210,24 @@ pub fn validate_surface_discretization(
 
         covered_source_faces.insert(element.source_face_id);
         for source_edge_id in element.source_edge_ids {
-            let source_edge = source_edges
+            if source_edge_id == INTERNAL_SOURCE_EDGE_ID {
+                continue;
+            }
+            source_edges
                 .get(&source_edge_id)
                 .ok_or(SurfaceValidationError::MissingSourceEdge { source_edge_id })?;
-            if surface_edges.contains_key(&source_edge_id)
-                && element_contains_source_edge(element, source_edge)
-            {
-                conforming_source_edges.insert(source_edge_id);
-            }
+        }
+    }
+
+    for (source_edge_id, source_edge) in &source_edges {
+        if source_edge_is_recovered_by_chain(
+            surface_edges
+                .get(source_edge_id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            source_edge,
+        ) {
+            conforming_source_edges.insert(*source_edge_id);
         }
     }
 
@@ -298,31 +308,49 @@ fn count_closed_source_edge_loops(
     Ok((edges.len(), closed_count))
 }
 
-fn surface_edge_source_ids(surface: &SurfaceDiscretization) -> BTreeMap<u32, [u32; 2]> {
-    let mut edges = BTreeMap::<u32, [u32; 2]>::new();
+fn surface_edge_source_ids(surface: &SurfaceDiscretization) -> BTreeMap<u32, Vec<[u32; 2]>> {
+    let mut edges = BTreeMap::<u32, Vec<[u32; 2]>>::new();
     for element in &surface.elements {
         for (source_edge_id, node_ids) in element.source_edge_ids.into_iter().zip([
             sorted_edge(element.node_ids[0], element.node_ids[1]),
             sorted_edge(element.node_ids[1], element.node_ids[2]),
             sorted_edge(element.node_ids[2], element.node_ids[0]),
         ]) {
-            edges.insert(source_edge_id, node_ids);
+            if source_edge_id != INTERNAL_SOURCE_EDGE_ID {
+                edges.entry(source_edge_id).or_default().push(node_ids);
+            }
         }
     }
     edges
 }
 
-fn element_contains_source_edge(
-    element: &SurfaceElement,
+fn source_edge_is_recovered_by_chain(
+    segments: &[[u32; 2]],
     source_edge: &SourceTopologyEdge,
 ) -> bool {
     let source_edge_nodes = sorted_edge(source_edge.node_ids[0], source_edge.node_ids[1]);
-    [
-        sorted_edge(element.node_ids[0], element.node_ids[1]),
-        sorted_edge(element.node_ids[1], element.node_ids[2]),
-        sorted_edge(element.node_ids[2], element.node_ids[0]),
-    ]
-    .contains(&source_edge_nodes)
+    if segments.contains(&source_edge_nodes) {
+        return true;
+    }
+    let mut adjacency = BTreeMap::<u32, Vec<u32>>::new();
+    for segment in segments {
+        adjacency.entry(segment[0]).or_default().push(segment[1]);
+        adjacency.entry(segment[1]).or_default().push(segment[0]);
+    }
+    let mut stack = vec![source_edge.node_ids[0]];
+    let mut visited = BTreeSet::<u32>::new();
+    while let Some(node_id) = stack.pop() {
+        if !visited.insert(node_id) {
+            continue;
+        }
+        if node_id == source_edge.node_ids[1] {
+            return true;
+        }
+        if let Some(next) = adjacency.get(&node_id) {
+            stack.extend(next.iter().copied());
+        }
+    }
+    false
 }
 
 fn topology_face_points(
