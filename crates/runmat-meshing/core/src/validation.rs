@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use crate::{
     artifact::{AnalysisMeshArtifact, ANALYSIS_MESH_SCHEMA_VERSION},
     quality::QualityThresholds,
+    topology::{BoundaryElementKind, VolumeElementKind},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +11,10 @@ pub struct AnalysisMeshValidationOptions {
     pub quality: QualityThresholds,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
+    pub expected_volume_m3: Option<f64>,
+    pub min_volume_coverage_ratio: f64,
+    pub expected_boundary_area_m2: Option<f64>,
+    pub min_boundary_area_ratio: f64,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
 }
@@ -20,6 +25,10 @@ impl Default for AnalysisMeshValidationOptions {
             quality: QualityThresholds::default(),
             expected_bounds_m: None,
             min_bounds_coverage_ratio: 0.90,
+            expected_volume_m3: None,
+            min_volume_coverage_ratio: 0.90,
+            expected_boundary_area_m2: None,
+            min_boundary_area_ratio: 0.90,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
         }
@@ -88,6 +97,14 @@ pub enum AnalysisMeshValidationError {
     BoundsCoverageFailed {
         axis: usize,
         coverage_ratio: String,
+        required_ratio: String,
+    },
+    VolumeCoverageFailed {
+        coverage_ratio: String,
+        required_ratio: String,
+    },
+    BoundaryAreaCoverageFailed {
+        area_ratio: String,
         required_ratio: String,
     },
     MissingRequiredBoundaryRegion {
@@ -241,6 +258,16 @@ pub fn validate_analysis_mesh_with_options(
         options.expected_bounds_m,
         options.min_bounds_coverage_ratio,
     )?;
+    validate_volume_coverage(
+        mesh,
+        options.expected_volume_m3,
+        options.min_volume_coverage_ratio,
+    )?;
+    validate_boundary_area_coverage(
+        mesh,
+        options.expected_boundary_area_m2,
+        options.min_boundary_area_ratio,
+    )?;
     validate_quality(mesh, options.quality)
 }
 
@@ -365,6 +392,131 @@ fn mesh_bounds_m(mesh: &AnalysisMeshArtifact) -> Option<[[f64; 3]; 2]> {
         }
     }
     Some([min, max])
+}
+
+fn validate_volume_coverage(
+    mesh: &AnalysisMeshArtifact,
+    expected_volume_m3: Option<f64>,
+    min_volume_coverage_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    let Some(expected_volume_m3) = expected_volume_m3 else {
+        return Ok(());
+    };
+    if !expected_volume_m3.is_finite()
+        || expected_volume_m3 <= f64::EPSILON
+        || !min_volume_coverage_ratio.is_finite()
+        || min_volume_coverage_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let actual_volume_m3 = mesh_volume_m3(mesh);
+    let coverage_ratio = actual_volume_m3 / expected_volume_m3;
+    if coverage_ratio + 1.0e-9 < min_volume_coverage_ratio
+        || coverage_ratio - 1.0e-9 > 1.0 / min_volume_coverage_ratio
+    {
+        return Err(AnalysisMeshValidationError::VolumeCoverageFailed {
+            coverage_ratio: format!("{coverage_ratio:.6}"),
+            required_ratio: format!("{min_volume_coverage_ratio:.6}"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_boundary_area_coverage(
+    mesh: &AnalysisMeshArtifact,
+    expected_boundary_area_m2: Option<f64>,
+    min_boundary_area_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    let Some(expected_boundary_area_m2) = expected_boundary_area_m2 else {
+        return Ok(());
+    };
+    if !expected_boundary_area_m2.is_finite()
+        || expected_boundary_area_m2 <= f64::EPSILON
+        || !min_boundary_area_ratio.is_finite()
+        || min_boundary_area_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let actual_boundary_area_m2 = mesh_boundary_area_m2(mesh);
+    let area_ratio = actual_boundary_area_m2 / expected_boundary_area_m2;
+    if area_ratio + 1.0e-9 < min_boundary_area_ratio
+        || area_ratio - 1.0e-9 > 1.0 / min_boundary_area_ratio
+    {
+        return Err(AnalysisMeshValidationError::BoundaryAreaCoverageFailed {
+            area_ratio: format!("{area_ratio:.6}"),
+            required_ratio: format!("{min_boundary_area_ratio:.6}"),
+        });
+    }
+    Ok(())
+}
+
+fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
+    mesh.volume_elements
+        .iter()
+        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
+        .filter_map(|element| {
+            Some(tet_volume_m3([
+                mesh_node(mesh, element.node_ids[0])?,
+                mesh_node(mesh, element.node_ids[1])?,
+                mesh_node(mesh, element.node_ids[2])?,
+                mesh_node(mesh, element.node_ids[3])?,
+            ]))
+        })
+        .sum()
+}
+
+fn mesh_boundary_area_m2(mesh: &AnalysisMeshArtifact) -> f64 {
+    mesh.boundary_faces
+        .iter()
+        .filter(|face| face.kind == BoundaryElementKind::Tri3 && face.node_ids.len() == 3)
+        .filter_map(|face| {
+            Some(triangle_area_m2([
+                mesh_node(mesh, face.node_ids[0])?,
+                mesh_node(mesh, face.node_ids[1])?,
+                mesh_node(mesh, face.node_ids[2])?,
+            ]))
+        })
+        .sum()
+}
+
+fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
+    mesh.nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .map(|node| node.coordinates_m)
+}
+
+fn tet_volume_m3(points: [[f64; 3]; 4]) -> f64 {
+    dot(
+        sub(points[1], points[0]),
+        cross(sub(points[2], points[0]), sub(points[3], points[0])),
+    )
+    .abs()
+        / 6.0
+}
+
+fn triangle_area_m2(points: [[f64; 3]; 3]) -> f64 {
+    0.5 * norm(cross(sub(points[1], points[0]), sub(points[2], points[0])))
+}
+
+fn sub(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn norm(value: [f64; 3]) -> f64 {
+    dot(value, value).sqrt()
 }
 
 #[cfg(test)]
@@ -524,6 +676,46 @@ mod tests {
             AnalysisMeshValidationError::BoundsCoverageFailed {
                 axis: 0,
                 coverage_ratio: "0.250000".to_string(),
+                required_ratio: "0.900000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_mesh_that_underfills_expected_volume() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                expected_volume_m3: Some(1.0),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("mesh should fail volume coverage");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::VolumeCoverageFailed {
+                coverage_ratio: "0.166667".to_string(),
+                required_ratio: "0.900000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_mesh_that_underfills_expected_boundary_area() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                expected_boundary_area_m2: Some(2.0),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("mesh should fail boundary area coverage");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::BoundaryAreaCoverageFailed {
+                area_ratio: "0.250000".to_string(),
                 required_ratio: "0.900000".to_string(),
             }
         );

@@ -25,6 +25,10 @@ use crate::{
         TetCandidateSet,
     },
     topology::{BoundaryElementKind, VolumeElementKind},
+    validation::{
+        validate_analysis_mesh_with_options, AnalysisMeshValidationError,
+        AnalysisMeshValidationOptions,
+    },
     volume_candidate::{
         prepare_volume_candidates, VolumeCandidateError, VolumeCandidateOptions, VolumeCandidateSet,
     },
@@ -46,6 +50,7 @@ pub enum ProductionMeshError {
     Surface(SurfaceDiscretizationError),
     VolumeCandidate(VolumeCandidateError),
     TetCandidate(TetCandidateError),
+    Validation(AnalysisMeshValidationError),
     MissingCandidateNode { node_id: u32 },
 }
 
@@ -59,6 +64,9 @@ impl std::fmt::Display for ProductionMeshError {
                 write!(formatter, "volume candidate preparation failed: {err}")
             }
             Self::TetCandidate(err) => write!(formatter, "Tet candidate formation failed: {err}"),
+            Self::Validation(err) => {
+                write!(formatter, "production mesh validation failed: {err:?}")
+            }
             Self::MissingCandidateNode { node_id } => {
                 write!(formatter, "candidate Tet references missing node {node_id}")
             }
@@ -248,7 +256,7 @@ fn analysis_mesh_from_preparation(
         })
         .collect::<Result<Vec<_>, ProductionMeshError>>()?;
 
-    Ok(AnalysisMeshArtifact {
+    let mesh = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: format!("production_{}", preparation.topology.mesh_id),
         nodes,
@@ -270,7 +278,24 @@ fn analysis_mesh_from_preparation(
             source_geometry_revision: preparation.topology.source_geometry_revision,
             source_geometry_sha256: preparation.topology.source_geometry_sha256.clone(),
         },
-    })
+    };
+    validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation))
+        .map_err(ProductionMeshError::Validation)?;
+    Ok(mesh)
+}
+
+fn production_validation_options(
+    preparation: &ProductionMeshPreparation,
+) -> AnalysisMeshValidationOptions {
+    AnalysisMeshValidationOptions {
+        expected_bounds_m: Some([
+            preparation.topology.bounds_min_m,
+            preparation.topology.bounds_max_m,
+        ]),
+        expected_volume_m3: Some(preparation.volume_candidates.total_volume_m3),
+        expected_boundary_area_m2: Some(preparation.volume_candidates.total_surface_area_m2),
+        ..AnalysisMeshValidationOptions::default()
+    }
 }
 
 fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
