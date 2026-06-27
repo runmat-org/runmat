@@ -2015,7 +2015,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         ));
     assert_eq!(
         adaptive_iterations[1]["convergence_status"].as_str(),
-        Some("converged")
+        Some("pending")
     );
     assert!(adaptive_iterations[1]["indicators"]
         .as_array()
@@ -2024,9 +2024,9 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .any(
             |indicator| indicator["namespace"].as_str() == Some("structural")
                 && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("skipped_missing_field")
+                && indicator["status"].as_str() == Some("used")
         ));
-    assert!(adaptive_iterations[1]["markers"]
+    assert!(!adaptive_iterations[1]["markers"]
         .as_array()
         .expect("solved adaptive markers")
         .is_empty());
