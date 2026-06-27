@@ -2,6 +2,7 @@ pub mod adaptive;
 pub mod artifact;
 pub mod backend;
 pub mod boundary;
+pub mod cad_topology;
 pub mod curve;
 pub mod evidence;
 pub mod options;
@@ -37,6 +38,10 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use cad_topology::{
+    build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,
+    CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
+};
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
     CurveDiscretizationOptions, CurveElement, CurveNode,

@@ -7,6 +7,7 @@ use crate::{
         AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
         AnalysisVolumeElement, MeshBackendSummary, ANALYSIS_MESH_SCHEMA_VERSION,
     },
+    cad_topology::{build_cad_topology, CadTopologyError, CadTopologyModel, CadTopologySource},
     curve::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
         CurveDiscretizationOptions,
@@ -44,6 +45,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProductionMeshPreparation {
+    pub cad_topology: CadTopologyModel,
     pub topology: SourceTopologyModel,
     pub curves: CurveDiscretization,
     pub surface: SurfaceDiscretization,
@@ -56,6 +58,7 @@ pub struct ProductionMeshPreparation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProductionMeshError {
     Topology(SourceTopologyError),
+    CadTopology(CadTopologyError),
     Curve(CurveDiscretizationError),
     Surface(SurfaceDiscretizationError),
     SurfaceValidation(SurfaceValidationError),
@@ -70,6 +73,7 @@ impl std::fmt::Display for ProductionMeshError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Topology(err) => write!(formatter, "source topology extraction failed: {err}"),
+            Self::CadTopology(err) => write!(formatter, "CAD topology normalization failed: {err}"),
             Self::Curve(err) => write!(formatter, "curve discretization failed: {err}"),
             Self::Surface(err) => write!(formatter, "surface discretization failed: {err}"),
             Self::SurfaceValidation(err) => write!(formatter, "surface validation failed: {err}"),
@@ -95,6 +99,8 @@ pub fn prepare_production_mesh(
     options: &VolumeMeshingOptions,
 ) -> Result<ProductionMeshPreparation, ProductionMeshError> {
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
+    let cad_topology =
+        build_cad_topology(geometry, &topology).map_err(ProductionMeshError::CadTopology)?;
     let curves = discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
         .map_err(ProductionMeshError::Curve)?;
     let surface = discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
@@ -115,6 +121,7 @@ pub fn prepare_production_mesh(
     .map_err(ProductionMeshError::TetCandidate)?;
 
     Ok(ProductionMeshPreparation {
+        cad_topology,
         topology,
         curves,
         surface,
@@ -336,6 +343,15 @@ fn production_backend_summary(
         source_topology_vertex_count: preparation.topology.vertices.len(),
         source_topology_edge_count: preparation.topology.edges.len(),
         source_topology_face_count: preparation.topology.faces.len(),
+        cad_topology_source: cad_topology_source_label(preparation.cad_topology.source).to_string(),
+        cad_vertex_count: preparation.cad_topology.report.vertex_count,
+        cad_edge_count: preparation.cad_topology.report.edge_count,
+        cad_face_count: preparation.cad_topology.report.face_count,
+        cad_shell_count: preparation.cad_topology.report.shell_count,
+        cad_volume_count: preparation.cad_topology.report.volume_count,
+        cad_semantic_face_count: preparation.cad_topology.report.semantic_face_count,
+        cad_generic_face_count: preparation.cad_topology.report.generic_face_count,
+        cad_closed_shell_count: preparation.cad_topology.report.closed_shell_count,
         curve_element_count: preparation.curves.elements.len(),
         surface_element_count: preparation.surface.elements.len(),
         surface_source_edge_loop_count: preparation.surface_validation.source_edge_loop_count,
@@ -368,6 +384,14 @@ fn production_backend_summary(
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
+    }
+}
+
+fn cad_topology_source_label(source: CadTopologySource) -> &'static str {
+    match source {
+        CadTopologySource::SemanticCad => "semantic_cad",
+        CadTopologySource::GenericCadMesh => "generic_cad_mesh",
+        CadTopologySource::MeshFallback => "mesh_fallback",
     }
 }
 
@@ -562,6 +586,10 @@ mod tests {
                 .expect("production preparation should run");
 
         assert_eq!(preparation.topology.faces.len(), 12);
+        assert_eq!(preparation.cad_topology.report.vertex_count, 8);
+        assert_eq!(preparation.cad_topology.report.edge_count, 18);
+        assert_eq!(preparation.cad_topology.report.face_count, 12);
+        assert_eq!(preparation.cad_topology.report.closed_shell_count, 1);
         assert_eq!(preparation.surface.elements.len(), 12);
         assert_eq!(preparation.surface_validation.source_edge_loop_count, 18);
         assert_eq!(
@@ -616,6 +644,11 @@ mod tests {
             "production_topology_tet_candidate/v1"
         );
         assert_eq!(mesh.backend.source_topology_face_count, 12);
+        assert_eq!(mesh.backend.cad_topology_source, "generic_cad_mesh");
+        assert_eq!(mesh.backend.cad_vertex_count, 8);
+        assert_eq!(mesh.backend.cad_edge_count, 18);
+        assert_eq!(mesh.backend.cad_face_count, 12);
+        assert_eq!(mesh.backend.cad_closed_shell_count, 1);
         assert_eq!(mesh.backend.surface_element_count, 12);
         assert_eq!(mesh.backend.surface_source_edge_loop_count, 18);
         assert_eq!(mesh.backend.surface_closed_edge_loop_count, 18);

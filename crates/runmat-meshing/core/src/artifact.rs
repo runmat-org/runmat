@@ -64,6 +64,24 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub source_topology_face_count: usize,
     #[serde(default)]
+    pub cad_topology_source: String,
+    #[serde(default)]
+    pub cad_vertex_count: usize,
+    #[serde(default)]
+    pub cad_edge_count: usize,
+    #[serde(default)]
+    pub cad_face_count: usize,
+    #[serde(default)]
+    pub cad_shell_count: usize,
+    #[serde(default)]
+    pub cad_volume_count: usize,
+    #[serde(default)]
+    pub cad_semantic_face_count: usize,
+    #[serde(default)]
+    pub cad_generic_face_count: usize,
+    #[serde(default)]
+    pub cad_closed_shell_count: usize,
+    #[serde(default)]
     pub curve_element_count: usize,
     #[serde(default)]
     pub surface_element_count: usize,
@@ -115,6 +133,15 @@ impl Default for MeshBackendSummary {
             source_topology_vertex_count: 0,
             source_topology_edge_count: 0,
             source_topology_face_count: 0,
+            cad_topology_source: "unknown".to_string(),
+            cad_vertex_count: 0,
+            cad_edge_count: 0,
+            cad_face_count: 0,
+            cad_shell_count: 0,
+            cad_volume_count: 0,
+            cad_semantic_face_count: 0,
+            cad_generic_face_count: 0,
+            cad_closed_shell_count: 0,
             curve_element_count: 0,
             surface_element_count: 0,
             surface_source_edge_loop_count: 0,
