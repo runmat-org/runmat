@@ -24,6 +24,10 @@ use crate::{
         validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions,
         SurfaceRecoveryReport,
     },
+    surface_validate::{
+        validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
+        SurfaceValidationReport,
+    },
     tet_candidate::{
         form_tet_candidates, TetCandidateError, TetCandidateNodeSource, TetCandidateOptions,
         TetCandidateSet,
@@ -43,6 +47,7 @@ pub struct ProductionMeshPreparation {
     pub topology: SourceTopologyModel,
     pub curves: CurveDiscretization,
     pub surface: SurfaceDiscretization,
+    pub surface_validation: SurfaceValidationReport,
     pub surface_recovery: SurfaceRecoveryReport,
     pub volume_candidates: VolumeCandidateSet,
     pub tet_candidates: TetCandidateSet,
@@ -53,6 +58,7 @@ pub enum ProductionMeshError {
     Topology(SourceTopologyError),
     Curve(CurveDiscretizationError),
     Surface(SurfaceDiscretizationError),
+    SurfaceValidation(SurfaceValidationError),
     SurfaceRecovery(SurfaceRecoveryError),
     VolumeCandidate(VolumeCandidateError),
     TetCandidate(TetCandidateError),
@@ -66,6 +72,7 @@ impl std::fmt::Display for ProductionMeshError {
             Self::Topology(err) => write!(formatter, "source topology extraction failed: {err}"),
             Self::Curve(err) => write!(formatter, "curve discretization failed: {err}"),
             Self::Surface(err) => write!(formatter, "surface discretization failed: {err}"),
+            Self::SurfaceValidation(err) => write!(formatter, "surface validation failed: {err}"),
             Self::SurfaceRecovery(err) => write!(formatter, "surface recovery failed: {err}"),
             Self::VolumeCandidate(err) => {
                 write!(formatter, "volume candidate preparation failed: {err}")
@@ -92,6 +99,9 @@ pub fn prepare_production_mesh(
         .map_err(ProductionMeshError::Curve)?;
     let surface = discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
         .map_err(ProductionMeshError::Surface)?;
+    let surface_validation =
+        validate_surface_discretization(&topology, &surface, SurfaceValidationOptions::default())
+            .map_err(ProductionMeshError::SurfaceValidation)?;
     let surface_recovery =
         validate_surface_recovery(&topology, &surface, SurfaceRecoveryOptions::default())
             .map_err(ProductionMeshError::SurfaceRecovery)?;
@@ -108,6 +118,7 @@ pub fn prepare_production_mesh(
         topology,
         curves,
         surface,
+        surface_validation,
         surface_recovery,
         volume_candidates,
         tet_candidates,
@@ -327,6 +338,12 @@ fn production_backend_summary(
         source_topology_face_count: preparation.topology.faces.len(),
         curve_element_count: preparation.curves.elements.len(),
         surface_element_count: preparation.surface.elements.len(),
+        surface_source_edge_loop_count: preparation.surface_validation.source_edge_loop_count,
+        surface_closed_edge_loop_count: preparation
+            .surface_validation
+            .closed_source_edge_loop_count,
+        surface_projection_error_m: preparation.surface_validation.max_projection_error_m,
+        surface_face_coverage_ratio: preparation.surface_validation.face_coverage_ratio,
         volume_candidate_count: preparation.volume_candidates.components.len(),
         interior_seed_point_count: preparation.tet_candidates.interior_seed_points.len(),
         tet_candidate_count: preparation.tet_candidates.tets.len(),
@@ -546,6 +563,12 @@ mod tests {
 
         assert_eq!(preparation.topology.faces.len(), 12);
         assert_eq!(preparation.surface.elements.len(), 12);
+        assert_eq!(preparation.surface_validation.source_edge_loop_count, 18);
+        assert_eq!(
+            preparation.surface_validation.closed_source_edge_loop_count,
+            18
+        );
+        assert_eq!(preparation.surface_validation.face_coverage_ratio, 1.0);
         assert_eq!(preparation.surface_recovery.surface_element_count, 12);
         assert_eq!(preparation.surface_recovery.open_edge_count, 0);
         assert_eq!(preparation.surface_recovery.nonmanifold_edge_count, 0);
@@ -594,6 +617,9 @@ mod tests {
         );
         assert_eq!(mesh.backend.source_topology_face_count, 12);
         assert_eq!(mesh.backend.surface_element_count, 12);
+        assert_eq!(mesh.backend.surface_source_edge_loop_count, 18);
+        assert_eq!(mesh.backend.surface_closed_edge_loop_count, 18);
+        assert_eq!(mesh.backend.surface_face_coverage_ratio, 1.0);
         assert_eq!(mesh.backend.volume_candidate_count, 1);
         assert!(mesh.backend.tet_candidate_count > 12);
         assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);

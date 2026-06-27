@@ -68,6 +68,14 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub surface_element_count: usize,
     #[serde(default)]
+    pub surface_source_edge_loop_count: usize,
+    #[serde(default)]
+    pub surface_closed_edge_loop_count: usize,
+    #[serde(default)]
+    pub surface_projection_error_m: f64,
+    #[serde(default)]
+    pub surface_face_coverage_ratio: f64,
+    #[serde(default)]
     pub volume_candidate_count: usize,
     #[serde(default)]
     pub interior_seed_point_count: usize,
@@ -109,6 +117,10 @@ impl Default for MeshBackendSummary {
             source_topology_face_count: 0,
             curve_element_count: 0,
             surface_element_count: 0,
+            surface_source_edge_loop_count: 0,
+            surface_closed_edge_loop_count: 0,
+            surface_projection_error_m: 0.0,
+            surface_face_coverage_ratio: 0.0,
             volume_candidate_count: 0,
             interior_seed_point_count: 0,
             tet_candidate_count: 0,

@@ -14,6 +14,7 @@ pub mod source_topology;
 pub mod spatial_index;
 pub mod surface;
 pub mod surface_recovery;
+pub mod surface_validate;
 pub mod tet_candidate;
 pub mod tolerance;
 pub mod topology;
@@ -76,6 +77,10 @@ pub use surface::{
 };
 pub use surface_recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
+};
+pub use surface_validate::{
+    validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
+    SurfaceValidationReport,
 };
 pub use tet_candidate::{
     form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
