@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -118,11 +118,17 @@ impl StructuredTetMesher {
             region_ids: input.region_ids.clone(),
         }];
 
+        let occupied_cells = occupied_cells(input, &grid);
+        let mut cell_tet_ids = vec![None; grid.cell_count()];
         let mut volume_elements = Vec::<AnalysisVolumeElement>::new();
         let mut element_quality = Vec::<ElementQuality>::new();
         for k in 0..grid.nz() {
             for j in 0..grid.ny() {
                 for i in 0..grid.nx() {
+                    let cell_index = grid.cell_index(i, j, k);
+                    if !occupied_cells[cell_index] {
+                        continue;
+                    }
                     let cell_nodes = [
                         node_id_at(i, j, k),
                         node_id_at(i + 1, j, k),
@@ -152,18 +158,22 @@ impl StructuredTetMesher {
                             volume_m3,
                         });
                         volume_elements.push(AnalysisVolumeElement {
-                            element_id,
+                            element_id: element_id.clone(),
                             kind: VolumeElementKind::Tet4,
                             node_ids: oriented.to_vec(),
                             material_region_id: material_region_id.clone(),
                             provenance: provenance.clone(),
                         });
+                        cell_tet_ids[cell_index]
+                            .get_or_insert_with(Vec::new)
+                            .push(element_id);
                     }
                 }
             }
         }
 
-        let boundary_faces = grid_boundary_faces(input, &grid, &node_id_at);
+        let boundary_faces =
+            grid_boundary_faces(input, &grid, &occupied_cells, &cell_tet_ids, &node_id_at);
         let quality = quality_report(element_quality);
         mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
 
@@ -234,6 +244,14 @@ impl StructuredGrid {
 
     fn element_count(&self) -> usize {
         6 * self.nx() * self.ny() * self.nz()
+    }
+
+    fn cell_count(&self) -> usize {
+        self.nx() * self.ny() * self.nz()
+    }
+
+    fn cell_index(&self, i: usize, j: usize, k: usize) -> usize {
+        i + self.nx() * (j + self.ny() * k)
     }
 
     fn min_cell_size(&self) -> Option<f64> {
@@ -634,74 +652,44 @@ fn grid_nodes(grid: &StructuredGrid) -> Vec<AnalysisMeshNode> {
 fn grid_boundary_faces(
     input: &BoundaryMeshInput,
     grid: &StructuredGrid,
+    occupied_cells: &[bool],
+    cell_tet_ids: &[Option<Vec<String>>],
     node_id_at: &impl Fn(usize, usize, usize) -> u32,
 ) -> Vec<AnalysisBoundaryFace> {
-    let regions_by_side = regions_by_boundary_side(input);
     let mut faces = Vec::new();
-    for side in BoundarySide::ALL {
-        let (a_count, b_count) = boundary_side_cell_counts(side, grid);
-        for a in 0..a_count {
-            for b in 0..b_count {
-                let quad = match side {
-                    BoundarySide::XMin => [
-                        node_id_at(0, a, b),
-                        node_id_at(0, a + 1, b),
-                        node_id_at(0, a + 1, b + 1),
-                        node_id_at(0, a, b + 1),
-                    ],
-                    BoundarySide::XMax => [
-                        node_id_at(grid.nx(), a, b),
-                        node_id_at(grid.nx(), a, b + 1),
-                        node_id_at(grid.nx(), a + 1, b + 1),
-                        node_id_at(grid.nx(), a + 1, b),
-                    ],
-                    BoundarySide::YMin => [
-                        node_id_at(a, 0, b),
-                        node_id_at(a, 0, b + 1),
-                        node_id_at(a + 1, 0, b + 1),
-                        node_id_at(a + 1, 0, b),
-                    ],
-                    BoundarySide::YMax => [
-                        node_id_at(a, grid.ny(), b),
-                        node_id_at(a + 1, grid.ny(), b),
-                        node_id_at(a + 1, grid.ny(), b + 1),
-                        node_id_at(a, grid.ny(), b + 1),
-                    ],
-                    BoundarySide::ZMin => [
-                        node_id_at(a, b, 0),
-                        node_id_at(a + 1, b, 0),
-                        node_id_at(a + 1, b + 1, 0),
-                        node_id_at(a, b + 1, 0),
-                    ],
-                    BoundarySide::ZMax => [
-                        node_id_at(a, b, grid.nz()),
-                        node_id_at(a, b + 1, grid.nz()),
-                        node_id_at(a + 1, b + 1, grid.nz()),
-                        node_id_at(a + 1, b, grid.nz()),
-                    ],
-                };
-                let region_ids = regions_by_side
-                    .get(&side)
-                    .cloned()
-                    .filter(|regions| !regions.is_empty())
-                    .unwrap_or_else(|| input.region_ids.clone());
+    for k in 0..grid.nz() {
+        for j in 0..grid.ny() {
+            for i in 0..grid.nx() {
+                let cell_index = grid.cell_index(i, j, k);
+                if !occupied_cells[cell_index] {
+                    continue;
+                }
                 let adjacent_volume_element_ids =
-                    boundary_side_adjacent_volume_element_ids(side, a, b, grid);
-                for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
-                    faces.push(AnalysisBoundaryFace {
-                        face_id: format!("bf_{}", faces.len() + 1),
-                        kind: BoundaryElementKind::Tri3,
-                        node_ids: tri.to_vec(),
-                        adjacent_volume_element_ids: adjacent_volume_element_ids.clone(),
-                        region_ids: region_ids.clone(),
-                        provenance: vec![MeshEntityProvenance {
-                            source_geometry_id: input.source_geometry_id.clone(),
-                            source_geometry_revision: input.source_geometry_revision,
-                            source_entity_kind: SourceEntityKind::Region,
-                            source_entity_id: region_ids.join(","),
+                    cell_tet_ids[cell_index].clone().unwrap_or_default();
+                for side in BoundarySide::ALL {
+                    if neighbor_is_occupied(grid, occupied_cells, i, j, k, side) {
+                        continue;
+                    }
+                    let quad = boundary_side_quad(side, i, j, k, node_id_at);
+                    let centroid = quad_centroid(quad, grid, node_id_at);
+                    let region_ids = nearest_boundary_triangle_regions(input, centroid)
+                        .unwrap_or_else(|| input.region_ids.clone());
+                    for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
+                        faces.push(AnalysisBoundaryFace {
+                            face_id: format!("bf_{}", faces.len() + 1),
+                            kind: BoundaryElementKind::Tri3,
+                            node_ids: tri.to_vec(),
+                            adjacent_volume_element_ids: adjacent_volume_element_ids.clone(),
                             region_ids: region_ids.clone(),
-                        }],
-                    });
+                            provenance: vec![MeshEntityProvenance {
+                                source_geometry_id: input.source_geometry_id.clone(),
+                                source_geometry_revision: input.source_geometry_revision,
+                                source_entity_kind: SourceEntityKind::Region,
+                                source_entity_id: region_ids.join(","),
+                                region_ids: region_ids.clone(),
+                            }],
+                        });
+                    }
                 }
             }
         }
@@ -709,33 +697,96 @@ fn grid_boundary_faces(
     faces
 }
 
-fn boundary_side_cell_counts(side: BoundarySide, grid: &StructuredGrid) -> (usize, usize) {
+fn neighbor_is_occupied(
+    grid: &StructuredGrid,
+    occupied_cells: &[bool],
+    i: usize,
+    j: usize,
+    k: usize,
+    side: BoundarySide,
+) -> bool {
+    let neighbor = match side {
+        BoundarySide::XMin => i.checked_sub(1).map(|i| (i, j, k)),
+        BoundarySide::XMax => (i + 1 < grid.nx()).then_some((i + 1, j, k)),
+        BoundarySide::YMin => j.checked_sub(1).map(|j| (i, j, k)),
+        BoundarySide::YMax => (j + 1 < grid.ny()).then_some((i, j + 1, k)),
+        BoundarySide::ZMin => k.checked_sub(1).map(|k| (i, j, k)),
+        BoundarySide::ZMax => (k + 1 < grid.nz()).then_some((i, j, k + 1)),
+    };
+    neighbor
+        .map(|(i, j, k)| occupied_cells[grid.cell_index(i, j, k)])
+        .unwrap_or(false)
+}
+
+fn boundary_side_quad(
+    side: BoundarySide,
+    i: usize,
+    j: usize,
+    k: usize,
+    node_id_at: &impl Fn(usize, usize, usize) -> u32,
+) -> [u32; 4] {
     match side {
-        BoundarySide::XMin | BoundarySide::XMax => (grid.ny(), grid.nz()),
-        BoundarySide::YMin | BoundarySide::YMax => (grid.nx(), grid.nz()),
-        BoundarySide::ZMin | BoundarySide::ZMax => (grid.nx(), grid.ny()),
+        BoundarySide::XMin => [
+            node_id_at(i, j, k),
+            node_id_at(i, j + 1, k),
+            node_id_at(i, j + 1, k + 1),
+            node_id_at(i, j, k + 1),
+        ],
+        BoundarySide::XMax => [
+            node_id_at(i + 1, j, k),
+            node_id_at(i + 1, j, k + 1),
+            node_id_at(i + 1, j + 1, k + 1),
+            node_id_at(i + 1, j + 1, k),
+        ],
+        BoundarySide::YMin => [
+            node_id_at(i, j, k),
+            node_id_at(i, j, k + 1),
+            node_id_at(i + 1, j, k + 1),
+            node_id_at(i + 1, j, k),
+        ],
+        BoundarySide::YMax => [
+            node_id_at(i, j + 1, k),
+            node_id_at(i + 1, j + 1, k),
+            node_id_at(i + 1, j + 1, k + 1),
+            node_id_at(i, j + 1, k + 1),
+        ],
+        BoundarySide::ZMin => [
+            node_id_at(i, j, k),
+            node_id_at(i + 1, j, k),
+            node_id_at(i + 1, j + 1, k),
+            node_id_at(i, j + 1, k),
+        ],
+        BoundarySide::ZMax => [
+            node_id_at(i, j, k + 1),
+            node_id_at(i, j + 1, k + 1),
+            node_id_at(i + 1, j + 1, k + 1),
+            node_id_at(i + 1, j, k + 1),
+        ],
     }
 }
 
-fn boundary_side_adjacent_volume_element_ids(
-    side: BoundarySide,
-    a: usize,
-    b: usize,
+fn quad_centroid(
+    quad: [u32; 4],
     grid: &StructuredGrid,
-) -> Vec<String> {
-    let (i, j, k) = match side {
-        BoundarySide::XMin => (0, a, b),
-        BoundarySide::XMax => (grid.nx() - 1, a, b),
-        BoundarySide::YMin => (a, 0, b),
-        BoundarySide::YMax => (a, grid.ny() - 1, b),
-        BoundarySide::ZMin => (a, b, 0),
-        BoundarySide::ZMax => (a, b, grid.nz() - 1),
-    };
-    let cell_index = i + grid.nx() * (j + grid.ny() * k);
-    let first_tet_index = cell_index * 6 + 1;
-    (first_tet_index..first_tet_index + 6)
-        .map(|index| format!("tet_{index}"))
-        .collect()
+    node_id_at: &impl Fn(usize, usize, usize) -> u32,
+) -> [f64; 3] {
+    let mut centroid = [0.0; 3];
+    for node_id in quad {
+        let index = node_id - 1;
+        let x_index = index as usize % grid.x.len();
+        let yz = index as usize / grid.x.len();
+        let y_index = yz % grid.y.len();
+        let z_index = yz / grid.y.len();
+        debug_assert_eq!(
+            node_id,
+            node_id_at(x_index, y_index, z_index),
+            "structured node id mapping changed"
+        );
+        centroid[0] += grid.x[x_index] * 0.25;
+        centroid[1] += grid.y[y_index] * 0.25;
+        centroid[2] += grid.z[z_index] * 0.25;
+    }
+    centroid
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -759,44 +810,99 @@ impl BoundarySide {
     ];
 }
 
-fn regions_by_boundary_side(input: &BoundaryMeshInput) -> BTreeMap<BoundarySide, Vec<String>> {
-    let mut by_side = BTreeMap::<BoundarySide, BTreeSet<String>>::new();
-    let tolerance = (0..3)
-        .map(|axis| input.bounds_max_m[axis] - input.bounds_min_m[axis])
-        .fold(0.0_f64, f64::max)
-        * 1.0e-8;
-    for triangle in &input.triangles {
-        let centroid = triangle
-            .node_ids
-            .iter()
-            .filter_map(|node_id| input.vertices.get(*node_id as usize))
-            .fold([0.0; 3], |mut sum, vertex| {
-                for axis in 0..3 {
-                    sum[axis] += vertex[axis] / 3.0;
-                }
-                sum
-            });
-        let sides = [
-            (BoundarySide::XMin, 0, input.bounds_min_m[0]),
-            (BoundarySide::XMax, 0, input.bounds_max_m[0]),
-            (BoundarySide::YMin, 1, input.bounds_min_m[1]),
-            (BoundarySide::YMax, 1, input.bounds_max_m[1]),
-            (BoundarySide::ZMin, 2, input.bounds_min_m[2]),
-            (BoundarySide::ZMax, 2, input.bounds_max_m[2]),
-        ];
-        for (side, axis, plane) in sides {
-            if (centroid[axis] - plane).abs() <= tolerance.max(1.0e-12) {
-                by_side
-                    .entry(side)
-                    .or_default()
-                    .extend(triangle.region_ids.iter().cloned());
+fn occupied_cells(input: &BoundaryMeshInput, grid: &StructuredGrid) -> Vec<bool> {
+    let mut occupied = vec![false; grid.cell_count()];
+    for k in 0..grid.nz() {
+        for j in 0..grid.ny() {
+            for i in 0..grid.nx() {
+                let center = [
+                    (grid.x[i] + grid.x[i + 1]) * 0.5,
+                    (grid.y[j] + grid.y[j + 1]) * 0.5,
+                    (grid.z[k] + grid.z[k + 1]) * 0.5,
+                ];
+                occupied[grid.cell_index(i, j, k)] = point_inside_closed_surface(input, center);
             }
         }
     }
-    by_side
-        .into_iter()
-        .map(|(side, regions)| (side, regions.into_iter().collect()))
-        .collect()
+    if occupied.iter().any(|cell| *cell) {
+        occupied
+    } else {
+        vec![true; grid.cell_count()]
+    }
+}
+
+fn point_inside_closed_surface(input: &BoundaryMeshInput, point: [f64; 3]) -> bool {
+    let epsilon = boundary_max_span(input).max(1.0) * 1.0e-10;
+    let origin = [
+        point[0] - epsilon * 0.37,
+        point[1] + epsilon * 0.19,
+        point[2] + epsilon * 0.11,
+    ];
+    let direction = [1.0, 0.0, 0.0];
+    let mut intersections = Vec::<f64>::new();
+    for triangle in &input.triangles {
+        let Some(vertices) = triangle_vertices(input, triangle.node_ids) else {
+            continue;
+        };
+        let Some(distance) = ray_triangle_intersection(origin, direction, vertices, epsilon) else {
+            continue;
+        };
+        if distance > epsilon {
+            intersections.push(distance);
+        }
+    }
+    intersections.sort_by(f64::total_cmp);
+    intersections.dedup_by(|left, right| (*left - *right).abs() <= epsilon);
+    intersections.len() % 2 == 1
+}
+
+fn ray_triangle_intersection(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    vertices: [[f64; 3]; 3],
+    epsilon: f64,
+) -> Option<f64> {
+    let edge1 = sub(vertices[1], vertices[0]);
+    let edge2 = sub(vertices[2], vertices[0]);
+    let h = cross(direction, edge2);
+    let determinant = dot(edge1, h);
+    if determinant.abs() <= epsilon {
+        return None;
+    }
+    let inverse_determinant = 1.0 / determinant;
+    let s = sub(origin, vertices[0]);
+    let u = inverse_determinant * dot(s, h);
+    if u < -epsilon || u > 1.0 + epsilon {
+        return None;
+    }
+    let q = cross(s, edge1);
+    let v = inverse_determinant * dot(direction, q);
+    if v < -epsilon || u + v > 1.0 + epsilon {
+        return None;
+    }
+    let distance = inverse_determinant * dot(edge2, q);
+    distance.is_finite().then_some(distance)
+}
+
+fn nearest_boundary_triangle_regions(
+    input: &BoundaryMeshInput,
+    point: [f64; 3],
+) -> Option<Vec<String>> {
+    input
+        .triangles
+        .iter()
+        .filter_map(|triangle| {
+            let vertices = triangle_vertices(input, triangle.node_ids)?;
+            let centroid = triangle_centroid(vertices);
+            Some((distance(point, centroid), triangle.region_ids.clone()))
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, mut region_ids)| {
+            region_ids.sort();
+            region_ids.dedup();
+            region_ids
+        })
+        .filter(|region_ids| !region_ids.is_empty())
 }
 
 fn target_size_m(
@@ -1064,6 +1170,33 @@ mod tests {
         geometry
     }
 
+    fn tetrahedron_geometry() -> GeometryAsset {
+        let mut geometry = cube_geometry();
+        geometry.geometry_id = "geo_tet_tetrahedron".to_string();
+        geometry.meshes[0].vertex_count = 4;
+        geometry.meshes[0].element_count = 4;
+        geometry.surface_meshes = vec![SurfaceMesh::new(
+            "cube_surface",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+        )];
+        geometry.region_entity_mappings = vec![
+            RegionEntityMapping::all_faces("region_fixed", "cube_surface", 4),
+            RegionEntityMapping::new(
+                "region_load",
+                "cube_surface",
+                runmat_geometry_core::EntityKind::Face,
+                vec![runmat_geometry_core::EntityIdRange::new(2, 2)],
+            ),
+        ];
+        geometry
+    }
+
     #[test]
     fn structured_tet_mesher_generates_valid_analysis_mesh() {
         let geometry = cube_geometry();
@@ -1138,6 +1271,45 @@ mod tests {
 
         assert!(fine.volume_elements.len() > coarse.volume_elements.len());
         assert!(fine.nodes.len() > coarse.nodes.len());
+    }
+
+    #[test]
+    fn structured_tet_mesher_carves_cells_outside_closed_surface() {
+        let geometry = tetrahedron_geometry();
+        let mesh = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                kind: MeshKindRequest::Solid,
+                target_size: MeshTargetSize::LengthM(0.25),
+                max_elements: 10_000,
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect("tetrahedron should produce an analysis mesh");
+
+        validate_analysis_mesh(&mesh, Default::default()).expect("carved mesh should validate");
+        assert!(!mesh.volume_elements.is_empty());
+        assert!(mesh.volume_elements.len() < 4 * 4 * 4 * 6);
+        assert!(mesh.volume_elements.iter().all(|element| {
+            let centroid = tet_centroid(
+                [
+                    element.node_ids[0],
+                    element.node_ids[1],
+                    element.node_ids[2],
+                    element.node_ids[3],
+                ],
+                &mesh.nodes,
+            );
+            point_inside_closed_surface(
+                &BoundaryMeshInput::from_geometry(&geometry).expect("boundary input"),
+                centroid,
+            )
+        }));
+        assert!(mesh.boundary_faces.len() < 6 * 4 * 4 * 2);
+        assert!(mesh
+            .boundary_faces
+            .iter()
+            .all(|face| !face.adjacent_volume_element_ids.is_empty()));
     }
 
     #[test]
@@ -1452,5 +1624,14 @@ mod tests {
         coordinates.sort_by(f64::total_cmp);
         coordinates.dedup_by(|left, right| (*left - *right).abs() <= 1.0e-12);
         coordinates
+    }
+
+    fn tet_centroid(node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> [f64; 3] {
+        let points = tet_points(node_ids, nodes).expect("test tet nodes should resolve");
+        [
+            (points[0][0] + points[1][0] + points[2][0] + points[3][0]) * 0.25,
+            (points[0][1] + points[1][1] + points[2][1] + points[3][1]) * 0.25,
+            (points[0][2] + points[1][2] + points[2][2] + points[3][2]) * 0.25,
+        ]
     }
 }
