@@ -399,12 +399,14 @@ fn grid_boundary_faces(
                     .cloned()
                     .filter(|regions| !regions.is_empty())
                     .unwrap_or_else(|| input.region_ids.clone());
+                let adjacent_volume_element_ids =
+                    boundary_side_adjacent_volume_element_ids(side, a, b, divisions);
                 for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
                     faces.push(AnalysisBoundaryFace {
                         face_id: format!("bf_{}", faces.len() + 1),
                         kind: BoundaryElementKind::Tri3,
                         node_ids: tri.to_vec(),
-                        adjacent_volume_element_ids: Vec::new(),
+                        adjacent_volume_element_ids: adjacent_volume_element_ids.clone(),
                         region_ids: region_ids.clone(),
                         provenance: vec![MeshEntityProvenance {
                             source_geometry_id: input.source_geometry_id.clone(),
@@ -419,6 +421,27 @@ fn grid_boundary_faces(
         }
     }
     faces
+}
+
+fn boundary_side_adjacent_volume_element_ids(
+    side: BoundarySide,
+    a: usize,
+    b: usize,
+    divisions: usize,
+) -> Vec<String> {
+    let (i, j, k) = match side {
+        BoundarySide::XMin => (0, a, b),
+        BoundarySide::XMax => (divisions - 1, a, b),
+        BoundarySide::YMin => (a, 0, b),
+        BoundarySide::YMax => (a, divisions - 1, b),
+        BoundarySide::ZMin => (a, b, 0),
+        BoundarySide::ZMax => (a, b, divisions - 1),
+    };
+    let cell_index = i + divisions * (j + divisions * k);
+    let first_tet_index = cell_index * 6 + 1;
+    (first_tet_index..first_tet_index + 6)
+        .map(|index| format!("tet_{index}"))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -778,6 +801,17 @@ mod tests {
                 .iter()
                 .all(|quality| quality.volume_m3 > 0.0)
         );
+        assert!(mesh
+            .boundary_faces
+            .iter()
+            .all(|face| !face.adjacent_volume_element_ids.is_empty()));
+        assert!(mesh.boundary_faces.iter().all(|face| {
+            face.adjacent_volume_element_ids.iter().all(|element_id| {
+                mesh.volume_elements
+                    .iter()
+                    .any(|element| element.element_id == *element_id)
+            })
+        }));
         assert!(mesh.volume_elements.iter().all(|element| {
             tet_volume(
                 [
