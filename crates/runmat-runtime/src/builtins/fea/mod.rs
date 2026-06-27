@@ -1564,7 +1564,7 @@ fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     #[cfg(feature = "plot-core")]
     {
         let request = plot_request_from_args(&args)?;
-        let mut figures = generate_plot_figures(&request.study, &request.run_id)?;
+        let mut figures = generate_plot_figures(&request.study, &request.run_id, &request.options)?;
         let figure = select_generated_figure(&mut figures, request.field_id.as_deref())?;
         let handle = import_generated_figure(figure)?;
         Ok(Value::Num(f64::from(handle)))
@@ -2588,6 +2588,13 @@ struct FeaPlotRequest {
     study: AnalysisStudySpec,
     run_id: String,
     field_id: Option<String>,
+    options: FeaPlotOptions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FeaPlotOptions {
+    field_id: Option<String>,
+    show_solver_mesh_edges: bool,
 }
 
 fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
@@ -2599,30 +2606,31 @@ fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
         ));
     }
 
-    let (core, field_from_name_value) = split_plot_field_name_value(args)?;
+    let (core, options) = split_plot_options(args)?;
     match core {
-        [single] => plot_request_from_context_value(single, field_from_name_value),
+        [single] => plot_request_from_context_value(single, options),
         [first, second] if is_fea_study(first) => {
             let study = study_context_from_value(PLOT_NAME, first)?;
             let run_id = run_id_from_value(PLOT_NAME, second)?;
             Ok(FeaPlotRequest {
                 study,
                 run_id,
-                field_id: field_from_name_value,
+                field_id: options.field_id.clone(),
+                options,
             })
         }
         [first, second] => {
-            let mut request = plot_request_from_context_value(first, None)?;
+            let mut request = plot_request_from_context_value(first, options)?;
             request.field_id = Some(scalar_string(second, PLOT_NAME, &ERROR_INPUT)?);
-            if field_from_name_value.is_some() {
-                request.field_id = field_from_name_value;
+            if request.options.field_id.is_some() {
+                request.field_id = request.options.field_id.clone();
             }
             Ok(request)
         }
         [first, second, third] if is_fea_study(first) => {
             let study = study_context_from_value(PLOT_NAME, first)?;
             let run_id = run_id_from_value(PLOT_NAME, second)?;
-            let field_id = match field_from_name_value {
+            let field_id = match options.field_id.clone() {
                 Some(field_id) => Some(field_id),
                 None => Some(scalar_string(third, PLOT_NAME, &ERROR_INPUT)?),
             };
@@ -2630,6 +2638,7 @@ fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
                 study,
                 run_id,
                 field_id,
+                options,
             })
         }
         _ => Err(builtin_error(
@@ -2640,24 +2649,50 @@ fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
     }
 }
 
-fn split_plot_field_name_value(args: &[Value]) -> BuiltinResult<(&[Value], Option<String>)> {
-    if args.len() >= 3 && is_field_option_name(&args[args.len() - 2]) {
-        let field_id = scalar_string(&args[args.len() - 1], PLOT_NAME, &ERROR_INPUT)?;
-        Ok((&args[..args.len() - 2], Some(field_id)))
-    } else {
-        Ok((args, None))
+fn split_plot_options(args: &[Value]) -> BuiltinResult<(&[Value], FeaPlotOptions)> {
+    let mut options = FeaPlotOptions::default();
+    let mut end = args.len();
+    while end >= 2 && is_plot_option_name(&args[end - 2]) {
+        let key = scalar_string(&args[end - 2], PLOT_NAME, &ERROR_INPUT)?.to_ascii_lowercase();
+        match key.as_str() {
+            "field" | "fieldid" | "field_id" => {
+                options.field_id = Some(scalar_string(&args[end - 1], PLOT_NAME, &ERROR_INPUT)?);
+            }
+            "mesh" => {
+                options.show_solver_mesh_edges =
+                    plot_mesh_option_shows_solver_edges(&args[end - 1])?;
+            }
+            _ => unreachable!("is_plot_option_name only accepts supported plot option names"),
+        }
+        end -= 2;
     }
+    Ok((&args[..end], options))
 }
 
-fn is_field_option_name(value: &Value) -> bool {
+fn is_plot_option_name(value: &Value) -> bool {
     scalar_string(value, PLOT_NAME, &ERROR_INPUT)
         .map(|name| {
             matches!(
                 name.to_ascii_lowercase().as_str(),
-                "field" | "fieldid" | "field_id"
+                "field" | "fieldid" | "field_id" | "mesh"
             )
         })
         .unwrap_or(false)
+}
+
+fn plot_mesh_option_shows_solver_edges(value: &Value) -> BuiltinResult<bool> {
+    let mesh = scalar_string(value, PLOT_NAME, &ERROR_INPUT)?;
+    match mesh.to_ascii_lowercase().as_str() {
+        "solver" | "solver_edges" | "solveredges" | "edges" => Ok(true),
+        "cad" | "geometry" | "surface" | "none" => Ok(false),
+        other => Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_INPUT,
+            format!(
+                "unsupported fea.plot mesh option `{other}`; expected solver, solver_edges, cad, geometry, surface, or none"
+            ),
+        )),
+    }
 }
 
 fn is_fea_study(value: &Value) -> bool {
@@ -2666,7 +2701,7 @@ fn is_fea_study(value: &Value) -> bool {
 
 fn plot_request_from_context_value(
     value: &Value,
-    field_override: Option<String>,
+    options: FeaPlotOptions,
 ) -> BuiltinResult<FeaPlotRequest> {
     let study = study_context_from_value(PLOT_NAME, value)?;
     let run_id = run_id_context_from_value(value)
@@ -2678,7 +2713,7 @@ fn plot_request_from_context_value(
                 "fea.plot requires a run_id; use a fea.RunResult from fea.run or pass fea.plot(study, runId, field)",
             )
         })?;
-    let field_id = field_override.or_else(|| match value {
+    let field_id = options.field_id.clone().or_else(|| match value {
         Value::Object(object) if object.class_name == FEA_FIELD_CLASS => object
             .properties
             .get("field_id")
@@ -2692,6 +2727,7 @@ fn plot_request_from_context_value(
         study,
         run_id,
         field_id,
+        options,
     })
 }
 
@@ -2699,6 +2735,7 @@ fn plot_request_from_context_value(
 fn generate_plot_figures(
     study: &AnalysisStudySpec,
     run_id: &str,
+    options: &FeaPlotOptions,
 ) -> BuiltinResult<Vec<crate::analysis::AnalysisGeneratedFigure>> {
     crate::analysis::analysis_generate_study_run_figures(
         study,
@@ -2707,6 +2744,7 @@ fn generate_plot_figures(
             include_comparison: false,
             include_trends: false,
             max_mesh_result_figures: 8,
+            show_solver_mesh_edges: options.show_solver_mesh_edges,
             ..crate::analysis::AnalysisFigureGenerationOptions::default()
         },
     )
@@ -3971,6 +4009,22 @@ run:
         let field_handle =
             block_on(fea_plot_builtin(vec![field])).expect("field plot should create a figure");
         assert!(matches!(field_handle, Value::Num(handle) if handle >= 1.0));
+    }
+
+    #[test]
+    fn fea_plot_request_accepts_solver_mesh_edge_option() {
+        let (run_value, _study) = synthetic_plot_run_value();
+
+        let request = plot_request_from_args(&[
+            run_value,
+            Value::String("von_mises".to_string()),
+            Value::String("mesh".to_string()),
+            Value::String("solver".to_string()),
+        ])
+        .expect("plot request should parse mesh solver option");
+
+        assert_eq!(request.field_id.as_deref(), Some("von_mises"));
+        assert!(request.options.show_solver_mesh_edges);
     }
 
     fn synthetic_plot_run_value() -> (Value, Value) {
