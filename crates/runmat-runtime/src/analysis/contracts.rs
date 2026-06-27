@@ -1333,6 +1333,9 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
 
 fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("nodal_von_mises") {
+        return AnalysisFieldLocation::Node;
+    }
     if normalized.contains("vector_potential") {
         return AnalysisFieldLocation::Edge;
     }

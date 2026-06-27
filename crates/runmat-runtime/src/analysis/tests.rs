@@ -59,13 +59,14 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
     FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
-    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MaterialEvidence,
@@ -3152,6 +3153,21 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(displacement.value_count, 12);
     assert_eq!(displacement.element_count, 12);
     assert_eq!(displacement.component_count, Some(3));
+    let nodal_von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        vec![4],
+        vec![0.0; 4],
+    ));
+    assert_eq!(
+        nodal_von_mises.topology_id.as_deref(),
+        Some("analysis_mesh")
+    );
+    assert_eq!(nodal_von_mises.element_kind, None);
+    assert_eq!(nodal_von_mises.location, AnalysisFieldLocation::Node);
+    assert_eq!(nodal_von_mises.entity_count, 4);
+    assert_eq!(nodal_von_mises.value_count, 4);
+    assert_eq!(nodal_von_mises.element_count, 4);
+    assert_eq!(nodal_von_mises.component_count, None);
     let solid_stress = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
         vec![1, 6],

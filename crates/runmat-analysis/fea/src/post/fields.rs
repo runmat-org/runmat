@@ -5,13 +5,13 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
     assembly::{
@@ -56,6 +56,8 @@ pub fn recover_result_fields(
     let strain_values = strain_recovery.values;
     let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
+    let nodal_von_mises_values =
+        recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
     let strain_energy_density_values =
         recover_strain_energy_density(&strain_values, &stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
@@ -95,6 +97,11 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
             vec![element_count],
             strain_energy_density_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            vec![node_count],
+            nodal_von_mises_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -273,6 +280,7 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, vec![0], Vec::new()),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
             vec![0],
@@ -565,6 +573,32 @@ fn recover_solid_tet4_strain(
         }
     }
     strain
+}
+
+fn recover_nodal_averaged_scalar(
+    summary: &AssemblySummary,
+    element_values: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    let mut nodal = vec![0.0_f64; node_count];
+    let mut counts = vec![0_usize; node_count];
+    for (element_index, element) in summary.structural_solid_recovery.iter().enumerate() {
+        let Some(value) = element_values.get(element_index).copied() else {
+            continue;
+        };
+        for node_index in element.node_indices {
+            if let Some(accumulator) = nodal.get_mut(node_index) {
+                *accumulator += value;
+                counts[node_index] += 1;
+            }
+        }
+    }
+    for (value, count) in nodal.iter_mut().zip(counts) {
+        if count > 0 {
+            *value /= count as f64;
+        }
+    }
+    nodal
 }
 
 fn prep_b_matrix_recovery_elements(
@@ -1516,7 +1550,15 @@ mod tests {
             field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY),
             &[1]
         );
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES),
+            &[4]
+        );
         assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] >= 0.0);
+        let element_von_mises = host_field(&fields, FEA_FIELD_STRUCTURAL_VON_MISES)[0];
+        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES)
+            .iter()
+            .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
         let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
         assert_eq!(metrics.basis, "solid_tet4_constant_strain");
         assert_eq!(metrics.solver_mesh_node_count, 4);
