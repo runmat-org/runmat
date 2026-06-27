@@ -689,6 +689,7 @@ mod tests {
                 target_size_m: 0.08,
                 reason: Some("initial".to_string()),
             }],
+            applied_samples: Vec::new(),
             rejected_samples: Vec::new(),
         };
 

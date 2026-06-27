@@ -19,6 +19,17 @@ pub struct SizingSampleRejection {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SizingSampleApplication {
+    pub position_m: [f64; 3],
+    pub target_size_m: f64,
+    pub inserted_breakpoint_count: usize,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshSizingField {
     #[serde(default)]
@@ -29,6 +40,8 @@ pub struct MeshSizingField {
     pub max_size_m: Option<f64>,
     #[serde(default)]
     pub samples: Vec<SizingSample>,
+    #[serde(default)]
+    pub applied_samples: Vec<SizingSampleApplication>,
     #[serde(default)]
     pub rejected_samples: Vec<SizingSampleRejection>,
 }

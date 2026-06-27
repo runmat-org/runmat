@@ -11,7 +11,7 @@ use crate::{
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::{MeshSizingField, SizingSample, SizingSampleRejection},
+    sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
@@ -326,18 +326,30 @@ fn insert_local_sizing_breakpoints(
     sizing: &mut MeshSizingField,
     grid: &mut StructuredGrid,
 ) {
-    let mut samples = sizing
-        .samples
-        .iter()
-        .filter_map(|sample| {
-            let target_size_m = clamped_sample_target_size(sample.target_size_m, sizing)?;
-            let position_m = sample.position_m;
-            position_m
-                .iter()
-                .all(|value| value.is_finite())
-                .then_some((position_m, target_size_m, sample.reason.clone()))
-        })
-        .collect::<Vec<_>>();
+    let mut samples = Vec::new();
+    for sample in sizing.samples.clone() {
+        let Some(target_size_m) = clamped_sample_target_size(sample.target_size_m, sizing) else {
+            sizing.rejected_samples.push(sizing_rejection(
+                sample.position_m,
+                sample.target_size_m,
+                sample.reason,
+                "skipped_invalid",
+                "sizing sample target size was not finite and positive after bounds were applied",
+            ));
+            continue;
+        };
+        if !sample.position_m.iter().all(|value| value.is_finite()) {
+            sizing.rejected_samples.push(sizing_rejection(
+                sample.position_m,
+                target_size_m,
+                sample.reason,
+                "skipped_invalid",
+                "sizing sample position contained a non-finite coordinate",
+            ));
+            continue;
+        }
+        samples.push((sample.position_m, target_size_m, sample.reason));
+    }
     samples.sort_by(|left, right| {
         left.1
             .total_cmp(&right.1)
@@ -347,12 +359,15 @@ fn insert_local_sizing_breakpoints(
     });
 
     for (position_m, target_size_m, reason) in samples {
+        let mut inserted_breakpoint_count = 0_usize;
+        let mut duplicate_or_boundary_count = 0_usize;
         for axis in 0..3 {
             for coordinate in
                 local_breakpoint_candidates(input, axis, position_m[axis], target_size_m)
             {
                 let mut candidate = grid.clone();
                 if !candidate.insert_axis_coordinate(axis, coordinate) {
+                    duplicate_or_boundary_count += 1;
                     continue;
                 }
                 if candidate.element_count() > max_elements {
@@ -373,9 +388,52 @@ fn insert_local_sizing_breakpoints(
                     ));
                 } else {
                     *grid = candidate;
+                    inserted_breakpoint_count += 1;
                 }
             }
         }
+        if inserted_breakpoint_count > 0 {
+            sizing.applied_samples.push(sizing_application(
+                position_m,
+                target_size_m,
+                inserted_breakpoint_count,
+                reason.clone(),
+                duplicate_or_boundary_count,
+            ));
+        } else if duplicate_or_boundary_count > 0 {
+            sizing.rejected_samples.push(sizing_rejection(
+                position_m,
+                target_size_m,
+                reason,
+                "skipped_duplicate",
+                "sizing sample only produced duplicate or boundary-clamped breakpoints",
+            ));
+        }
+    }
+}
+
+fn sizing_application(
+    position_m: [f64; 3],
+    target_size_m: f64,
+    inserted_breakpoint_count: usize,
+    reason: Option<String>,
+    duplicate_or_boundary_count: usize,
+) -> SizingSampleApplication {
+    let detail = if duplicate_or_boundary_count > 0 {
+        Some(format!(
+            "inserted {inserted_breakpoint_count} local sizing breakpoints; skipped {duplicate_or_boundary_count} duplicate or boundary-clamped candidates"
+        ))
+    } else {
+        Some(format!(
+            "inserted {inserted_breakpoint_count} local sizing breakpoints"
+        ))
+    };
+    SizingSampleApplication {
+        position_m,
+        target_size_m,
+        inserted_breakpoint_count,
+        reason,
+        detail,
     }
 }
 
@@ -1138,6 +1196,12 @@ mod tests {
             .expect("local sizing-driven mesh should generate");
 
         validate_analysis_mesh(&mesh, Default::default()).expect("local mesh should validate");
+        assert_eq!(mesh.sizing.applied_samples.len(), 1);
+        assert_eq!(
+            mesh.sizing.applied_samples[0].reason.as_deref(),
+            Some("structural.load_regions")
+        );
+        assert!(mesh.sizing.applied_samples[0].inserted_breakpoint_count > 0);
         let x = unique_axis_coordinates(&mesh, 0);
         assert!(x.iter().any(|value| (*value - 0.4).abs() <= 1.0e-12));
         let spacings = x
@@ -1148,6 +1212,64 @@ mod tests {
         let max_spacing = spacings.iter().copied().fold(0.0_f64, f64::max);
         assert!(min_spacing <= 0.25 + 1.0e-12);
         assert!(max_spacing > min_spacing * 1.5);
+    }
+
+    #[test]
+    fn sizing_field_reports_duplicate_and_invalid_samples() {
+        let geometry = cube_geometry();
+        let mut options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [0.5, 0.5, 0.5],
+                    target_size_m: 0.5,
+                    reason: Some("structural.stress_gradient".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.5, 0.5, 0.5],
+                    target_size_m: 0.5,
+                    reason: Some("structural.stress_gradient".to_string()),
+                },
+                SizingSample {
+                    position_m: [f64::NAN, 0.5, 0.5],
+                    target_size_m: 0.25,
+                    reason: Some("structural.invalid_position".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.25, 0.25, 0.25],
+                    target_size_m: f64::NAN,
+                    reason: Some("structural.invalid_size".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+            .expect("audited sizing mesh should generate");
+
+        assert_eq!(mesh.sizing.applied_samples.len(), 1);
+        assert_eq!(
+            mesh.sizing.applied_samples[0].reason.as_deref(),
+            Some("structural.stress_gradient")
+        );
+        assert!(mesh.sizing.rejected_samples.iter().any(|rejection| {
+            rejection.status == "skipped_duplicate"
+                && rejection.reason.as_deref() == Some("structural.stress_gradient")
+        }));
+        assert!(mesh.sizing.rejected_samples.iter().any(|rejection| {
+            rejection.status == "skipped_invalid"
+                && rejection.reason.as_deref() == Some("structural.invalid_position")
+        }));
+        assert!(mesh.sizing.rejected_samples.iter().any(|rejection| {
+            rejection.status == "skipped_invalid"
+                && rejection.reason.as_deref() == Some("structural.invalid_size")
+        }));
     }
 
     #[test]
