@@ -1212,7 +1212,7 @@ pub fn analysis_run_study_op(
         run_envelope,
         resolved_run_options,
         resolved_electromagnetic_run_options,
-        refined_analysis_mesh_artifact_path,
+        refined_analysis_mesh_artifact,
     ) = match spec.run_kind {
         AnalysisRunKind::LinearStatic => {
             let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
@@ -1227,15 +1227,15 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            let refined_analysis_mesh_artifact_path = generate_and_persist_refined_study_analysis_mesh(
+            let refined_analysis_mesh_artifact = generate_and_persist_refined_study_analysis_mesh(
                 spec,
                 &study_fingerprint,
                 analysis_mesh_artifact_path.as_deref(),
                 &context,
             )?;
-            if let Some(refined_path) = refined_analysis_mesh_artifact_path.as_ref() {
+            if let Some(refined_artifact) = refined_analysis_mesh_artifact.as_ref() {
                 let mut refined_options = options.clone();
-                refined_options.analysis_mesh_artifact_path = Some(refined_path.clone());
+                refined_options.analysis_mesh_artifact_path = Some(refined_artifact.path.clone());
                 let refined_run = analysis_run_linear_static_with_options(
                     &model,
                     spec.backend,
@@ -1246,14 +1246,14 @@ pub fn analysis_run_study_op(
                     refined_run,
                     run_options_to_json(&refined_options),
                     None,
-                    refined_analysis_mesh_artifact_path,
+                    refined_analysis_mesh_artifact,
                 ))
             } else {
                 Ok((
                     initial_run,
                     run_options_to_json(&options),
                     None,
-                    refined_analysis_mesh_artifact_path,
+                    refined_analysis_mesh_artifact,
                 ))
             }
         }
@@ -1357,6 +1357,11 @@ pub fn analysis_run_study_op(
             Ok((run, run_options_to_json(&options), Some(options), None))
         }
     }?;
+    let refined_analysis_mesh_artifact_path =
+        refined_analysis_mesh_artifact.as_ref().map(|artifact| artifact.path.clone());
+    let refinement_effect = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.refinement_effect.clone());
 
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -1370,6 +1375,7 @@ pub fn analysis_run_study_op(
             "prep_artifact_id": study_prep_artifact_id.clone(),
             "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
             "refined_analysis_mesh_artifact_path": refined_analysis_mesh_artifact_path.clone(),
+            "refinement_effect": refinement_effect,
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -13416,12 +13422,18 @@ fn generate_and_persist_study_analysis_mesh(
     })
 }
 
+#[derive(Debug, Clone)]
+struct RefinedAnalysisMeshArtifact {
+    path: String,
+    refinement_effect: serde_json::Value,
+}
+
 fn generate_and_persist_refined_study_analysis_mesh(
     spec: &AnalysisStudySpec,
     study_fingerprint: &str,
     analysis_mesh_artifact_path: Option<&str>,
     context: &OperationContext,
-) -> Result<Option<String>, OperationErrorEnvelope> {
+) -> Result<Option<RefinedAnalysisMeshArtifact>, OperationErrorEnvelope> {
     let Some(path) = analysis_mesh_artifact_path else {
         return Ok(None);
     };
@@ -13534,6 +13546,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
         mesh.adaptive_iterations.len()
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
+    let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
     validate_analysis_mesh(&refined_mesh, Default::default()).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -13568,11 +13581,16 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "sizing_rejections": sizing_rejection_summary(&refined_mesh),
-            "refinement_effect": refinement_effect_summary(&mesh, &refined_mesh),
+            "refinement_effect": refinement_effect.clone(),
             "mesh": refined_mesh,
         }),
     )
-    .map(Some)
+    .map(|path| {
+        Some(RefinedAnalysisMeshArtifact {
+            path,
+            refinement_effect,
+        })
+    })
     .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,

@@ -2082,6 +2082,12 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["refined_analysis_mesh_artifact_path"].as_str(),
         Some(refined_artifact_path.as_str())
     );
+    assert_eq!(run_payload["refinement_effect"]["topology_changed"].as_bool(), Some(true));
+    assert!(
+        run_payload["refinement_effect"]["element_count_delta"]
+            .as_i64()
+            .is_some_and(|delta| delta > 0)
+    );
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
