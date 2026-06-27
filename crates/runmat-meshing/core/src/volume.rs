@@ -174,7 +174,10 @@ impl StructuredTetMesher {
 
         let boundary_faces =
             grid_boundary_faces(input, &grid, &occupied_cells, &cell_tet_ids, &node_id_at);
-        let quality = quality_report(element_quality);
+        let quality = quality_report(
+            element_quality,
+            boundary_projection_errors(input, &boundary_faces, &nodes),
+        );
         mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
 
         let mesh = AnalysisMeshArtifact {
@@ -971,7 +974,10 @@ fn target_size_m(
     }
 }
 
-fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
+fn quality_report(
+    elements: Vec<ElementQuality>,
+    boundary_projection_errors_m: Vec<f64>,
+) -> AnalysisMeshQualityReport {
     let min_scaled_jacobian = elements
         .iter()
         .map(|element| element.scaled_jacobian)
@@ -989,13 +995,106 @@ fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
             .sum::<f64>()
             / elements.len() as f64
     };
+    let mean_boundary_projection_error_m = if boundary_projection_errors_m.is_empty() {
+        0.0
+    } else {
+        boundary_projection_errors_m.iter().sum::<f64>() / boundary_projection_errors_m.len() as f64
+    };
+    let max_boundary_projection_error_m = boundary_projection_errors_m
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
     AnalysisMeshQualityReport {
         min_scaled_jacobian,
         mean_aspect_ratio,
         max_aspect_ratio,
         inverted_element_count: 0,
+        mean_boundary_projection_error_m,
+        max_boundary_projection_error_m,
         elements,
     }
+}
+
+fn boundary_projection_errors(
+    input: &BoundaryMeshInput,
+    boundary_faces: &[AnalysisBoundaryFace],
+    nodes: &[AnalysisMeshNode],
+) -> Vec<f64> {
+    boundary_faces
+        .iter()
+        .filter_map(|face| {
+            let centroid = element_centroid(nodes, &face.node_ids)?;
+            nearest_boundary_triangle_distance(input, centroid)
+        })
+        .filter(|distance_m| distance_m.is_finite())
+        .collect()
+}
+
+fn nearest_boundary_triangle_distance(input: &BoundaryMeshInput, point: [f64; 3]) -> Option<f64> {
+    input
+        .triangles
+        .iter()
+        .filter_map(|triangle| {
+            let vertices = triangle_vertices(input, triangle.node_ids)?;
+            Some(point_triangle_distance(point, vertices))
+        })
+        .filter(|distance_m| distance_m.is_finite())
+        .min_by(f64::total_cmp)
+}
+
+fn point_triangle_distance(point: [f64; 3], vertices: [[f64; 3]; 3]) -> f64 {
+    let [a, b, c] = vertices;
+    let ab = sub(b, a);
+    let ac = sub(c, a);
+    let ap = sub(point, a);
+
+    let d1 = dot(ab, ap);
+    let d2 = dot(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return distance(point, a);
+    }
+
+    let bp = sub(point, b);
+    let d3 = dot(ab, bp);
+    let d4 = dot(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return distance(point, b);
+    }
+
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let v = d1 / (d1 - d3);
+        return distance(point, add(a, scale(ab, v)));
+    }
+
+    let cp = sub(point, c);
+    let d5 = dot(ab, cp);
+    let d6 = dot(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return distance(point, c);
+    }
+
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let w = d2 / (d2 - d6);
+        return distance(point, add(a, scale(ac, w)));
+    }
+
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
+        let bc = sub(c, b);
+        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return distance(point, add(b, scale(bc, w)));
+    }
+
+    let normal = cross(ab, ac);
+    let normal_length = norm(normal);
+    if normal_length <= f64::EPSILON {
+        return distance(point, a)
+            .min(distance(point, b))
+            .min(distance(point, c));
+    }
+    dot(ap, normal).abs() / normal_length
 }
 
 fn orient_tet(mut node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> [u32; 4] {
@@ -1043,12 +1142,39 @@ fn tet_points(node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> Option<[[f64; 3
     ])
 }
 
+fn element_centroid(nodes: &[AnalysisMeshNode], node_ids: &[u32]) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0; 3];
+    for node_id in node_ids {
+        let coordinates = nodes.get(node_id.checked_sub(1)? as usize)?.coordinates_m;
+        centroid[0] += coordinates[0];
+        centroid[1] += coordinates[1];
+        centroid[2] += coordinates[2];
+    }
+    let scale = 1.0 / node_ids.len() as f64;
+    Some([
+        centroid[0] * scale,
+        centroid[1] * scale,
+        centroid[2] * scale,
+    ])
+}
+
 fn lerp(left: f64, right: f64, t: f64) -> f64 {
     left + (right - left) * t
 }
 
+fn add(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
 fn sub(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
     [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn scale(value: [f64; 3], factor: f64) -> [f64; 3] {
+    [value[0] * factor, value[1] * factor, value[2] * factor]
 }
 
 fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
@@ -1258,6 +1384,8 @@ mod tests {
         assert_eq!(mesh.nodes.len(), 27);
         assert_eq!(mesh.volume_elements.len(), 48);
         assert_eq!(mesh.boundary_faces.len(), 48);
+        assert!(mesh.quality.mean_boundary_projection_error_m <= 1.0e-12);
+        assert!(mesh.quality.max_boundary_projection_error_m <= 1.0e-12);
         assert!(mesh.boundary_faces.iter().any(|face| {
             face.region_ids
                 .iter()
@@ -1342,6 +1470,9 @@ mod tests {
         assert!(mesh.volume_elements.len() < 4 * 4 * 4 * 6);
         assert!(mesh.nodes.len() < 5 * 5 * 5);
         assert!(all_nodes_are_referenced(&mesh));
+        assert!(mesh.quality.mean_boundary_projection_error_m.is_finite());
+        assert!(mesh.quality.max_boundary_projection_error_m.is_finite());
+        assert!(mesh.quality.max_boundary_projection_error_m > 0.0);
         assert!(mesh.volume_elements.iter().all(|element| {
             let centroid = tet_centroid(
                 [

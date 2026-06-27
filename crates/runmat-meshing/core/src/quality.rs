@@ -15,6 +15,10 @@ pub struct AnalysisMeshQualityReport {
     pub max_aspect_ratio: f64,
     pub inverted_element_count: usize,
     #[serde(default)]
+    pub mean_boundary_projection_error_m: f64,
+    #[serde(default)]
+    pub max_boundary_projection_error_m: f64,
+    #[serde(default)]
     pub elements: Vec<ElementQuality>,
 }
 
@@ -25,6 +29,8 @@ impl Default for AnalysisMeshQualityReport {
             mean_aspect_ratio: 1.0,
             max_aspect_ratio: 1.0,
             inverted_element_count: 0,
+            mean_boundary_projection_error_m: 0.0,
+            max_boundary_projection_error_m: 0.0,
             elements: Vec::new(),
         }
     }
