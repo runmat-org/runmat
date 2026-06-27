@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    adaptive::AdaptiveIterationSummary,
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance},
     quality::AnalysisMeshQualityReport,
     sizing::MeshSizingField,
@@ -64,5 +65,7 @@ pub struct AnalysisMeshArtifact {
     pub boundary_edges: Vec<AnalysisBoundaryEdge>,
     pub quality: AnalysisMeshQualityReport,
     pub sizing: MeshSizingField,
+    #[serde(default)]
+    pub adaptive_iterations: Vec<AdaptiveIterationSummary>,
     pub provenance: AnalysisMeshProvenance,
 }

@@ -1990,6 +1990,29 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
             .expect("region ids")
             .iter()
             .any(|region| region.as_str() == Some("root"))));
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(adaptive_iterations.len(), 1);
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert_eq!(
+        adaptive_iterations[0]["node_count"].as_u64(),
+        payload["mesh"]["nodes"]
+            .as_array()
+            .map(|nodes| nodes.len() as u64)
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("skipped_missing_field")
+        ));
 
     let run_payload: serde_json::Value = serde_json::from_slice(
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
@@ -4908,6 +4931,7 @@ fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
         boundary_edges: Vec::new(),
         quality: AnalysisMeshQualityReport::default(),
         sizing: MeshSizingField::default(),
+        adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
             algorithm: "test".to_string(),
             source_geometry_id: "geo:test".to_string(),

@@ -38,8 +38,10 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
-    generate_analysis_mesh, validate_analysis_mesh, AnalysisMeshArtifact, ElementFamilyHint,
-    MeshConnectivityClass,
+    generate_analysis_mesh, plan_refinement_indicators,
+    structural_static_default_refinement_indicators, validate_analysis_mesh,
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, AnalysisMeshArtifact, ElementFamilyHint,
+    MeshConnectivityClass, RefinementIndicatorAvailability, RefinementStrategy, SizingFieldUpdate,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13274,7 +13276,7 @@ fn generate_and_persist_study_analysis_mesh(
     let Some(options) = spec.mesh_options.clone() else {
         return Ok(None);
     };
-    let mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
+    let mut mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -13292,6 +13294,7 @@ fn generate_and_persist_study_analysis_mesh(
             ]),
         )
     })?;
+    attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
     validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -13342,6 +13345,47 @@ fn generate_and_persist_study_analysis_mesh(
             ]),
         )
     })
+}
+
+fn attach_initial_adaptive_mesh_summary(
+    spec: &AnalysisStudySpec,
+    options: &runmat_meshing_core::VolumeMeshingOptions,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let defaults = match spec.create_model_intent.profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => {
+            structural_static_default_refinement_indicators()
+        }
+        _ => Vec::new(),
+    };
+    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+        return;
+    }
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| RefinementIndicatorAvailability {
+            key,
+            applicable: true,
+            field_available: false,
+        })
+        .collect::<Vec<_>>();
+    let indicators =
+        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::None) {
+        AdaptiveConvergenceStatus::Disabled
+    } else {
+        AdaptiveConvergenceStatus::Pending
+    };
+    mesh.adaptive_iterations.push(AdaptiveIterationSummary {
+        iteration_index: 0,
+        node_count: mesh.nodes.len(),
+        element_count: mesh.volume_elements.len(),
+        convergence_status,
+        indicators,
+        markers: Vec::new(),
+        sizing_update: SizingFieldUpdate::default(),
+    });
 }
 
 fn resolve_analysis_mesh_artifact(

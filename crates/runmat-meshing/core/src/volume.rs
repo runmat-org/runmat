@@ -159,6 +159,7 @@ impl VolumeMesher for StructuredTetMesher {
                 max_size_m: None,
                 samples: Vec::new(),
             },
+            adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
                 algorithm: "structured_bbox_tet/v1".to_string(),
                 source_geometry_id: input.source_geometry_id.clone(),
@@ -419,10 +420,7 @@ fn tet_volume(node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> f64 {
     let Some([a, b, c, d]) = tet_points(node_ids, nodes) else {
         return 0.0;
     };
-    let ad = sub(a, d);
-    let bd = sub(b, d);
-    let cd = sub(c, d);
-    dot(ad, cross(bd, cd)) / 6.0
+    dot(sub(b, a), cross(sub(c, a), sub(d, a))) / 6.0
 }
 
 fn tet_aspect_ratio(node_ids: [u32; 4], nodes: &[AnalysisMeshNode]) -> f64 {
@@ -589,6 +587,17 @@ mod tests {
             .elements
             .iter()
             .all(|quality| quality.volume_m3 > 0.0));
+        assert!(mesh.volume_elements.iter().all(|element| {
+            tet_volume(
+                [
+                    element.node_ids[0],
+                    element.node_ids[1],
+                    element.node_ids[2],
+                    element.node_ids[3],
+                ],
+                &mesh.nodes,
+            ) > 0.0
+        }));
     }
 
     #[test]

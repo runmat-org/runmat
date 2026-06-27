@@ -150,6 +150,13 @@ pub fn plan_refinement_indicators(
         .collect()
 }
 
+pub fn structural_static_default_refinement_indicators() -> Vec<RefinementIndicatorKey> {
+    vec![
+        RefinementIndicatorKey::new("structural", "stress_gradient"),
+        RefinementIndicatorKey::new("structural", "strain_energy_density"),
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefinementMarker {
     pub entity_id: String,
@@ -397,5 +404,18 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn structural_static_defaults_are_owned_by_adaptive_policy() {
+        let defaults = structural_static_default_refinement_indicators();
+
+        assert_eq!(
+            defaults,
+            vec![
+                key("structural", "stress_gradient"),
+                key("structural", "strain_energy_density")
+            ]
+        );
     }
 }
