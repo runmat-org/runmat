@@ -11,7 +11,7 @@ use crate::{
     options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::{MeshSizingField, SizingSample},
+    sizing::{MeshSizingField, SizingSample, SizingSampleRejection},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
@@ -92,7 +92,7 @@ impl StructuredTetMesher {
         let mut mesh_sizing = sizing.cloned().unwrap_or_default();
         append_geometry_focus_sizing_samples(input, options, &mut mesh_sizing);
 
-        let grid = structured_grid(input, options, Some(&mesh_sizing))?;
+        let grid = structured_grid(input, options, Some(&mut mesh_sizing))?;
         let nodes = grid_nodes(&grid);
         let node_id_at = |i: usize, j: usize, k: usize| -> u32 {
             (1 + i + grid.x.len() * (j + grid.y.len() * k)) as u32
@@ -263,7 +263,7 @@ impl StructuredGrid {
 fn structured_grid(
     input: &BoundaryMeshInput,
     options: &VolumeMeshingOptions,
-    sizing: Option<&MeshSizingField>,
+    sizing: Option<&mut MeshSizingField>,
 ) -> Result<StructuredGrid, MeshingError> {
     let max_by_budget = ((options.max_elements / 6).max(1) as f64)
         .cbrt()
@@ -286,6 +286,7 @@ fn structured_grid(
         }
     };
     let requested = sizing
+        .as_deref()
         .and_then(global_sizing_target_size_m)
         .map(|length_m| requested.max(divisions_for_target_size(input, length_m)))
         .unwrap_or(requested);
@@ -315,7 +316,7 @@ fn global_sizing_target_size_m(sizing: &MeshSizingField) -> Option<f64> {
 fn insert_local_sizing_breakpoints(
     input: &BoundaryMeshInput,
     max_elements: usize,
-    sizing: &MeshSizingField,
+    sizing: &mut MeshSizingField,
     grid: &mut StructuredGrid,
 ) {
     let mut samples = sizing
@@ -327,7 +328,7 @@ fn insert_local_sizing_breakpoints(
             position_m
                 .iter()
                 .all(|value| value.is_finite())
-                .then_some((position_m, target_size_m))
+                .then_some((position_m, target_size_m, sample.reason.clone()))
         })
         .collect::<Vec<_>>();
     samples.sort_by(|left, right| {
@@ -338,19 +339,52 @@ fn insert_local_sizing_breakpoints(
             .then_with(|| left.0[2].total_cmp(&right.0[2]))
     });
 
-    for (position_m, target_size_m) in samples {
+    for (position_m, target_size_m, reason) in samples {
         for axis in 0..3 {
             for coordinate in
                 local_breakpoint_candidates(input, axis, position_m[axis], target_size_m)
             {
                 let mut candidate = grid.clone();
-                candidate.insert_axis_coordinate(axis, coordinate);
-                if candidate.element_count() <= max_elements && candidate.satisfies_quality_guard()
-                {
+                if !candidate.insert_axis_coordinate(axis, coordinate) {
+                    continue;
+                }
+                if candidate.element_count() > max_elements {
+                    sizing.rejected_samples.push(sizing_rejection(
+                        position_m,
+                        target_size_m,
+                        reason.clone(),
+                        "skipped_budget",
+                        "element budget prevented local sizing breakpoint",
+                    ));
+                } else if !candidate.satisfies_quality_guard() {
+                    sizing.rejected_samples.push(sizing_rejection(
+                        position_m,
+                        target_size_m,
+                        reason.clone(),
+                        "skipped_quality",
+                        "mesh quality guard prevented local sizing breakpoint",
+                    ));
+                } else {
                     *grid = candidate;
                 }
             }
         }
+    }
+}
+
+fn sizing_rejection(
+    position_m: [f64; 3],
+    target_size_m: f64,
+    reason: Option<String>,
+    status: &str,
+    detail: &str,
+) -> SizingSampleRejection {
+    SizingSampleRejection {
+        position_m,
+        target_size_m,
+        status: status.to_string(),
+        reason,
+        detail: Some(detail.to_string()),
     }
 }
 
@@ -463,14 +497,14 @@ fn small_feature_sizing_samples(input: &BoundaryMeshInput) -> Vec<SizingSample> 
 }
 
 impl StructuredGrid {
-    fn insert_axis_coordinate(&mut self, axis: usize, coordinate: f64) {
+    fn insert_axis_coordinate(&mut self, axis: usize, coordinate: f64) -> bool {
         let coordinates = match axis {
             0 => &mut self.x,
             1 => &mut self.y,
             _ => &mut self.z,
         };
         if !coordinate.is_finite() {
-            return;
+            return false;
         }
         let span = coordinates
             .last()
@@ -483,10 +517,11 @@ impl StructuredGrid {
             .iter()
             .any(|existing| (*existing - coordinate).abs() <= tolerance)
         {
-            return;
+            return false;
         }
         coordinates.push(coordinate);
         coordinates.sort_by(f64::total_cmp);
+        true
     }
 
     fn satisfies_quality_guard(&self) -> bool {
@@ -1135,6 +1170,10 @@ mod tests {
         assert!(
             mesh.quality.min_scaled_jacobian >= QualityThresholds::default().min_scaled_jacobian
         );
+        assert!(mesh.sizing.rejected_samples.iter().any(|rejection| {
+            rejection.status == "skipped_quality"
+                && rejection.reason.as_deref() == Some("structural.stress_gradient")
+        }));
         let min_spacing = unique_axis_coordinates(&mesh, 0)
             .windows(2)
             .map(|pair| pair[1] - pair[0])
@@ -1167,6 +1206,12 @@ mod tests {
 
         assert!(mesh.volume_elements.len() <= 48);
         assert_eq!(mesh.volume_elements.len(), 48);
+        assert!(
+            mesh.sizing
+                .rejected_samples
+                .iter()
+                .any(|rejection| rejection.status == "skipped_budget")
+        );
     }
 
     #[test]
