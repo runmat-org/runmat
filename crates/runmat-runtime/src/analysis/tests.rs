@@ -4806,14 +4806,23 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
     .expect("run should succeed");
 
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
-    assert!(envelope.data.publishable);
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
+    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback)
+    );
+    assert!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
+    );
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
 }
 
@@ -4869,14 +4878,23 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
     .expect("run should succeed");
 
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback)
+    );
+    assert!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
+    );
     assert_eq!(envelope.data.provenance.quality_policy, "strict");
 }
 

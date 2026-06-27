@@ -9366,7 +9366,7 @@ pub fn analysis_run_linear_static_with_options(
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
     let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
     let legacy_surrogate_reasons =
-        legacy_surrogate_mesh_basis_reasons(analysis_mesh.as_ref(), prep_context.as_ref());
+        legacy_surrogate_mesh_basis_reasons(model, analysis_mesh.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
         matches!(
             reason.code,
@@ -9589,16 +9589,23 @@ fn solid_mesh_quality_reasons(
 }
 
 fn legacy_surrogate_mesh_basis_reasons(
+    model: &AnalysisModel,
     analysis_mesh: Option<&AnalysisMeshArtifact>,
-    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> Vec<QualityReason> {
-    if analysis_mesh.is_some() || prep_context.is_none() {
+    if analysis_mesh.is_some() || model_has_explicit_structural_elements(model) {
         return Vec::new();
     }
     vec![QualityReason {
         code: QualityReasonCode::LegacySurrogateMeshBasis,
         detail: "linear static structural result used the legacy prep/surrogate mesh basis; provide a solid analysis mesh for production-eligible solid FEA".to_string(),
     }]
+}
+
+fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
+    model
+        .structural
+        .as_ref()
+        .is_some_and(|structural| !structural.elements.is_empty())
 }
 
 fn boundary_region_mapping_reasons(
