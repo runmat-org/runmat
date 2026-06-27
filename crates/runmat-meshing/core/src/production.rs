@@ -368,6 +368,7 @@ fn production_backend_summary(
         cad_shell_count: preparation.cad_topology.report.shell_count,
         cad_volume_count: preparation.cad_topology.report.volume_count,
         cad_semantic_face_count: preparation.cad_topology.report.semantic_face_count,
+        cad_imported_face_count: preparation.cad_topology.report.imported_face_count,
         cad_generic_face_count: preparation.cad_topology.report.generic_face_count,
         cad_closed_shell_count: preparation.cad_topology.report.closed_shell_count,
         cad_evaluation_source: cad_evaluation_source_label(preparation.cad_evaluation.source)
@@ -717,6 +718,7 @@ mod tests {
         assert_eq!(mesh.backend.cad_edge_count, 18);
         assert_eq!(mesh.backend.cad_face_count, 12);
         assert_eq!(mesh.backend.cad_closed_shell_count, 1);
+        assert_eq!(mesh.backend.cad_imported_face_count, 0);
         assert_eq!(
             mesh.backend.cad_evaluation_source,
             "planar_facet_approximation"

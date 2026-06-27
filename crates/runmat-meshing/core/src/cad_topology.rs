@@ -48,6 +48,8 @@ pub struct CadEdge {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CadFace {
     pub entity_id: CadEntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_face_id: Option<u64>,
     pub source_face_ids: Vec<u32>,
     pub source_edge_ids: Vec<u32>,
     pub loop_edge_ids: Vec<String>,
@@ -79,6 +81,7 @@ pub struct CadTopologyReport {
     pub shell_count: usize,
     pub volume_count: usize,
     pub semantic_face_count: usize,
+    pub imported_face_count: usize,
     pub generic_face_count: usize,
     pub closed_shell_count: usize,
 }
@@ -122,6 +125,7 @@ pub fn build_cad_topology(
 
     let source = cad_topology_source(geometry);
     let semantic_face_regions = semantic_face_regions(geometry);
+    let imported_face_ids_by_region = imported_face_ids_by_region(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
 
     let vertices = topology
@@ -141,15 +145,24 @@ pub fn build_cad_topology(
         .faces
         .iter()
         .map(|face| {
-            let region_ids = face_region_by_source_face
+            let mapped_region_ids = face_region_by_source_face
                 .get(&face.source_triangle_id)
-                .cloned()
-                .unwrap_or_else(|| face.region_ids.clone());
+                .cloned();
+            let identity_region_ids = mapped_region_ids.clone().unwrap_or_default();
+            let region_ids = mapped_region_ids.unwrap_or_else(|| face.region_ids.clone());
             CadFace {
                 entity_id: CadEntityId {
                     kind: CadEntityKind::Face,
-                    id: stable_face_id(&semantic_face_regions, &region_ids, face.face_id),
+                    id: stable_face_id(
+                        &semantic_face_regions,
+                        identity_region_ids.as_slice(),
+                        face.face_id,
+                    ),
                 },
+                imported_face_id: imported_face_id_for_regions(
+                    &imported_face_ids_by_region,
+                    identity_region_ids.as_slice(),
+                ),
                 source_face_ids: vec![face.face_id],
                 source_edge_ids: face.edge_ids.to_vec(),
                 loop_edge_ids: face
@@ -224,6 +237,10 @@ pub fn build_cad_topology(
                 .any(|region_id| semantic_face_regions.contains(region_id))
         })
         .count();
+    let imported_face_count = faces
+        .iter()
+        .filter(|face| face.imported_face_id.is_some())
+        .count();
     let generic_face_count = faces.len().saturating_sub(semantic_face_count);
     let report = CadTopologyReport {
         source,
@@ -233,6 +250,7 @@ pub fn build_cad_topology(
         shell_count: 1,
         volume_count: usize::from(closed),
         semantic_face_count,
+        imported_face_count,
         generic_face_count,
         closed_shell_count: usize::from(closed),
     };
@@ -281,6 +299,29 @@ fn semantic_face_regions(geometry: &GeometryAsset) -> BTreeSet<String> {
         })
         .map(|region| region.region_id.clone())
         .collect()
+}
+
+fn imported_face_ids_by_region(geometry: &GeometryAsset) -> BTreeMap<String, u64> {
+    geometry
+        .regions
+        .iter()
+        .filter_map(|region| {
+            region
+                .cad_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.face_id)
+                .map(|face_id| (region.region_id.clone(), face_id))
+        })
+        .collect()
+}
+
+fn imported_face_id_for_regions(
+    imported_face_ids_by_region: &BTreeMap<String, u64>,
+    region_ids: &[String],
+) -> Option<u64> {
+    region_ids
+        .iter()
+        .find_map(|region_id| imported_face_ids_by_region.get(region_id).copied())
 }
 
 fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<u32, Vec<String>> {
@@ -340,6 +381,7 @@ mod tests {
         assert_eq!(cad.report.closed_shell_count, 1);
         assert_eq!(cad.report.volume_count, 1);
         assert_eq!(cad.report.semantic_face_count, 0);
+        assert_eq!(cad.report.imported_face_count, 0);
         assert_eq!(cad.report.generic_face_count, 12);
     }
 
@@ -352,10 +394,15 @@ mod tests {
 
         assert_eq!(cad.source, CadTopologySource::SemanticCad);
         assert!(cad.report.semantic_face_count > 0);
+        assert_eq!(cad.report.imported_face_count, 2);
         assert!(cad
             .faces
             .iter()
             .any(|face| face.entity_id.id == "face_000001"));
+        assert!(cad
+            .faces
+            .iter()
+            .any(|face| face.imported_face_id == Some(1)));
     }
 
     fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {

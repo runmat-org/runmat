@@ -78,6 +78,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_semantic_face_count: usize,
     #[serde(default)]
+    pub cad_imported_face_count: usize,
+    #[serde(default)]
     pub cad_generic_face_count: usize,
     #[serde(default)]
     pub cad_closed_shell_count: usize,
@@ -154,6 +156,7 @@ impl Default for MeshBackendSummary {
             cad_shell_count: 0,
             cad_volume_count: 0,
             cad_semantic_face_count: 0,
+            cad_imported_face_count: 0,
             cad_generic_face_count: 0,
             cad_closed_shell_count: 0,
             cad_evaluation_source: "unknown".to_string(),
