@@ -2229,24 +2229,23 @@ mod tests {
     }
 
     #[test]
-    fn explicit_production_backend_fails_until_backend_exists() {
+    fn explicit_production_backend_generates_candidate_analysis_mesh() {
         let geometry = cube_geometry();
-        let err = generate_analysis_mesh(
+        let mesh = generate_analysis_mesh(
             &geometry,
             VolumeMeshingOptions {
                 backend: MeshBackendKind::Production,
                 ..VolumeMeshingOptions::default()
             },
         )
-        .expect_err("production backend is not wired yet");
+        .expect("production backend should generate a candidate analysis mesh");
 
-        match err {
-            MeshingError::ProductionBackend(message) => {
-                assert!(message.contains("production Tet generation is pending"));
-                assert!(message.contains("volume component"));
-            }
-            other => panic!("unexpected production error: {other:?}"),
-        }
+        validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect("production candidate analysis mesh should validate");
+        assert_eq!(
+            mesh.provenance.algorithm,
+            "production_topology_tet_candidate/v1"
+        );
     }
 
     #[test]

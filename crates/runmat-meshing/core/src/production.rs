@@ -1,22 +1,33 @@
 use runmat_geometry_core::GeometryAsset;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::{
+    artifact::{
+        AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
+        ANALYSIS_MESH_SCHEMA_VERSION,
+    },
     curve::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
         CurveDiscretizationOptions,
     },
     options::{MeshTargetSize, VolumeMeshingOptions},
+    provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
+    quality::{AnalysisMeshQualityReport, ElementQuality},
+    sizing::MeshSizingField,
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
         discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
         SurfaceDiscretizationOptions,
     },
-    tet_candidate::{form_tet_candidates, TetCandidateError, TetCandidateOptions, TetCandidateSet},
+    tet_candidate::{
+        form_tet_candidates, TetCandidateError, TetCandidateNodeSource, TetCandidateOptions,
+        TetCandidateSet,
+    },
+    topology::{BoundaryElementKind, VolumeElementKind},
     volume_candidate::{
         prepare_volume_candidates, VolumeCandidateError, VolumeCandidateOptions, VolumeCandidateSet,
     },
-    AnalysisMeshArtifact,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -35,12 +46,7 @@ pub enum ProductionMeshError {
     Surface(SurfaceDiscretizationError),
     VolumeCandidate(VolumeCandidateError),
     TetCandidate(TetCandidateError),
-    TetGenerationPending {
-        component_count: usize,
-        surface_element_count: usize,
-        curve_element_count: usize,
-        candidate_tet_count: usize,
-    },
+    MissingCandidateNode { node_id: u32 },
 }
 
 impl std::fmt::Display for ProductionMeshError {
@@ -53,15 +59,9 @@ impl std::fmt::Display for ProductionMeshError {
                 write!(formatter, "volume candidate preparation failed: {err}")
             }
             Self::TetCandidate(err) => write!(formatter, "Tet candidate formation failed: {err}"),
-            Self::TetGenerationPending {
-                component_count,
-                surface_element_count,
-                curve_element_count,
-                candidate_tet_count,
-            } => write!(
-                formatter,
-                "production Tet generation is pending after preparing {component_count} volume component(s), {surface_element_count} surface element(s), {curve_element_count} curve element(s), and {candidate_tet_count} candidate Tet element(s)"
-            ),
+            Self::MissingCandidateNode { node_id } => {
+                write!(formatter, "candidate Tet references missing node {node_id}")
+            }
         }
     }
 }
@@ -97,12 +97,7 @@ pub fn generate_production_analysis_mesh(
     options: &VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
     let preparation = prepare_production_mesh(geometry, options)?;
-    Err(ProductionMeshError::TetGenerationPending {
-        component_count: preparation.volume_candidates.components.len(),
-        surface_element_count: preparation.surface.elements.len(),
-        curve_element_count: preparation.curves.elements.len(),
-        candidate_tet_count: preparation.tet_candidates.tets.len(),
-    })
+    analysis_mesh_from_preparation(&preparation, options)
 }
 
 fn curve_options_for_mesh(
@@ -122,6 +117,168 @@ fn curve_options_for_mesh(
         target_size_m,
         min_segments_per_edge: 1,
         max_segments_per_edge: options.max_elements.max(1).min(4096),
+    }
+}
+
+fn analysis_mesh_from_preparation(
+    preparation: &ProductionMeshPreparation,
+    options: &VolumeMeshingOptions,
+) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
+    let mut node_id_map = BTreeMap::<u32, u32>::new();
+    let nodes = preparation
+        .tet_candidates
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let node_id = index as u32 + 1;
+            node_id_map.insert(node.node_id, node_id);
+            AnalysisMeshNode {
+                node_id,
+                coordinates_m: node.coordinates_m,
+                provenance: vec![MeshEntityProvenance {
+                    source_geometry_id: preparation.topology.source_geometry_id.clone(),
+                    source_geometry_revision: preparation.topology.source_geometry_revision,
+                    source_entity_kind: match node.source {
+                        TetCandidateNodeSource::Surface => SourceEntityKind::Mesh,
+                        TetCandidateNodeSource::InteriorSeed => SourceEntityKind::Body,
+                    },
+                    source_entity_id: node.node_id.to_string(),
+                    region_ids: Vec::new(),
+                }],
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut source_surface_to_tet = BTreeMap::<u32, Vec<String>>::new();
+    let mut volume_elements = Vec::<AnalysisVolumeElement>::new();
+    let mut quality_elements = Vec::<ElementQuality>::new();
+    for tet in &preparation.tet_candidates.tets {
+        let element_id = format!("prod_tet_{}", tet.tet_id + 1);
+        let node_ids = tet
+            .node_ids
+            .iter()
+            .map(|node_id| {
+                node_id_map
+                    .get(node_id)
+                    .copied()
+                    .ok_or(ProductionMeshError::MissingCandidateNode { node_id: *node_id })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        source_surface_to_tet
+            .entry(tet.source_surface_element_id)
+            .or_default()
+            .push(element_id.clone());
+        volume_elements.push(AnalysisVolumeElement {
+            element_id: element_id.clone(),
+            kind: VolumeElementKind::Tet4,
+            node_ids,
+            material_region_id: tet
+                .region_ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "region_default".to_string()),
+            provenance: vec![MeshEntityProvenance {
+                source_geometry_id: preparation.topology.source_geometry_id.clone(),
+                source_geometry_revision: preparation.topology.source_geometry_revision,
+                source_entity_kind: SourceEntityKind::Face,
+                source_entity_id: tet.source_surface_element_id.to_string(),
+                region_ids: tet.region_ids.clone(),
+            }],
+        });
+        quality_elements.push(ElementQuality {
+            element_id,
+            scaled_jacobian: (1.0 / tet.aspect_ratio.max(1.0)).min(1.0),
+            aspect_ratio: tet.aspect_ratio,
+            volume_m3: tet.volume_m3,
+        });
+    }
+
+    let boundary_faces = preparation
+        .surface
+        .elements
+        .iter()
+        .map(|element| {
+            let node_ids = element
+                .node_ids
+                .iter()
+                .map(|node_id| {
+                    node_id_map
+                        .get(node_id)
+                        .copied()
+                        .ok_or(ProductionMeshError::MissingCandidateNode { node_id: *node_id })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(AnalysisBoundaryFace {
+                face_id: format!("prod_boundary_{}", element.element_id + 1),
+                kind: BoundaryElementKind::Tri3,
+                node_ids,
+                adjacent_volume_element_ids: source_surface_to_tet
+                    .get(&element.element_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                region_ids: element.region_ids.clone(),
+                provenance: vec![MeshEntityProvenance {
+                    source_geometry_id: preparation.topology.source_geometry_id.clone(),
+                    source_geometry_revision: preparation.topology.source_geometry_revision,
+                    source_entity_kind: SourceEntityKind::Face,
+                    source_entity_id: element.source_face_id.to_string(),
+                    region_ids: element.region_ids.clone(),
+                }],
+            })
+        })
+        .collect::<Result<Vec<_>, ProductionMeshError>>()?;
+
+    Ok(AnalysisMeshArtifact {
+        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+        mesh_id: format!("production_{}", preparation.topology.mesh_id),
+        nodes,
+        volume_elements,
+        boundary_faces,
+        boundary_edges: Vec::new(),
+        quality: quality_report(quality_elements),
+        sizing: MeshSizingField {
+            global_target_size_m: match options.target_size {
+                MeshTargetSize::LengthM(length) => Some(length),
+                MeshTargetSize::Auto => None,
+            },
+            ..MeshSizingField::default()
+        },
+        adaptive_iterations: Vec::new(),
+        provenance: AnalysisMeshProvenance {
+            algorithm: "production_topology_tet_candidate/v1".to_string(),
+            source_geometry_id: preparation.topology.source_geometry_id.clone(),
+            source_geometry_revision: preparation.topology.source_geometry_revision,
+            source_geometry_sha256: preparation.topology.source_geometry_sha256.clone(),
+        },
+    })
+}
+
+fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
+    if elements.is_empty() {
+        return AnalysisMeshQualityReport::default();
+    }
+    let min_scaled_jacobian = elements
+        .iter()
+        .map(|element| element.scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
+    let max_aspect_ratio = elements
+        .iter()
+        .map(|element| element.aspect_ratio)
+        .fold(0.0_f64, f64::max);
+    let mean_aspect_ratio = elements
+        .iter()
+        .map(|element| element.aspect_ratio)
+        .sum::<f64>()
+        / elements.len() as f64;
+    AnalysisMeshQualityReport {
+        min_scaled_jacobian,
+        mean_aspect_ratio,
+        max_aspect_ratio,
+        inverted_element_count: 0,
+        mean_boundary_projection_error_m: 0.0,
+        max_boundary_projection_error_m: 0.0,
+        elements,
     }
 }
 
@@ -150,25 +307,20 @@ mod tests {
     }
 
     #[test]
-    fn production_mesh_fails_at_tet_generation_boundary_for_now() {
-        let err =
+    fn production_mesh_generates_analysis_mesh_artifact_from_candidates() {
+        let mesh =
             generate_production_analysis_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
-                .expect_err("Tet generation is not implemented yet");
+                .expect("production mesh should generate from candidates");
 
-        match err {
-            ProductionMeshError::TetGenerationPending {
-                component_count,
-                surface_element_count,
-                curve_element_count,
-                candidate_tet_count,
-            } => {
-                assert_eq!(component_count, 1);
-                assert_eq!(surface_element_count, 12);
-                assert!(curve_element_count > 0);
-                assert_eq!(candidate_tet_count, 12);
-            }
-            other => panic!("unexpected production error: {other:?}"),
-        }
+        crate::validate_analysis_mesh(&mesh, crate::QualityThresholds::default())
+            .expect("production candidate mesh should validate");
+        assert_eq!(mesh.nodes.len(), 9);
+        assert_eq!(mesh.volume_elements.len(), 12);
+        assert_eq!(mesh.boundary_faces.len(), 12);
+        assert_eq!(
+            mesh.provenance.algorithm,
+            "production_topology_tet_candidate/v1"
+        );
     }
 
     fn cube_geometry() -> GeometryAsset {
