@@ -93,6 +93,25 @@ pub enum AnalysisMeshValidationError {
         face_id: String,
         element_id: String,
     },
+    DuplicateBoundaryEdgeId {
+        edge_id: String,
+    },
+    WrongBoundaryEdgeNodeCount {
+        edge_id: String,
+        expected: usize,
+        actual: usize,
+    },
+    UnknownBoundaryEdgeNode {
+        edge_id: String,
+        node_id: u32,
+    },
+    RepeatedBoundaryEdgeNode {
+        edge_id: String,
+    },
+    UnknownBoundaryEdgeAdjacentFace {
+        edge_id: String,
+        face_id: String,
+    },
     QualityThresholdFailed {
         reason: String,
     },
@@ -251,6 +270,46 @@ pub fn validate_analysis_mesh_with_options(
                     AnalysisMeshValidationError::UnknownBoundaryAdjacentElement {
                         face_id: face.face_id.clone(),
                         element_id: element_id.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    let mut boundary_edge_ids = BTreeSet::<String>::new();
+    for edge in &mesh.boundary_edges {
+        if !boundary_edge_ids.insert(edge.edge_id.clone()) {
+            return Err(AnalysisMeshValidationError::DuplicateBoundaryEdgeId {
+                edge_id: edge.edge_id.clone(),
+            });
+        }
+        if edge.node_ids.len() != 2 {
+            return Err(AnalysisMeshValidationError::WrongBoundaryEdgeNodeCount {
+                edge_id: edge.edge_id.clone(),
+                expected: 2,
+                actual: edge.node_ids.len(),
+            });
+        }
+        let mut local_nodes = BTreeSet::<u32>::new();
+        for node_id in &edge.node_ids {
+            if !node_ids.contains(node_id) {
+                return Err(AnalysisMeshValidationError::UnknownBoundaryEdgeNode {
+                    edge_id: edge.edge_id.clone(),
+                    node_id: *node_id,
+                });
+            }
+            if !local_nodes.insert(*node_id) {
+                return Err(AnalysisMeshValidationError::RepeatedBoundaryEdgeNode {
+                    edge_id: edge.edge_id.clone(),
+                });
+            }
+        }
+        for face_id in &edge.adjacent_boundary_face_ids {
+            if !face_ids.contains(face_id) {
+                return Err(
+                    AnalysisMeshValidationError::UnknownBoundaryEdgeAdjacentFace {
+                        edge_id: edge.edge_id.clone(),
+                        face_id: face_id.clone(),
                     },
                 );
             }
@@ -556,8 +615,8 @@ mod tests {
     use super::*;
     use crate::{
         artifact::{
-            AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
-            ANALYSIS_MESH_SCHEMA_VERSION,
+            AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+            AnalysisVolumeElement, ANALYSIS_MESH_SCHEMA_VERSION,
         },
         provenance::AnalysisMeshProvenance,
         quality::AnalysisMeshQualityReport,
@@ -674,6 +733,48 @@ mod tests {
             AnalysisMeshValidationError::UnknownBoundaryFaceNode {
                 face_id: "f1".to_string(),
                 node_id: 99
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unmapped_boundary_edge_nodes() {
+        let mut mesh = valid_tet_mesh();
+        mesh.boundary_edges = vec![AnalysisBoundaryEdge {
+            edge_id: "edge1".to_string(),
+            node_ids: [1, 99],
+            adjacent_boundary_face_ids: vec!["f1".to_string()],
+            region_ids: Vec::new(),
+            provenance: Vec::new(),
+        }];
+        let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect_err("unknown boundary edge node should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::UnknownBoundaryEdgeNode {
+                edge_id: "edge1".to_string(),
+                node_id: 99
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_boundary_edge_adjacent_to_unknown_face() {
+        let mut mesh = valid_tet_mesh();
+        mesh.boundary_edges = vec![AnalysisBoundaryEdge {
+            edge_id: "edge1".to_string(),
+            node_ids: [1, 2],
+            adjacent_boundary_face_ids: vec!["missing_face".to_string()],
+            region_ids: Vec::new(),
+            provenance: Vec::new(),
+        }];
+        let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect_err("unknown boundary edge adjacent face should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::UnknownBoundaryEdgeAdjacentFace {
+                edge_id: "edge1".to_string(),
+                face_id: "missing_face".to_string()
             }
         );
     }

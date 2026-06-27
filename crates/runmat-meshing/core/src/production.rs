@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     artifact::{
-        AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
-        ANALYSIS_MESH_SCHEMA_VERSION,
+        AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+        AnalysisVolumeElement, ANALYSIS_MESH_SCHEMA_VERSION,
     },
     curve::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
@@ -258,13 +258,15 @@ fn analysis_mesh_from_preparation(
         })
         .collect::<Result<Vec<_>, ProductionMeshError>>()?;
 
+    let boundary_edges = boundary_edges_from_faces(&boundary_faces, preparation);
+
     let mesh = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: format!("production_{}", preparation.topology.mesh_id),
         nodes,
         volume_elements,
         boundary_faces,
-        boundary_edges: Vec::new(),
+        boundary_edges,
         quality: quality_report(quality_elements),
         sizing: MeshSizingField {
             global_target_size_m: match options.target_size {
@@ -284,6 +286,76 @@ fn analysis_mesh_from_preparation(
     validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation))
         .map_err(ProductionMeshError::Validation)?;
     Ok(mesh)
+}
+
+fn boundary_edges_from_faces(
+    boundary_faces: &[AnalysisBoundaryFace],
+    preparation: &ProductionMeshPreparation,
+) -> Vec<AnalysisBoundaryEdge> {
+    let mut edges = BTreeMap::<[u32; 2], BoundaryEdgeAccumulator>::new();
+    for face in boundary_faces {
+        if face.node_ids.len() != 3 {
+            continue;
+        }
+        for edge in triangle_edges([face.node_ids[0], face.node_ids[1], face.node_ids[2]]) {
+            let accumulator = edges
+                .entry(edge)
+                .or_insert_with(|| BoundaryEdgeAccumulator {
+                    node_ids: edge,
+                    adjacent_boundary_face_ids: Vec::new(),
+                    region_ids: BTreeSet::new(),
+                });
+            accumulator
+                .adjacent_boundary_face_ids
+                .push(face.face_id.clone());
+            accumulator
+                .region_ids
+                .extend(face.region_ids.iter().cloned());
+        }
+    }
+    edges
+        .into_values()
+        .enumerate()
+        .map(|(index, edge)| {
+            let region_ids = edge.region_ids.into_iter().collect::<Vec<_>>();
+            AnalysisBoundaryEdge {
+                edge_id: format!("prod_boundary_edge_{}", index + 1),
+                node_ids: edge.node_ids,
+                adjacent_boundary_face_ids: edge.adjacent_boundary_face_ids,
+                region_ids: region_ids.clone(),
+                provenance: vec![MeshEntityProvenance {
+                    source_geometry_id: preparation.topology.source_geometry_id.clone(),
+                    source_geometry_revision: preparation.topology.source_geometry_revision,
+                    source_entity_kind: SourceEntityKind::Edge,
+                    source_entity_id: format!("boundary_edge_{}", index + 1),
+                    region_ids,
+                }],
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundaryEdgeAccumulator {
+    node_ids: [u32; 2],
+    adjacent_boundary_face_ids: Vec<String>,
+    region_ids: BTreeSet<String>,
+}
+
+fn triangle_edges(node_ids: [u32; 3]) -> [[u32; 2]; 3] {
+    [
+        sorted_edge(node_ids[0], node_ids[1]),
+        sorted_edge(node_ids[1], node_ids[2]),
+        sorted_edge(node_ids[2], node_ids[0]),
+    ]
+}
+
+fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
+    if left <= right {
+        [left, right]
+    } else {
+        [right, left]
+    }
 }
 
 fn referenced_candidate_node_ids(preparation: &ProductionMeshPreparation) -> BTreeSet<u32> {
@@ -375,6 +447,11 @@ mod tests {
         assert_eq!(mesh.nodes.len(), 9);
         assert_eq!(mesh.volume_elements.len(), 12);
         assert_eq!(mesh.boundary_faces.len(), 12);
+        assert_eq!(mesh.boundary_edges.len(), 18);
+        assert!(mesh
+            .boundary_edges
+            .iter()
+            .all(|edge| !edge.adjacent_boundary_face_ids.is_empty()));
         assert_eq!(
             mesh.provenance.algorithm,
             "production_topology_tet_candidate/v1"
