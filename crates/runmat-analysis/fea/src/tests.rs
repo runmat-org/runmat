@@ -156,6 +156,7 @@ fn moment_loads_require_rotational_dofs() {
         .expect_err("moment loads should require rotational DOFs");
     let message = err.to_string();
     assert!(message.contains("moment loads require rotational-DOF structural elements"));
+    assert!(message.contains("use a wrench load"));
     assert!(message.contains("load_id=tip_load"));
 }
 

@@ -17,7 +17,7 @@ use crate::{
 };
 
 const MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
-    "moment loads require rotational-DOF structural elements";
+    "moment loads require rotational-DOF structural elements; use a wrench load for equivalent force-couple moments on solid-only face regions";
 const ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
     "prescribed rotations require rotational-DOF structural elements";
 
