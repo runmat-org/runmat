@@ -8,6 +8,7 @@ pub mod provenance;
 pub mod quality;
 pub mod sizing;
 pub mod source_topology;
+pub mod surface;
 pub mod topology;
 pub mod validation;
 pub mod volume;
@@ -43,6 +44,10 @@ pub use sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingS
 pub use source_topology::{
     extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
     SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
+};
+pub use surface::{
+    discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
+    SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
 };
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
