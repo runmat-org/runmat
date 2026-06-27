@@ -11,7 +11,7 @@ use crate::{
     options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality},
-    sizing::MeshSizingField,
+    sizing::{MeshSizingField, SizingSample},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
@@ -89,7 +89,10 @@ impl StructuredTetMesher {
             return Err(MeshingError::EmptyBoundaryRegions);
         }
 
-        let divisions = grid_divisions(input, options, sizing)?;
+        let mut mesh_sizing = sizing.cloned().unwrap_or_default();
+        append_geometry_focus_sizing_samples(input, options, &mut mesh_sizing);
+
+        let divisions = grid_divisions(input, options, Some(&mesh_sizing))?;
         let nodes = grid_nodes(input, divisions);
         let node_id_at = |i: usize, j: usize, k: usize| -> u32 {
             (1 + i + (divisions + 1) * (j + (divisions + 1) * k)) as u32
@@ -155,7 +158,6 @@ impl StructuredTetMesher {
 
         let boundary_faces = grid_boundary_faces(input, divisions, &node_id_at);
         let quality = quality_report(element_quality);
-        let mut mesh_sizing = sizing.cloned().unwrap_or_default();
         mesh_sizing.global_target_size_m = target_size_m(input, options, divisions);
 
         Ok(AnalysisMeshArtifact {
@@ -243,6 +245,80 @@ fn sizing_target_size_m(sizing: &MeshSizingField) -> Option<f64> {
         .chain(sizing.global_target_size_m)
         .filter(|value| value.is_finite() && *value > 0.0)
         .reduce(f64::min)
+}
+
+fn append_geometry_focus_sizing_samples(
+    input: &BoundaryMeshInput,
+    options: &VolumeMeshingOptions,
+    sizing: &mut MeshSizingField,
+) {
+    if options.refinement.focus.curvature {
+        sizing.samples.extend(curvature_sizing_samples(input));
+    }
+    if options.refinement.focus.small_features {
+        sizing.samples.extend(small_feature_sizing_samples(input));
+    }
+}
+
+fn curvature_sizing_samples(input: &BoundaryMeshInput) -> Vec<SizingSample> {
+    let mut triangles_by_edge = BTreeMap::<[u32; 2], Vec<usize>>::new();
+    for (triangle_index, triangle) in input.triangles.iter().enumerate() {
+        for edge in triangle_edges(triangle.node_ids) {
+            triangles_by_edge
+                .entry(edge)
+                .or_default()
+                .push(triangle_index);
+        }
+    }
+
+    triangles_by_edge
+        .into_iter()
+        .filter_map(|(edge, triangle_indices)| {
+            if triangle_indices.len() != 2 {
+                return None;
+            }
+            let left = input.triangles.get(triangle_indices[0])?;
+            let right = input.triangles.get(triangle_indices[1])?;
+            let left_normal = triangle_unit_normal(input, left.node_ids)?;
+            let right_normal = triangle_unit_normal(input, right.node_ids)?;
+            let normal_dot = dot(left_normal, right_normal).clamp(-1.0, 1.0);
+            if 1.0 - normal_dot.abs() <= 0.05 {
+                return None;
+            }
+            let left_vertex = *input.vertices.get(edge[0] as usize)?;
+            let right_vertex = *input.vertices.get(edge[1] as usize)?;
+            let edge_length = distance(left_vertex, right_vertex);
+            (edge_length.is_finite() && edge_length > 0.0).then_some(SizingSample {
+                position_m: midpoint(left_vertex, right_vertex),
+                target_size_m: edge_length * 0.5,
+                reason: Some("geometry.curvature".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn small_feature_sizing_samples(input: &BoundaryMeshInput) -> Vec<SizingSample> {
+    let max_span = boundary_max_span(input);
+    if !max_span.is_finite() || max_span <= 0.0 {
+        return Vec::new();
+    }
+    let threshold = max_span * 0.35;
+    input
+        .triangles
+        .iter()
+        .filter_map(|triangle| {
+            let vertices = triangle_vertices(input, triangle.node_ids)?;
+            let min_edge = triangle_min_edge(vertices);
+            if !min_edge.is_finite() || min_edge <= 0.0 || min_edge > threshold {
+                return None;
+            }
+            Some(SizingSample {
+                position_m: triangle_centroid(vertices),
+                target_size_m: min_edge * 0.5,
+                reason: Some("geometry.small_features".to_string()),
+            })
+        })
+        .collect()
 }
 
 fn grid_nodes(input: &BoundaryMeshInput, divisions: usize) -> Vec<AnalysisMeshNode> {
@@ -518,6 +594,69 @@ fn norm(value: [f64; 3]) -> f64 {
     dot(value, value).sqrt()
 }
 
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    norm(sub(left, right))
+}
+
+fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        (left[0] + right[0]) * 0.5,
+        (left[1] + right[1]) * 0.5,
+        (left[2] + right[2]) * 0.5,
+    ]
+}
+
+fn triangle_edges(triangle: [u32; 3]) -> [[u32; 2]; 3] {
+    [
+        sorted_edge(triangle[0], triangle[1]),
+        sorted_edge(triangle[1], triangle[2]),
+        sorted_edge(triangle[2], triangle[0]),
+    ]
+}
+
+fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
+    [left.min(right), left.max(right)]
+}
+
+fn triangle_vertices(input: &BoundaryMeshInput, node_ids: [u32; 3]) -> Option<[[f64; 3]; 3]> {
+    Some([
+        *input.vertices.get(node_ids[0] as usize)?,
+        *input.vertices.get(node_ids[1] as usize)?,
+        *input.vertices.get(node_ids[2] as usize)?,
+    ])
+}
+
+fn triangle_unit_normal(input: &BoundaryMeshInput, node_ids: [u32; 3]) -> Option<[f64; 3]> {
+    let [a, b, c] = triangle_vertices(input, node_ids)?;
+    let normal = cross(sub(b, a), sub(c, a));
+    let length = norm(normal);
+    (length > 0.0).then_some([
+        normal[0] / length,
+        normal[1] / length,
+        normal[2] / length,
+    ])
+}
+
+fn triangle_min_edge(vertices: [[f64; 3]; 3]) -> f64 {
+    distance(vertices[0], vertices[1])
+        .min(distance(vertices[1], vertices[2]))
+        .min(distance(vertices[2], vertices[0]))
+}
+
+fn triangle_centroid(vertices: [[f64; 3]; 3]) -> [f64; 3] {
+    [
+        (vertices[0][0] + vertices[1][0] + vertices[2][0]) / 3.0,
+        (vertices[0][1] + vertices[1][1] + vertices[2][1]) / 3.0,
+        (vertices[0][2] + vertices[1][2] + vertices[2][2]) / 3.0,
+    ]
+}
+
+fn boundary_max_span(input: &BoundaryMeshInput) -> f64 {
+    (0..3)
+        .map(|axis| input.bounds_max_m[axis] - input.bounds_min_m[axis])
+        .fold(0.0_f64, f64::max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +742,15 @@ mod tests {
         }
     }
 
+    fn thin_box_geometry() -> GeometryAsset {
+        let mut geometry = cube_geometry();
+        geometry.geometry_id = "geo_tet_thin_box".to_string();
+        for vertex in geometry.surface_meshes[0].vertices.iter_mut().skip(4) {
+            vertex[2] = 0.2;
+        }
+        geometry
+    }
+
     #[test]
     fn structured_tet_mesher_generates_valid_analysis_mesh() {
         let geometry = cube_geometry();
@@ -678,6 +826,9 @@ mod tests {
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
         };
+        let mut base_options = base_options;
+        base_options.refinement.focus.curvature = false;
+        base_options.refinement.focus.small_features = false;
         let coarse = generate_analysis_mesh(&geometry, base_options.clone())
             .expect("coarse mesh should generate");
         let sizing = MeshSizingField {
@@ -725,6 +876,56 @@ mod tests {
 
         assert!(mesh.volume_elements.len() <= 48);
         assert_eq!(mesh.volume_elements.len(), 48);
+    }
+
+    #[test]
+    fn curvature_focus_adds_geometry_sizing_samples() {
+        let geometry = cube_geometry();
+        let mut coarse_options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        coarse_options.refinement.focus.curvature = false;
+        coarse_options.refinement.focus.small_features = false;
+        let coarse = generate_analysis_mesh(&geometry, coarse_options.clone())
+            .expect("coarse mesh should generate");
+
+        coarse_options.refinement.focus.curvature = true;
+        let focused = generate_analysis_mesh(&geometry, coarse_options)
+            .expect("curvature-focused mesh should generate");
+
+        assert!(focused.volume_elements.len() > coarse.volume_elements.len());
+        assert!(focused
+            .sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("geometry.curvature")));
+    }
+
+    #[test]
+    fn small_feature_focus_adds_geometry_sizing_samples() {
+        let geometry = thin_box_geometry();
+        let mut coarse_options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        coarse_options.refinement.focus.curvature = false;
+        coarse_options.refinement.focus.small_features = false;
+        let coarse = generate_analysis_mesh(&geometry, coarse_options.clone())
+            .expect("coarse thin-box mesh should generate");
+
+        coarse_options.refinement.focus.small_features = true;
+        let focused = generate_analysis_mesh(&geometry, coarse_options)
+            .expect("small-feature-focused mesh should generate");
+
+        assert!(focused.volume_elements.len() > coarse.volume_elements.len());
+        assert!(focused
+            .sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("geometry.small_features")));
     }
 
     #[test]
