@@ -82,6 +82,7 @@ pub struct CadTopologyReport {
     pub volume_count: usize,
     pub semantic_face_count: usize,
     pub imported_face_count: usize,
+    pub evaluator_face_count: usize,
     pub generic_face_count: usize,
     pub closed_shell_count: usize,
 }
@@ -126,6 +127,7 @@ pub fn build_cad_topology(
     let source = cad_topology_source(geometry);
     let semantic_face_regions = semantic_face_regions(geometry);
     let imported_face_ids_by_region = imported_face_ids_by_region(geometry);
+    let evaluator_face_ids = evaluator_face_ids(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
 
     let vertices = topology
@@ -241,6 +243,13 @@ pub fn build_cad_topology(
         .iter()
         .filter(|face| face.imported_face_id.is_some())
         .count();
+    let evaluator_face_count = faces
+        .iter()
+        .filter(|face| {
+            face.imported_face_id
+                .is_some_and(|face_id| evaluator_face_ids.contains(&face_id))
+        })
+        .count();
     let generic_face_count = faces.len().saturating_sub(semantic_face_count);
     let report = CadTopologyReport {
         source,
@@ -251,6 +260,7 @@ pub fn build_cad_topology(
         volume_count: usize::from(closed),
         semantic_face_count,
         imported_face_count,
+        evaluator_face_count,
         generic_face_count,
         closed_shell_count: usize::from(closed),
     };
@@ -324,6 +334,15 @@ fn imported_face_id_for_regions(
         .find_map(|region_id| imported_face_ids_by_region.get(region_id).copied())
 }
 
+fn evaluator_face_ids(geometry: &GeometryAsset) -> BTreeSet<u64> {
+    geometry
+        .source_geometry
+        .cad_evaluators
+        .iter()
+        .flat_map(|evaluator| evaluator.faces.iter().map(|face| face.imported_face_id))
+        .collect()
+}
+
 fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<u32, Vec<String>> {
     let mut regions = BTreeMap::<u32, BTreeSet<String>>::new();
     for mapping in &geometry.region_entity_mappings {
@@ -362,9 +381,9 @@ mod tests {
     use super::*;
     use crate::extract_source_topology;
     use runmat_geometry_core::{
-        CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, GeometrySource,
-        MeshDescriptor, MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind,
-        SurfaceMesh, TessellationProfile, UnitSystem,
+        CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership, CadSemanticKind,
+        EntityIdRange, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+        SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
     };
 
     #[test]
@@ -382,6 +401,7 @@ mod tests {
         assert_eq!(cad.report.volume_count, 1);
         assert_eq!(cad.report.semantic_face_count, 0);
         assert_eq!(cad.report.imported_face_count, 0);
+        assert_eq!(cad.report.evaluator_face_count, 0);
         assert_eq!(cad.report.generic_face_count, 12);
     }
 
@@ -395,6 +415,7 @@ mod tests {
         assert_eq!(cad.source, CadTopologySource::SemanticCad);
         assert!(cad.report.semantic_face_count > 0);
         assert_eq!(cad.report.imported_face_count, 2);
+        assert_eq!(cad.report.evaluator_face_count, 2);
         assert!(cad
             .faces
             .iter()
@@ -434,6 +455,27 @@ mod tests {
                 kind: SourceGeometryKind::Cad,
                 assembly: None,
                 material_evidence: Vec::new(),
+                cad_evaluators: if with_semantic_face {
+                    vec![CadEvaluatorSet {
+                        evaluator_id: "cad_evaluator_test".to_string(),
+                        backend: "test".to_string(),
+                        format_name: "step".to_string(),
+                        requires_source_geometry: true,
+                        faces: vec![CadFaceEvaluator {
+                            evaluator_id: "cad_face_1".to_string(),
+                            imported_face_id: 1,
+                            name: "face".to_string(),
+                            supports_point_evaluation: true,
+                            supports_projection: true,
+                            supports_normal: true,
+                            supports_derivatives: true,
+                            supports_curvature: true,
+                        }],
+                        curves: Vec::new(),
+                    }]
+                } else {
+                    Vec::new()
+                },
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,

@@ -267,6 +267,7 @@ mod tests {
                 kind: SourceGeometryKind::Cad,
                 assembly: None,
                 material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,

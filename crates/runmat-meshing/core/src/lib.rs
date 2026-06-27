@@ -869,6 +869,7 @@ mod tests {
                     unit_basis: None,
                     assumptions: Vec::new(),
                 }],
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,

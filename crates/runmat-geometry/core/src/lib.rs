@@ -6,10 +6,11 @@ pub mod selection;
 
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use model::{
-    AssemblyNode, CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
-    CadSemanticKind, EntityIdRange, GeometryAsset, GeometrySource, MaterialEvidence,
-    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    AssemblyNode, CadColorEvidence, CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluator,
+    CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, EntityIdRange,
+    GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
+    MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+    TessellationProfile, UnitSystem,
 };
 pub use selection::{EntityKind, EntityRef};
 
@@ -29,6 +30,7 @@ mod tests {
                 kind: SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: vec![],
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,

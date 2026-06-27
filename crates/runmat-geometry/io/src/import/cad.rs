@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    AssemblyNode, CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
-    CadSemanticKind, EntityIdRange, EntityKind, Region, RegionEntityMapping, SourceGeometryKind,
-    SurfaceMesh,
+    AssemblyNode, CadColorEvidence, CadEvaluatorSet, CadFaceEvaluator, CadLabelRef,
+    CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind,
+    Region, RegionEntityMapping, SourceGeometryKind, SurfaceMesh,
 };
 
 use crate::{
@@ -187,6 +187,7 @@ pub(crate) fn build_topology_result(
     let vertex_count = topology.vertices.len() as u64;
     let triangle_count = topology.triangles.len() as u64;
     let (regions, mappings) = topology_regions(&topology);
+    let cad_evaluators = cad_evaluator_sets(&topology);
     let importer_version = format!("cad/occt/{}/v1", format.as_str());
     let mut asset = build_asset(BuildAssetInput {
         path,
@@ -208,6 +209,7 @@ pub(crate) fn build_topology_result(
     });
 
     asset.source_geometry.kind = SourceGeometryKind::Cad;
+    asset.source_geometry.cad_evaluators = cad_evaluators;
     asset.source_geometry.assembly = topology
         .assembly
         .clone()
@@ -225,6 +227,33 @@ pub(crate) fn build_topology_result(
     asset.region_entity_mappings = mappings;
 
     Ok(build_result(asset, diagnostics))
+}
+
+fn cad_evaluator_sets(topology: &OcctCadTopology) -> Vec<CadEvaluatorSet> {
+    if topology.faces.is_empty() {
+        return Vec::new();
+    }
+    vec![CadEvaluatorSet {
+        evaluator_id: format!("cad_evaluator_{}", topology.backend),
+        backend: topology.backend.clone(),
+        format_name: topology.format_name.clone(),
+        requires_source_geometry: true,
+        faces: topology
+            .faces
+            .iter()
+            .map(|face| CadFaceEvaluator {
+                evaluator_id: format!("cad_face_{}", face.face_id),
+                imported_face_id: face.face_id,
+                name: face.name.clone(),
+                supports_point_evaluation: true,
+                supports_projection: true,
+                supports_normal: true,
+                supports_derivatives: true,
+                supports_curvature: true,
+            })
+            .collect(),
+        curves: Vec::new(),
+    }]
 }
 
 fn topology_regions(topology: &OcctCadTopology) -> (Vec<Region>, Vec<RegionEntityMapping>) {
@@ -620,6 +649,12 @@ mod tests {
                 .expect("truncated preview topology should import");
 
         assert_eq!(result.asset.surface_meshes[0].triangles.len(), 1);
+        assert_eq!(result.asset.source_geometry.cad_evaluators.len(), 1);
+        assert_eq!(
+            result.asset.source_geometry.cad_evaluators[0].faces[0].imported_face_id,
+            0
+        );
+        assert!(result.asset.source_geometry.cad_evaluators[0].faces[0].supports_projection);
         assert!(result
             .asset
             .diagnostics

@@ -325,6 +325,7 @@ mod tests {
                 kind: runmat_geometry_core::SourceGeometryKind::Cad,
                 assembly: None,
                 material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
             units: runmat_geometry_core::UnitSystem::Meter,

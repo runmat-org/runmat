@@ -1558,6 +1558,7 @@ mod tests {
                 kind: runmat_geometry_core::SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
             units,
