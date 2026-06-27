@@ -1867,7 +1867,11 @@ pub struct AnalysisStudyRunData {
     #[serde(default)]
     pub analysis_mesh_artifact_path: Option<String>,
     #[serde(default)]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    #[serde(default)]
     pub refined_analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub refined_analysis_mesh_evidence_artifact_path: Option<String>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,

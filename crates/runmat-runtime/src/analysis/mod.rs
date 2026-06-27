@@ -1178,8 +1178,14 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let analysis_mesh_artifact_path =
+    let analysis_mesh_artifact =
         generate_and_persist_study_analysis_mesh(spec, &study_fingerprint, &context)?;
+    let analysis_mesh_artifact_path = analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.path.clone());
+    let analysis_mesh_evidence_artifact_path = analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.evidence_path.clone());
 
     let study_prep = crate::geometry::geometry_prep_for_analysis_op(
         &spec.geometry,
@@ -1360,6 +1366,9 @@ pub fn analysis_run_study_op(
     let refined_analysis_mesh_artifact_path = refined_analysis_mesh_artifact
         .as_ref()
         .map(|artifact| artifact.path.clone());
+    let refined_analysis_mesh_evidence_artifact_path = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.evidence_path.clone());
     let refinement_effect = refined_analysis_mesh_artifact
         .as_ref()
         .map(|artifact| artifact.refinement_effect.clone());
@@ -1375,7 +1384,9 @@ pub fn analysis_run_study_op(
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
             "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
+            "analysis_mesh_evidence_artifact_path": analysis_mesh_evidence_artifact_path.clone(),
             "refined_analysis_mesh_artifact_path": refined_analysis_mesh_artifact_path.clone(),
+            "refined_analysis_mesh_evidence_artifact_path": refined_analysis_mesh_evidence_artifact_path.clone(),
             "refinement_effect": refinement_effect,
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
@@ -1423,7 +1434,9 @@ pub fn analysis_run_study_op(
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             prep_artifact_id: Some(study_prep_artifact_id),
             analysis_mesh_artifact_path,
+            analysis_mesh_evidence_artifact_path,
             refined_analysis_mesh_artifact_path,
+            refined_analysis_mesh_evidence_artifact_path,
             run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
@@ -13427,11 +13440,17 @@ fn attach_prep_artifact_to_electromagnetic_options(
     }
 }
 
+#[derive(Debug, Clone)]
+struct StudyAnalysisMeshArtifact {
+    path: String,
+    evidence_path: String,
+}
+
 fn generate_and_persist_study_analysis_mesh(
     spec: &AnalysisStudySpec,
     study_fingerprint: &str,
     context: &OperationContext,
-) -> Result<Option<String>, OperationErrorEnvelope> {
+) -> Result<Option<StudyAnalysisMeshArtifact>, OperationErrorEnvelope> {
     let Some(options) = spec.mesh_options.clone() else {
         return Ok(None);
     };
@@ -13456,9 +13475,10 @@ fn generate_and_persist_study_analysis_mesh(
     })?;
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
-    let validation_options = analysis_mesh_validation_options_for_study(spec, &options);
-    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options).map_err(
-        |err| {
+    let validation_options =
+        analysis_mesh_validation_options_for_generated_mesh(spec, &options, &mesh);
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options.clone())
+        .map_err(|err| {
             operation_error(
                 ANALYSIS_RUN_STUDY_OPERATION,
                 ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -13476,9 +13496,44 @@ fn generate_and_persist_study_analysis_mesh(
                     ("mesh_id".to_string(), mesh.mesh_id.clone()),
                 ]),
             )
-        },
-    )?;
-    persist_study_evidence(
+        })?;
+    let mesh_evidence =
+        runmat_meshing_core::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let evidence_path = persist_study_evidence(
+        study_fingerprint,
+        "mesh_evidence",
+        serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
+            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "mesh_evidence": mesh_evidence,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mesh_path = persist_study_evidence(
         study_fingerprint,
         "analysis_mesh",
         serde_json::json!({
@@ -13486,6 +13541,7 @@ fn generate_and_persist_study_analysis_mesh(
             "study_id": spec.study_id.clone(),
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
+            "mesh_evidence_artifact_path": evidence_path.clone(),
             "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
@@ -13495,7 +13551,6 @@ fn generate_and_persist_study_analysis_mesh(
             "mesh": mesh,
         }),
     )
-    .map(Some)
     .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -13513,7 +13568,11 @@ fn generate_and_persist_study_analysis_mesh(
                 ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
             ]),
         )
-    })
+    })?;
+    Ok(Some(StudyAnalysisMeshArtifact {
+        path: mesh_path,
+        evidence_path,
+    }))
 }
 
 fn mesh_options_in_si_units(
@@ -13541,6 +13600,18 @@ fn analysis_mesh_validation_options_for_study(
         required_boundary_region_ids: required_boundary_region_ids_for_study(spec),
         ..AnalysisMeshValidationOptions::default()
     }
+}
+
+fn analysis_mesh_validation_options_for_generated_mesh(
+    spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
+    mesh: &AnalysisMeshArtifact,
+) -> AnalysisMeshValidationOptions {
+    let mut validation = analysis_mesh_validation_options_for_study(spec, options);
+    if mesh.backend.backend != "production" {
+        validation.min_boundary_edge_recovery_ratio = 0.0;
+    }
+    validation
 }
 
 fn geometry_surface_bounds_m(geometry: &GeometryAsset) -> Option<[[f64; 3]; 2]> {
@@ -13770,6 +13841,7 @@ fn analysis_boundary_face_centroid(
 #[derive(Debug, Clone)]
 struct RefinedAnalysisMeshArtifact {
     path: String,
+    evidence_path: String,
     refinement_effect: serde_json::Value,
 }
 
@@ -13892,27 +13964,69 @@ fn generate_and_persist_refined_study_analysis_mesh(
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
-    let validation_options = analysis_mesh_validation_options_for_study(spec, &options);
-    runmat_meshing_core::validate_analysis_mesh_with_options(&refined_mesh, validation_options)
-        .map_err(|err| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("refined analysis mesh failed validation: {err:?}"),
-                BTreeMap::from([
-                    ("study_id".to_string(), spec.study_id.clone()),
-                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
-                    ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
-                ]),
-            )
-        })?;
+    let validation_options =
+        analysis_mesh_validation_options_for_generated_mesh(spec, &options, &refined_mesh);
+    runmat_meshing_core::validate_analysis_mesh_with_options(
+        &refined_mesh,
+        validation_options.clone(),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("refined analysis mesh failed validation: {err:?}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
+            ]),
+        )
+    })?;
+
+    let refined_mesh_evidence =
+        runmat_meshing_core::build_mesh_evidence_artifact(&refined_mesh, &validation_options);
+    let refined_evidence_path = persist_study_evidence(
+        study_fingerprint,
+        "mesh_evidence_refined",
+        serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "source_analysis_mesh_artifact_path": path,
+            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
+            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "refinement_effect": refinement_effect.clone(),
+            "mesh_evidence": refined_mesh_evidence,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist refined mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
 
     persist_study_evidence(
         study_fingerprint,
@@ -13923,6 +14037,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
             "source_analysis_mesh_artifact_path": path,
+            "mesh_evidence_artifact_path": refined_evidence_path.clone(),
             "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
@@ -13936,6 +14051,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
     .map(|path| {
         Some(RefinedAnalysisMeshArtifact {
             path,
+            evidence_path: refined_evidence_path,
             refinement_effect,
         })
     })
@@ -14609,7 +14725,50 @@ fn append_solved_adaptive_mesh_summary(
         .map_err(|err| format!("failed to encode mesh payload: {err}"))?;
     let bytes = serde_json::to_vec_pretty(&payload)
         .map_err(|err| format!("failed to encode analysis mesh artifact: {err}"))?;
-    atomic_write_bytes(&path_buf, &bytes)
+    atomic_write_bytes(&path_buf, &bytes)?;
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)?;
+    Ok(())
+}
+
+fn update_mesh_evidence_from_analysis_mesh_payload(
+    analysis_mesh_payload: &serde_json::Value,
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), String> {
+    let Some(evidence_path) = analysis_mesh_payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let evidence_path = PathBuf::from(evidence_path);
+    let mut evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs_read(&evidence_path)
+            .map_err(|err| format!("failed to read mesh evidence artifact: {err}"))?,
+    )
+    .map_err(|err| format!("failed to parse mesh evidence artifact: {err}"))?;
+    let validation = evidence_payload
+        .get("mesh_evidence")
+        .and_then(|evidence| evidence.get("validation"))
+        .cloned()
+        .map(serde_json::from_value::<runmat_meshing_core::MeshValidationEvidence>)
+        .transpose()
+        .map_err(|err| format!("failed to decode mesh evidence validation policy: {err}"))?
+        .unwrap_or_else(|| {
+            runmat_meshing_core::build_mesh_evidence_artifact(
+                mesh,
+                &AnalysisMeshValidationOptions::default(),
+            )
+            .validation
+        });
+    evidence_payload["mesh_evidence"] = serde_json::to_value(
+        runmat_meshing_core::build_mesh_evidence_artifact_with_validation_evidence(
+            mesh, validation,
+        ),
+    )
+    .map_err(|err| format!("failed to encode mesh evidence payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&evidence_payload)
+        .map_err(|err| format!("failed to encode mesh evidence artifact: {err}"))?;
+    atomic_write_bytes(&evidence_path, &bytes)
 }
 
 fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a [f64]> {

@@ -1992,6 +1992,12 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .as_ref()
         .expect("study run should persist analysis mesh artifact path");
     assert!(artifact_path.ends_with("analysis_mesh.json"));
+    let evidence_path = envelope
+        .data
+        .analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("study run should persist mesh evidence artifact path");
+    assert!(evidence_path.ends_with("mesh_evidence.json"));
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
             .expect("parse analysis mesh artifact");
@@ -2002,6 +2008,27 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     assert_eq!(
         payload["mesh"]["schema_version"].as_str(),
         Some("analysis-mesh/v1")
+    );
+    assert_eq!(
+        payload["mesh_evidence_artifact_path"].as_str(),
+        Some(evidence_path.as_str())
+    );
+    let evidence_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
+            .expect("parse mesh evidence artifact");
+    assert_eq!(
+        evidence_payload["schema_version"].as_str(),
+        Some("fea_study_mesh_evidence_artifact/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["schema_version"].as_str(),
+        Some("mesh-evidence/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["topology"]["node_count"].as_u64(),
+        payload["mesh"]["nodes"]
+            .as_array()
+            .map(|nodes| nodes.len() as u64)
     );
     assert!(
         payload["mesh"]["volume_elements"]
@@ -2065,6 +2092,12 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .as_ref()
         .expect("pending adaptive sizing should persist refined mesh artifact path");
     assert!(refined_artifact_path.ends_with("analysis_mesh_refined.json"));
+    let refined_evidence_path = envelope
+        .data
+        .refined_analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("pending adaptive sizing should persist refined mesh evidence artifact path");
+    assert!(refined_evidence_path.ends_with("mesh_evidence_refined.json"));
     let refined_payload: serde_json::Value = serde_json::from_slice(
         &fs::read(refined_artifact_path).expect("read refined mesh artifact"),
     )
@@ -2072,6 +2105,26 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     assert_eq!(
         refined_payload["source_analysis_mesh_artifact_path"].as_str(),
         Some(artifact_path.as_str())
+    );
+    assert_eq!(
+        refined_payload["mesh_evidence_artifact_path"].as_str(),
+        Some(refined_evidence_path.as_str())
+    );
+    let refined_evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(refined_evidence_path).expect("read refined mesh evidence artifact"),
+    )
+    .expect("parse refined mesh evidence artifact");
+    assert_eq!(
+        refined_evidence_payload["mesh_evidence"]["topology"]["adaptive_iteration_count"].as_u64(),
+        refined_payload["mesh"]["adaptive_iterations"]
+            .as_array()
+            .map(|iterations| iterations.len() as u64)
+    );
+    assert_eq!(
+        refined_evidence_payload["mesh_evidence"]["sizing"]["applied_sample_count"].as_u64(),
+        refined_payload["mesh"]["sizing"]["applied_samples"]
+            .as_array()
+            .map(|samples| samples.len() as u64)
     );
     assert!(
         refined_payload["mesh"]["volume_elements"]
@@ -2104,8 +2157,16 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         Some(artifact_path.as_str())
     );
     assert_eq!(
+        run_payload["analysis_mesh_evidence_artifact_path"].as_str(),
+        Some(evidence_path.as_str())
+    );
+    assert_eq!(
         run_payload["refined_analysis_mesh_artifact_path"].as_str(),
         Some(refined_artifact_path.as_str())
+    );
+    assert_eq!(
+        run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
+        Some(refined_evidence_path.as_str())
     );
     assert_eq!(
         run_payload["refinement_effect"]["topology_changed"].as_bool(),
@@ -2176,6 +2237,11 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
         .analysis_mesh_artifact_path
         .as_ref()
         .expect("study run should persist production analysis mesh artifact path");
+    let evidence_path = envelope
+        .data
+        .analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("study run should persist production mesh evidence artifact path");
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
             .expect("parse analysis mesh artifact");
@@ -2190,7 +2256,24 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
             .len(),
         12
     );
+    let evidence_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
+            .expect("parse mesh evidence artifact");
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["backend"]["backend"].as_str(),
+        Some("production")
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["boundary_recovery"]
+            ["boundary_face_recovery_ratio"]
+            .as_f64(),
+        Some(1.0)
+    );
     assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
+    assert_eq!(
+        envelope.data.refined_analysis_mesh_evidence_artifact_path,
+        None
+    );
     let _ = fs::remove_dir_all(&root);
 }
 

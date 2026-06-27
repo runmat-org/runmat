@@ -3,6 +3,7 @@ pub mod artifact;
 pub mod backend;
 pub mod boundary;
 pub mod curve;
+pub mod evidence;
 pub mod options;
 pub mod production;
 pub mod provenance;
@@ -34,6 +35,11 @@ pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriang
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
     CurveDiscretizationOptions, CurveElement, CurveNode,
+};
+pub use evidence::{
+    build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,
+    MeshBoundaryRecoveryEvidence, MeshEvidenceArtifact, MeshQualityEvidence, MeshRegionEvidence,
+    MeshSizingEvidence, MeshTopologyEvidence, MeshValidationEvidence, MESH_EVIDENCE_SCHEMA_VERSION,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
