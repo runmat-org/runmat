@@ -1,5 +1,6 @@
 pub mod adaptive;
 pub mod artifact;
+pub mod backend;
 pub mod boundary;
 pub mod options;
 pub mod provenance;
@@ -22,6 +23,7 @@ pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
     AnalysisVolumeElement,
 };
+pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,

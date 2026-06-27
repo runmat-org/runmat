@@ -4,6 +4,7 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
 
+use crate::backend::MeshBackendKind;
 use crate::topology::VolumeElementKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,6 +186,8 @@ pub type AdaptiveMeshingOptions = MeshRefinementOptions;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeMeshingOptions {
+    #[serde(default)]
+    pub backend: MeshBackendKind,
     pub kind: MeshKindRequest,
     pub element: VolumeElementKind,
     pub element_order: MeshElementOrder,
@@ -197,6 +200,7 @@ pub struct VolumeMeshingOptions {
 impl Default for VolumeMeshingOptions {
     fn default() -> Self {
         Self {
+            backend: MeshBackendKind::Auto,
             kind: MeshKindRequest::Solid,
             element: VolumeElementKind::Tet4,
             element_order: MeshElementOrder::Linear,

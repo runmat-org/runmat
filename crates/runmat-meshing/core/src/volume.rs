@@ -7,6 +7,7 @@ use crate::{
         AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
         ANALYSIS_MESH_SCHEMA_VERSION,
     },
+    backend::{select_volume_backend, MeshBackendKind},
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
@@ -31,6 +32,7 @@ pub enum MeshingError {
     InvalidElementBudget,
     InvalidTargetSize,
     EmptyBoundaryRegions,
+    ProductionBackendUnavailable,
 }
 
 impl std::fmt::Display for MeshingError {
@@ -51,6 +53,12 @@ impl std::fmt::Display for MeshingError {
                 )
             }
             Self::EmptyBoundaryRegions => write!(formatter, "boundary mesh has no region ids"),
+            Self::ProductionBackendUnavailable => {
+                write!(
+                    formatter,
+                    "production volume meshing backend is not available yet"
+                )
+            }
         }
     }
 }
@@ -213,7 +221,11 @@ pub fn generate_analysis_mesh(
     options: VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
     let input = BoundaryMeshInput::from_geometry(geometry)?;
-    StructuredTetMesher.mesh(&input, &options)
+    match select_volume_backend(&options).selected {
+        MeshBackendKind::StructuredTetFallback => StructuredTetMesher.mesh(&input, &options),
+        MeshBackendKind::Production => Err(MeshingError::ProductionBackendUnavailable),
+        MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
+    }
 }
 
 pub fn generate_analysis_mesh_with_sizing(
@@ -222,7 +234,13 @@ pub fn generate_analysis_mesh_with_sizing(
     sizing: &MeshSizingField,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
     let input = BoundaryMeshInput::from_geometry(geometry)?;
-    StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
+    match select_volume_backend(&options).selected {
+        MeshBackendKind::StructuredTetFallback => {
+            StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
+        }
+        MeshBackendKind::Production => Err(MeshingError::ProductionBackendUnavailable),
+        MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1524,7 +1542,10 @@ fn boundary_max_span(input: &BoundaryMeshInput) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{validate_analysis_mesh, BoundaryMeshTriangle, MeshKindRequest, SizingSample};
+    use crate::{
+        validate_analysis_mesh, BoundaryMeshTriangle, MeshBackendKind, MeshKindRequest,
+        SizingSample,
+    };
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
         SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
@@ -2198,6 +2219,60 @@ mod tests {
             MeshingError::UnsupportedMeshKind(MeshKindRequest::Surrogate)
         );
         assert!(err.to_string().contains("unsupported analysis mesh kind"));
+    }
+
+    #[test]
+    fn auto_backend_uses_structured_fallback_until_production_backend_exists() {
+        let geometry = cube_geometry();
+        let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+            .expect("auto backend should generate with fallback");
+
+        assert_eq!(mesh.provenance.algorithm, "structured_bbox_tet/v1");
+    }
+
+    #[test]
+    fn explicit_production_backend_fails_until_backend_exists() {
+        let geometry = cube_geometry();
+        let err = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                backend: MeshBackendKind::Production,
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect_err("production backend is not wired yet");
+
+        assert_eq!(err, MeshingError::ProductionBackendUnavailable);
+    }
+
+    #[test]
+    fn volume_meshing_options_default_backend_when_deserializing_old_payloads() {
+        let options: VolumeMeshingOptions = serde_json::from_value(serde_json::json!({
+            "kind": "solid",
+            "element": "tet4",
+            "element_order": "linear",
+            "profile": "analysis_ready",
+            "max_elements": 250000,
+            "target_size": "auto",
+            "refinement": {
+                "strategy": "auto",
+                "max_iterations": 4,
+                "convergence": {
+                    "field_change_tolerance": 0.05,
+                    "energy_change_tolerance": 0.02
+                },
+                "focus": {
+                    "loads": "fine",
+                    "constraints": "fine",
+                    "interfaces": "normal",
+                    "curvature": true,
+                    "small_features": true
+                }
+            }
+        }))
+        .expect("old mesh options payload should deserialize");
+
+        assert_eq!(options.backend, MeshBackendKind::Auto);
     }
 
     fn unique_axis_coordinates(mesh: &AnalysisMeshArtifact, axis: usize) -> Vec<f64> {
