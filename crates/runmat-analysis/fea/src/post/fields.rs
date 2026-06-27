@@ -9,8 +9,9 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
     FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
     FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
     assembly::{
@@ -55,6 +56,8 @@ pub fn recover_result_fields(
     let strain_values = strain_recovery.values;
     let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
+    let strain_energy_density_values =
+        recover_strain_energy_density(&strain_values, &stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force);
     let rotation_values = recover_rotation(summary, &solve_result.solution);
@@ -87,6 +90,11 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_STRESS,
             vec![element_count, TENSOR_COMPONENT_COUNT],
             stress_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            vec![element_count],
+            strain_energy_density_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -265,6 +273,11 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            vec![0],
+            Vec::new(),
+        ),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(
@@ -976,6 +989,20 @@ fn recover_von_mises(stress: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+fn recover_strain_energy_density(strain: &[f64], stress: &[f64]) -> Vec<f64> {
+    strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .zip(stress.chunks_exact(TENSOR_COMPONENT_COUNT))
+        .map(|(strain_tensor, stress_tensor)| {
+            0.5 * strain_tensor
+                .iter()
+                .zip(stress_tensor.iter())
+                .map(|(strain, stress)| strain * stress)
+                .sum::<f64>()
+        })
+        .collect()
+}
+
 struct BeamResultValues {
     axial_force: Vec<f64>,
     shear_force: Vec<f64>,
@@ -1485,6 +1512,11 @@ mod tests {
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY),
+            &[1]
+        );
+        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] >= 0.0);
         let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
         assert_eq!(metrics.basis, "solid_tet4_constant_strain");
         assert_eq!(metrics.solver_mesh_node_count, 4);
@@ -1496,6 +1528,14 @@ mod tests {
             .iter()
             .find(|field| field.field_id == field_id)
             .map(|field| field.shape.as_slice())
+            .expect("field should be present")
+    }
+
+    fn host_field<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [f64] {
+        fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .and_then(AnalysisField::as_host_f64)
             .expect("field should be present")
     }
 

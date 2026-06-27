@@ -33,7 +33,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
@@ -9640,6 +9641,7 @@ fn primary_solver_mesh_field_expected_count(
     match field.field_id.as_str() {
         FEA_FIELD_STRUCTURAL_DISPLACEMENT => Some(mesh.nodes.len()),
         FEA_FIELD_STRUCTURAL_STRAIN
+        | FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY
         | FEA_FIELD_STRUCTURAL_STRESS
         | FEA_FIELD_STRUCTURAL_VON_MISES => Some(mesh.volume_elements.len()),
         _ => None,
@@ -13451,12 +13453,18 @@ fn append_solved_adaptive_mesh_summary(
     let has_von_mises = von_mises_values
         .map(|values| values.len() == mesh.volume_elements.len())
         .unwrap_or(false);
+    let strain_energy_density_values =
+        analysis_field_values(fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY);
+    let has_strain_energy_density = strain_energy_density_values
+        .map(|values| values.len() == mesh.volume_elements.len())
+        .unwrap_or(false);
     let availability = defaults
         .iter()
         .cloned()
         .map(|key| {
-            let field_available =
-                key.namespace == "structural" && key.name == "stress_gradient" && has_von_mises;
+            let field_available = key.namespace == "structural"
+                && ((key.name == "stress_gradient" && has_von_mises)
+                    || (key.name == "strain_energy_density" && has_strain_energy_density));
             RefinementIndicatorAvailability {
                 key,
                 applicable: true,

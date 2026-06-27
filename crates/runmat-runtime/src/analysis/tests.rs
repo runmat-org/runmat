@@ -63,7 +63,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
     FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -2897,6 +2898,13 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY.to_string(),
+            "structural",
+            "strain_energy_density",
+            Some("J/m^3"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
             FEA_FIELD_MODAL_FREQUENCY_HZ.to_string(),
             "modal",
             "frequency_hz",
@@ -3075,6 +3083,22 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(solid_stress.value_count, 6);
     assert_eq!(solid_stress.element_count, 6);
     assert_eq!(solid_stress.component_count, Some(6));
+    let strain_energy_density = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(
+        strain_energy_density.topology_id.as_deref(),
+        Some("analysis_mesh")
+    );
+    assert_eq!(strain_energy_density.element_kind.as_deref(), Some("tet4"));
+    assert_eq!(
+        strain_energy_density.location,
+        AnalysisFieldLocation::Element
+    );
+    assert_eq!(strain_energy_density.entity_count, 1);
+    assert_eq!(strain_energy_density.value_count, 1);
     assert_eq!(membrane.topology_id.as_deref(), Some("analysis_mesh"));
     assert_eq!(membrane.element_kind.as_deref(), Some("tri3"));
     assert_eq!(membrane.entity_count, 1);

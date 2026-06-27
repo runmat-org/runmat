@@ -32,7 +32,8 @@ use crate::{
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
     FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
@@ -105,6 +106,10 @@ fn canonical_cantilever_benchmark_runs() {
         vec![1, 6]
     );
     assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY).shape,
+        vec![1]
+    );
+    assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE).shape,
         vec![1, 3]
     );
@@ -129,6 +134,7 @@ fn canonical_cantilever_benchmark_runs() {
     assert!(stress_tensor.iter().any(|value| value.abs() > 0.0));
     assert!(stress_tensor[0].abs() > 0.0);
     assert!(stress_tensor[0].abs() < stress_tensor[1].abs());
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] > 0.0);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE)
         .iter()
         .all(|value| value.is_finite()));

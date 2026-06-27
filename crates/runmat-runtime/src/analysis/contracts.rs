@@ -1347,6 +1347,9 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     {
         return AnalysisFieldLocation::Mode;
     }
+    if normalized.contains("energy_density") {
+        return AnalysisFieldLocation::Element;
+    }
     if normalized.contains("residual")
         || normalized.contains("equation_scale")
         || normalized.contains("energy")
