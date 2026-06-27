@@ -1473,6 +1473,39 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
 mod tests {
     use super::*;
 
+    fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
+        runmat_geometry_core::GeometryAsset {
+            geometry_id: "geometry".to_string(),
+            source: runmat_geometry_core::GeometrySource {
+                path: "/tmp/generic.step".to_string(),
+                sha256: "hash".to_string(),
+                importer_version: "test/v1".to_string(),
+            },
+            source_geometry: runmat_geometry_core::SourceGeometry {
+                kind: runmat_geometry_core::SourceGeometryKind::Mesh,
+                assembly: None,
+                material_evidence: Vec::new(),
+            },
+            tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
+            units: runmat_geometry_core::UnitSystem::Meter,
+            revision: 1,
+            meshes: vec![runmat_geometry_core::MeshDescriptor {
+                mesh_id: "cad_surface".to_string(),
+                kind: runmat_geometry_core::MeshKind::Surface,
+                vertex_count: 3,
+                element_count: 1,
+            }],
+            surface_meshes: vec![runmat_geometry_core::SurfaceMesh::new(
+                "cad_surface",
+                vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                vec![[0, 1, 2]],
+            )],
+            regions: Vec::new(),
+            region_entity_mappings: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
     fn simple_render_topology() -> AnalysisRenderTopology {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
@@ -1525,6 +1558,44 @@ mod tests {
         let plot = first_mesh_plot(&figure);
         assert_eq!(plot.edge_mode(), MeshEdgeMode::All);
         assert!(plot.edge_width() > 0.0);
+    }
+
+    #[test]
+    fn base_mesh_figure_can_force_solver_render_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "solver source",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::Solver,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("solver source should render from topology");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.mesh_id(), Some("analysis_mesh"));
+    }
+
+    #[test]
+    fn base_mesh_figure_can_force_cad_geometry_source() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "cad source",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::Cad,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("CAD source should render from geometry");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.mesh_id(), Some("cad_surface"));
     }
 
     #[test]
