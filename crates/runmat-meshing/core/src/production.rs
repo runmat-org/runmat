@@ -148,6 +148,12 @@ fn tet_candidate_options_for_mesh(
         },
         max_radius_edge_ratio: 2.5,
         sizing_compliance_tolerance: 0.35,
+        max_optimization_passes: match options.refinement.strategy {
+            crate::options::RefinementStrategy::None => 0,
+            _ => 2,
+        },
+        smoothing_relaxation: 0.30,
+        sliver_aspect_ratio: 20.0,
         ..TetCandidateOptions::default()
     }
 }
@@ -340,6 +346,9 @@ fn production_backend_summary(
         tet_refinement_point_count: preparation.tet_candidates.recovery.refinement_point_count,
         tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
         tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
+        tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
+        tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
+        tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }
@@ -591,6 +600,10 @@ mod tests {
         assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
         assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
         assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
+        assert!(mesh.backend.tet_optimization_pass_count <= 2);
+        assert!(
+            mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
+        );
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(

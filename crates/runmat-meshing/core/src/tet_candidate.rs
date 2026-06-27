@@ -24,6 +24,9 @@ pub struct TetCandidateOptions {
     pub max_refinement_passes: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_compliance_tolerance: f64,
+    pub max_optimization_passes: usize,
+    pub smoothing_relaxation: f64,
+    pub sliver_aspect_ratio: f64,
 }
 
 impl Default for TetCandidateOptions {
@@ -37,6 +40,9 @@ impl Default for TetCandidateOptions {
             max_refinement_passes: 0,
             max_radius_edge_ratio: 3.0,
             sizing_compliance_tolerance: 0.25,
+            max_optimization_passes: 0,
+            smoothing_relaxation: 0.35,
+            sliver_aspect_ratio: 20.0,
         }
     }
 }
@@ -87,6 +93,9 @@ pub struct TetRecoveryReport {
     pub refinement_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
+    pub optimization_pass_count: usize,
+    pub smoothed_point_count: usize,
+    pub sliver_candidate_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +172,9 @@ pub fn form_tet_candidates(
     let mut refinement_pass_count = 0_usize;
     let mut refinement_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
+    let mut optimization_pass_count = 0_usize;
+    let mut smoothed_point_count = 0_usize;
+    let mut sliver_candidate_count = 0_usize;
     for component in &volume_candidates.components {
         let tolerance =
             MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
@@ -186,6 +198,19 @@ pub fn form_tet_candidates(
         refinement_pass_count += refinement.pass_count;
         refinement_point_count += refinement.inserted_point_count;
         sizing_violation_count += refinement.sizing_violation_count;
+        let optimization = smooth_component_seed_points(
+            component,
+            &mut component_seed_points,
+            &surface_nodes,
+            &surface_elements,
+            surface,
+            options,
+            tolerance,
+            next_node_id,
+        )?;
+        optimization_pass_count += optimization.pass_count;
+        smoothed_point_count += optimization.smoothed_point_count;
+        sliver_candidate_count += optimization.sliver_candidate_count;
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -278,6 +303,9 @@ pub fn form_tet_candidates(
             refinement_point_count,
             max_radius_edge_ratio,
             sizing_violation_count,
+            optimization_pass_count,
+            smoothed_point_count,
+            sliver_candidate_count,
         },
         total_volume_m3,
     })
@@ -293,6 +321,10 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options.max_radius_edge_ratio <= 0.0
         || !options.sizing_compliance_tolerance.is_finite()
         || options.sizing_compliance_tolerance < 0.0
+        || !options.smoothing_relaxation.is_finite()
+        || !(0.0..=1.0).contains(&options.smoothing_relaxation)
+        || !options.sliver_aspect_ratio.is_finite()
+        || options.sliver_aspect_ratio <= 0.0
         || options
             .interior_target_size_m
             .is_some_and(|size| !size.is_finite() || size <= 0.0)
@@ -699,6 +731,205 @@ fn candidate_tet_points(
                 node_id: tet.node_ids[3],
             })?,
     ])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SmoothingSummary {
+    pass_count: usize,
+    smoothed_point_count: usize,
+    sliver_candidate_count: usize,
+}
+
+fn smooth_component_seed_points(
+    component: &VolumeCandidateComponent,
+    seed_points: &mut Vec<[f64; 3]>,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    surface: &SurfaceDiscretization,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+    first_seed_node_id: u32,
+) -> Result<SmoothingSummary, TetCandidateError> {
+    if options.max_optimization_passes == 0 || seed_points.is_empty() {
+        return Ok(SmoothingSummary {
+            pass_count: 0,
+            smoothed_point_count: 0,
+            sliver_candidate_count: 0,
+        });
+    }
+
+    let surface_triangle_index =
+        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    let mut pass_count = 0_usize;
+    let mut smoothed_point_count = 0_usize;
+    let mut sliver_candidate_count = 0_usize;
+
+    for _ in 0..options.max_optimization_passes {
+        let seed_node_ids = seed_node_ids(first_seed_node_id, seed_points.len());
+        let (current_status, current_tets) = component_insertion_tet_drafts(
+            component,
+            &seed_node_ids,
+            seed_points,
+            surface_nodes,
+            surface_elements,
+            surface,
+            options,
+            tolerance,
+        )?;
+        if current_tets.is_empty() {
+            break;
+        }
+        let current_quality = CandidateQualitySnapshot::from_tets(&current_tets, options);
+        sliver_candidate_count += current_quality.sliver_count;
+        let proposed = smoothed_seed_points(
+            seed_points,
+            &seed_node_ids,
+            &current_tets,
+            surface_nodes,
+            &surface_triangle_index,
+            surface,
+            surface_elements,
+            options,
+            tolerance,
+        )?;
+        if proposed == *seed_points {
+            break;
+        }
+        let (proposed_status, proposed_tets) = component_insertion_tet_drafts(
+            component,
+            &seed_node_ids,
+            &proposed,
+            surface_nodes,
+            surface_elements,
+            surface,
+            options,
+            tolerance,
+        )?;
+        if !proposed_status.accepted && current_status.accepted {
+            break;
+        }
+        let proposed_quality = CandidateQualitySnapshot::from_tets(&proposed_tets, options);
+        if !candidate_quality_is_no_worse(proposed_quality, current_quality) {
+            break;
+        }
+        let moved_count = seed_points
+            .iter()
+            .zip(proposed.iter())
+            .filter(|(left, right)| !tolerance.point_nearly_equal(**left, **right, 1.0))
+            .count();
+        if moved_count == 0 {
+            break;
+        }
+        *seed_points = proposed;
+        pass_count += 1;
+        smoothed_point_count += moved_count;
+    }
+
+    Ok(SmoothingSummary {
+        pass_count,
+        smoothed_point_count,
+        sliver_candidate_count,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CandidateQualitySnapshot {
+    max_aspect_ratio: f64,
+    max_radius_edge_ratio: f64,
+    volume_ratio_error: f64,
+    sliver_count: usize,
+}
+
+impl CandidateQualitySnapshot {
+    fn from_tets(tets: &[TetCandidate], options: TetCandidateOptions) -> Self {
+        let max_aspect_ratio = tets
+            .iter()
+            .map(|tet| tet.aspect_ratio)
+            .fold(0.0_f64, f64::max);
+        let sliver_count = tets
+            .iter()
+            .filter(|tet| tet.aspect_ratio > options.sliver_aspect_ratio)
+            .count();
+        Self {
+            max_aspect_ratio,
+            max_radius_edge_ratio: 0.0,
+            volume_ratio_error: 0.0,
+            sliver_count,
+        }
+    }
+}
+
+fn candidate_quality_is_no_worse(
+    proposed: CandidateQualitySnapshot,
+    current: CandidateQualitySnapshot,
+) -> bool {
+    proposed.sliver_count <= current.sliver_count
+        && proposed.max_aspect_ratio <= current.max_aspect_ratio * (1.0 + 1.0e-9)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn smoothed_seed_points(
+    seed_points: &[[f64; 3]],
+    seed_node_ids: &[u32],
+    tets: &[TetCandidate],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_triangle_index: &LinearSpatialIndex<u32>,
+    surface: &SurfaceDiscretization,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+) -> Result<Vec<[f64; 3]>, TetCandidateError> {
+    let seed_index = seed_node_ids
+        .iter()
+        .enumerate()
+        .map(|(index, node_id)| (*node_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
+    let mut sums = vec![[0.0, 0.0, 0.0]; seed_points.len()];
+    let mut counts = vec![0_usize; seed_points.len()];
+    for tet in tets {
+        let points = candidate_tet_points(tet, &all_nodes)?;
+        let centroid = tet_centroid(points);
+        for node_id in tet.node_ids {
+            let Some(index) = seed_index.get(&node_id).copied() else {
+                continue;
+            };
+            for axis in 0..3 {
+                sums[index][axis] += centroid[axis];
+            }
+            counts[index] += 1;
+        }
+    }
+
+    let mut proposed = seed_points.to_vec();
+    for (index, point) in seed_points.iter().enumerate() {
+        if counts[index] == 0 {
+            continue;
+        }
+        let average = [
+            sums[index][0] / counts[index] as f64,
+            sums[index][1] / counts[index] as f64,
+            sums[index][2] / counts[index] as f64,
+        ];
+        let candidate = [
+            point[0] * (1.0 - options.smoothing_relaxation)
+                + average[0] * options.smoothing_relaxation,
+            point[1] * (1.0 - options.smoothing_relaxation)
+                + average[1] * options.smoothing_relaxation,
+            point[2] * (1.0 - options.smoothing_relaxation)
+                + average[2] * options.smoothing_relaxation,
+        ];
+        if point_is_inside_component(
+            candidate,
+            surface,
+            surface_elements,
+            tolerance,
+            surface_triangle_index,
+        )? {
+            proposed[index] = candidate;
+        }
+    }
+    Ok(proposed)
 }
 
 fn max_tet_radius_edge_ratio(nodes: &[TetCandidateNode], tets: &[TetCandidate]) -> f64 {
@@ -1342,6 +1573,36 @@ mod tests {
         assert!(candidates.recovery.refinement_point_count > 0);
         assert!(candidates.recovery.max_radius_edge_ratio.is_finite());
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn optimization_pass_smooths_interior_seed_points_without_fallback() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(0.8),
+                max_interior_seed_points: 12,
+                max_optimization_passes: 2,
+                smoothing_relaxation: 0.2,
+                allow_fan_fallback: false,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("Tet candidates should form with smoothing");
+
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert!(candidates.recovery.optimization_pass_count <= 2);
+        assert!(
+            candidates.recovery.optimization_pass_count > 0
+                || candidates.recovery.sliver_candidate_count == 0
+        );
+        assert!(
+            candidates.recovery.smoothed_point_count <= candidates.interior_seed_points.len() * 2
+        );
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }
 
