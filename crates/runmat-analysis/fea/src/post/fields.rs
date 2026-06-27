@@ -144,6 +144,8 @@ pub struct StructuralFieldRecoveryMetrics {
     pub prep_recovery_edge_count: usize,
     pub constrained_edge_count: usize,
     pub recovery_element_count: usize,
+    pub solver_mesh_node_count: usize,
+    pub solver_mesh_element_count: usize,
     pub max_edge_displacement_jump: f64,
     pub max_edge_strain_norm: f64,
     pub mean_edge_stiffness_ratio: f64,
@@ -217,12 +219,27 @@ pub fn structural_field_recovery_metrics(
         .as_ref()
         .map(|coordinates| coordinates.element_geometry_coverage_ratio)
         .unwrap_or(0.0);
+    let solver_mesh_element_count = summary.structural_solid_recovery.len();
+    let solver_mesh_node_count = if solver_mesh_element_count == 0 {
+        0
+    } else {
+        let mut nodes = summary
+            .structural_solid_recovery
+            .iter()
+            .flat_map(|element| element.node_indices)
+            .collect::<Vec<_>>();
+        nodes.sort_unstable();
+        nodes.dedup();
+        nodes.len()
+    };
 
     StructuralFieldRecoveryMetrics {
         active_stiffness_edge_count,
         prep_recovery_edge_count,
         constrained_edge_count,
         recovery_element_count: strain_recovery.element_count,
+        solver_mesh_node_count,
+        solver_mesh_element_count,
         max_edge_displacement_jump,
         max_edge_strain_norm,
         mean_edge_stiffness_ratio,
@@ -1468,10 +1485,10 @@ mod tests {
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
-        assert_eq!(
-            structural_field_recovery_metrics(&summary, &solve.solution).basis,
-            "solid_tet4_constant_strain"
-        );
+        let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
+        assert_eq!(metrics.basis, "solid_tet4_constant_strain");
+        assert_eq!(metrics.solver_mesh_node_count, 4);
+        assert_eq!(metrics.solver_mesh_element_count, 1);
     }
 
     fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {
