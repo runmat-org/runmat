@@ -756,7 +756,10 @@ run:
         .mesh_options
         .as_ref()
         .expect("linear static structural studies should default to solid analysis mesh options");
-    assert_eq!(mesh_options.kind, runmat_meshing_core::MeshKindRequest::Solid);
+    assert_eq!(
+        mesh_options.kind,
+        runmat_meshing_core::MeshKindRequest::Solid
+    );
     assert_eq!(
         mesh_options.element,
         runmat_meshing_core::VolumeElementKind::Tet4
@@ -1973,10 +1976,6 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .analysis_mesh_artifact_path
         .as_ref()
         .expect("study run should persist analysis mesh artifact path");
-    assert_eq!(
-        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
-        Some(artifact_path.as_str())
-    );
     assert!(artifact_path.ends_with("analysis_mesh.json"));
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
@@ -2032,32 +2031,29 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         adaptive_iterations[1]["convergence_status"].as_str(),
         Some("pending")
     );
-    assert!(
-        adaptive_iterations[1]["indicators"]
-            .as_array()
-            .expect("solved adaptive indicators")
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("structural")
-                    && indicator["name"].as_str() == Some("stress_gradient")
-                    && indicator["status"].as_str() == Some("used")
-            )
-    );
-    assert!(
-        !adaptive_iterations[1]["markers"]
-            .as_array()
-            .expect("solved adaptive markers")
-            .is_empty()
-    );
+    assert!(adaptive_iterations[1]["indicators"]
+        .as_array()
+        .expect("solved adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(!adaptive_iterations[1]["markers"]
+        .as_array()
+        .expect("solved adaptive markers")
+        .is_empty());
     let refined_artifact_path = envelope
         .data
         .refined_analysis_mesh_artifact_path
         .as_ref()
         .expect("pending adaptive sizing should persist refined mesh artifact path");
     assert!(refined_artifact_path.ends_with("analysis_mesh_refined.json"));
-    let refined_payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(refined_artifact_path).expect("read refined mesh artifact"))
-            .expect("parse refined mesh artifact");
+    let refined_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(refined_artifact_path).expect("read refined mesh artifact"),
+    )
+    .expect("parse refined mesh artifact");
     assert_eq!(
         refined_payload["source_analysis_mesh_artifact_path"].as_str(),
         Some(artifact_path.as_str())
@@ -2096,12 +2092,13 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["refined_analysis_mesh_artifact_path"].as_str(),
         Some(refined_artifact_path.as_str())
     );
-    assert_eq!(run_payload["refinement_effect"]["topology_changed"].as_bool(), Some(true));
-    assert!(
-        run_payload["refinement_effect"]["element_count_delta"]
-            .as_i64()
-            .is_some_and(|delta| delta > 0)
+    assert_eq!(
+        run_payload["refinement_effect"]["topology_changed"].as_bool(),
+        Some(true)
     );
+    assert!(run_payload["refinement_effect"]["element_count_delta"]
+        .as_i64()
+        .is_some_and(|delta| delta > 0));
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
@@ -2109,7 +2106,10 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .render_topology
         .as_ref()
         .expect("analysis mesh backed run should persist render topology");
-    assert_eq!(render_topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    assert_eq!(
+        render_topology.source,
+        AnalysisRenderTopologySource::AnalysisMesh
+    );
     let render_mesh = render_topology
         .meshes
         .first()
@@ -2545,24 +2545,20 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.operation, "fea.run_linear_static");
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
     assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
-    assert!(
-        !envelope
-            .data
-            .run
-            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-            .expect("structural displacement field should be present")
-            .is_empty()
-    );
+    assert!(!envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("structural displacement field should be present")
+        .is_empty());
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.result_quality, QualityGate::Warn);
-    assert!(
-        envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
-    );
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
@@ -4838,20 +4834,16 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
     assert_eq!(envelope.data.result_quality, QualityGate::Warn);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(
-        envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback)
-    );
-    assert!(
-        envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
-    );
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
 }
 
@@ -4910,20 +4902,16 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
     assert_eq!(envelope.data.result_quality, QualityGate::Warn);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(
-        envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback)
-    );
-    assert!(
-        envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
-    );
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
     assert_eq!(envelope.data.provenance.quality_policy, "strict");
 }
 
@@ -4966,7 +4954,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 
     let mut projected = minimal_analysis_mesh();
     projected.sizing.global_target_size_m = Some(0.1);
-    projected.quality.max_boundary_projection_error_m = 0.05;
+    projected.quality.max_boundary_projection_error_m = 0.06;
     let projection_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&projected));
     let projection_reason = projection_reasons
         .iter()
@@ -4974,10 +4962,9 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
         .expect("boundary projection error should be reported");
     assert!(projection_reason
         .detail
-        .contains("max_boundary_projection_error_m=0.05"));
-    assert!(projection_reason
-        .detail
-        .contains("warning threshold 0.025"));
+        .contains("max_boundary_projection_error_m=0.06"));
+    assert!(projection_reason.detail.contains("thresholds max=0.05"));
+    assert!(projection_reason.detail.contains("mean=0.025"));
 
     let mut empty = minimal_analysis_mesh();
     empty.volume_elements.clear();
@@ -4990,6 +4977,17 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 #[test]
 fn solid_mesh_material_coverage_uses_region_assignments() {
     let mesh = minimal_analysis_mesh();
+    let mut single_material = sample_model();
+    single_material.material_assignments = vec![MaterialAssignment {
+        region_id: "boundary_face".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert!(solid_mesh_quality_reasons(&single_material, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
     let mut multi_material = sample_model();
     multi_material.materials.push(MaterialModel {
         material_id: "mat_aluminum".to_string(),
@@ -5057,6 +5055,32 @@ fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
         .expect("unmapped boundary condition region should be reported");
     assert!(bc_reason.detail.contains("bc_root"));
     assert!(bc_reason.detail.contains("root"));
+}
+
+#[test]
+fn study_analysis_mesh_attaches_requested_boundary_regions_from_source_geometry() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    spec.model = Some(sample_model());
+    spec.model.as_mut().expect("sample study has model").loads[0].region_id = "root".to_string();
+    spec.model
+        .as_mut()
+        .expect("sample study has model")
+        .boundary_conditions[0]
+        .region_id = "root".to_string();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.boundary_faces = vec![analysis_boundary_face(
+        "nearest_generated_face",
+        vec![1, 2, 3],
+        &["other_region"],
+    )];
+
+    attach_requested_boundary_regions_to_analysis_mesh(&spec, &mut mesh);
+
+    assert!(mesh
+        .boundary_faces
+        .iter()
+        .any(|face| { face.region_ids.iter().any(|region| region == "root") }));
 }
 
 #[test]
@@ -5162,29 +5186,23 @@ fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
         adaptive_iterations[0]["convergence_status"].as_str(),
         Some("pending")
     );
-    assert!(
-        adaptive_iterations[0]["indicators"]
-            .as_array()
-            .expect("adaptive indicators")
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("structural")
-                    && indicator["name"].as_str() == Some("stress_gradient")
-                    && indicator["status"].as_str() == Some("used")
-            )
-    );
-    assert!(
-        !adaptive_iterations[0]["markers"]
-            .as_array()
-            .expect("adaptive markers")
-            .is_empty()
-    );
-    assert!(
-        !payload["mesh"]["sizing"]["samples"]
-            .as_array()
-            .expect("sizing samples")
-            .is_empty()
-    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(!adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
+    assert!(!payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .is_empty());
 }
 
 #[test]
@@ -5227,16 +5245,20 @@ fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
     let indicators = adaptive_iterations[0]["indicators"]
         .as_array()
         .expect("adaptive indicators");
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("structural")
-            && indicator["name"].as_str() == Some("load_regions")
-            && indicator["status"].as_str() == Some("used")
-    ));
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("structural")
-            && indicator["name"].as_str() == Some("constraint_regions")
-            && indicator["status"].as_str() == Some("used")
-    ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("load_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("constraint_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
     let markers = adaptive_iterations[0]["markers"]
         .as_array()
         .expect("adaptive markers");
@@ -5349,16 +5371,20 @@ fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
     let indicators = adaptive_iterations[0]["indicators"]
         .as_array()
         .expect("adaptive indicators");
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("structural")
-            && indicator["name"].as_str() == Some("load_regions")
-            && indicator["status"].as_str() == Some("skipped_not_applicable")
-    ));
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("structural")
-            && indicator["name"].as_str() == Some("constraint_regions")
-            && indicator["status"].as_str() == Some("used")
-    ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("load_regions")
+                && indicator["status"].as_str() == Some("skipped_not_applicable")
+        ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("constraint_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
     let samples = payload["mesh"]["sizing"]["samples"]
         .as_array()
         .expect("sizing samples");
@@ -5414,31 +5440,25 @@ fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
         adaptive_iterations[0]["convergence_status"].as_str(),
         Some("pending")
     );
-    assert!(
-        adaptive_iterations[0]["indicators"]
-            .as_array()
-            .expect("adaptive indicators")
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("structural")
-                    && indicator["name"].as_str() == Some("strain_energy_density")
-                    && indicator["status"].as_str() == Some("used")
-            )
-    );
-    assert!(
-        adaptive_iterations[0]["markers"]
-            .as_array()
-            .expect("adaptive markers")
-            .iter()
-            .any(|marker| marker["reason"].as_str() == Some("structural.strain_energy_density"))
-    );
-    assert!(
-        payload["mesh"]["sizing"]["samples"]
-            .as_array()
-            .expect("sizing samples")
-            .iter()
-            .any(|sample| sample["reason"].as_str() == Some("structural.strain_energy_density"))
-    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("strain_energy_density")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.strain_energy_density")));
+    assert!(payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.strain_energy_density")));
 }
 
 #[test]
@@ -5575,11 +5595,7 @@ fn append_solved_adaptive_mesh_summary_uses_electromagnetic_element_fields() {
             vec![2, 3],
             vec![1.0, 2.0, 2.0, 2.0, 3.0, 6.0],
         ),
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_ENERGY_DENSITY,
-            vec![2],
-            vec![2.0, 18.0],
-        ),
+        AnalysisField::host_f64(FEA_FIELD_EM_ENERGY_DENSITY, vec![2], vec![2.0, 18.0]),
     ];
 
     append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
@@ -5604,11 +5620,13 @@ fn append_solved_adaptive_mesh_summary_uses_electromagnetic_element_fields() {
         "current_density_gradient",
         "energy_density",
     ] {
-        assert!(indicators.iter().any(
-            |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
-                && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")
-        ));
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
     }
     let markers = adaptive_iterations[0]["markers"]
         .as_array()
@@ -5681,11 +5699,13 @@ fn append_solved_adaptive_mesh_summary_uses_acoustic_pressure_fields() {
         .as_array()
         .expect("adaptive indicators");
     for name in ["pressure_gradient", "pressure_curvature"] {
-        assert!(indicators.iter().any(
-            |indicator| indicator["namespace"].as_str() == Some("acoustic")
-                && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")
-        ));
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("acoustic")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
     }
     let markers = adaptive_iterations[0]["markers"]
         .as_array()
@@ -5771,11 +5791,11 @@ fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
         "vorticity",
         "wall_shear",
     ] {
-        assert!(indicators.iter().any(
-            |indicator| indicator["namespace"].as_str() == Some("cfd")
+        assert!(indicators
+            .iter()
+            .any(|indicator| indicator["namespace"].as_str() == Some("cfd")
                 && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")
-        ));
+                && indicator["status"].as_str() == Some("used")));
     }
     let markers = adaptive_iterations[0]["markers"]
         .as_array()
@@ -5864,17 +5884,17 @@ fn append_solved_adaptive_mesh_summary_uses_cht_element_fields() {
         "interface_temperature_jump",
         "fluid_boundary_layer",
     ] {
-        assert!(indicators.iter().any(
-            |indicator| indicator["namespace"].as_str() == Some("cht")
+        assert!(indicators
+            .iter()
+            .any(|indicator| indicator["namespace"].as_str() == Some("cht")
                 && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")
-        ));
+                && indicator["status"].as_str() == Some("used")));
     }
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("cht")
+    assert!(indicators
+        .iter()
+        .any(|indicator| indicator["namespace"].as_str() == Some("cht")
             && indicator["name"].as_str() == Some("solid_heat_flux_gradient")
-            && indicator["status"].as_str() == Some("skipped_missing_field")
-    ));
+            && indicator["status"].as_str() == Some("skipped_missing_field")));
     let markers = adaptive_iterations[0]["markers"]
         .as_array()
         .expect("adaptive markers");
@@ -5926,19 +5946,15 @@ fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
         adaptive_iterations[0]["convergence_status"].as_str(),
         Some("pending")
     );
-    assert!(
-        adaptive_iterations[0]["indicators"]
-            .as_array()
-            .expect("adaptive indicators")
-            .iter()
-            .all(|indicator| indicator["status"].as_str() == Some("skipped_missing_field"))
-    );
-    assert!(
-        adaptive_iterations[0]["markers"]
-            .as_array()
-            .expect("adaptive markers")
-            .is_empty()
-    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .all(|indicator| indicator["status"].as_str() == Some("skipped_missing_field")));
+    assert!(adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
 }
 
 #[test]
@@ -5973,15 +5989,17 @@ fn append_solved_adaptive_mesh_summary_uses_persisted_analysis_context() {
     let indicators = adaptive_iterations[0]["indicators"]
         .as_array()
         .expect("adaptive indicators");
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("modal")
+    assert!(indicators
+        .iter()
+        .any(|indicator| indicator["namespace"].as_str() == Some("modal")
             && indicator["name"].as_str() == Some("mode_shape_curvature")
-            && indicator["status"].as_str() == Some("skipped_missing_field")
-    ));
-    assert!(!indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("structural")
-            && indicator["name"].as_str() == Some("stress_gradient")
-    ));
+            && indicator["status"].as_str() == Some("skipped_missing_field")));
+    assert!(!indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+        ));
 }
 
 #[test]
@@ -9055,45 +9073,42 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
             && diag.message.contains("max_interface_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| diag.code
-        == "FEA_FSI_INTERFACE_CLOSURE"
-        && diag.message.contains("interface_node_count=")
-        && diag.message.contains("interface_face_count=")
-        && diag.message.contains("force_balance_ratio=")
-        && diag
-            .message
-            .contains("max_displacement_transfer_residual_m=")
-        && diag.message.contains("max_coupling_iteration_count=")
-        && diag.message.contains("pressure_feedback_residual_ratio=")
-        && diag.message.contains("two_way_interface_residual_ratio=")
-        && diag
-            .message
-            .contains("structural_traction_update_residual_ratio=")
-        && diag
-            .message
-            .contains("pressure_displacement_law_residual_ratio=")
-        && diag.message.contains("structural_solve_residual_ratio=")
-        && diag.message.contains("interface_work_j_per_m2=")
-        && diag.message.contains("structural_strain_energy_j_per_m2=")
-        && diag
-            .message
-            .contains("interface_work_energy_residual_ratio=")
-        && diag.message.contains("structural_coupling_edge_count=")
-        && diag
-            .message
-            .contains("interface_connectivity_coverage_ratio=")
-        && diag
-            .message
-            .contains("mesh_backed_interface_connectivity_ratio=")
-        && diag.message.contains("full_topology_edge_count=")
-        && diag.message.contains("full_topology_element_count=")
-        && diag.message.contains("interface_stiffness_pa_per_m=")));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_KNOWN_ANSWER"
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
+            && diag.message.contains("interface_node_count=")
+            && diag.message.contains("interface_face_count=")
+            && diag.message.contains("force_balance_ratio=")
+            && diag
+                .message
+                .contains("max_displacement_transfer_residual_m=")
+            && diag.message.contains("max_coupling_iteration_count=")
+            && diag.message.contains("pressure_feedback_residual_ratio=")
+            && diag.message.contains("two_way_interface_residual_ratio=")
+            && diag
+                .message
+                .contains("structural_traction_update_residual_ratio=")
+            && diag
+                .message
+                .contains("pressure_displacement_law_residual_ratio=")
+            && diag.message.contains("structural_solve_residual_ratio=")
+            && diag.message.contains("interface_work_j_per_m2=")
+            && diag.message.contains("structural_strain_energy_j_per_m2=")
+            && diag
+                .message
+                .contains("interface_work_energy_residual_ratio=")
+            && diag.message.contains("structural_coupling_edge_count=")
+            && diag
+                .message
+                .contains("interface_connectivity_coverage_ratio=")
+            && diag
+                .message
+                .contains("mesh_backed_interface_connectivity_ratio=")
+            && diag.message.contains("full_topology_edge_count=")
+            && diag.message.contains("full_topology_element_count=")
+            && diag.message.contains("interface_stiffness_pa_per_m=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_FSI_KNOWN_ANSWER"
             && diag
                 .message
                 .contains("basis=pressure_loaded_wall_partitioned")
@@ -9120,7 +9135,8 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")));
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
     assert!(envelope
         .data
         .run

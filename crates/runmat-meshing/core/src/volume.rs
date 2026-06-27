@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -263,6 +263,39 @@ impl StructuredGrid {
 
     fn cell_index(&self, i: usize, j: usize, k: usize) -> usize {
         i + self.nx() * (j + self.ny() * k)
+    }
+
+    fn cell_coordinates(&self, index: usize) -> (usize, usize, usize) {
+        let nx = self.nx().max(1);
+        let ny = self.ny().max(1);
+        let k = index / (nx * ny);
+        let rem = index % (nx * ny);
+        let j = rem / nx;
+        let i = rem % nx;
+        (i, j, k)
+    }
+
+    fn cell_neighbors(&self, i: usize, j: usize, k: usize) -> Vec<usize> {
+        let mut neighbors = Vec::with_capacity(6);
+        if i > 0 {
+            neighbors.push(self.cell_index(i - 1, j, k));
+        }
+        if i + 1 < self.nx() {
+            neighbors.push(self.cell_index(i + 1, j, k));
+        }
+        if j > 0 {
+            neighbors.push(self.cell_index(i, j - 1, k));
+        }
+        if j + 1 < self.ny() {
+            neighbors.push(self.cell_index(i, j + 1, k));
+        }
+        if k > 0 {
+            neighbors.push(self.cell_index(i, j, k - 1));
+        }
+        if k + 1 < self.nz() {
+            neighbors.push(self.cell_index(i, j, k + 1));
+        }
+        neighbors
     }
 
     fn min_cell_size(&self) -> Option<f64> {
@@ -885,10 +918,48 @@ fn occupied_cells(input: &BoundaryMeshInput, grid: &StructuredGrid) -> Vec<bool>
         }
     }
     if occupied.iter().any(|cell| *cell) {
-        occupied
+        largest_connected_occupied_component(grid, occupied)
     } else {
         vec![true; grid.cell_count()]
     }
+}
+
+fn largest_connected_occupied_component(
+    grid: &StructuredGrid,
+    occupied_cells: Vec<bool>,
+) -> Vec<bool> {
+    let mut visited = vec![false; occupied_cells.len()];
+    let mut largest_component = Vec::<usize>::new();
+    for cell_index in 0..occupied_cells.len() {
+        if !occupied_cells[cell_index] || visited[cell_index] {
+            continue;
+        }
+        let mut component = Vec::new();
+        let mut queue = VecDeque::from([cell_index]);
+        visited[cell_index] = true;
+        while let Some(current) = queue.pop_front() {
+            component.push(current);
+            let (i, j, k) = grid.cell_coordinates(current);
+            for neighbor in grid.cell_neighbors(i, j, k) {
+                if occupied_cells[neighbor] && !visited[neighbor] {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        if component.len() > largest_component.len() {
+            largest_component = component;
+        }
+    }
+    if largest_component.is_empty() {
+        return occupied_cells;
+    }
+
+    let mut retained = vec![false; occupied_cells.len()];
+    for cell_index in largest_component {
+        retained[cell_index] = true;
+    }
+    retained
 }
 
 fn point_inside_closed_surface(input: &BoundaryMeshInput, point: [f64; 3]) -> bool {
@@ -1044,50 +1115,64 @@ fn project_boundary_nodes_if_quality_improves(
     boundary_faces: &[AnalysisBoundaryFace],
     original_quality: AnalysisMeshQualityReport,
 ) -> (Vec<AnalysisMeshNode>, AnalysisMeshQualityReport) {
-    let mut projected_nodes = nodes.clone();
-    let mut projected_any = false;
+    let mut projection_targets = Vec::<(u32, [f64; 3], [f64; 3])>::new();
     for node_id in boundary_faces
         .iter()
         .flat_map(|face| face.node_ids.iter().copied())
         .collect::<std::collections::BTreeSet<_>>()
     {
-        let Some(node) = projected_nodes.get_mut(node_id.saturating_sub(1) as usize) else {
+        let Some(node) = nodes.get(node_id.saturating_sub(1) as usize) else {
             continue;
         };
         let Some(projected) = nearest_boundary_triangle_point(input, node.coordinates_m) else {
             continue;
         };
         if distance(node.coordinates_m, projected) > 0.0 {
-            node.coordinates_m = projected;
-            projected_any = true;
+            projection_targets.push((node_id, node.coordinates_m, projected));
         }
     }
-    if !projected_any {
+    if projection_targets.is_empty() {
         return (nodes, original_quality);
     }
 
-    let Some(projected_element_quality) =
-        element_quality_for_nodes(volume_elements, &projected_nodes)
-    else {
-        return (nodes, original_quality);
-    };
-    let projected_quality = quality_report(
-        projected_element_quality,
-        boundary_projection_errors(input, boundary_faces, &projected_nodes),
-    );
     let thresholds = QualityThresholds::default();
-    let improved_projection =
-        projected_quality.max_boundary_projection_error_m < original_quality.max_boundary_projection_error_m;
-    let quality_ok = projected_quality.min_scaled_jacobian.is_finite()
-        && projected_quality.min_scaled_jacobian >= thresholds.min_scaled_jacobian
-        && projected_quality.max_aspect_ratio.is_finite()
-        && projected_quality.max_aspect_ratio <= thresholds.max_aspect_ratio
-        && projected_quality.inverted_element_count == 0;
-    if improved_projection && quality_ok {
-        (projected_nodes, projected_quality)
-    } else {
-        (nodes, original_quality)
+    let mut best_nodes = nodes.clone();
+    let mut best_quality = original_quality.clone();
+    for relaxation in [1.0_f64, 0.75, 0.5, 0.25, 0.125] {
+        let mut candidate_nodes = nodes.clone();
+        for (node_id, original, projected) in &projection_targets {
+            let Some(node) = candidate_nodes.get_mut(node_id.saturating_sub(1) as usize) else {
+                continue;
+            };
+            node.coordinates_m = [
+                original[0] + relaxation * (projected[0] - original[0]),
+                original[1] + relaxation * (projected[1] - original[1]),
+                original[2] + relaxation * (projected[2] - original[2]),
+            ];
+        }
+
+        let Some(candidate_element_quality) =
+            element_quality_for_nodes(volume_elements, &candidate_nodes)
+        else {
+            continue;
+        };
+        let candidate_quality = quality_report(
+            candidate_element_quality,
+            boundary_projection_errors(input, boundary_faces, &candidate_nodes),
+        );
+        let improved_projection = candidate_quality.max_boundary_projection_error_m
+            < best_quality.max_boundary_projection_error_m;
+        let quality_ok = candidate_quality.min_scaled_jacobian.is_finite()
+            && candidate_quality.min_scaled_jacobian >= thresholds.min_scaled_jacobian
+            && candidate_quality.max_aspect_ratio.is_finite()
+            && candidate_quality.max_aspect_ratio <= thresholds.max_aspect_ratio
+            && candidate_quality.inverted_element_count == 0;
+        if improved_projection && quality_ok {
+            best_nodes = candidate_nodes;
+            best_quality = candidate_quality;
+        }
     }
+    (best_nodes, best_quality)
 }
 
 fn element_quality_for_nodes(
@@ -1357,7 +1442,7 @@ fn boundary_max_span(input: &BoundaryMeshInput) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{validate_analysis_mesh, MeshKindRequest, SizingSample};
+    use crate::{validate_analysis_mesh, BoundaryMeshTriangle, MeshKindRequest, SizingSample};
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
         SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
@@ -1597,6 +1682,99 @@ mod tests {
             .all(|face| !face.adjacent_volume_element_ids.is_empty()));
     }
 
+    #[test]
+    fn occupied_cells_keep_largest_connected_component() {
+        let grid = StructuredGrid {
+            x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            y: vec![0.0, 1.0],
+            z: vec![0.0, 1.0],
+        };
+        let occupied = vec![true, true, false, true];
+
+        let retained = largest_connected_occupied_component(&grid, occupied);
+
+        assert_eq!(retained, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn boundary_projection_accepts_quality_preserving_move() {
+        let input = BoundaryMeshInput {
+            mesh_id: "projection_surface".to_string(),
+            source_geometry_id: "geo_projection_surface".to_string(),
+            source_geometry_revision: 1,
+            source_geometry_sha256: None,
+            vertices: vec![[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [0.0, 10.0, 0.0]],
+            triangles: vec![BoundaryMeshTriangle {
+                triangle_id: 0,
+                node_ids: [0, 1, 2],
+                region_ids: vec!["region_surface".to_string()],
+                provenance: Vec::new(),
+            }],
+            bounds_min_m: [-10.0, -10.0, 0.0],
+            bounds_max_m: [10.0, 10.0, 2.0],
+            region_ids: vec!["region_surface".to_string()],
+        };
+        let nodes = vec![
+            AnalysisMeshNode {
+                node_id: 1,
+                coordinates_m: [0.0, 0.0, 0.5],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 2,
+                coordinates_m: [1.0, 0.0, 0.5],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 3,
+                coordinates_m: [0.0, 1.0, 0.5],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 4,
+                coordinates_m: [0.0, 0.0, 2.0],
+                provenance: Vec::new(),
+            },
+        ];
+        let volume_elements = vec![AnalysisVolumeElement {
+            element_id: "tet_1".to_string(),
+            kind: VolumeElementKind::Tet4,
+            node_ids: vec![1, 2, 3, 4],
+            material_region_id: "region_surface".to_string(),
+            provenance: Vec::new(),
+        }];
+        let boundary_faces = vec![AnalysisBoundaryFace {
+            face_id: "bf_1".to_string(),
+            kind: BoundaryElementKind::Tri3,
+            node_ids: vec![1, 2, 3],
+            adjacent_volume_element_ids: vec!["tet_1".to_string()],
+            region_ids: vec!["region_surface".to_string()],
+            provenance: Vec::new(),
+        }];
+        let original_quality = quality_report(
+            element_quality_for_nodes(&volume_elements, &nodes).expect("quality"),
+            boundary_projection_errors(&input, &boundary_faces, &nodes),
+        );
+
+        let (projected_nodes, projected_quality) = project_boundary_nodes_if_quality_improves(
+            &input,
+            nodes,
+            &volume_elements,
+            &boundary_faces,
+            original_quality.clone(),
+        );
+
+        assert!(
+            projected_quality.max_boundary_projection_error_m
+                < original_quality.max_boundary_projection_error_m
+        );
+        assert!(
+            projected_quality.min_scaled_jacobian
+                >= QualityThresholds::default().min_scaled_jacobian
+        );
+        assert!(projected_nodes[0].coordinates_m[2] < 0.5);
+    }
+
     fn all_nodes_are_referenced(mesh: &AnalysisMeshArtifact) -> bool {
         mesh.nodes.iter().all(|node| {
             mesh.volume_elements
@@ -1804,12 +1982,11 @@ mod tests {
 
         assert!(mesh.volume_elements.len() <= 48);
         assert_eq!(mesh.volume_elements.len(), 48);
-        assert!(
-            mesh.sizing
-                .rejected_samples
-                .iter()
-                .any(|rejection| rejection.status == "skipped_budget")
-        );
+        assert!(mesh
+            .sizing
+            .rejected_samples
+            .iter()
+            .any(|rejection| rejection.status == "skipped_budget"));
     }
 
     #[test]

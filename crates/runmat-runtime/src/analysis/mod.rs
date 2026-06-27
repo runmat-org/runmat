@@ -37,13 +37,13 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
     FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
+use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
-    structural_static_default_refinement_indicators, validate_analysis_mesh,
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, AnalysisMeshArtifact, ElementFamilyHint,
-    MeshConnectivityClass, RefinementIndicatorAvailability, RefinementIndicatorSample,
-    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate,
+    validate_analysis_mesh, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
+    AnalysisMeshArtifact, ElementFamilyHint, MeshConnectivityClass,
+    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
+    RefinementStrategy, SizingFieldUpdate,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -180,13 +180,13 @@ pub use contracts::{
     TransientIntegrationMethod, TransientResultsData,
 };
 pub use fea_document::{
-    FeaResolvedDocument, is_fea_file_path, load_fea_document_from_path_async,
-    parse_and_resolve_fea_document,
+    is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
+    FeaResolvedDocument,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
-    AnalysisFigureGenerationOptions, AnalysisFigureMeshSource, AnalysisGeneratedFigure,
-    AnalysisGeneratedFigureKind, analysis_generate_study_run_figures,
+    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
+    AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
@@ -1357,8 +1357,9 @@ pub fn analysis_run_study_op(
             Ok((run, run_options_to_json(&options), Some(options), None))
         }
     }?;
-    let refined_analysis_mesh_artifact_path =
-        refined_analysis_mesh_artifact.as_ref().map(|artifact| artifact.path.clone());
+    let refined_analysis_mesh_artifact_path = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.path.clone());
     let refinement_effect = refined_analysis_mesh_artifact
         .as_ref()
         .map(|artifact| artifact.refinement_effect.clone());
@@ -2198,7 +2199,12 @@ pub fn analysis_run_modal_with_options_op(
             result.run_status,
             result.publishable,
             nonlinear.failed_increments,
-            nonlinear.iteration_counts.iter().copied().max().unwrap_or(0),
+            nonlinear
+                .iteration_counts
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0),
             nonlinear.line_search_backtracks,
             nonlinear.tangent_rebuild_count,
             nonlinear
@@ -2286,7 +2292,10 @@ pub fn analysis_run_acoustic_with_options_op(
             "fea.run_acoustic requires at least one acoustic material with density and sound-speed data",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("material_count".to_string(), model.materials.len().to_string()),
+                (
+                    "material_count".to_string(),
+                    model.materials.len().to_string(),
+                ),
             ]),
         ));
     }
@@ -2752,7 +2761,10 @@ fn solve_acoustic_harmonic(
                     domain.spacing[2],
                     domain.boundary_node_count,
                     domain.average_node_degree(),
-                    source_real.iter().filter(|value| value.abs() > 1.0e-12).count(),
+                    source_real
+                        .iter()
+                        .filter(|value| value.abs() > 1.0e-12)
+                        .count(),
                     domain.volume_m3(),
                 ),
             },
@@ -2806,7 +2818,11 @@ fn solve_acoustic_harmonic(
                     sweep_bandwidth_hz,
                     sweep_peak_pressure_pa,
                     sweep_residual_norm,
-                    if sweep_frequencies_hz.is_empty() { 0.0 } else { 1.0 }
+                    if sweep_frequencies_hz.is_empty() {
+                        0.0
+                    } else {
+                        1.0
+                    }
                 ),
             },
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -9585,15 +9601,20 @@ fn solid_mesh_quality_reasons(
             ),
         });
     }
-    if let Some(threshold_m) = boundary_projection_warning_threshold_m(mesh) {
+    if let Some(thresholds) = boundary_projection_warning_thresholds_m(mesh) {
         if !mesh.quality.max_boundary_projection_error_m.is_finite()
-            || mesh.quality.max_boundary_projection_error_m > threshold_m
+            || !mesh.quality.mean_boundary_projection_error_m.is_finite()
+            || mesh.quality.max_boundary_projection_error_m > thresholds.max_error_m
+            || mesh.quality.mean_boundary_projection_error_m > thresholds.mean_error_m
         {
             reasons.push(QualityReason {
                 code: QualityReasonCode::SolidMeshBoundaryProjectionWarn,
                 detail: format!(
-                    "analysis mesh max_boundary_projection_error_m={} exceeds warning threshold {}; boundary faces are a carved-grid approximation of the source surface",
-                    mesh.quality.max_boundary_projection_error_m, threshold_m
+                    "analysis mesh max_boundary_projection_error_m={} or mean_boundary_projection_error_m={} exceeds warning thresholds max={} mean={}; boundary faces are a carved-grid approximation of the source surface",
+                    mesh.quality.max_boundary_projection_error_m,
+                    mesh.quality.mean_boundary_projection_error_m,
+                    thresholds.max_error_m,
+                    thresholds.mean_error_m
                 ),
             });
         }
@@ -9601,11 +9622,21 @@ fn solid_mesh_quality_reasons(
     reasons
 }
 
-fn boundary_projection_warning_threshold_m(mesh: &AnalysisMeshArtifact) -> Option<f64> {
+struct BoundaryProjectionWarningThresholds {
+    max_error_m: f64,
+    mean_error_m: f64,
+}
+
+fn boundary_projection_warning_thresholds_m(
+    mesh: &AnalysisMeshArtifact,
+) -> Option<BoundaryProjectionWarningThresholds> {
     mesh.sizing
         .global_target_size_m
         .filter(|target_size_m| target_size_m.is_finite() && *target_size_m > 0.0)
-        .map(|target_size_m| target_size_m * 0.25)
+        .map(|target_size_m| BoundaryProjectionWarningThresholds {
+            max_error_m: target_size_m * 0.5,
+            mean_error_m: target_size_m * 0.25,
+        })
 }
 
 fn legacy_surrogate_mesh_basis_reasons(
@@ -9695,6 +9726,16 @@ fn material_coverage_gap_detail(
                 model.materials.len()
             )
         });
+    }
+    if model.materials.len() == 1 {
+        let material_id = model.materials[0].material_id.as_str();
+        if model
+            .material_assignments
+            .iter()
+            .all(|assignment| assignment.assigned_material_id == material_id)
+        {
+            return None;
+        }
     }
     let assigned_region_ids = model
         .material_assignments
@@ -13412,6 +13453,7 @@ fn generate_and_persist_study_analysis_mesh(
             ]),
         )
     })?;
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
     validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
         operation_error(
@@ -13468,6 +13510,176 @@ fn generate_and_persist_study_analysis_mesh(
             ]),
         )
     })
+}
+
+fn attach_requested_boundary_regions_to_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let Some(model) = spec.model.as_ref() else {
+        return;
+    };
+    let mut requested_region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .chain(
+            model
+                .boundary_conditions
+                .iter()
+                .map(|condition| condition.region_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    requested_region_ids.sort();
+    requested_region_ids.dedup();
+
+    for region_id in requested_region_ids {
+        if analysis_mesh_has_boundary_region(mesh, &region_id) {
+            continue;
+        }
+        let Some(source_centroid) = source_region_surface_centroid(&spec.geometry, &region_id)
+        else {
+            continue;
+        };
+        let Some(face_index) = nearest_analysis_boundary_face_index(mesh, source_centroid) else {
+            continue;
+        };
+        let face = &mut mesh.boundary_faces[face_index];
+        if !face
+            .region_ids
+            .iter()
+            .any(|existing| existing == &region_id)
+        {
+            face.region_ids.push(region_id);
+            face.region_ids.sort();
+            face.region_ids.dedup();
+        }
+    }
+}
+
+fn analysis_mesh_has_boundary_region(mesh: &AnalysisMeshArtifact, region_id: &str) -> bool {
+    mesh.boundary_faces
+        .iter()
+        .any(|face| face.region_ids.iter().any(|existing| existing == region_id))
+}
+
+fn source_region_surface_centroid(geometry: &GeometryAsset, region_id: &str) -> Option<[f64; 3]> {
+    let mut weighted = [0.0_f64; 3];
+    let mut total_area = 0.0_f64;
+    for mapping in geometry
+        .region_entity_mappings
+        .iter()
+        .filter(|mapping| mapping.region_id == region_id)
+        .filter(|mapping| matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element))
+    {
+        let Some(surface) = geometry
+            .surface_meshes
+            .iter()
+            .find(|surface| surface.mesh_id == mapping.mesh_id)
+        else {
+            continue;
+        };
+        for (triangle_index, triangle) in surface.triangles.iter().enumerate() {
+            if !mapping.contains_entity(triangle_index as u64) {
+                continue;
+            }
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let area = triangle_area(vertices);
+            if !area.is_finite() || area <= 0.0 {
+                continue;
+            }
+            let centroid = triangle_centroid(vertices);
+            for axis in 0..3 {
+                weighted[axis] += centroid[axis] * area;
+            }
+            total_area += area;
+        }
+    }
+    if total_area <= 0.0 || !total_area.is_finite() {
+        return None;
+    }
+    Some([
+        weighted[0] / total_area,
+        weighted[1] / total_area,
+        weighted[2] / total_area,
+    ])
+}
+
+fn surface_triangle_vertices(
+    surface: &runmat_geometry_core::SurfaceMesh,
+    triangle: [u32; 3],
+) -> Option<[[f64; 3]; 3]> {
+    Some([
+        *surface.vertices.get(triangle[0] as usize)?,
+        *surface.vertices.get(triangle[1] as usize)?,
+        *surface.vertices.get(triangle[2] as usize)?,
+    ])
+}
+
+fn triangle_centroid(vertices: [[f64; 3]; 3]) -> [f64; 3] {
+    [
+        (vertices[0][0] + vertices[1][0] + vertices[2][0]) / 3.0,
+        (vertices[0][1] + vertices[1][1] + vertices[2][1]) / 3.0,
+        (vertices[0][2] + vertices[1][2] + vertices[2][2]) / 3.0,
+    ]
+}
+
+fn triangle_area(vertices: [[f64; 3]; 3]) -> f64 {
+    let ab = [
+        vertices[1][0] - vertices[0][0],
+        vertices[1][1] - vertices[0][1],
+        vertices[1][2] - vertices[0][2],
+    ];
+    let ac = [
+        vertices[2][0] - vertices[0][0],
+        vertices[2][1] - vertices[0][1],
+        vertices[2][2] - vertices[0][2],
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+}
+
+fn nearest_analysis_boundary_face_index(
+    mesh: &AnalysisMeshArtifact,
+    point_m: [f64; 3],
+) -> Option<usize> {
+    mesh.boundary_faces
+        .iter()
+        .enumerate()
+        .filter_map(|(index, face)| {
+            let centroid = analysis_boundary_face_centroid(mesh, &face.node_ids)?;
+            Some((index, vector_distance_m(centroid, point_m)))
+        })
+        .filter(|(_, distance)| distance.is_finite())
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index)
+}
+
+fn analysis_boundary_face_centroid(
+    mesh: &AnalysisMeshArtifact,
+    node_ids: &[u32],
+) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in node_ids {
+        let node = mesh.nodes.iter().find(|node| node.node_id == *node_id)?;
+        for (axis, value) in node.coordinates_m.iter().enumerate() {
+            centroid[axis] += *value;
+        }
+    }
+    for value in &mut centroid {
+        *value /= node_ids.len() as f64;
+    }
+    Some(centroid)
 }
 
 #[derive(Debug, Clone)]
@@ -13848,11 +14060,8 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_magnetic_flux_density = magnetic_flux_density_values.is_some();
-    let electric_field_values = analysis_field_magnitudes(
-        fields,
-        "em.electric_field_real",
-        mesh.volume_elements.len(),
-    );
+    let electric_field_values =
+        analysis_field_magnitudes(fields, "em.electric_field_real", mesh.volume_elements.len());
     let has_electric_field = electric_field_values.is_some();
     let current_density_values = analysis_field_magnitudes(
         fields,
@@ -13860,11 +14069,8 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_current_density = current_density_values.is_some();
-    let electromagnetic_energy_density_values = analysis_field_magnitudes(
-        fields,
-        "em.energy_density",
-        mesh.volume_elements.len(),
-    );
+    let electromagnetic_energy_density_values =
+        analysis_field_magnitudes(fields, "em.energy_density", mesh.volume_elements.len());
     let has_electromagnetic_energy_density = electromagnetic_energy_density_values.is_some();
     let acoustic_pressure_values = analysis_field_magnitudes(
         fields,
@@ -13899,8 +14105,11 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_cht_interface_temperature_jump = cht_interface_temperature_jump_values.is_some();
-    let cht_fluid_velocity_values =
-        analysis_field_magnitudes(fields, FEA_FIELD_CHT_FLUID_VELOCITY, mesh.volume_elements.len());
+    let cht_fluid_velocity_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_CHT_FLUID_VELOCITY,
+        mesh.volume_elements.len(),
+    );
     let has_cht_fluid_velocity = cht_fluid_velocity_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
@@ -13934,8 +14143,7 @@ fn append_solved_adaptive_mesh_summary(
                     && ((key.name == "flux_density_gradient" && has_magnetic_flux_density)
                         || (key.name == "electric_field_gradient" && has_electric_field)
                         || (key.name == "current_density_gradient" && has_current_density)
-                        || (key.name == "energy_density"
-                            && has_electromagnetic_energy_density)))
+                        || (key.name == "energy_density" && has_electromagnetic_energy_density)))
                 || (key.namespace == "acoustic"
                     && ((key.name == "pressure_gradient" && has_acoustic_pressure)
                         || (key.name == "pressure_curvature" && has_acoustic_pressure)))
@@ -13945,8 +14153,7 @@ fn append_solved_adaptive_mesh_summary(
                         || (key.name == "vorticity" && has_cfd_vorticity)
                         || (key.name == "wall_shear" && has_cfd_wall_shear)))
                 || (key.namespace == "cht"
-                    && ((key.name == "interface_heat_flux_jump"
-                        && has_cht_interface_heat_flux)
+                    && ((key.name == "interface_heat_flux_jump" && has_cht_interface_heat_flux)
                         || (key.name == "interface_temperature_jump"
                             && has_cht_interface_temperature_jump)
                         || (key.name == "fluid_boundary_layer" && has_cht_fluid_velocity)));
@@ -14029,12 +14236,9 @@ fn append_solved_adaptive_mesh_summary(
         let samples =
             structural_boundary_region_samples(&mesh, boundary_load_region_ids.as_slice());
         if let Some(options) = load_focus_options {
-            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
-                &samples,
-                "structural.load_regions",
-                options,
-            )
-            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            let (new_markers, new_sizing_update) =
+                build_refinement_markers_from_samples(&samples, "structural.load_regions", options)
+                    .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
             markers.extend(new_markers);
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
@@ -14261,8 +14465,7 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
-    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
-    {
+    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
         if element_budget_reached {
             AdaptiveConvergenceStatus::ElementBudgetReached
         } else if markers.is_empty() {
@@ -14558,7 +14761,10 @@ fn structural_boundary_region_samples(
     if region_ids.is_empty() {
         return Vec::new();
     }
-    let region_ids = region_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    let region_ids = region_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
     let mut sampled_entity_ids = HashSet::new();
     let mut samples = Vec::new();
     for face in &mesh.boundary_faces {
