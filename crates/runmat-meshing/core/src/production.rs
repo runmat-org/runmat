@@ -22,7 +22,7 @@ use crate::{
     sizing::MeshSizingField,
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
-        discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
+        discretize_cad_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
         SurfaceDiscretizationOptions,
     },
     surface_recovery::{
@@ -115,8 +115,12 @@ pub fn prepare_production_mesh(
         .map_err(ProductionMeshError::CadEvaluation)?;
     let curves = discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
         .map_err(ProductionMeshError::Curve)?;
-    let surface = discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
-        .map_err(ProductionMeshError::Surface)?;
+    let surface = discretize_cad_surfaces(
+        &topology,
+        &cad_evaluation,
+        SurfaceDiscretizationOptions::default(),
+    )
+    .map_err(ProductionMeshError::Surface)?;
     let surface_validation =
         validate_surface_discretization(&topology, &surface, SurfaceValidationOptions::default())
             .map_err(ProductionMeshError::SurfaceValidation)?;
@@ -380,6 +384,10 @@ fn production_backend_summary(
             .closed_source_edge_loop_count,
         surface_projection_error_m: preparation.surface_validation.max_projection_error_m,
         surface_face_coverage_ratio: preparation.surface_validation.face_coverage_ratio,
+        surface_cad_face_count: surface_cad_face_count(&preparation.surface),
+        surface_max_cad_projection_error_m: surface_max_cad_projection_error_m(
+            &preparation.surface,
+        ),
         volume_candidate_count: preparation.volume_candidates.components.len(),
         interior_seed_point_count: preparation.tet_candidates.interior_seed_points.len(),
         tet_candidate_count: preparation.tet_candidates.tets.len(),
@@ -420,6 +428,23 @@ fn cad_evaluation_source_label(source: CadEvaluationSource) -> &'static str {
         CadEvaluationSource::ParametricCad => "parametric_cad",
         CadEvaluationSource::PlanarFacetApproximation => "planar_facet_approximation",
     }
+}
+
+fn surface_cad_face_count(surface: &SurfaceDiscretization) -> usize {
+    surface
+        .elements
+        .iter()
+        .filter_map(|element| element.cad_face_id.as_ref())
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+fn surface_max_cad_projection_error_m(surface: &SurfaceDiscretization) -> f64 {
+    surface
+        .elements
+        .iter()
+        .map(|element| element.max_projection_error_m)
+        .fold(0.0_f64, f64::max)
 }
 
 fn boundary_face_recovery_ratio(boundary_faces: &[AnalysisBoundaryFace]) -> f64 {
@@ -624,6 +649,16 @@ mod tests {
             0.0
         );
         assert_eq!(preparation.surface.elements.len(), 12);
+        assert_eq!(surface_cad_face_count(&preparation.surface), 12);
+        assert_eq!(
+            surface_max_cad_projection_error_m(&preparation.surface),
+            0.0
+        );
+        assert!(preparation
+            .surface
+            .elements
+            .iter()
+            .all(|element| element.cad_face_id.is_some()));
         assert_eq!(preparation.surface_validation.source_edge_loop_count, 18);
         assert_eq!(
             preparation.surface_validation.closed_source_edge_loop_count,
@@ -693,6 +728,8 @@ mod tests {
         assert_eq!(mesh.backend.surface_source_edge_loop_count, 18);
         assert_eq!(mesh.backend.surface_closed_edge_loop_count, 18);
         assert_eq!(mesh.backend.surface_face_coverage_ratio, 1.0);
+        assert_eq!(mesh.backend.surface_cad_face_count, 12);
+        assert_eq!(mesh.backend.surface_max_cad_projection_error_m, 0.0);
         assert_eq!(mesh.backend.volume_candidate_count, 1);
         assert!(mesh.backend.tet_candidate_count > 12);
         assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);
