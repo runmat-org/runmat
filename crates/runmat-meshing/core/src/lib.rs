@@ -16,7 +16,8 @@ pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriang
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
-    RefinementStrategy, VolumeMeshingOptions,
+    RefinementIndicatorMode, RefinementIndicatorOverrides, RefinementStrategy,
+    VolumeMeshingOptions,
 };
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};

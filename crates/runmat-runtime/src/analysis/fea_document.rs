@@ -15,8 +15,9 @@ use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
 use runmat_meshing_core::{
     MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions, MeshTargetSize,
-    RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions, RefinementStrategy,
-    VolumeElementKind, VolumeMeshingOptions,
+    RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
+    RefinementIndicatorMode, RefinementIndicatorOverrides, RefinementStrategy, VolumeElementKind,
+    VolumeMeshingOptions,
 };
 use serde::de::{DeserializeOwned, Error as DeError};
 use serde::{Deserialize, Deserializer};
@@ -150,6 +151,8 @@ struct FeaMeshRefinementDocument {
     convergence: FeaRefinementConvergenceDocument,
     #[serde(default)]
     focus: FeaRefinementFocusDocument,
+    #[serde(default)]
+    indicators: BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
 }
 
 impl Default for FeaMeshRefinementDocument {
@@ -159,6 +162,7 @@ impl Default for FeaMeshRefinementDocument {
             max_iterations: default_refinement_max_iterations(),
             convergence: FeaRefinementConvergenceDocument::default(),
             focus: FeaRefinementFocusDocument::default(),
+            indicators: BTreeMap::new(),
         }
     }
 }
@@ -621,6 +625,7 @@ fn resolve_mesh_options(
                 .to_string(),
         );
     }
+    validate_refinement_indicators(&mesh.refinement.indicators)?;
 
     Ok(Some(VolumeMeshingOptions {
         kind: mesh.kind,
@@ -644,8 +649,72 @@ fn resolve_mesh_options(
                 curvature: mesh.refinement.focus.curvature,
                 small_features: mesh.refinement.focus.small_features,
             },
+            indicators: RefinementIndicatorOverrides {
+                namespaces: mesh.refinement.indicators.clone(),
+            },
         },
     }))
+}
+
+fn validate_refinement_indicators(
+    indicators: &BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
+) -> Result<(), String> {
+    for (namespace, names) in indicators {
+        let allowed = allowed_refinement_indicator_names(namespace)
+            .ok_or_else(|| format!("unknown mesh.refinement.indicators namespace `{namespace}`"))?;
+        for name in names.keys() {
+            if !allowed.contains(&name.as_str()) {
+                return Err(format!(
+                    "unknown mesh.refinement.indicators.{namespace}.{name}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn allowed_refinement_indicator_names(namespace: &str) -> Option<&'static [&'static str]> {
+    match namespace {
+        "structural" => Some(&[
+            "stress_gradient",
+            "strain_energy_density",
+            "displacement_gradient",
+            "plastic_strain",
+            "contact_pressure",
+            "contact_gap",
+        ]),
+        "modal" => Some(&[
+            "mode_shape_curvature",
+            "modal_strain_energy",
+            "frequency_residual",
+        ]),
+        "thermal" => Some(&["temperature_gradient", "heat_flux_gradient", "heat_source"]),
+        "thermo_mechanical" => {
+            Some(&["thermal_gradient", "thermal_stress", "structural_von_mises"])
+        }
+        "electro_thermal" => Some(&[
+            "electric_field_gradient",
+            "current_density_gradient",
+            "joule_heat_density",
+            "thermal_gradient",
+        ]),
+        "electromagnetic" => Some(&[
+            "flux_density_gradient",
+            "electric_field_gradient",
+            "current_density_gradient",
+            "energy_density",
+        ]),
+        "acoustic" => Some(&["pressure_gradient", "wavelength"]),
+        "cfd" => Some(&[
+            "velocity_gradient",
+            "pressure_gradient",
+            "vorticity",
+            "wall_shear",
+            "boundary_layer",
+        ]),
+        "coupling" => Some(&["interface_jump", "interface_flux", "interface_residual"]),
+        _ => None,
+    }
 }
 
 async fn load_geometry(
@@ -1582,6 +1651,16 @@ refinement:
     interfaces: normal
     curvature: true
     small_features: true
+  indicators:
+    structural:
+      stress_gradient: true
+      displacement_gradient: false
+      plastic_strain: auto
+    modal:
+      modal_strain_energy: on
+      frequency_residual: off
+    thermal:
+      temperature_gradient: true
 "#,
         )
         .expect("mesh document should parse");
@@ -1612,6 +1691,31 @@ refinement:
         );
         assert!(options.refinement.focus.curvature);
         assert!(options.refinement.focus.small_features);
+        let indicators = &options.refinement.indicators.namespaces;
+        assert_eq!(
+            indicators["structural"]["stress_gradient"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["structural"]["displacement_gradient"],
+            RefinementIndicatorMode::Off
+        );
+        assert_eq!(
+            indicators["structural"]["plastic_strain"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["modal"]["modal_strain_energy"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["modal"]["frequency_residual"],
+            RefinementIndicatorMode::Off
+        );
+        assert_eq!(
+            indicators["thermal"]["temperature_gradient"],
+            RefinementIndicatorMode::On
+        );
     }
 
     #[test]
@@ -1668,5 +1772,39 @@ target_size: -0.002
         .expect_err("negative target size should fail during parsing");
 
         assert!(err.to_string().contains("mesh.target_size"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unknown_refinement_indicators() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    structural:
+      stress_gradient: true
+      made_up_indicator: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_mesh_options(Some(&mesh))
+            .expect_err("unknown refinement indicator should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators.structural.made_up_indicator"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    made_up_physics:
+      stress_gradient: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_mesh_options(Some(&mesh))
+            .expect_err("unknown refinement namespace should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators namespace `made_up_physics`"));
     }
 }
