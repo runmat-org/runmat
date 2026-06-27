@@ -9365,6 +9365,8 @@ pub fn analysis_run_linear_static_with_options(
     let field_topology_reasons =
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
     let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
+    let legacy_surrogate_reasons =
+        legacy_surrogate_mesh_basis_reasons(analysis_mesh.as_ref(), prep_context.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
         matches!(
             reason.code,
@@ -9382,6 +9384,8 @@ pub fn analysis_run_linear_static_with_options(
         QualityGate::Fail
     } else if !field_topology_reasons.is_empty() {
         QualityGate::Fail
+    } else if !legacy_surrogate_reasons.is_empty() {
+        QualityGate::Warn
     } else if !solid_mesh_reasons.is_empty() {
         QualityGate::Warn
     } else if has_material_assignment_conflict {
@@ -9399,6 +9403,7 @@ pub fn analysis_run_linear_static_with_options(
     }
     quality_reasons.extend(solid_mesh_reasons);
     quality_reasons.extend(field_topology_reasons);
+    quality_reasons.extend(legacy_surrogate_reasons);
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
@@ -9581,6 +9586,19 @@ fn solid_mesh_quality_reasons(
         });
     }
     reasons
+}
+
+fn legacy_surrogate_mesh_basis_reasons(
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+    prep_context: Option<&AnalysisRunPrepContext>,
+) -> Vec<QualityReason> {
+    if analysis_mesh.is_some() || prep_context.is_none() {
+        return Vec::new();
+    }
+    vec![QualityReason {
+        code: QualityReasonCode::LegacySurrogateMeshBasis,
+        detail: "linear static structural result used the legacy prep/surrogate mesh basis; provide a solid analysis mesh for production-eligible solid FEA".to_string(),
+    }]
 }
 
 fn boundary_region_mapping_reasons(

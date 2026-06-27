@@ -2531,14 +2531,24 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.operation, "fea.run_linear_static");
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
     assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
-    assert!(!envelope
-        .data
-        .run
-        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-        .expect("structural displacement field should be present")
-        .is_empty());
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert!(
+        !envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .is_empty()
+    );
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
+    assert!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis)
+    );
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);

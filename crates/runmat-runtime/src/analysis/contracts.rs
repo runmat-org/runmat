@@ -331,6 +331,7 @@ pub enum QualityReasonCode {
     SolidMeshMaterialCoverageIncomplete,
     SolidMeshQualityMinJacobianFailed,
     SolidMeshQualityAspectRatioWarn,
+    LegacySurrogateMeshBasis,
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,
