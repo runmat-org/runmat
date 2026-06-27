@@ -1326,27 +1326,6 @@ pub fn analysis_run_study_op(
         }
     }?;
 
-    append_solved_adaptive_mesh_summary(
-        spec,
-        analysis_mesh_artifact_path.as_deref(),
-        &run_envelope,
-    )
-    .map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to update analysis mesh adaptive summary: {err}"),
-            BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
-        )
-    })?;
-
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "run",
@@ -9288,6 +9267,31 @@ pub fn analysis_run_linear_static_with_options(
     })?;
 
     let mut run = run;
+    append_solved_adaptive_mesh_summary(
+        options.analysis_mesh_artifact_path.as_deref(),
+        &run.fields,
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_OPERATION,
+            ANALYSIS_RUN_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to update analysis mesh adaptive summary: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                options
+                    .analysis_mesh_artifact_path
+                    .clone()
+                    .unwrap_or_default(),
+            )]),
+        )
+    })?;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
 
@@ -13411,20 +13415,12 @@ fn attach_initial_adaptive_mesh_summary(
 }
 
 fn append_solved_adaptive_mesh_summary(
-    spec: &AnalysisStudySpec,
     analysis_mesh_artifact_path: Option<&str>,
-    run_envelope: &OperationEnvelope<AnalysisRunResult>,
+    fields: &[AnalysisField],
 ) -> Result<(), String> {
-    if spec.run_kind != AnalysisRunKind::LinearStatic {
-        return Ok(());
-    }
     let Some(path) = analysis_mesh_artifact_path else {
         return Ok(());
     };
-    let Some(options) = spec.mesh_options.as_ref() else {
-        return Ok(());
-    };
-
     let path_buf = PathBuf::from(path);
     let mut payload: serde_json::Value = serde_json::from_slice(
         &fs_read(&path_buf)
@@ -13433,21 +13429,22 @@ fn append_solved_adaptive_mesh_summary(
     .map_err(|err| format!("failed to parse analysis mesh artifact: {err}"))?;
     let mut mesh: AnalysisMeshArtifact = serde_json::from_value(payload["mesh"].clone())
         .map_err(|err| format!("failed to decode analysis mesh payload: {err}"))?;
-
-    let defaults = match spec.create_model_intent.profile {
-        AnalysisCreateModelProfile::LinearStaticStructural => {
-            structural_static_default_refinement_indicators()
-        }
-        _ => Vec::new(),
+    let options = payload
+        .get("mesh_options")
+        .cloned()
+        .map(serde_json::from_value::<runmat_meshing_core::VolumeMeshingOptions>)
+        .transpose()
+        .map_err(|err| format!("failed to decode analysis mesh options: {err}"))?;
+    let Some(options) = options.as_ref() else {
+        return Ok(());
     };
+
+    let defaults = structural_static_default_refinement_indicators();
     if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
         return Ok(());
     }
 
-    let von_mises_values = analysis_field_values(
-        &run_envelope.data.run.fields,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
-    );
+    let von_mises_values = analysis_field_values(fields, FEA_FIELD_STRUCTURAL_VON_MISES);
     let has_von_mises = von_mises_values
         .map(|values| values.len() == mesh.volume_elements.len())
         .unwrap_or(false);

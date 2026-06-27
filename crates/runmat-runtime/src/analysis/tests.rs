@@ -4921,6 +4921,70 @@ fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
         .all(|sample| sample.current_size_m.is_finite() && sample.current_size_m > 0.0));
 }
 
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        vec![2],
+        vec![10.0, 1000.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(adaptive_iterations.len(), 1);
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(!adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
+    assert!(!payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .is_empty());
+}
+
 fn analysis_mesh_with_boundary_regions(
     fixed_region_ids: &[&str],
     load_region_ids: &[&str],
