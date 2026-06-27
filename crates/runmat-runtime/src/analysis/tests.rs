@@ -5212,6 +5212,49 @@ fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_uses_persisted_analysis_context() {
+    let root = temp_artifact_root("append-solved-adaptive-modal-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = minimal_analysis_mesh();
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "modal_structural",
+            "run_kind": "modal",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("modal")
+            && indicator["name"].as_str() == Some("mode_shape_curvature")
+            && indicator["status"].as_str() == Some("skipped_missing_field")
+    ));
+    assert!(!indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("structural")
+            && indicator["name"].as_str() == Some("stress_gradient")
+    ));
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
     let root = temp_artifact_root("append-solved-adaptive-budget-summary");
     let _ = fs::remove_dir_all(&root);

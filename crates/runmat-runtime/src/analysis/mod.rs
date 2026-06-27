@@ -13387,6 +13387,8 @@ fn generate_and_persist_study_analysis_mesh(
             "study_id": spec.study_id.clone(),
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
+            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
+            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "mesh_options": options,
             "mesh": mesh,
         }),
@@ -13559,6 +13561,8 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "geometry_id": spec.geometry.geometry_id.clone(),
             "geometry_revision": spec.geometry.revision,
             "source_analysis_mesh_artifact_path": path,
+            "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
+            "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "mesh_options": options,
             "mesh": refined_mesh,
         }),
@@ -13592,12 +13596,10 @@ fn attach_initial_adaptive_mesh_summary(
     let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
         Vec::new()
     } else {
-        match spec.create_model_intent.profile {
-            AnalysisCreateModelProfile::LinearStaticStructural => {
-                structural_static_default_refinement_indicators()
-            }
-            _ => Vec::new(),
-        }
+        default_refinement_indicators_for_context(
+            analysis_refinement_profile_label(spec.create_model_intent.profile),
+            analysis_refinement_run_kind_label(spec.run_kind),
+        )
     };
     if defaults.is_empty()
         && options.refinement.indicators.namespaces.is_empty()
@@ -13632,6 +13634,45 @@ fn attach_initial_adaptive_mesh_summary(
     });
 }
 
+fn default_refinement_indicators_for_context(
+    profile: &str,
+    run_kind: &str,
+) -> Vec<runmat_meshing_core::RefinementIndicatorKey> {
+    runmat_meshing_core::default_refinement_indicators_for_analysis(profile, run_kind)
+}
+
+fn analysis_refinement_profile_label(profile: AnalysisCreateModelProfile) -> &'static str {
+    match profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
+        AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
+        AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
+        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
+        AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
+        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
+        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
+        AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
+        AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
+        AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
+        AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
+        AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
+    }
+}
+
+fn analysis_refinement_run_kind_label(run_kind: AnalysisRunKind) -> &'static str {
+    match run_kind {
+        AnalysisRunKind::LinearStatic => "linear_static",
+        AnalysisRunKind::Modal => "modal",
+        AnalysisRunKind::Acoustic => "acoustic",
+        AnalysisRunKind::Thermal => "thermal",
+        AnalysisRunKind::Transient => "transient",
+        AnalysisRunKind::Cfd => "cfd",
+        AnalysisRunKind::Cht => "cht",
+        AnalysisRunKind::Fsi => "fsi",
+        AnalysisRunKind::Nonlinear => "nonlinear",
+        AnalysisRunKind::Electromagnetic => "electromagnetic",
+    }
+}
+
 fn append_solved_adaptive_mesh_summary(
     analysis_mesh_artifact_path: Option<&str>,
     fields: &[AnalysisField],
@@ -13657,10 +13698,18 @@ fn append_solved_adaptive_mesh_summary(
         return Ok(());
     };
 
+    let profile_label = payload
+        .get("analysis_profile")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("linear_static_structural");
+    let run_kind_label = payload
+        .get("run_kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("linear_static");
     let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
         Vec::new()
     } else {
-        structural_static_default_refinement_indicators()
+        default_refinement_indicators_for_context(profile_label, run_kind_label)
     };
     if defaults.is_empty()
         && options.refinement.indicators.namespaces.is_empty()
