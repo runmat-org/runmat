@@ -10,7 +10,8 @@ pub mod validation;
 pub mod volume;
 
 pub use adaptive::{
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
+    plan_refinement_indicators, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
+    RefinementIndicatorAvailability, RefinementIndicatorKey, RefinementIndicatorStatus,
     RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
 };
 pub use artifact::{
