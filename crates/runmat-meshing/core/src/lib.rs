@@ -10,10 +10,11 @@ pub mod validation;
 pub mod volume;
 
 pub use adaptive::{
-    plan_refinement_indicators, structural_static_default_refinement_indicators,
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorAvailability,
-    RefinementIndicatorKey, RefinementIndicatorStatus, RefinementIndicatorSummary,
-    RefinementMarker, SizingFieldUpdate,
+    build_refinement_markers_from_samples, plan_refinement_indicators,
+    structural_static_default_refinement_indicators, AdaptiveConvergenceStatus,
+    AdaptiveIterationSummary, RefinementIndicatorAvailability, RefinementIndicatorKey,
+    RefinementIndicatorSample, RefinementIndicatorStatus, RefinementIndicatorSummary,
+    RefinementMarker, RefinementMarkerError, RefinementMarkerOptions, SizingFieldUpdate,
 };
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
