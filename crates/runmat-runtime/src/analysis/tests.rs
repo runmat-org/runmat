@@ -6032,6 +6032,45 @@ fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_f
         .all(|sample| sample["reason"].as_str() == Some("mesh.uniform_refinement")));
 }
 
+#[test]
+fn sizing_rejection_summary_groups_statuses_and_reasons() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.sizing.rejected_samples = vec![
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.1, 0.2, 0.3],
+            target_size_m: 0.01,
+            status: "skipped_quality".to_string(),
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: Some("mesh quality guard prevented local sizing breakpoint".to_string()),
+        },
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.2, 0.2, 0.3],
+            target_size_m: 0.02,
+            status: "skipped_quality".to_string(),
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: None,
+        },
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.5, 0.2, 0.3],
+            target_size_m: 0.01,
+            status: "skipped_budget".to_string(),
+            reason: None,
+            detail: None,
+        },
+    ];
+
+    let summary = sizing_rejection_summary(&mesh);
+
+    assert_eq!(summary["total"].as_u64(), Some(3));
+    assert_eq!(summary["by_status"]["skipped_quality"].as_u64(), Some(2));
+    assert_eq!(summary["by_status"]["skipped_budget"].as_u64(), Some(1));
+    assert_eq!(
+        summary["by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
+}
+
 fn analysis_mesh_with_boundary_regions(
     fixed_region_ids: &[&str],
     load_region_ids: &[&str],

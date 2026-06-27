@@ -13391,6 +13391,7 @@ fn generate_and_persist_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "sizing_rejections": sizing_rejection_summary(&mesh),
             "mesh": mesh,
         }),
     )
@@ -13566,6 +13567,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "sizing_rejections": sizing_rejection_summary(&refined_mesh),
             "mesh": refined_mesh,
         }),
     )
@@ -14370,6 +14372,24 @@ fn merge_sizing_update(target: &mut SizingFieldUpdate, update: SizingFieldUpdate
         (None, Some(right)) => Some(right),
         (None, None) => None,
     };
+}
+
+fn sizing_rejection_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
+    let mut by_status = BTreeMap::<String, usize>::new();
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    for rejection in &mesh.sizing.rejected_samples {
+        *by_status.entry(rejection.status.clone()).or_default() += 1;
+        let reason = rejection
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *by_reason.entry(reason).or_default() += 1;
+    }
+    serde_json::json!({
+        "total": mesh.sizing.rejected_samples.len(),
+        "by_status": by_status,
+        "by_reason": by_reason,
+    })
 }
 
 fn structural_stress_gradient_samples(
