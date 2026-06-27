@@ -2,6 +2,7 @@ pub mod dofs;
 pub mod elements;
 pub mod legacy_surrogate;
 pub mod solid;
+mod solid_boundary;
 
 use std::{collections::BTreeMap, fmt};
 
@@ -27,6 +28,7 @@ use self::{
     solid::{
         assemble_solid_stiffness_dense, solid_topology_from_analysis_mesh, SolidAssemblyError,
     },
+    solid_boundary::apply_analysis_mesh_structural_regions,
 };
 
 use crate::operator::OperatorSystem;
@@ -540,8 +542,9 @@ fn assemble_linear_system_impl(
         constrained[dof] = true;
         rhs[dof] = 0.0;
     }
+    let mut structural_wrench_lowering = Vec::new();
     if let (Some(mesh), Some(_)) = (analysis_mesh.as_ref(), solid_topology.as_ref()) {
-        apply_analysis_mesh_structural_regions(
+        structural_wrench_lowering = apply_analysis_mesh_structural_regions(
             model,
             mesh,
             &structural_dof_layout,
@@ -1051,7 +1054,7 @@ fn assemble_linear_system_impl(
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
-        structural_wrench_lowering: Vec::new(),
+        structural_wrench_lowering,
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
@@ -1715,80 +1718,6 @@ fn add_lumped_shell_mass_and_damping(
             damping_diag[dof] += 0.01;
         }
     }
-}
-
-fn apply_analysis_mesh_structural_regions(
-    model: &AnalysisModel,
-    mesh: &AnalysisMeshArtifact,
-    layout: &StructuralDofLayout,
-    constrained: &mut [bool],
-    rhs: &mut [f64],
-) {
-    rhs.fill(0.0);
-    constrained.fill(false);
-
-    for load in &model.loads {
-        let target_nodes = analysis_mesh_region_node_indices(mesh, &load.region_id);
-        if target_nodes.is_empty() {
-            continue;
-        }
-        let scale = 1.0 / target_nodes.len() as f64;
-        match load.kind {
-            LoadKind::Force { fx, fy, fz } | LoadKind::Wrench { fx, fy, fz, .. } => {
-                for node_index in target_nodes {
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, fx * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, fy * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, fz * scale);
-                }
-            }
-            LoadKind::BodyForce { gx, gy, gz } => {
-                let all_nodes = (0..mesh.nodes.len()).collect::<Vec<_>>();
-                let scale = 1.0 / all_nodes.len().max(1) as f64;
-                for node_index in all_nodes {
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, gx * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, gy * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, gz * scale);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for bc in &model.boundary_conditions {
-        let target_nodes = analysis_mesh_region_node_indices(mesh, &bc.region_id);
-        for node_index in target_nodes {
-            match bc.kind {
-                BoundaryConditionKind::Fixed | BoundaryConditionKind::PrescribedDisplacement => {
-                    for kind in [
-                        StructuralDofKind::Ux,
-                        StructuralDofKind::Uy,
-                        StructuralDofKind::Uz,
-                    ] {
-                        constrain_dof(layout, constrained, rhs, node_index, kind, 0.0);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-fn analysis_mesh_region_node_indices(mesh: &AnalysisMeshArtifact, region_id: &str) -> Vec<usize> {
-    let mut node_ids = Vec::<u32>::new();
-    for face in &mesh.boundary_faces {
-        if !face.region_ids.iter().any(|region| region == region_id) {
-            continue;
-        }
-        for node_id in &face.node_ids {
-            if !node_ids.contains(node_id) {
-                node_ids.push(*node_id);
-            }
-        }
-    }
-    node_ids
-        .into_iter()
-        .filter_map(|node_id| mesh.nodes.iter().position(|node| node.node_id == node_id))
-        .collect()
 }
 
 fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
@@ -3215,6 +3144,59 @@ mod tests {
         assert_eq!(summary.operator.rhs[10], -4.0);
     }
 
+    #[test]
+    fn analysis_mesh_boundary_regions_integrate_pressure_loads() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = Vec::new();
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "pressure_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Pressure { magnitude_pa: 12.0 },
+        }];
+        let mut mesh = tet4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
+
+        assert_close(summary.operator.rhs[1], -2.0);
+        assert_close(summary.operator.rhs[4], -2.0);
+        assert_close(summary.operator.rhs[10], -2.0);
+    }
+
+    #[test]
+    fn analysis_mesh_boundary_regions_lower_wrench_moments() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = Vec::new();
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "wrench_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Wrench {
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.0,
+                mx: 0.0,
+                my: 6.0,
+                mz: 0.0,
+                px: 0.0,
+                py: 0.0,
+                pz: 0.0,
+            },
+        }];
+        let mut mesh = tet4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
+
+        assert_eq!(summary.structural_wrench_lowering.len(), 1);
+        let lowering = &summary.structural_wrench_lowering[0];
+        assert_eq!(lowering.load_id, "wrench_tip");
+        assert_eq!(lowering.region_id, "tip");
+        assert!(lowering.moment_couple_applied);
+        assert_close(lowering.applied_moment_at_point[1], 6.0);
+        assert_close(lowering.moment_residual[1], 0.0);
+        assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+    }
+
     fn tet4_mesh() -> AnalysisMeshArtifact {
         AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -3262,6 +3244,13 @@ mod tests {
                 .collect(),
             provenance: Vec::new(),
         }
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= 1.0e-8,
+            "expected {expected}, got {actual}"
+        );
     }
 
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
