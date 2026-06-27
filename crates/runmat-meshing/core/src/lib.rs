@@ -1,3 +1,4 @@
+pub mod adaptive;
 pub mod artifact;
 pub mod boundary;
 pub mod options;
@@ -8,6 +9,10 @@ pub mod topology;
 pub mod validation;
 pub mod volume;
 
+pub use adaptive::{
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
+    RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
+};
 pub use artifact::{
     AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
     AnalysisVolumeElement,
