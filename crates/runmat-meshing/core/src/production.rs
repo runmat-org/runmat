@@ -12,6 +12,7 @@ use crate::{
         discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
         SurfaceDiscretizationOptions,
     },
+    tet_candidate::{form_tet_candidates, TetCandidateError, TetCandidateOptions, TetCandidateSet},
     volume_candidate::{
         prepare_volume_candidates, VolumeCandidateError, VolumeCandidateOptions, VolumeCandidateSet,
     },
@@ -24,6 +25,7 @@ pub struct ProductionMeshPreparation {
     pub curves: CurveDiscretization,
     pub surface: SurfaceDiscretization,
     pub volume_candidates: VolumeCandidateSet,
+    pub tet_candidates: TetCandidateSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,10 +34,12 @@ pub enum ProductionMeshError {
     Curve(CurveDiscretizationError),
     Surface(SurfaceDiscretizationError),
     VolumeCandidate(VolumeCandidateError),
+    TetCandidate(TetCandidateError),
     TetGenerationPending {
         component_count: usize,
         surface_element_count: usize,
         curve_element_count: usize,
+        candidate_tet_count: usize,
     },
 }
 
@@ -48,13 +52,15 @@ impl std::fmt::Display for ProductionMeshError {
             Self::VolumeCandidate(err) => {
                 write!(formatter, "volume candidate preparation failed: {err}")
             }
+            Self::TetCandidate(err) => write!(formatter, "Tet candidate formation failed: {err}"),
             Self::TetGenerationPending {
                 component_count,
                 surface_element_count,
                 curve_element_count,
+                candidate_tet_count,
             } => write!(
                 formatter,
-                "production Tet generation is pending after preparing {component_count} volume component(s), {surface_element_count} surface element(s), and {curve_element_count} curve element(s)"
+                "production Tet generation is pending after preparing {component_count} volume component(s), {surface_element_count} surface element(s), {curve_element_count} curve element(s), and {candidate_tet_count} candidate Tet element(s)"
             ),
         }
     }
@@ -73,12 +79,16 @@ pub fn prepare_production_mesh(
         .map_err(ProductionMeshError::Surface)?;
     let volume_candidates = prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
         .map_err(ProductionMeshError::VolumeCandidate)?;
+    let tet_candidates =
+        form_tet_candidates(&surface, &volume_candidates, TetCandidateOptions::default())
+            .map_err(ProductionMeshError::TetCandidate)?;
 
     Ok(ProductionMeshPreparation {
         topology,
         curves,
         surface,
         volume_candidates,
+        tet_candidates,
     })
 }
 
@@ -91,6 +101,7 @@ pub fn generate_production_analysis_mesh(
         component_count: preparation.volume_candidates.components.len(),
         surface_element_count: preparation.surface.elements.len(),
         curve_element_count: preparation.curves.elements.len(),
+        candidate_tet_count: preparation.tet_candidates.tets.len(),
     })
 }
 
@@ -132,7 +143,9 @@ mod tests {
         assert_eq!(preparation.topology.faces.len(), 12);
         assert_eq!(preparation.surface.elements.len(), 12);
         assert_eq!(preparation.volume_candidates.components.len(), 1);
+        assert_eq!(preparation.tet_candidates.tets.len(), 12);
         assert!((preparation.volume_candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+        assert!((preparation.tet_candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
         assert!(!preparation.curves.elements.is_empty());
     }
 
@@ -147,10 +160,12 @@ mod tests {
                 component_count,
                 surface_element_count,
                 curve_element_count,
+                candidate_tet_count,
             } => {
                 assert_eq!(component_count, 1);
                 assert_eq!(surface_element_count, 12);
                 assert!(curve_element_count > 0);
+                assert_eq!(candidate_tet_count, 12);
             }
             other => panic!("unexpected production error: {other:?}"),
         }

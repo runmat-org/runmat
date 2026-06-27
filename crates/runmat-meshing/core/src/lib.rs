@@ -10,6 +10,7 @@ pub mod quality;
 pub mod sizing;
 pub mod source_topology;
 pub mod surface;
+pub mod tet_candidate;
 pub mod topology;
 pub mod validation;
 pub mod volume;
@@ -54,6 +55,10 @@ pub use source_topology::{
 pub use surface::{
     discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
     SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
+};
+pub use tet_candidate::{
+    form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
+    TetCandidateOptions, TetCandidateSet,
 };
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
