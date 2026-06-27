@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     artifact::{
-        ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-        AnalysisVolumeElement,
+        AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
+        ANALYSIS_MESH_SCHEMA_VERSION,
     },
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
@@ -92,10 +92,10 @@ impl StructuredTetMesher {
         let mut mesh_sizing = sizing.cloned().unwrap_or_default();
         append_geometry_focus_sizing_samples(input, options, &mut mesh_sizing);
 
-        let divisions = grid_divisions(input, options, Some(&mesh_sizing))?;
-        let nodes = grid_nodes(input, divisions);
+        let grid = structured_grid(input, options, Some(&mesh_sizing))?;
+        let nodes = grid_nodes(&grid);
         let node_id_at = |i: usize, j: usize, k: usize| -> u32 {
-            (1 + i + (divisions + 1) * (j + (divisions + 1) * k)) as u32
+            (1 + i + grid.x.len() * (j + grid.y.len() * k)) as u32
         };
 
         let material_region_id = input
@@ -113,9 +113,9 @@ impl StructuredTetMesher {
 
         let mut volume_elements = Vec::<AnalysisVolumeElement>::new();
         let mut element_quality = Vec::<ElementQuality>::new();
-        for k in 0..divisions {
-            for j in 0..divisions {
-                for i in 0..divisions {
+        for k in 0..grid.nz() {
+            for j in 0..grid.ny() {
+                for i in 0..grid.nx() {
                     let cell_nodes = [
                         node_id_at(i, j, k),
                         node_id_at(i + 1, j, k),
@@ -156,9 +156,9 @@ impl StructuredTetMesher {
             }
         }
 
-        let boundary_faces = grid_boundary_faces(input, divisions, &node_id_at);
+        let boundary_faces = grid_boundary_faces(input, &grid, &node_id_at);
         let quality = quality_report(element_quality);
-        mesh_sizing.global_target_size_m = target_size_m(input, options, divisions);
+        mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
 
         Ok(AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -197,11 +197,55 @@ pub fn generate_analysis_mesh_with_sizing(
     StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
 }
 
-fn grid_divisions(
+#[derive(Debug, Clone, PartialEq)]
+struct StructuredGrid {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    z: Vec<f64>,
+}
+
+impl StructuredGrid {
+    fn uniform(input: &BoundaryMeshInput, divisions: usize) -> Self {
+        Self {
+            x: uniform_axis(input.bounds_min_m[0], input.bounds_max_m[0], divisions),
+            y: uniform_axis(input.bounds_min_m[1], input.bounds_max_m[1], divisions),
+            z: uniform_axis(input.bounds_min_m[2], input.bounds_max_m[2], divisions),
+        }
+    }
+
+    fn nx(&self) -> usize {
+        self.x.len().saturating_sub(1)
+    }
+
+    fn ny(&self) -> usize {
+        self.y.len().saturating_sub(1)
+    }
+
+    fn nz(&self) -> usize {
+        self.z.len().saturating_sub(1)
+    }
+
+    fn element_count(&self) -> usize {
+        6 * self.nx() * self.ny() * self.nz()
+    }
+
+    fn min_cell_size(&self) -> Option<f64> {
+        [
+            min_axis_spacing(&self.x),
+            min_axis_spacing(&self.y),
+            min_axis_spacing(&self.z),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(f64::min)
+    }
+}
+
+fn structured_grid(
     input: &BoundaryMeshInput,
     options: &VolumeMeshingOptions,
     sizing: Option<&MeshSizingField>,
-) -> Result<usize, MeshingError> {
+) -> Result<StructuredGrid, MeshingError> {
     let max_by_budget = ((options.max_elements / 6).max(1) as f64)
         .cbrt()
         .floor()
@@ -223,10 +267,15 @@ fn grid_divisions(
         }
     };
     let requested = sizing
-        .and_then(sizing_target_size_m)
+        .and_then(global_sizing_target_size_m)
         .map(|length_m| requested.max(divisions_for_target_size(input, length_m)))
         .unwrap_or(requested);
-    Ok(requested.clamp(1, max_by_budget))
+    let divisions = requested.clamp(1, max_by_budget);
+    let mut grid = StructuredGrid::uniform(input, divisions);
+    if let Some(sizing) = sizing {
+        insert_local_sizing_breakpoints(input, options.max_elements, sizing, &mut grid);
+    }
+    Ok(grid)
 }
 
 fn divisions_for_target_size(input: &BoundaryMeshInput, length_m: f64) -> usize {
@@ -236,15 +285,87 @@ fn divisions_for_target_size(input: &BoundaryMeshInput, length_m: f64) -> usize 
     (max_span / length_m).ceil().max(1.0) as usize
 }
 
-fn sizing_target_size_m(sizing: &MeshSizingField) -> Option<f64> {
-    sizing
-        .samples
-        .iter()
-        .map(|sample| sample.target_size_m)
-        .chain(sizing.min_size_m)
-        .chain(sizing.global_target_size_m)
+fn global_sizing_target_size_m(sizing: &MeshSizingField) -> Option<f64> {
+    [sizing.min_size_m, sizing.global_target_size_m]
+        .into_iter()
+        .flatten()
         .filter(|value| value.is_finite() && *value > 0.0)
         .reduce(f64::min)
+}
+
+fn insert_local_sizing_breakpoints(
+    input: &BoundaryMeshInput,
+    max_elements: usize,
+    sizing: &MeshSizingField,
+    grid: &mut StructuredGrid,
+) {
+    let mut samples = sizing
+        .samples
+        .iter()
+        .filter_map(|sample| {
+            let target_size_m = clamped_sample_target_size(sample.target_size_m, sizing)?;
+            let position_m = sample.position_m;
+            position_m
+                .iter()
+                .all(|value| value.is_finite())
+                .then_some((position_m, target_size_m))
+        })
+        .collect::<Vec<_>>();
+    samples.sort_by(|left, right| {
+        left.1
+            .total_cmp(&right.1)
+            .then_with(|| left.0[0].total_cmp(&right.0[0]))
+            .then_with(|| left.0[1].total_cmp(&right.0[1]))
+            .then_with(|| left.0[2].total_cmp(&right.0[2]))
+    });
+
+    for (position_m, target_size_m) in samples {
+        for axis in 0..3 {
+            for coordinate in
+                local_breakpoint_candidates(input, axis, position_m[axis], target_size_m)
+            {
+                let mut candidate = grid.clone();
+                candidate.insert_axis_coordinate(axis, coordinate);
+                if candidate.element_count() <= max_elements {
+                    *grid = candidate;
+                }
+            }
+        }
+    }
+}
+
+fn clamped_sample_target_size(target_size_m: f64, sizing: &MeshSizingField) -> Option<f64> {
+    if !target_size_m.is_finite() || target_size_m <= 0.0 {
+        return None;
+    }
+    let mut target_size_m = target_size_m;
+    if let Some(min_size_m) = sizing
+        .min_size_m
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        target_size_m = target_size_m.max(min_size_m);
+    }
+    if let Some(max_size_m) = sizing
+        .max_size_m
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        target_size_m = target_size_m.min(max_size_m);
+    }
+    (target_size_m.is_finite() && target_size_m > 0.0).then_some(target_size_m)
+}
+
+fn local_breakpoint_candidates(
+    input: &BoundaryMeshInput,
+    axis: usize,
+    coordinate: f64,
+    target_size_m: f64,
+) -> [f64; 3] {
+    [
+        coordinate,
+        coordinate - target_size_m,
+        coordinate + target_size_m,
+    ]
+    .map(|value| value.clamp(input.bounds_min_m[axis], input.bounds_max_m[axis]))
 }
 
 fn append_geometry_focus_sizing_samples(
@@ -321,23 +442,55 @@ fn small_feature_sizing_samples(input: &BoundaryMeshInput) -> Vec<SizingSample> 
         .collect()
 }
 
-fn grid_nodes(input: &BoundaryMeshInput, divisions: usize) -> Vec<AnalysisMeshNode> {
-    let mut nodes = Vec::with_capacity((divisions + 1).pow(3));
-    for k in 0..=divisions {
-        for j in 0..=divisions {
-            for i in 0..=divisions {
-                let t = [
-                    i as f64 / divisions as f64,
-                    j as f64 / divisions as f64,
-                    k as f64 / divisions as f64,
-                ];
+impl StructuredGrid {
+    fn insert_axis_coordinate(&mut self, axis: usize, coordinate: f64) {
+        let coordinates = match axis {
+            0 => &mut self.x,
+            1 => &mut self.y,
+            _ => &mut self.z,
+        };
+        if !coordinate.is_finite() {
+            return;
+        }
+        let span = coordinates
+            .last()
+            .zip(coordinates.first())
+            .map(|(max, min)| max - min)
+            .unwrap_or(0.0)
+            .abs();
+        let tolerance = span.max(1.0) * 1.0e-10;
+        if coordinates
+            .iter()
+            .any(|existing| (*existing - coordinate).abs() <= tolerance)
+        {
+            return;
+        }
+        coordinates.push(coordinate);
+        coordinates.sort_by(f64::total_cmp);
+    }
+}
+
+fn uniform_axis(min: f64, max: f64, divisions: usize) -> Vec<f64> {
+    (0..=divisions)
+        .map(|index| lerp(min, max, index as f64 / divisions as f64))
+        .collect()
+}
+
+fn min_axis_spacing(axis: &[f64]) -> Option<f64> {
+    axis.windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .reduce(f64::min)
+}
+
+fn grid_nodes(grid: &StructuredGrid) -> Vec<AnalysisMeshNode> {
+    let mut nodes = Vec::with_capacity(grid.x.len() * grid.y.len() * grid.z.len());
+    for z in &grid.z {
+        for y in &grid.y {
+            for x in &grid.x {
                 nodes.push(AnalysisMeshNode {
                     node_id: nodes.len() as u32 + 1,
-                    coordinates_m: [
-                        lerp(input.bounds_min_m[0], input.bounds_max_m[0], t[0]),
-                        lerp(input.bounds_min_m[1], input.bounds_max_m[1], t[1]),
-                        lerp(input.bounds_min_m[2], input.bounds_max_m[2], t[2]),
-                    ],
+                    coordinates_m: [*x, *y, *z],
                     provenance: Vec::new(),
                 });
             }
@@ -348,14 +501,15 @@ fn grid_nodes(input: &BoundaryMeshInput, divisions: usize) -> Vec<AnalysisMeshNo
 
 fn grid_boundary_faces(
     input: &BoundaryMeshInput,
-    divisions: usize,
+    grid: &StructuredGrid,
     node_id_at: &impl Fn(usize, usize, usize) -> u32,
 ) -> Vec<AnalysisBoundaryFace> {
     let regions_by_side = regions_by_boundary_side(input);
     let mut faces = Vec::new();
     for side in BoundarySide::ALL {
-        for a in 0..divisions {
-            for b in 0..divisions {
+        let (a_count, b_count) = boundary_side_cell_counts(side, grid);
+        for a in 0..a_count {
+            for b in 0..b_count {
                 let quad = match side {
                     BoundarySide::XMin => [
                         node_id_at(0, a, b),
@@ -364,10 +518,10 @@ fn grid_boundary_faces(
                         node_id_at(0, a, b + 1),
                     ],
                     BoundarySide::XMax => [
-                        node_id_at(divisions, a, b),
-                        node_id_at(divisions, a, b + 1),
-                        node_id_at(divisions, a + 1, b + 1),
-                        node_id_at(divisions, a + 1, b),
+                        node_id_at(grid.nx(), a, b),
+                        node_id_at(grid.nx(), a, b + 1),
+                        node_id_at(grid.nx(), a + 1, b + 1),
+                        node_id_at(grid.nx(), a + 1, b),
                     ],
                     BoundarySide::YMin => [
                         node_id_at(a, 0, b),
@@ -376,10 +530,10 @@ fn grid_boundary_faces(
                         node_id_at(a + 1, 0, b),
                     ],
                     BoundarySide::YMax => [
-                        node_id_at(a, divisions, b),
-                        node_id_at(a + 1, divisions, b),
-                        node_id_at(a + 1, divisions, b + 1),
-                        node_id_at(a, divisions, b + 1),
+                        node_id_at(a, grid.ny(), b),
+                        node_id_at(a + 1, grid.ny(), b),
+                        node_id_at(a + 1, grid.ny(), b + 1),
+                        node_id_at(a, grid.ny(), b + 1),
                     ],
                     BoundarySide::ZMin => [
                         node_id_at(a, b, 0),
@@ -388,10 +542,10 @@ fn grid_boundary_faces(
                         node_id_at(a, b + 1, 0),
                     ],
                     BoundarySide::ZMax => [
-                        node_id_at(a, b, divisions),
-                        node_id_at(a, b + 1, divisions),
-                        node_id_at(a + 1, b + 1, divisions),
-                        node_id_at(a + 1, b, divisions),
+                        node_id_at(a, b, grid.nz()),
+                        node_id_at(a, b + 1, grid.nz()),
+                        node_id_at(a + 1, b + 1, grid.nz()),
+                        node_id_at(a + 1, b, grid.nz()),
                     ],
                 };
                 let region_ids = regions_by_side
@@ -400,7 +554,7 @@ fn grid_boundary_faces(
                     .filter(|regions| !regions.is_empty())
                     .unwrap_or_else(|| input.region_ids.clone());
                 let adjacent_volume_element_ids =
-                    boundary_side_adjacent_volume_element_ids(side, a, b, divisions);
+                    boundary_side_adjacent_volume_element_ids(side, a, b, grid);
                 for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
                     faces.push(AnalysisBoundaryFace {
                         face_id: format!("bf_{}", faces.len() + 1),
@@ -423,21 +577,29 @@ fn grid_boundary_faces(
     faces
 }
 
+fn boundary_side_cell_counts(side: BoundarySide, grid: &StructuredGrid) -> (usize, usize) {
+    match side {
+        BoundarySide::XMin | BoundarySide::XMax => (grid.ny(), grid.nz()),
+        BoundarySide::YMin | BoundarySide::YMax => (grid.nx(), grid.nz()),
+        BoundarySide::ZMin | BoundarySide::ZMax => (grid.nx(), grid.ny()),
+    }
+}
+
 fn boundary_side_adjacent_volume_element_ids(
     side: BoundarySide,
     a: usize,
     b: usize,
-    divisions: usize,
+    grid: &StructuredGrid,
 ) -> Vec<String> {
     let (i, j, k) = match side {
         BoundarySide::XMin => (0, a, b),
-        BoundarySide::XMax => (divisions - 1, a, b),
+        BoundarySide::XMax => (grid.nx() - 1, a, b),
         BoundarySide::YMin => (a, 0, b),
-        BoundarySide::YMax => (a, divisions - 1, b),
+        BoundarySide::YMax => (a, grid.ny() - 1, b),
         BoundarySide::ZMin => (a, b, 0),
-        BoundarySide::ZMax => (a, b, divisions - 1),
+        BoundarySide::ZMax => (a, b, grid.nz() - 1),
     };
-    let cell_index = i + divisions * (j + divisions * k);
+    let cell_index = i + grid.nx() * (j + grid.ny() * k);
     let first_tet_index = cell_index * 6 + 1;
     (first_tet_index..first_tet_index + 6)
         .map(|index| format!("tet_{index}"))
@@ -508,16 +670,16 @@ fn regions_by_boundary_side(input: &BoundaryMeshInput) -> BTreeMap<BoundarySide,
 fn target_size_m(
     input: &BoundaryMeshInput,
     options: &VolumeMeshingOptions,
-    divisions: usize,
+    grid: &StructuredGrid,
 ) -> Option<f64> {
     match options.target_size {
         MeshTargetSize::LengthM(value) => Some(value),
-        MeshTargetSize::Auto => {
+        MeshTargetSize::Auto => grid.min_cell_size().or_else(|| {
             let max_span = (0..3)
                 .map(|axis| input.bounds_max_m[axis] - input.bounds_min_m[axis])
                 .fold(0.0_f64, f64::max);
-            Some(max_span / divisions as f64)
-        }
+            Some(max_span)
+        }),
     }
 }
 
@@ -653,11 +815,7 @@ fn triangle_unit_normal(input: &BoundaryMeshInput, node_ids: [u32; 3]) -> Option
     let [a, b, c] = triangle_vertices(input, node_ids)?;
     let normal = cross(sub(b, a), sub(c, a));
     let length = norm(normal);
-    (length > 0.0).then_some([
-        normal[0] / length,
-        normal[1] / length,
-        normal[2] / length,
-    ])
+    (length > 0.0).then_some([normal[0] / length, normal[1] / length, normal[2] / length])
 }
 
 fn triangle_min_edge(vertices: [[f64; 3]; 3]) -> f64 {
@@ -683,7 +841,7 @@ fn boundary_max_span(input: &BoundaryMeshInput) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MeshKindRequest, SizingSample, validate_analysis_mesh};
+    use crate::{validate_analysis_mesh, MeshKindRequest, SizingSample};
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
         SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
@@ -790,17 +948,15 @@ mod tests {
                 .iter()
                 .any(|region| region == "region_fixed")
         }));
-        assert!(
-            mesh.boundary_faces
-                .iter()
-                .any(|face| face.region_ids.iter().any(|region| region == "region_load"))
-        );
-        assert!(
-            mesh.quality
-                .elements
-                .iter()
-                .all(|quality| quality.volume_m3 > 0.0)
-        );
+        assert!(mesh
+            .boundary_faces
+            .iter()
+            .any(|face| face.region_ids.iter().any(|region| region == "region_load")));
+        assert!(mesh
+            .quality
+            .elements
+            .iter()
+            .all(|quality| quality.volume_m3 > 0.0));
         assert!(mesh
             .boundary_faces
             .iter()
@@ -883,6 +1039,41 @@ mod tests {
             refined.sizing.samples[0].reason.as_deref(),
             Some("structural.stress_gradient")
         );
+    }
+
+    #[test]
+    fn sizing_field_creates_local_structured_breakpoints() {
+        let geometry = cube_geometry();
+        let mut options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.4, 0.4, 0.4],
+                target_size_m: 0.2,
+                reason: Some("structural.load_regions".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let mesh = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+            .expect("local sizing-driven mesh should generate");
+
+        validate_analysis_mesh(&mesh, Default::default()).expect("local mesh should validate");
+        let x = unique_axis_coordinates(&mesh, 0);
+        assert!(x.iter().any(|value| (*value - 0.4).abs() <= 1.0e-12));
+        let spacings = x
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
+        let min_spacing = spacings.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_spacing = spacings.iter().copied().fold(0.0_f64, f64::max);
+        assert!(min_spacing <= 0.2 + 1.0e-12);
+        assert!(max_spacing > min_spacing * 1.5);
     }
 
     #[test]
@@ -991,5 +1182,16 @@ mod tests {
             err,
             MeshingError::UnsupportedElementKind(VolumeElementKind::Hex8)
         );
+    }
+
+    fn unique_axis_coordinates(mesh: &AnalysisMeshArtifact, axis: usize) -> Vec<f64> {
+        let mut coordinates = mesh
+            .nodes
+            .iter()
+            .map(|node| node.coordinates_m[axis])
+            .collect::<Vec<_>>();
+        coordinates.sort_by(f64::total_cmp);
+        coordinates.dedup_by(|left, right| (*left - *right).abs() <= 1.0e-12);
+        coordinates
     }
 }
