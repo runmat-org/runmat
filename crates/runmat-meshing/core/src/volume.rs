@@ -8,7 +8,7 @@ use crate::{
         ANALYSIS_MESH_SCHEMA_VERSION,
     },
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
-    options::{MeshProfile, MeshTargetSize, VolumeMeshingOptions},
+    options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{MeshSizingField, SizingSample, SizingSampleRejection},
@@ -26,6 +26,7 @@ pub trait VolumeMesher {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MeshingError {
     BoundaryInput(String),
+    UnsupportedMeshKind(MeshKindRequest),
     UnsupportedElementKind(VolumeElementKind),
     InvalidElementBudget,
     InvalidTargetSize,
@@ -36,6 +37,9 @@ impl std::fmt::Display for MeshingError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BoundaryInput(message) => write!(formatter, "invalid boundary mesh: {message}"),
+            Self::UnsupportedMeshKind(kind) => {
+                write!(formatter, "unsupported analysis mesh kind: {kind:?}")
+            }
             Self::UnsupportedElementKind(kind) => {
                 write!(formatter, "unsupported volume element kind: {kind:?}")
             }
@@ -79,6 +83,9 @@ impl StructuredTetMesher {
         options: &VolumeMeshingOptions,
         sizing: Option<&MeshSizingField>,
     ) -> Result<AnalysisMeshArtifact, MeshingError> {
+        if !matches!(options.kind, MeshKindRequest::Solid) {
+            return Err(MeshingError::UnsupportedMeshKind(options.kind));
+        }
         if !matches!(options.element, VolumeElementKind::Tet4) {
             return Err(MeshingError::UnsupportedElementKind(options.element));
         }
@@ -1293,6 +1300,25 @@ mod tests {
             err,
             MeshingError::UnsupportedElementKind(VolumeElementKind::Hex8)
         );
+    }
+
+    #[test]
+    fn unsupported_mesh_kind_is_rejected() {
+        let geometry = cube_geometry();
+        let err = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                kind: MeshKindRequest::Surrogate,
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect_err("surrogate compatibility mode is not an analysis mesh backend");
+
+        assert_eq!(
+            err,
+            MeshingError::UnsupportedMeshKind(MeshKindRequest::Surrogate)
+        );
+        assert!(err.to_string().contains("unsupported analysis mesh kind"));
     }
 
     fn unique_axis_coordinates(mesh: &AnalysisMeshArtifact, axis: usize) -> Vec<f64> {
