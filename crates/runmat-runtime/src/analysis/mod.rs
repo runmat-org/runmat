@@ -13456,7 +13456,7 @@ fn generate_and_persist_study_analysis_mesh(
     })?;
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
-    let validation_options = analysis_mesh_validation_options_for_study(spec);
+    let validation_options = analysis_mesh_validation_options_for_study(spec, &options);
     runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options).map_err(
         |err| {
             operation_error(
@@ -13529,9 +13529,15 @@ fn mesh_options_in_si_units(
 
 fn analysis_mesh_validation_options_for_study(
     spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
 ) -> AnalysisMeshValidationOptions {
     AnalysisMeshValidationOptions {
         expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
+        min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
+        min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
+        min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
         required_boundary_region_ids: required_boundary_region_ids_for_study(spec),
         ..AnalysisMeshValidationOptions::default()
     }
@@ -13886,7 +13892,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
-    let validation_options = analysis_mesh_validation_options_for_study(spec);
+    let validation_options = analysis_mesh_validation_options_for_study(spec, &options);
     runmat_meshing_core::validate_analysis_mesh_with_options(&refined_mesh, validation_options)
         .map_err(|err| {
             operation_error(

@@ -185,6 +185,27 @@ impl Default for MeshRefinementOptions {
 pub type AdaptiveMeshingOptions = MeshRefinementOptions;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshValidationPolicyOptions {
+    pub min_bounds_coverage_ratio: f64,
+    pub min_volume_coverage_ratio: f64,
+    pub min_boundary_area_ratio: f64,
+    pub min_boundary_face_recovery_ratio: f64,
+    pub min_boundary_edge_recovery_ratio: f64,
+}
+
+impl Default for MeshValidationPolicyOptions {
+    fn default() -> Self {
+        Self {
+            min_bounds_coverage_ratio: 0.90,
+            min_volume_coverage_ratio: 0.90,
+            min_boundary_area_ratio: 0.90,
+            min_boundary_face_recovery_ratio: 1.0,
+            min_boundary_edge_recovery_ratio: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeMeshingOptions {
     #[serde(default)]
     pub backend: MeshBackendKind,
@@ -195,6 +216,8 @@ pub struct VolumeMeshingOptions {
     pub max_elements: usize,
     pub target_size: MeshTargetSize,
     pub refinement: MeshRefinementOptions,
+    #[serde(default)]
+    pub validation: MeshValidationPolicyOptions,
 }
 
 impl Default for VolumeMeshingOptions {
@@ -208,6 +231,7 @@ impl Default for VolumeMeshingOptions {
             max_elements: 250_000,
             target_size: MeshTargetSize::Auto,
             refinement: MeshRefinementOptions::default(),
+            validation: MeshValidationPolicyOptions::default(),
         }
     }
 }

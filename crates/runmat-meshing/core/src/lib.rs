@@ -37,9 +37,9 @@ pub use curve::{
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
-    RefinementIndicatorMode, RefinementIndicatorOverrides, RefinementStrategy,
-    VolumeMeshingOptions,
+    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
+    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
+    RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
 };
 pub use production::{
     generate_production_analysis_mesh, prepare_production_mesh, ProductionMeshError,

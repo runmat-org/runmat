@@ -15,9 +15,9 @@ use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
 use runmat_meshing_core::{
     MeshBackendKind, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, RefinementConvergenceOptions, RefinementFocusLevel, RefinementFocusOptions,
-    RefinementIndicatorMode, RefinementIndicatorOverrides, RefinementStrategy, VolumeElementKind,
-    VolumeMeshingOptions,
+    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
+    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
+    RefinementIndicatorOverrides, RefinementStrategy, VolumeElementKind, VolumeMeshingOptions,
 };
 use serde::de::{DeserializeOwned, Error as DeError};
 use serde::{Deserialize, Deserializer};
@@ -140,6 +140,35 @@ struct FeaMeshDocument {
     target_size: Option<MeshTargetSize>,
     #[serde(default)]
     refinement: FeaMeshRefinementDocument,
+    #[serde(default)]
+    validation: FeaMeshValidationDocument,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshValidationDocument {
+    #[serde(default = "default_min_bounds_coverage_ratio")]
+    min_bounds_coverage_ratio: f64,
+    #[serde(default = "default_min_volume_coverage_ratio")]
+    min_volume_coverage_ratio: f64,
+    #[serde(default = "default_min_boundary_area_ratio")]
+    min_boundary_area_ratio: f64,
+    #[serde(default = "default_min_boundary_face_recovery_ratio")]
+    min_boundary_face_recovery_ratio: f64,
+    #[serde(default = "default_min_boundary_edge_recovery_ratio")]
+    min_boundary_edge_recovery_ratio: f64,
+}
+
+impl Default for FeaMeshValidationDocument {
+    fn default() -> Self {
+        Self {
+            min_bounds_coverage_ratio: default_min_bounds_coverage_ratio(),
+            min_volume_coverage_ratio: default_min_volume_coverage_ratio(),
+            min_boundary_area_ratio: default_min_boundary_area_ratio(),
+            min_boundary_face_recovery_ratio: default_min_boundary_face_recovery_ratio(),
+            min_boundary_edge_recovery_ratio: default_min_boundary_edge_recovery_ratio(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -641,6 +670,26 @@ fn resolve_mesh_options(
             );
         }
     }
+    validate_unit_ratio(
+        "mesh.validation.min_bounds_coverage_ratio",
+        mesh.validation.min_bounds_coverage_ratio,
+    )?;
+    validate_unit_ratio(
+        "mesh.validation.min_volume_coverage_ratio",
+        mesh.validation.min_volume_coverage_ratio,
+    )?;
+    validate_unit_ratio(
+        "mesh.validation.min_boundary_area_ratio",
+        mesh.validation.min_boundary_area_ratio,
+    )?;
+    validate_unit_ratio(
+        "mesh.validation.min_boundary_face_recovery_ratio",
+        mesh.validation.min_boundary_face_recovery_ratio,
+    )?;
+    validate_unit_ratio(
+        "mesh.validation.min_boundary_edge_recovery_ratio",
+        mesh.validation.min_boundary_edge_recovery_ratio,
+    )?;
     if matches!(mesh.refinement.strategy, RefinementStrategy::None)
         && mesh.refinement.max_iterations > 0
     {
@@ -678,7 +727,21 @@ fn resolve_mesh_options(
                 namespaces: mesh.refinement.indicators.clone(),
             },
         },
+        validation: MeshValidationPolicyOptions {
+            min_bounds_coverage_ratio: mesh.validation.min_bounds_coverage_ratio,
+            min_volume_coverage_ratio: mesh.validation.min_volume_coverage_ratio,
+            min_boundary_area_ratio: mesh.validation.min_boundary_area_ratio,
+            min_boundary_face_recovery_ratio: mesh.validation.min_boundary_face_recovery_ratio,
+            min_boundary_edge_recovery_ratio: mesh.validation.min_boundary_edge_recovery_ratio,
+        },
     }))
+}
+
+fn validate_unit_ratio(label: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(format!("{label} must be finite and in the range (0, 1]"));
+    }
+    Ok(())
 }
 
 fn default_mesh_options_for_study(
@@ -1598,6 +1661,26 @@ fn default_energy_change_tolerance() -> f64 {
     0.02
 }
 
+fn default_min_bounds_coverage_ratio() -> f64 {
+    MeshValidationPolicyOptions::default().min_bounds_coverage_ratio
+}
+
+fn default_min_volume_coverage_ratio() -> f64 {
+    MeshValidationPolicyOptions::default().min_volume_coverage_ratio
+}
+
+fn default_min_boundary_area_ratio() -> f64 {
+    MeshValidationPolicyOptions::default().min_boundary_area_ratio
+}
+
+fn default_min_boundary_face_recovery_ratio() -> f64 {
+    MeshValidationPolicyOptions::default().min_boundary_face_recovery_ratio
+}
+
+fn default_min_boundary_edge_recovery_ratio() -> f64 {
+    MeshValidationPolicyOptions::default().min_boundary_edge_recovery_ratio
+}
+
 fn default_focus_fine() -> RefinementFocusLevel {
     RefinementFocusLevel::Fine
 }
@@ -1933,6 +2016,11 @@ refinement:
         assert_eq!(options.refinement.convergence.field_change_tolerance, 0.05);
         assert_eq!(options.refinement.convergence.energy_change_tolerance, 0.02);
         assert_eq!(options.refinement.convergence.residual_tolerance, None);
+        assert_eq!(options.validation.min_bounds_coverage_ratio, 0.90);
+        assert_eq!(options.validation.min_volume_coverage_ratio, 0.90);
+        assert_eq!(options.validation.min_boundary_area_ratio, 0.90);
+        assert_eq!(options.validation.min_boundary_face_recovery_ratio, 1.0);
+        assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 1.0);
         assert_eq!(options.refinement.focus.loads, RefinementFocusLevel::Fine);
         assert_eq!(
             options.refinement.focus.constraints,
@@ -1969,6 +2057,47 @@ refinement:
             indicators["thermal"]["temperature_gradient"],
             RefinementIndicatorMode::On
         );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_validation_policy_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  min_bounds_coverage_ratio: 0.95
+  min_volume_coverage_ratio: 0.96
+  min_boundary_area_ratio: 0.97
+  min_boundary_face_recovery_ratio: 0.98
+  min_boundary_edge_recovery_ratio: 0.99
+"#,
+        )
+        .expect("mesh document should parse validation policy");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.validation.min_bounds_coverage_ratio, 0.95);
+        assert_eq!(options.validation.min_volume_coverage_ratio, 0.96);
+        assert_eq!(options.validation.min_boundary_area_ratio, 0.97);
+        assert_eq!(options.validation.min_boundary_face_recovery_ratio, 0.98);
+        assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 0.99);
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_validation_policy_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  min_volume_coverage_ratio: 1.2
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid validation ratio should fail");
+
+        assert!(err.contains("mesh.validation.min_volume_coverage_ratio"));
     }
 
     #[test]

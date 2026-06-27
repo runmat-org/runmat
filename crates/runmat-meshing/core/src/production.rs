@@ -283,7 +283,7 @@ fn analysis_mesh_from_preparation(
             source_geometry_sha256: preparation.topology.source_geometry_sha256.clone(),
         },
     };
-    validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation))
+    validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation, options))
         .map_err(ProductionMeshError::Validation)?;
     Ok(mesh)
 }
@@ -371,16 +371,20 @@ fn referenced_candidate_node_ids(preparation: &ProductionMeshPreparation) -> BTr
 
 fn production_validation_options(
     preparation: &ProductionMeshPreparation,
+    options: &VolumeMeshingOptions,
 ) -> AnalysisMeshValidationOptions {
     AnalysisMeshValidationOptions {
         expected_bounds_m: Some([
             preparation.topology.bounds_min_m,
             preparation.topology.bounds_max_m,
         ]),
+        min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
         expected_volume_m3: Some(preparation.volume_candidates.total_volume_m3),
+        min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
         expected_boundary_area_m2: Some(preparation.volume_candidates.total_surface_area_m2),
-        min_boundary_face_recovery_ratio: 1.0,
-        min_boundary_edge_recovery_ratio: 1.0,
+        min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
         ..AnalysisMeshValidationOptions::default()
     }
 }

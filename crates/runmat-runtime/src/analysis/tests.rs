@@ -2201,7 +2201,10 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     spec.geometry.units = UnitSystem::Millimeter;
     spec.model = Some(sample_model());
 
-    let options = analysis_mesh_validation_options_for_study(&spec);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.validation.min_bounds_coverage_ratio = 0.95;
+    mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
+    let options = analysis_mesh_validation_options_for_study(&spec, &mesh_options);
 
     assert_eq!(
         options.expected_bounds_m,
@@ -2211,6 +2214,8 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
         options.required_boundary_region_ids,
         vec!["root".to_string(), "tip".to_string()]
     );
+    assert_eq!(options.min_bounds_coverage_ratio, 0.95);
+    assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
 }
 
 #[test]
