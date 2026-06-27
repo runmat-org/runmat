@@ -5,13 +5,16 @@ pub mod boundary;
 pub mod curve;
 pub mod evidence;
 pub mod options;
+pub mod predicate;
 pub mod production;
 pub mod provenance;
 pub mod quality;
 pub mod sizing;
 pub mod source_topology;
+pub mod spatial_index;
 pub mod surface;
 pub mod tet_candidate;
+pub mod tolerance;
 pub mod topology;
 pub mod validation;
 pub mod volume;
@@ -47,6 +50,13 @@ pub use options::{
     RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
     RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
 };
+pub use predicate::{
+    closest_point_on_triangle, distance, distance_squared, point_in_closed_triangle_surface,
+    point_triangle_distance, ray_triangle_intersection, tet_centroid, tet_circumsphere,
+    tet_circumsphere_contains_point, tet_edge_aspect_ratio, tet_signed_volume, tet_volume,
+    triangle_area, triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3,
+    Triangle3,
+};
 pub use production::{
     generate_production_analysis_mesh, prepare_production_mesh, ProductionMeshError,
     ProductionMeshPreparation,
@@ -58,6 +68,7 @@ pub use source_topology::{
     extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
     SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
 };
+pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry};
 pub use surface::{
     discretize_topology_surfaces, SurfaceDiscretization, SurfaceDiscretizationError,
     SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
@@ -66,6 +77,7 @@ pub use tet_candidate::{
     form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
     TetCandidateOptions, TetCandidateSet,
 };
+pub use tolerance::MeshingTolerance;
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationError,

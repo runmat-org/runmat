@@ -3,7 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    predicate::{
+        distance_squared, point_in_closed_triangle_surface, tet_centroid,
+        tet_circumsphere_contains_point, tet_edge_aspect_ratio, tet_signed_volume,
+        triangle_centroid, PointInClosedSurface,
+    },
+    spatial_index::{Aabb3, LinearSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
+    tolerance::MeshingTolerance,
     volume_candidate::{VolumeCandidateComponent, VolumeCandidateSet},
 };
 
@@ -124,8 +131,15 @@ pub fn form_tet_candidates(
 
     let mut interior_seed_points = Vec::<[f64; 3]>::new();
     for component in &volume_candidates.components {
-        let component_seed_points =
-            sample_component_interior_points(component, surface, &surface_elements, options)?;
+        let tolerance =
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
+        let component_seed_points = sample_component_interior_points(
+            component,
+            surface,
+            &surface_elements,
+            options,
+            tolerance,
+        )?;
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -149,6 +163,7 @@ pub fn form_tet_candidates(
             &surface_elements,
             surface,
             options,
+            tolerance,
             &mut tets,
         )?;
         if tets.len() == insertion_start {
@@ -161,7 +176,7 @@ pub fn form_tet_candidates(
             )?;
             let fan_seed_node_id = component_seed_node_ids[component_seed_points
                 .iter()
-                .position(|point| distance(*point, fan_seed_point) <= 1.0e-12)
+                .position(|point| tolerance.point_nearly_equal(*point, fan_seed_point, 1.0))
                 .unwrap_or(0)];
             append_component_tets(
                 component,
@@ -234,7 +249,7 @@ fn append_component_tets(
         if volume_m3 < options.min_volume_m3 {
             continue;
         }
-        let aspect_ratio = tet_aspect_ratio(points);
+        let aspect_ratio = tet_edge_aspect_ratio(points);
         if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
             continue;
         }
@@ -259,6 +274,7 @@ fn append_component_insertion_tets(
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
     surface: &SurfaceDiscretization,
     options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<(), TetCandidateError> {
     if seed_node_ids.is_empty() || seed_node_ids.len() != seed_points.len() {
@@ -284,12 +300,20 @@ fn append_component_insertion_tets(
         });
     }
 
+    let surface_triangle_index =
+        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
     let candidate_tets = tetrahedralize_points(&points);
     let mut accepted_tets = Vec::<TetCandidate>::new();
     for candidate in candidate_tets {
         let tet_points = candidate.vertices.map(|index| points[index].coordinates_m);
         let centroid = tet_centroid(tet_points);
-        if !point_is_inside_component(centroid, component, surface, surface_elements)? {
+        if !point_is_inside_component(
+            centroid,
+            surface,
+            surface_elements,
+            tolerance,
+            &surface_triangle_index,
+        )? {
             continue;
         }
         let mut node_ids = candidate.vertices.map(|index| points[index].node_id);
@@ -302,12 +326,16 @@ fn append_component_insertion_tets(
         if volume_m3 < options.min_volume_m3 {
             continue;
         }
-        let aspect_ratio = tet_aspect_ratio(tet_points);
+        let aspect_ratio = tet_edge_aspect_ratio(tet_points);
         if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
             continue;
         }
-        let source_surface_element_id =
-            nearest_surface_element_id(centroid, component, surface, surface_elements)?;
+        let source_surface_element_id = nearest_surface_element_id(
+            centroid,
+            surface,
+            surface_elements,
+            &surface_triangle_index,
+        )?;
         let region_ids = surface_elements
             .get(&source_surface_element_id)
             .map(|element| element.region_ids.clone())
@@ -382,6 +410,7 @@ fn tetrahedralize_points(input_points: &[ConnectivityPoint]) -> Vec<Connectivity
             if tet_circumsphere_contains_point(
                 tet.vertices.map(|index| points[index].coordinates_m),
                 point,
+                MeshingTolerance::default(),
             ) {
                 bad_indices.push(tet_index);
             }
@@ -410,7 +439,9 @@ fn tetrahedralize_points(input_points: &[ConnectivityPoint]) -> Vec<Connectivity
         for face in cavity_faces {
             let vertices = [face[0], face[1], face[2], point_index];
             let points_for_tet = vertices.map(|index| points[index].coordinates_m);
-            if tet_signed_volume(points_for_tet).abs() > 1.0e-24 {
+            if tet_signed_volume(points_for_tet).abs()
+                > MeshingTolerance::default().volume_epsilon(1.0)
+            {
                 tets.push(ConnectivityTet { vertices });
             }
         }
@@ -478,88 +509,18 @@ fn sorted_face(mut face: [usize; 3]) -> [usize; 3] {
     face
 }
 
-fn tet_circumsphere_contains_point(tet_points: [[f64; 3]; 4], point: [f64; 3]) -> bool {
-    let Some((center, radius_squared)) = tet_circumsphere(tet_points) else {
-        return false;
-    };
-    distance_squared(center, point) <= radius_squared * (1.0 + 1.0e-10)
-}
-
-fn tet_circumsphere(points: [[f64; 3]; 4]) -> Option<([f64; 3], f64)> {
-    let a = [
-        [
-            2.0 * (points[1][0] - points[0][0]),
-            2.0 * (points[1][1] - points[0][1]),
-            2.0 * (points[1][2] - points[0][2]),
-        ],
-        [
-            2.0 * (points[2][0] - points[0][0]),
-            2.0 * (points[2][1] - points[0][1]),
-            2.0 * (points[2][2] - points[0][2]),
-        ],
-        [
-            2.0 * (points[3][0] - points[0][0]),
-            2.0 * (points[3][1] - points[0][1]),
-            2.0 * (points[3][2] - points[0][2]),
-        ],
-    ];
-    let b = [
-        dot(points[1], points[1]) - dot(points[0], points[0]),
-        dot(points[2], points[2]) - dot(points[0], points[0]),
-        dot(points[3], points[3]) - dot(points[0], points[0]),
-    ];
-    let center = solve_3x3(a, b)?;
-    Some((center, distance_squared(center, points[0])))
-}
-
-fn solve_3x3(mut a: [[f64; 3]; 3], mut b: [f64; 3]) -> Option<[f64; 3]> {
-    for pivot in 0..3 {
-        let mut pivot_row = pivot;
-        for row in (pivot + 1)..3 {
-            if a[row][pivot].abs() > a[pivot_row][pivot].abs() {
-                pivot_row = row;
-            }
-        }
-        if a[pivot_row][pivot].abs() <= 1.0e-14 {
-            return None;
-        }
-        if pivot_row != pivot {
-            a.swap(pivot, pivot_row);
-            b.swap(pivot, pivot_row);
-        }
-        let pivot_value = a[pivot][pivot];
-        for column in pivot..3 {
-            a[pivot][column] /= pivot_value;
-        }
-        b[pivot] /= pivot_value;
-        for row in 0..3 {
-            if row == pivot {
-                continue;
-            }
-            let factor = a[row][pivot];
-            for column in pivot..3 {
-                a[row][column] -= factor * a[pivot][column];
-            }
-            b[row] -= factor * b[pivot];
-        }
-    }
-    Some(b)
-}
-
 fn nearest_surface_element_id(
     point: [f64; 3],
-    component: &VolumeCandidateComponent,
     surface: &SurfaceDiscretization,
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    triangle_index: &LinearSpatialIndex<u32>,
 ) -> Result<u32, TetCandidateError> {
     let mut best = None::<(u32, f64)>;
-    for element_id in &component.surface_element_ids {
-        let element =
-            surface_elements
-                .get(element_id)
-                .ok_or(TetCandidateError::MissingSurfaceElement {
-                    element_id: *element_id,
-                })?;
+    for entry in triangle_index.entries() {
+        let element_id = entry.payload;
+        let element = surface_elements
+            .get(&element_id)
+            .ok_or(TetCandidateError::MissingSurfaceElement { element_id })?;
         let centroid = triangle_centroid(surface_element_points(surface, element)?);
         let distance_squared = distance_squared(point, centroid);
         if best.is_none_or(|(_, best_distance)| distance_squared < best_distance) {
@@ -568,22 +529,6 @@ fn nearest_surface_element_id(
     }
     best.map(|(element_id, _)| element_id)
         .ok_or(TetCandidateError::MissingSurfaceElement { element_id: 0 })
-}
-
-fn triangle_centroid(points: [[f64; 3]; 3]) -> [f64; 3] {
-    [
-        (points[0][0] + points[1][0] + points[2][0]) / 3.0,
-        (points[0][1] + points[1][1] + points[2][1]) / 3.0,
-        (points[0][2] + points[1][2] + points[2][2]) / 3.0,
-    ]
-}
-
-fn tet_centroid(points: [[f64; 3]; 4]) -> [f64; 3] {
-    [
-        (points[0][0] + points[1][0] + points[2][0] + points[3][0]) * 0.25,
-        (points[0][1] + points[1][1] + points[2][1] + points[3][1]) * 0.25,
-        (points[0][2] + points[1][2] + points[2][2] + points[3][2]) * 0.25,
-    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -645,7 +590,7 @@ fn score_fan_seed_point(
             surface_nodes,
         )?;
         let volume_m3 = tet_signed_volume(points).abs();
-        let aspect_ratio = tet_aspect_ratio(points);
+        let aspect_ratio = tet_edge_aspect_ratio(points);
         if volume_m3 < options.min_volume_m3
             || !aspect_ratio.is_finite()
             || aspect_ratio > options.max_aspect_ratio
@@ -712,10 +657,19 @@ fn sample_component_interior_points(
     surface: &SurfaceDiscretization,
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
     options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
 ) -> Result<Vec<[f64; 3]>, TetCandidateError> {
     let mut points = Vec::<[f64; 3]>::new();
     let center = component_interior_point(component);
-    if point_is_inside_component(center, component, surface, surface_elements)? {
+    let triangle_index =
+        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    if point_is_inside_component(
+        center,
+        surface,
+        surface_elements,
+        tolerance,
+        &triangle_index,
+    )? {
         points.push(center);
     }
 
@@ -737,10 +691,16 @@ fn sample_component_interior_points(
                         grid_center(component.bounds_min_m[1], spans[1], divisions[1], y_index),
                         grid_center(component.bounds_min_m[2], spans[2], divisions[2], z_index),
                     ];
-                    if contains_point(&points, point) {
+                    if contains_point(&points, point, tolerance) {
                         continue;
                     }
-                    if point_is_inside_component(point, component, surface, surface_elements)? {
+                    if point_is_inside_component(
+                        point,
+                        surface,
+                        surface_elements,
+                        tolerance,
+                        &triangle_index,
+                    )? {
                         points.push(point);
                     }
                 }
@@ -758,19 +718,44 @@ fn grid_center(minimum: f64, span: f64, divisions: usize, index: usize) -> f64 {
     minimum + span * (index as f64 + 0.5) / divisions as f64
 }
 
-fn contains_point(points: &[[f64; 3]], candidate: [f64; 3]) -> bool {
+fn contains_point(points: &[[f64; 3]], candidate: [f64; 3], tolerance: MeshingTolerance) -> bool {
     points
         .iter()
-        .any(|point| distance(*point, candidate) <= 1.0e-12)
+        .any(|point| tolerance.point_nearly_equal(*point, candidate, 1.0))
 }
 
 fn point_is_inside_component(
     point: [f64; 3],
+    surface: &SurfaceDiscretization,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    tolerance: MeshingTolerance,
+    triangle_index: &LinearSpatialIndex<u32>,
+) -> Result<bool, TetCandidateError> {
+    let triangles = triangle_index
+        .entries()
+        .iter()
+        .map(|entry| {
+            surface_elements
+                .get(&entry.payload)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: entry.payload,
+                })
+                .and_then(|element| surface_element_points(surface, element))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(matches!(
+        point_in_closed_triangle_surface(point, &triangles, tolerance),
+        PointInClosedSurface::Inside | PointInClosedSurface::OnBoundary
+    ))
+}
+
+fn component_surface_triangle_index(
     component: &VolumeCandidateComponent,
     surface: &SurfaceDiscretization,
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
-) -> Result<bool, TetCandidateError> {
-    let mut hits = Vec::<f64>::new();
+    tolerance: MeshingTolerance,
+) -> Result<LinearSpatialIndex<u32>, TetCandidateError> {
+    let mut index = LinearSpatialIndex::<u32>::new();
     for element_id in &component.surface_element_ids {
         let element =
             surface_elements
@@ -779,16 +764,12 @@ fn point_is_inside_component(
                     element_id: *element_id,
                 })?;
         let triangle = surface_element_points(surface, element)?;
-        if let Some(hit) = ray_x_triangle_hit(point, triangle) {
-            if !hits
-                .iter()
-                .any(|existing| (existing - hit).abs() <= 1.0e-10)
-            {
-                hits.push(hit);
-            }
-        }
+        index.insert(
+            Aabb3::from_triangle(triangle).expanded(tolerance),
+            *element_id,
+        );
     }
-    Ok(hits.len() % 2 == 1)
+    Ok(index)
 }
 
 fn surface_element_points(
@@ -814,34 +795,6 @@ fn surface_node(
         .ok_or(TetCandidateError::MissingSurfaceNode { node_id })
 }
 
-fn ray_x_triangle_hit(origin: [f64; 3], triangle: [[f64; 3]; 3]) -> Option<f64> {
-    let direction = [1.0, 0.0, 0.0];
-    let edge_1 = sub(triangle[1], triangle[0]);
-    let edge_2 = sub(triangle[2], triangle[0]);
-    let h = cross(direction, edge_2);
-    let determinant = dot(edge_1, h);
-    if determinant.abs() <= 1.0e-12 {
-        return None;
-    }
-    let inverse_determinant = 1.0 / determinant;
-    let s = sub(origin, triangle[0]);
-    let u = inverse_determinant * dot(s, h);
-    if !(-1.0e-12..=1.0 + 1.0e-12).contains(&u) {
-        return None;
-    }
-    let q = cross(s, edge_1);
-    let v = inverse_determinant * dot(direction, q);
-    if v < -1.0e-12 || u + v > 1.0 + 1.0e-12 {
-        return None;
-    }
-    let t = inverse_determinant * dot(edge_2, q);
-    if t > 1.0e-12 {
-        Some(t)
-    } else {
-        None
-    }
-}
-
 fn tet_points(
     node_ids: [u32; 4],
     interior: [f64; 3],
@@ -865,50 +818,6 @@ fn tet_points(
             })?,
         interior,
     ])
-}
-
-fn tet_signed_volume(points: [[f64; 3]; 4]) -> f64 {
-    dot(
-        sub(points[1], points[0]),
-        cross(sub(points[2], points[0]), sub(points[3], points[0])),
-    ) / 6.0
-}
-
-fn tet_aspect_ratio(points: [[f64; 3]; 4]) -> f64 {
-    let mut min_edge = f64::INFINITY;
-    let mut max_edge = 0.0_f64;
-    for left_index in 0..4 {
-        for right_index in (left_index + 1)..4 {
-            let length = distance(points[left_index], points[right_index]);
-            min_edge = min_edge.min(length);
-            max_edge = max_edge.max(length);
-        }
-    }
-    max_edge / min_edge.max(f64::EPSILON)
-}
-
-fn sub(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
-}
-
-fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
-}
-
-fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
-    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-}
-
-fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
-    distance_squared(left, right).sqrt()
-}
-
-fn distance_squared(left: [f64; 3], right: [f64; 3]) -> f64 {
-    (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2)
 }
 
 #[cfg(test)]
