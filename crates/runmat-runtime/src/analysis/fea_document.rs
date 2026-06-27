@@ -679,6 +679,8 @@ fn allowed_refinement_indicator_names(namespace: &str) -> Option<&'static [&'sta
             "stress_gradient",
             "strain_energy_density",
             "displacement_gradient",
+            "load_regions",
+            "constraint_regions",
             "plastic_strain",
             "contact_pressure",
             "contact_gap",
@@ -688,31 +690,66 @@ fn allowed_refinement_indicator_names(namespace: &str) -> Option<&'static [&'sta
             "modal_strain_energy",
             "frequency_residual",
         ]),
-        "thermal" => Some(&["temperature_gradient", "heat_flux_gradient", "heat_source"]),
-        "thermo_mechanical" => {
-            Some(&["thermal_gradient", "thermal_stress", "structural_von_mises"])
-        }
+        "thermal" => Some(&[
+            "temperature_gradient",
+            "heat_flux_gradient",
+            "heat_source",
+            "convection_regions",
+            "prescribed_temperature_regions",
+        ]),
+        "thermo_mechanical" => Some(&[
+            "thermal_gradient",
+            "thermal_stress",
+            "structural_von_mises",
+            "strain_energy_density",
+            "region_temperature_delta",
+        ]),
         "electro_thermal" => Some(&[
             "electric_field_gradient",
             "current_density_gradient",
             "joule_heat_density",
             "thermal_gradient",
+            "source_regions",
+            "ground_regions",
         ]),
         "electromagnetic" => Some(&[
             "flux_density_gradient",
             "electric_field_gradient",
             "current_density_gradient",
             "energy_density",
+            "source_regions",
+            "ground_regions",
+            "insulation_regions",
         ]),
-        "acoustic" => Some(&["pressure_gradient", "wavelength"]),
+        "acoustic" => Some(&[
+            "pressure_gradient",
+            "pressure_curvature",
+            "wavelength",
+            "impedance_regions",
+            "source_regions",
+        ]),
         "cfd" => Some(&[
             "velocity_gradient",
             "pressure_gradient",
             "vorticity",
             "wall_shear",
             "boundary_layer",
+            "inlet_regions",
+            "outlet_regions",
         ]),
-        "coupling" => Some(&["interface_jump", "interface_flux", "interface_residual"]),
+        "cht" => Some(&[
+            "interface_heat_flux_jump",
+            "interface_temperature_jump",
+            "solid_heat_flux_gradient",
+            "fluid_boundary_layer",
+        ]),
+        "fsi" => Some(&[
+            "interface_displacement_jump",
+            "interface_traction_jump",
+            "structural_stress_gradient",
+            "fluid_pressure_gradient",
+            "fluid_velocity_gradient",
+        ]),
         _ => None,
     }
 }
@@ -1719,6 +1756,83 @@ refinement:
     }
 
     #[test]
+    fn fea_document_mesh_options_accept_physics_refinement_namespaces() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    structural:
+      load_regions: auto
+      constraint_regions: auto
+    modal:
+      mode_shape_curvature: on
+    thermal:
+      convection_regions: auto
+      prescribed_temperature_regions: auto
+    thermo_mechanical:
+      strain_energy_density: auto
+      region_temperature_delta: auto
+    electro_thermal:
+      source_regions: auto
+      ground_regions: auto
+    electromagnetic:
+      source_regions: auto
+      ground_regions: auto
+      insulation_regions: auto
+    acoustic:
+      pressure_curvature: auto
+      impedance_regions: auto
+      source_regions: auto
+    cfd:
+      inlet_regions: auto
+      outlet_regions: auto
+    cht:
+      interface_heat_flux_jump: on
+      interface_temperature_jump: on
+      solid_heat_flux_gradient: auto
+      fluid_boundary_layer: auto
+    fsi:
+      interface_displacement_jump: on
+      interface_traction_jump: on
+      structural_stress_gradient: auto
+      fluid_pressure_gradient: auto
+      fluid_velocity_gradient: auto
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        let indicators = &options.refinement.indicators.namespaces;
+        assert_eq!(
+            indicators["structural"]["load_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["thermal"]["convection_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["thermo_mechanical"]["strain_energy_density"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["electromagnetic"]["insulation_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["cht"]["interface_heat_flux_jump"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["fsi"]["interface_traction_jump"],
+            RefinementIndicatorMode::On
+        );
+    }
+
+    #[test]
     fn fea_document_mesh_options_accept_numeric_size_and_residual() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
@@ -1806,5 +1920,20 @@ refinement:
             .expect_err("unknown refinement namespace should fail validation");
 
         assert!(err.contains("mesh.refinement.indicators namespace `made_up_physics`"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    coupling:
+      interface_jump: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_mesh_options(Some(&mesh))
+            .expect_err("generic coupling namespace should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators namespace `coupling`"));
     }
 }
