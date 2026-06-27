@@ -126,7 +126,13 @@ pub fn form_tet_candidates(
     for component in &volume_candidates.components {
         let component_seed_points =
             sample_component_interior_points(component, surface, &surface_elements, options)?;
-        let fan_seed_point = component_seed_points[0];
+        let fan_seed_point = select_component_fan_seed_point(
+            component,
+            &component_seed_points,
+            &surface_nodes,
+            &surface_elements,
+            options,
+        )?;
         interior_seed_points.extend(component_seed_points);
 
         let interior_node_id = next_node_id;
@@ -221,6 +227,119 @@ fn append_component_tets(
         });
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FanSeedScore {
+    point: [f64; 3],
+    valid_tet_count: usize,
+    volume_error_ratio: f64,
+    max_aspect_ratio: f64,
+    mean_aspect_ratio: f64,
+}
+
+fn select_component_fan_seed_point(
+    component: &VolumeCandidateComponent,
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+) -> Result<[f64; 3], TetCandidateError> {
+    let mut best_score = None::<FanSeedScore>;
+    for point in seed_points {
+        let score =
+            score_fan_seed_point(component, *point, surface_nodes, surface_elements, options)?;
+        if best_score.is_none_or(|best| fan_seed_score_is_better(score, best)) {
+            best_score = Some(score);
+        }
+    }
+    Ok(best_score
+        .map(|score| score.point)
+        .unwrap_or_else(|| component_interior_point(component)))
+}
+
+fn score_fan_seed_point(
+    component: &VolumeCandidateComponent,
+    point: [f64; 3],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+) -> Result<FanSeedScore, TetCandidateError> {
+    let mut valid_tet_count = 0_usize;
+    let mut total_volume_m3 = 0.0_f64;
+    let mut aspect_ratio_sum = 0.0_f64;
+    let mut max_aspect_ratio = 0.0_f64;
+
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let points = tet_points(
+            [
+                element.node_ids[0],
+                element.node_ids[1],
+                element.node_ids[2],
+                u32::MAX,
+            ],
+            point,
+            surface_nodes,
+        )?;
+        let volume_m3 = tet_signed_volume(points).abs();
+        let aspect_ratio = tet_aspect_ratio(points);
+        if volume_m3 < options.min_volume_m3
+            || !aspect_ratio.is_finite()
+            || aspect_ratio > options.max_aspect_ratio
+        {
+            continue;
+        }
+        valid_tet_count += 1;
+        total_volume_m3 += volume_m3;
+        aspect_ratio_sum += aspect_ratio;
+        max_aspect_ratio = max_aspect_ratio.max(aspect_ratio);
+    }
+
+    let mean_aspect_ratio = if valid_tet_count == 0 {
+        f64::INFINITY
+    } else {
+        aspect_ratio_sum / valid_tet_count as f64
+    };
+    let volume_error_ratio = if component.volume_m3 > 0.0 {
+        ((total_volume_m3 - component.volume_m3).abs() / component.volume_m3).abs()
+    } else {
+        f64::INFINITY
+    };
+    Ok(FanSeedScore {
+        point,
+        valid_tet_count,
+        volume_error_ratio,
+        max_aspect_ratio,
+        mean_aspect_ratio,
+    })
+}
+
+fn fan_seed_score_is_better(candidate: FanSeedScore, best: FanSeedScore) -> bool {
+    candidate
+        .valid_tet_count
+        .cmp(&best.valid_tet_count)
+        .then_with(|| {
+            best.volume_error_ratio
+                .partial_cmp(&candidate.volume_error_ratio)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| {
+            best.max_aspect_ratio
+                .partial_cmp(&candidate.max_aspect_ratio)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| {
+            best.mean_aspect_ratio
+                .partial_cmp(&candidate.mean_aspect_ratio)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .is_gt()
 }
 
 fn component_interior_point(component: &VolumeCandidateComponent) -> [f64; 3] {
