@@ -380,6 +380,7 @@ fn production_validation_options(
         expected_volume_m3: Some(preparation.volume_candidates.total_volume_m3),
         expected_boundary_area_m2: Some(preparation.volume_candidates.total_surface_area_m2),
         min_boundary_face_recovery_ratio: 1.0,
+        min_boundary_edge_recovery_ratio: 1.0,
         ..AnalysisMeshValidationOptions::default()
     }
 }

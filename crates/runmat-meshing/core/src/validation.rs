@@ -16,6 +16,7 @@ pub struct AnalysisMeshValidationOptions {
     pub expected_boundary_area_m2: Option<f64>,
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
+    pub min_boundary_edge_recovery_ratio: f64,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
 }
@@ -31,6 +32,7 @@ impl Default for AnalysisMeshValidationOptions {
             expected_boundary_area_m2: None,
             min_boundary_area_ratio: 0.90,
             min_boundary_face_recovery_ratio: 0.0,
+            min_boundary_edge_recovery_ratio: 0.0,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
         }
@@ -129,6 +131,10 @@ pub enum AnalysisMeshValidationError {
         required_ratio: String,
     },
     BoundaryFaceRecoveryFailed {
+        recovery_ratio: String,
+        required_ratio: String,
+    },
+    BoundaryEdgeRecoveryFailed {
         recovery_ratio: String,
         required_ratio: String,
     },
@@ -277,6 +283,7 @@ pub fn validate_analysis_mesh_with_options(
     }
 
     let mut boundary_edge_ids = BTreeSet::<String>::new();
+    let mut recovered_boundary_edges = BTreeSet::<[u32; 2]>::new();
     for edge in &mesh.boundary_edges {
         if !boundary_edge_ids.insert(edge.edge_id.clone()) {
             return Err(AnalysisMeshValidationError::DuplicateBoundaryEdgeId {
@@ -314,6 +321,9 @@ pub fn validate_analysis_mesh_with_options(
                 );
             }
         }
+        if !edge.adjacent_boundary_face_ids.is_empty() {
+            recovered_boundary_edges.insert(sorted_edge(edge.node_ids[0], edge.node_ids[1]));
+        }
     }
 
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
@@ -334,6 +344,11 @@ pub fn validate_analysis_mesh_with_options(
         options.min_boundary_area_ratio,
     )?;
     validate_boundary_face_recovery(mesh, options.min_boundary_face_recovery_ratio)?;
+    validate_boundary_edge_recovery(
+        mesh,
+        &recovered_boundary_edges,
+        options.min_boundary_edge_recovery_ratio,
+    )?;
     validate_quality(mesh, options.quality)
 }
 
@@ -541,6 +556,48 @@ fn validate_boundary_face_recovery(
     Ok(())
 }
 
+fn validate_boundary_edge_recovery(
+    mesh: &AnalysisMeshArtifact,
+    recovered_boundary_edges: &BTreeSet<[u32; 2]>,
+    min_boundary_edge_recovery_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    if mesh.boundary_faces.is_empty()
+        || !min_boundary_edge_recovery_ratio.is_finite()
+        || min_boundary_edge_recovery_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let expected_edges = boundary_face_edges(mesh);
+    if expected_edges.is_empty() {
+        return Ok(());
+    }
+    let recovered_count = expected_edges
+        .iter()
+        .filter(|edge| recovered_boundary_edges.contains(*edge))
+        .count();
+    let recovery_ratio = recovered_count as f64 / expected_edges.len() as f64;
+    if recovery_ratio + 1.0e-9 < min_boundary_edge_recovery_ratio {
+        return Err(AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed {
+            recovery_ratio: format!("{recovery_ratio:.6}"),
+            required_ratio: format!("{min_boundary_edge_recovery_ratio:.6}"),
+        });
+    }
+    Ok(())
+}
+
+fn boundary_face_edges(mesh: &AnalysisMeshArtifact) -> BTreeSet<[u32; 2]> {
+    let mut edges = BTreeSet::<[u32; 2]>::new();
+    for face in &mesh.boundary_faces {
+        if face.kind != BoundaryElementKind::Tri3 || face.node_ids.len() != 3 {
+            continue;
+        }
+        edges.insert(sorted_edge(face.node_ids[0], face.node_ids[1]));
+        edges.insert(sorted_edge(face.node_ids[1], face.node_ids[2]));
+        edges.insert(sorted_edge(face.node_ids[2], face.node_ids[0]));
+    }
+    edges
+}
+
 fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
     mesh.volume_elements
         .iter()
@@ -608,6 +665,14 @@ fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
 
 fn norm(value: [f64; 3]) -> f64 {
     dot(value, value).sqrt()
+}
+
+fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
+    if left <= right {
+        [left, right]
+    } else {
+        [right, left]
+    }
 }
 
 #[cfg(test)]
@@ -754,6 +819,26 @@ mod tests {
             AnalysisMeshValidationError::UnknownBoundaryEdgeNode {
                 edge_id: "edge1".to_string(),
                 node_id: 99
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_missing_boundary_edge_recovery_when_required() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                min_boundary_edge_recovery_ratio: 1.0,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("missing boundary edge recovery should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed {
+                recovery_ratio: "0.000000".to_string(),
+                required_ratio: "1.000000".to_string(),
             }
         );
     }
