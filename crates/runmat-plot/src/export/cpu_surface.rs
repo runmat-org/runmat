@@ -1,4 +1,5 @@
 use crate::core::{Camera, PipelineType, ProjectionType, RenderData};
+use crate::plots::surface::ColorMap;
 use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
 use font8x8::{UnicodeFonts, BASIC_FONTS};
@@ -23,6 +24,8 @@ struct AxesView {
     show_minor_grid: bool,
     show_box: bool,
     axes_kind: AxesKind,
+    colorbar_enabled: bool,
+    colormap: ColorMap,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1523,6 +1526,7 @@ pub async fn render_figure_rgba_bytes(
         let (title, x_label, y_label, z_label) = get_axes_title_and_labels(&figure, axes_index);
         let (title_scale, label_scale, tick_scale, show_grid, show_minor_grid, show_box) =
             get_axes_style_and_display_prefs(&figure, axes_index);
+        let (colorbar_enabled, colormap) = get_axes_colorbar_prefs(&figure, axes_index);
 
         axes_views.push(AxesView {
             viewport,
@@ -1542,6 +1546,8 @@ pub async fn render_figure_rgba_bytes(
             show_minor_grid,
             show_box,
             axes_kind: figure.axes_kind(axes_index),
+            colorbar_enabled,
+            colormap,
         });
     }
 
@@ -1563,16 +1569,58 @@ pub async fn render_figure_rgba_bytes(
         draw_render_data(&mut canvas, rd, axes);
     }
     for axes in &axes_views {
-        if !axes.has_3d_content {
-            continue;
+        if axes.has_3d_content {
+            draw_3d_orientation_gizmo(&mut canvas, axes);
+            if axes_views.len() == 1 {
+                draw_legend_for_axes(&mut canvas, &figure, axes);
+            }
         }
-        draw_3d_orientation_gizmo(&mut canvas, axes);
-        if axes_views.len() == 1 {
-            draw_legend_for_axes(&mut canvas, &figure, axes);
-        }
+        draw_colorbar_for_axes(&mut canvas, axes);
     }
 
     Ok(canvas.rgba())
+}
+
+fn get_axes_colorbar_prefs(figure: &Figure, axes_index: usize) -> (bool, ColorMap) {
+    let meta = figure.axes_metadata(axes_index);
+    let enabled = figure.colorbar_enabled
+        || meta
+            .map(|meta| meta.colorbar_enabled)
+            .unwrap_or(figure.colorbar_enabled);
+    let colormap = meta.map(|meta| meta.colormap).unwrap_or(figure.colormap);
+    (enabled, colormap)
+}
+
+fn draw_colorbar_for_axes(canvas: &mut Canvas, axes: &AxesView) {
+    if !axes.colorbar_enabled {
+        return;
+    }
+    let (_, py, pw, ph) = axes.plot_rect;
+    if pw < 48 || ph < 48 {
+        return;
+    }
+
+    let bar_width = 12_i32;
+    let pad = 8_i32;
+    let x = (axes.plot_rect.0 + pw) as i32 - bar_width - pad;
+    let y = py as i32 + pad;
+    let h = ph as i32 - 2 * pad;
+    if h <= 0 {
+        return;
+    }
+
+    for row in 0..h {
+        let t = 1.0 - (row as f32 / (h - 1).max(1) as f32);
+        let color = axes.colormap.map_value(t);
+        let rgba = [
+            (color.x.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.y.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.z.clamp(0.0, 1.0) * 255.0).round() as u8,
+            255,
+        ];
+        canvas.fill_rect(x, y + row, bar_width, 1, rgba);
+    }
+    canvas.stroke_rect(x, y, bar_width, h, [50, 58, 72, 255], 1.0);
 }
 
 fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesView) {
@@ -1686,6 +1734,9 @@ pub async fn render_figure_png_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plots::{MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshScalarField};
+    use glam::Vec3;
+    use std::collections::BTreeSet;
 
     #[test]
     fn cpu_export_respects_explicit_axes_minor_grid_override() {
@@ -1700,5 +1751,66 @@ mod tests {
         inherited.minor_grid_enabled = true;
         let (_, _, _, _, inherited_minor_grid, _) = get_axes_style_and_display_prefs(&inherited, 0);
         assert!(inherited_minor_grid);
+    }
+
+    #[test]
+    fn cpu_export_renders_scalar_mesh_with_colorbar() {
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ],
+            vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+        )
+        .expect("tet boundary mesh should be valid");
+        mesh.set_edge_mode(MeshEdgeMode::None);
+        mesh.set_scalar_field(Some(MeshScalarField::new(
+            "structural.von_mises",
+            MeshFieldLocation::Triangle,
+            vec![0.0, 0.33, 0.66, 1.0],
+        )))
+        .expect("triangle scalar field should attach");
+
+        let mut figure = Figure::new();
+        figure.colorbar_enabled = true;
+        figure.add_mesh_plot(mesh);
+
+        let width = 320;
+        let height = 240;
+        let rgba = pollster::block_on(render_figure_rgba_bytes(
+            figure, width, height, None, None, None, None,
+        ))
+        .expect("CPU render should succeed");
+
+        let background = [255, 255, 255, 255];
+        let non_background = rgba
+            .chunks_exact(4)
+            .filter(|pixel| *pixel != background)
+            .count();
+        assert!(
+            non_background > 2_000,
+            "scalar mesh render should not be blank"
+        );
+
+        let mut max_vertical_color_variation = 0;
+        for x in (width / 2)..(width - 12) {
+            let mut colorbar_colors = BTreeSet::new();
+            for y in 40..(height - 40) {
+                let idx = ((y * width + x) * 4) as usize;
+                colorbar_colors.insert([
+                    rgba[idx],
+                    rgba[idx + 1],
+                    rgba[idx + 2],
+                    rgba[idx + 3],
+                ]);
+            }
+            max_vertical_color_variation = max_vertical_color_variation.max(colorbar_colors.len());
+        }
+        assert!(
+            max_vertical_color_variation > 12,
+            "colorbar strip should contain a visible gradient; saw {max_vertical_color_variation} unique colors"
+        );
     }
 }
