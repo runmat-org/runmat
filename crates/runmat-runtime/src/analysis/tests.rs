@@ -5626,6 +5626,101 @@ fn append_solved_adaptive_mesh_summary_uses_acoustic_pressure_fields() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-cfd-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "fluid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "cfd_steady_state",
+            "run_kind": "cfd",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_VELOCITY,
+            vec![2, 3],
+            vec![1.0, 0.0, 0.0, 0.0, 12.0, 5.0],
+        ),
+        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![2], vec![1.0, 20.0]),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_VORTICITY,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 0.0, 8.0, 15.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "velocity_gradient",
+        "pressure_gradient",
+        "vorticity",
+        "wall_shear",
+    ] {
+        assert!(indicators.iter().any(
+            |indicator| indicator["namespace"].as_str() == Some("cfd")
+                && indicator["name"].as_str() == Some(name)
+                && indicator["status"].as_str() == Some("used")
+        ));
+    }
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in [
+        "cfd.velocity_gradient",
+        "cfd.pressure_gradient",
+        "cfd.vorticity",
+        "cfd.wall_shear",
+    ] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
     let root = temp_artifact_root("append-solved-adaptive-missing-fields-summary");
     let _ = fs::remove_dir_all(&root);

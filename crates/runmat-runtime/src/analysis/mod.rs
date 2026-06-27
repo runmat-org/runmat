@@ -13802,6 +13802,21 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_acoustic_pressure = acoustic_pressure_values.is_some();
+    let cfd_velocity_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_VELOCITY, mesh.volume_elements.len());
+    let has_cfd_velocity = cfd_velocity_values.is_some();
+    let cfd_pressure_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_PRESSURE, mesh.volume_elements.len());
+    let has_cfd_pressure = cfd_pressure_values.is_some();
+    let cfd_vorticity_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_VORTICITY, mesh.volume_elements.len());
+    let has_cfd_vorticity = cfd_vorticity_values.is_some();
+    let cfd_wall_shear_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+        mesh.volume_elements.len(),
+    );
+    let has_cfd_wall_shear = cfd_wall_shear_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
@@ -13838,7 +13853,12 @@ fn append_solved_adaptive_mesh_summary(
                             && has_electromagnetic_energy_density)))
                 || (key.namespace == "acoustic"
                     && ((key.name == "pressure_gradient" && has_acoustic_pressure)
-                        || (key.name == "pressure_curvature" && has_acoustic_pressure)));
+                        || (key.name == "pressure_curvature" && has_acoustic_pressure)))
+                || (key.namespace == "cfd"
+                    && ((key.name == "velocity_gradient" && has_cfd_velocity)
+                        || (key.name == "pressure_gradient" && has_cfd_pressure)
+                        || (key.name == "vorticity" && has_cfd_vorticity)
+                        || (key.name == "wall_shear" && has_cfd_wall_shear)));
             RefinementIndicatorAvailability {
                 key,
                 applicable,
@@ -13891,6 +13911,10 @@ fn append_solved_adaptive_mesh_summary(
         indicator_was_used(&indicators, "acoustic", "pressure_gradient");
     let acoustic_pressure_curvature_used =
         indicator_was_used(&indicators, "acoustic", "pressure_curvature");
+    let cfd_velocity_gradient_used = indicator_was_used(&indicators, "cfd", "velocity_gradient");
+    let cfd_pressure_gradient_used = indicator_was_used(&indicators, "cfd", "pressure_gradient");
+    let cfd_vorticity_used = indicator_was_used(&indicators, "cfd", "vorticity");
+    let cfd_wall_shear_used = indicator_was_used(&indicators, "cfd", "wall_shear");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -14049,6 +14073,58 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
+    if !element_budget_reached && cfd_velocity_gradient_used {
+        if let Some(values) = cfd_velocity_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.velocity_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_pressure_gradient_used {
+        if let Some(values) = cfd_pressure_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.pressure_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_vorticity_used {
+        if let Some(values) = cfd_vorticity_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.vorticity",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_wall_shear_used {
+        if let Some(values) = cfd_wall_shear_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.wall_shear",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
     {
         if element_budget_reached {
@@ -14072,7 +14148,11 @@ fn append_solved_adaptive_mesh_summary(
                 element_budget_reached,
                 field_change: (stress_gradient_used
                     || acoustic_pressure_gradient_used
-                    || acoustic_pressure_curvature_used)
+                    || acoustic_pressure_curvature_used
+                    || cfd_velocity_gradient_used
+                    || cfd_pressure_gradient_used
+                    || cfd_vorticity_used
+                    || cfd_wall_shear_used)
                     .then_some(marker_change),
                 energy_change: (strain_energy_density_used
                     || temperature_gradient_used
@@ -14252,6 +14332,13 @@ fn electromagnetic_element_gradient_samples(
 }
 
 fn acoustic_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn cfd_element_gradient_samples(
     mesh: &AnalysisMeshArtifact,
     element_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
