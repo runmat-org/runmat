@@ -13772,6 +13772,30 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_heat_flux = heat_flux_values.is_some();
+    let magnetic_flux_density_values = analysis_field_magnitudes(
+        fields,
+        "em.magnetic_flux_density_magnitude",
+        mesh.volume_elements.len(),
+    );
+    let has_magnetic_flux_density = magnetic_flux_density_values.is_some();
+    let electric_field_values = analysis_field_magnitudes(
+        fields,
+        "em.electric_field_real",
+        mesh.volume_elements.len(),
+    );
+    let has_electric_field = electric_field_values.is_some();
+    let current_density_values = analysis_field_magnitudes(
+        fields,
+        "em.current_density_real",
+        mesh.volume_elements.len(),
+    );
+    let has_current_density = current_density_values.is_some();
+    let electromagnetic_energy_density_values = analysis_field_magnitudes(
+        fields,
+        "em.energy_density",
+        mesh.volume_elements.len(),
+    );
+    let has_electromagnetic_energy_density = electromagnetic_energy_density_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
@@ -13799,7 +13823,13 @@ fn append_solved_adaptive_mesh_summary(
                         || (key.name == "constraint_regions" && has_boundary_constraint_regions)))
                 || (key.namespace == "thermal"
                     && ((key.name == "temperature_gradient" && has_temperature_gradient)
-                        || (key.name == "heat_flux_gradient" && has_heat_flux)));
+                        || (key.name == "heat_flux_gradient" && has_heat_flux)))
+                || (key.namespace == "electromagnetic"
+                    && ((key.name == "flux_density_gradient" && has_magnetic_flux_density)
+                        || (key.name == "electric_field_gradient" && has_electric_field)
+                        || (key.name == "current_density_gradient" && has_current_density)
+                        || (key.name == "energy_density"
+                            && has_electromagnetic_energy_density)));
             RefinementIndicatorAvailability {
                 key,
                 applicable,
@@ -13840,6 +13870,14 @@ fn append_solved_adaptive_mesh_summary(
     let temperature_gradient_used =
         indicator_was_used(&indicators, "thermal", "temperature_gradient");
     let heat_flux_gradient_used = indicator_was_used(&indicators, "thermal", "heat_flux_gradient");
+    let electromagnetic_flux_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "flux_density_gradient");
+    let electromagnetic_electric_field_used =
+        indicator_was_used(&indicators, "electromagnetic", "electric_field_gradient");
+    let electromagnetic_current_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "current_density_gradient");
+    let electromagnetic_energy_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "energy_density");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -13920,6 +13958,58 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
+    if !element_budget_reached && electromagnetic_flux_density_used {
+        if let Some(values) = magnetic_flux_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.flux_density_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_electric_field_used {
+        if let Some(values) = electric_field_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.electric_field_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_current_density_used {
+        if let Some(values) = current_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.current_density_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_energy_density_used {
+        if let Some(values) = electromagnetic_energy_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.energy_density",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
     {
         if element_budget_reached {
@@ -13944,7 +14034,8 @@ fn append_solved_adaptive_mesh_summary(
                 field_change: stress_gradient_used.then_some(marker_change),
                 energy_change: (strain_energy_density_used
                     || temperature_gradient_used
-                    || heat_flux_gradient_used)
+                    || heat_flux_gradient_used
+                    || electromagnetic_energy_density_used)
                     .then_some(marker_change),
                 residual: None,
             },
@@ -13975,6 +14066,15 @@ fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Opt
         .iter()
         .find(|field| field.field_id == field_id)
         .and_then(AnalysisField::as_host_f64)
+}
+
+fn analysis_field_magnitudes(
+    fields: &[AnalysisField],
+    field_id: &str,
+    entity_count: usize,
+) -> Option<Vec<f64>> {
+    let values = analysis_field_values(fields, field_id)?;
+    vector_field_magnitudes(values, entity_count)
 }
 
 fn latest_prefixed_vector_field_magnitudes(
@@ -14096,6 +14196,13 @@ fn structural_strain_energy_density_samples(
 }
 
 fn thermal_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn electromagnetic_element_gradient_samples(
     mesh: &AnalysisMeshArtifact,
     element_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
