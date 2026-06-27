@@ -67,6 +67,7 @@ struct MeshCounts {
     plot_index: usize,
     vertices: usize,
     triangles: usize,
+    triangle_volume_element_indices: Vec<Option<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +183,7 @@ fn mesh_result_figures(
                 )]
             }
         };
-    let mesh_counts = collect_mesh_counts(&probe);
+    let mesh_counts = collect_mesh_counts_with_topology(&probe, render_topology);
     if mesh_counts.is_empty() {
         return Vec::new();
     }
@@ -731,18 +732,34 @@ fn render_topology_figure(
 }
 
 fn collect_mesh_counts(figure: &Figure) -> Vec<MeshCounts> {
-    figure
-        .plots()
-        .enumerate()
-        .filter_map(|(plot_index, plot)| match plot {
-            PlotElement::Mesh(mesh) => Some(MeshCounts {
+    collect_mesh_counts_with_topology(figure, None)
+}
+
+fn collect_mesh_counts_with_topology(
+    figure: &Figure,
+    topology: Option<&AnalysisRenderTopology>,
+) -> Vec<MeshCounts> {
+    let mut counts = Vec::new();
+    let mut mesh_ordinal = 0usize;
+    for (plot_index, plot) in figure.plots().enumerate() {
+        if let PlotElement::Mesh(mesh) = plot {
+            let triangle_volume_element_indices = topology
+                .and_then(|topology| topology.meshes.get(mesh_ordinal))
+                .filter(|render_mesh| {
+                    render_mesh.triangle_volume_element_indices.len() == mesh.triangles().len()
+                })
+                .map(|render_mesh| render_mesh.triangle_volume_element_indices.clone())
+                .unwrap_or_default();
+            counts.push(MeshCounts {
                 plot_index,
                 vertices: mesh.vertices().len(),
                 triangles: mesh.triangles().len(),
-            }),
-            _ => None,
-        })
-        .collect()
+                triangle_volume_element_indices,
+            });
+            mesh_ordinal += 1;
+        }
+    }
+    counts
 }
 
 fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts]) -> Option<String> {
@@ -824,6 +841,9 @@ fn scalar_overlay(
             options,
         );
     }
+    if let Some(overlay) = scalar_overlay_from_element_values(field, meshes, options) {
+        return Some(overlay);
+    }
     if let Some(vectors) = vectors_for_count(field, total_vertices) {
         if total_vertices <= options.max_overlay_values {
             let magnitudes = vectors
@@ -853,6 +873,48 @@ fn scalar_overlay(
         }
     }
     None
+}
+
+fn scalar_overlay_from_element_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Element
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+        || field_entity_count(field, &descriptor, values.len()) != values.len()
+    {
+        return None;
+    }
+    let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
+    if total_triangles > options.max_overlay_values {
+        return None;
+    }
+    let values = values
+        .iter()
+        .copied()
+        .map(f64_to_f32)
+        .collect::<Option<Vec<_>>>()?;
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.triangle_volume_element_indices.len() != mesh.triangles {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.triangles);
+        for element_index in &mesh.triangle_volume_element_indices {
+            let element_index = (*element_index)?;
+            chunk.push(*values.get(element_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Triangle,
+        chunks,
+    })
 }
 
 fn scalar_overlay_from_values<I>(
@@ -1388,6 +1450,7 @@ mod tests {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 triangles: vec![[0, 1, 2]],
+                triangle_volume_element_indices: Vec::new(),
             }],
         }
     }
@@ -1440,6 +1503,7 @@ mod tests {
             plot_index: 0,
             vertices: 4,
             triangles: 12,
+            triangle_volume_element_indices: Vec::new(),
         }];
 
         let warning = field_topology_mismatch_warning(&field, &meshes)
@@ -1450,5 +1514,26 @@ mod tests {
         assert!(warning.contains("element_kind=tet4"));
         assert!(warning.contains("value_count=1"));
         assert!(warning.contains("render_triangle_count=12"));
+    }
+
+    #[test]
+    fn scalar_overlay_projects_element_values_to_boundary_triangles() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
+        }];
+
+        let overlay = scalar_overlay(
+            &field,
+            &meshes,
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("element scalar field should project to boundary triangles");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Triangle);
+        assert_eq!(overlay.chunks, vec![vec![10.0, 42.0, 42.0]]);
     }
 }

@@ -968,6 +968,8 @@ pub struct AnalysisRenderMesh {
     pub mesh_id: String,
     pub vertices: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_volume_element_indices: Vec<Option<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

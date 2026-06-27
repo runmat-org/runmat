@@ -14198,6 +14198,7 @@ fn render_topology_from_prep_context(
             mesh_id: "solver_surface".to_string(),
             vertices: prep.element_topology_node_coordinates_m.clone(),
             triangles,
+            triangle_volume_element_indices: Vec::new(),
         }],
     })
 }
@@ -14216,20 +14217,33 @@ fn render_topology_from_analysis_mesh(
         .enumerate()
         .map(|(index, node)| (node.node_id, index as u32))
         .collect::<HashMap<_, _>>();
-    let triangles = mesh
+    let volume_index_by_id = mesh
+        .volume_elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| (element.element_id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let face_entries = mesh
         .boundary_faces
         .iter()
         .filter(|face| {
             face.kind == runmat_meshing_core::BoundaryElementKind::Tri3 && face.node_ids.len() == 3
         })
         .filter_map(|face| {
-            Some([
+            let triangle = [
                 *node_index_by_id.get(&face.node_ids[0])?,
                 *node_index_by_id.get(&face.node_ids[1])?,
                 *node_index_by_id.get(&face.node_ids[2])?,
-            ])
+            ];
+            let volume_element_index = face
+                .adjacent_volume_element_ids
+                .iter()
+                .find_map(|element_id| volume_index_by_id.get(element_id.as_str()).copied());
+            Some((triangle, volume_element_index))
         })
         .collect::<Vec<_>>();
+    let (triangles, triangle_volume_element_indices): (Vec<_>, Vec<_>) =
+        face_entries.into_iter().unzip();
     if triangles.is_empty() {
         return None;
     }
@@ -14241,6 +14255,7 @@ fn render_topology_from_analysis_mesh(
             mesh_id: "analysis_mesh_boundary".to_string(),
             vertices: mesh.nodes.iter().map(|node| node.coordinates_m).collect(),
             triangles,
+            triangle_volume_element_indices,
         }],
     })
 }
