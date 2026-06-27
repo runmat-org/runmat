@@ -1260,7 +1260,7 @@ fn resolve_load(
         FeaLoadType::Wrench => {
             let [fx, fy, fz] = load_force(load)?;
             let [mx, my, mz] = load_moment(load)?;
-            let [px, py, pz] = load_point(load)?;
+            let [px, py, pz] = point_in_meters(load_point(load)?, geometry.units);
             LoadKind::Wrench {
                 fx,
                 fy,
@@ -1502,6 +1502,19 @@ fn load_moment(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
 fn load_point(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
     load.point
         .ok_or_else(|| "wrench load requires point: [px, py, pz]".to_string())
+}
+
+fn point_in_meters(point: [f64; 3], units: UnitSystem) -> [f64; 3] {
+    let scale = geometry_unit_scale_to_meters(units);
+    [point[0] * scale, point[1] * scale, point[2] * scale]
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
+    match units {
+        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
+        UnitSystem::Millimeter => 1.0e-3,
+        UnitSystem::Inch => 0.0254,
+    }
 }
 
 fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
@@ -1793,6 +1806,38 @@ point: [0.1, 0.2, 0.3]
                 py: 0.2,
                 pz: 0.3,
             }
+        ));
+    }
+
+    #[test]
+    fn fea_document_scales_wrench_point_from_geometry_units_to_meters() {
+        let mut geometry = sample_geometry();
+        geometry.units = UnitSystem::Millimeter;
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tag:tip
+type: wrench
+force: [10.0, 20.0, 30.0]
+moment: [1.0, 2.0, 3.0]
+point: [100.0, 200.0, 300.0]
+"#,
+        )
+        .expect("load document should parse");
+
+        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect("load should resolve against geometry");
+
+        assert!(matches!(
+            resolved.kind,
+            LoadKind::Wrench {
+                px,
+                py,
+                pz,
+                ..
+            } if (px - 0.1).abs() <= 1.0e-12
+                && (py - 0.2).abs() <= 1.0e-12
+                && (pz - 0.3).abs() <= 1.0e-12
         ));
     }
 

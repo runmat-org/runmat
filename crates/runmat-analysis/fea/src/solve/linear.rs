@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, dense_stiffness},
+    operator::{apply_k, csr_stiffness, dense_stiffness},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
@@ -387,7 +387,7 @@ fn graph_tuned_preconditioner(
     summary: &AssemblySummary,
     requested: SpdPreconditionerKind,
 ) -> SpdPreconditionerKind {
-    if dense_stiffness(&summary.operator).is_some() {
+    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
         return SpdPreconditionerKind::Jacobi;
     }
     if let Some(graph) = summary.prep_graph_assembly.as_ref() {
@@ -399,7 +399,7 @@ fn graph_tuned_preconditioner(
 }
 
 fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> usize {
-    if dense_stiffness(&summary.operator).is_some() {
+    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
         return base_max_iters
             .max(summary.dof_count.saturating_mul(2))
             .max(256);
@@ -481,6 +481,7 @@ mod tests {
                 dof_count,
                 constrained: vec![false; dof_count],
                 stiffness_dense: Some(vec![0.0; dof_count * dof_count]),
+                stiffness_csr: None,
                 stiffness_diag: vec![1.0; dof_count],
                 stiffness_upper: vec![0.0; dof_count.saturating_sub(1)],
                 mass_diag: vec![1.0; dof_count],

@@ -1,5 +1,6 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_geometry_core::UnitSystem;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
     MeshScalarField, MeshVectorField, PlotElement,
@@ -676,6 +677,7 @@ fn base_mesh_figure_for_run_source(
                     ..GeometryPreviewFigureOptions::default()
                 },
             ) {
+                normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
                 if let Some(topology) = render_topology {
                     if let Ok(solver) = render_topology_figure(topology, title.clone(), options) {
                         append_mesh_plots(&mut figure, &solver);
@@ -710,6 +712,32 @@ fn base_mesh_figure_for_run_source(
             },
         )
         .ok(),
+    }
+}
+
+fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSystem) {
+    let scale = geometry_unit_scale_to_meters(units);
+    if (scale - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for index in 0..figure.plots().count() {
+        let Some(PlotElement::Mesh(mesh)) = figure.get_plot_mut(index) else {
+            continue;
+        };
+        let vertices = mesh
+            .vertices()
+            .iter()
+            .map(|vertex| *vertex * scale)
+            .collect::<Vec<_>>();
+        let _ = mesh.set_vertices(vertices);
+    }
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f32 {
+    match units {
+        UnitSystem::Unspecified | UnitSystem::Meter => 1.0,
+        UnitSystem::Millimeter => 0.001,
+        UnitSystem::Inch => 0.0254,
     }
 }
 
@@ -1513,6 +1541,12 @@ mod tests {
     use super::*;
 
     fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
+        simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Meter)
+    }
+
+    fn simple_geometry_asset_with_units(
+        units: runmat_geometry_core::UnitSystem,
+    ) -> runmat_geometry_core::GeometryAsset {
         runmat_geometry_core::GeometryAsset {
             geometry_id: "geometry".to_string(),
             source: runmat_geometry_core::GeometrySource {
@@ -1526,7 +1560,7 @@ mod tests {
                 material_evidence: Vec::new(),
             },
             tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
-            units: runmat_geometry_core::UnitSystem::Meter,
+            units,
             revision: 1,
             meshes: vec![runmat_geometry_core::MeshDescriptor {
                 mesh_id: "cad_surface".to_string(),
@@ -1657,6 +1691,33 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+    }
+
+    #[test]
+    fn auto_layered_result_scales_geometry_context_to_solver_meters() {
+        let mut geometry =
+            simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Millimeter);
+        geometry.surface_meshes[0].vertices =
+            vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 1000.0, 0.0]];
+        let topology = simple_render_topology();
+
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let cad = figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("cad_surface") => Some(mesh),
+                _ => None,
+            })
+            .expect("CAD context mesh should be present");
+        assert_eq!(cad.vertices()[1], Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(cad.vertices()[2], Vec3::new(0.0, 1.0, 0.0));
     }
 
     #[test]

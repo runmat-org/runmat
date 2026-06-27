@@ -354,15 +354,25 @@ fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
 }
 
 fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
-    if summary.structural_solid_element_count == 0 && summary.operator.stiffness_dense.is_none() {
+    if summary.structural_solid_element_count == 0
+        && summary.operator.stiffness_dense.is_none()
+        && summary.operator.stiffness_csr.is_none()
+    {
         return None;
     }
 
-    let dense_stiffness_nnz = summary
+    let stiffness_nnz = summary
         .operator
-        .stiffness_dense
+        .stiffness_csr
         .as_ref()
-        .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
+        .map(|csr| csr.values.iter().filter(|value| value.abs() > 0.0).count())
+        .or_else(|| {
+            summary
+                .operator
+                .stiffness_dense
+                .as_ref()
+                .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
+        })
         .unwrap_or(0);
     let rhs_nonzero_count = summary
         .operator
@@ -370,25 +380,34 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
         .iter()
         .filter(|value| value.abs() > 0.0)
         .count();
-    let has_dense_solid_stiffness =
-        summary.operator.stiffness_dense.is_some() && summary.structural_solid_element_count > 0;
+    let has_solid_stiffness = (summary.operator.stiffness_csr.is_some()
+        || summary.operator.stiffness_dense.is_some())
+        && summary.structural_solid_element_count > 0;
+    let storage = if summary.operator.stiffness_csr.is_some() {
+        "sparse_csr"
+    } else if summary.operator.stiffness_dense.is_some() {
+        "dense"
+    } else {
+        "none"
+    };
 
     Some(FeaDiagnostic {
         code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
-        severity: if has_dense_solid_stiffness {
+        severity: if has_solid_stiffness {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=solid_tet4_dense_stiffness solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} dense_stiffness_nnz={} rhs_nonzero_count={} dense_stiffness_present={}",
+            "basis=solid_tet4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
+            storage,
             summary.structural_node_count,
             summary.structural_solid_element_count,
             summary.dof_count,
             summary.constrained_dof_count,
-            dense_stiffness_nnz,
+            stiffness_nnz,
             rhs_nonzero_count,
-            summary.operator.stiffness_dense.is_some()
+            has_solid_stiffness
         ),
     })
 }

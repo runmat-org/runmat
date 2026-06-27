@@ -25,13 +25,11 @@ use self::{
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
     legacy_surrogate::legacy_surrogate_topology,
-    solid::{
-        assemble_solid_stiffness_dense, solid_topology_from_analysis_mesh, SolidAssemblyError,
-    },
+    solid::{assemble_solid_stiffness_csr, solid_topology_from_analysis_mesh, SolidAssemblyError},
     solid_boundary::apply_analysis_mesh_structural_regions,
 };
 
-use crate::operator::OperatorSystem;
+use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::physics::coupling::thermo_mechanical;
 use crate::{
     FeaElectroThermalContext, FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext,
@@ -1020,8 +1018,8 @@ fn assemble_linear_system_impl(
         }
     }
 
-    let mut stiffness_dense = match analysis_mesh.as_ref() {
-        Some(mesh) => match assemble_solid_stiffness_dense(
+    let stiffness_csr = match analysis_mesh.as_ref() {
+        Some(mesh) => match assemble_solid_stiffness_csr(
             mesh,
             SolidMaterial {
                 youngs_modulus_pa: structural_material.youngs_modulus_pa,
@@ -1037,9 +1035,17 @@ fn assemble_linear_system_impl(
         },
         None => None,
     };
-    if let Some(dense) = stiffness_dense.as_ref() {
+    if let Some(csr) = stiffness_csr.as_ref() {
+        apply_csr_constraints(csr, &constrained, &mut rhs, dof_count);
         for i in 0..dof_count {
-            stiffness_diag[i] = dense[i * dof_count + i].abs().max(1.0e-12);
+            let start = csr.row_offsets[i];
+            let end = csr.row_offsets[i + 1];
+            stiffness_diag[i] = csr.column_indices[start..end]
+                .iter()
+                .zip(csr.values[start..end].iter())
+                .find_map(|(&column, &value)| (column == i).then_some(value.abs()))
+                .unwrap_or(1.0e-12)
+                .max(1.0e-12);
         }
         stiffness_upper.fill(0.0);
     }
@@ -1084,7 +1090,8 @@ fn assemble_linear_system_impl(
         operator: OperatorSystem {
             dof_count,
             constrained,
-            stiffness_dense: stiffness_dense.take(),
+            stiffness_dense: None,
+            stiffness_csr,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -1527,6 +1534,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             dof_count,
             constrained,
             stiffness_dense: Some(dense),
+            stiffness_csr: None,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -2001,6 +2009,22 @@ fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64],
         for row in 0..dof_count {
             if !constrained[row] {
                 rhs[row] -= dense[row * dof_count + dof] * rhs[dof];
+            }
+        }
+    }
+}
+
+fn apply_csr_constraints(csr: &CsrMatrix, constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
+    for row in 0..dof_count {
+        if constrained[row] {
+            continue;
+        }
+        let start = csr.row_offsets[row];
+        let end = csr.row_offsets[row + 1];
+        for entry in start..end {
+            let column = csr.column_indices[entry];
+            if constrained[column] {
+                rhs[row] -= csr.values[entry] * rhs[column];
             }
         }
     }
@@ -3058,7 +3082,7 @@ mod tests {
     };
 
     #[test]
-    fn analysis_mesh_populates_dense_solid_stiffness_operator() {
+    fn analysis_mesh_populates_sparse_solid_stiffness_operator() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
 
@@ -3078,22 +3102,29 @@ mod tests {
                 [0.0, 0.0, 1.0],
             ]
         );
-        let dense = summary
+        assert!(summary.operator.stiffness_dense.is_none());
+        let csr = summary
             .operator
-            .stiffness_dense
+            .stiffness_csr
             .as_ref()
-            .expect("analysis mesh should assemble a dense solid stiffness matrix");
-        assert_eq!(dense.len(), summary.dof_count * summary.dof_count);
+            .expect("analysis mesh should assemble a sparse solid stiffness matrix");
+        assert_eq!(csr.row_offsets.len(), summary.dof_count + 1);
+        assert_eq!(csr.row_offsets.last().copied(), Some(csr.values.len()));
+        assert_eq!(csr.column_indices.len(), csr.values.len());
         assert!(summary
             .operator
             .stiffness_diag
             .iter()
             .all(|value| *value > 0.0));
         for row in 0..summary.dof_count {
-            assert!(
-                (summary.operator.stiffness_diag[row] - dense[row * summary.dof_count + row].abs())
-                    <= 1.0e-8
-            );
+            let start = csr.row_offsets[row];
+            let end = csr.row_offsets[row + 1];
+            let diagonal = csr.column_indices[start..end]
+                .iter()
+                .zip(csr.values[start..end].iter())
+                .find_map(|(&column, &value)| (column == row).then_some(value.abs()))
+                .expect("csr row should include diagonal");
+            assert!((summary.operator.stiffness_diag[row] - diagonal) <= 1.0e-8);
         }
     }
 

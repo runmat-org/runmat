@@ -905,15 +905,24 @@ impl BoundarySide {
 
 fn occupied_cells(input: &BoundaryMeshInput, grid: &StructuredGrid) -> Vec<bool> {
     let mut occupied = vec![false; grid.cell_count()];
+    let boundary_cells = boundary_triangle_centroid_cells(input, grid);
     for k in 0..grid.nz() {
         for j in 0..grid.ny() {
             for i in 0..grid.nx() {
+                let cell_index = grid.cell_index(i, j, k);
+                if boundary_cells[cell_index] {
+                    occupied[cell_index] = true;
+                    continue;
+                }
                 let center = [
                     (grid.x[i] + grid.x[i + 1]) * 0.5,
                     (grid.y[j] + grid.y[j + 1]) * 0.5,
                     (grid.z[k] + grid.z[k + 1]) * 0.5,
                 ];
-                occupied[grid.cell_index(i, j, k)] = point_inside_closed_surface(input, center);
+                occupied[cell_index] = point_inside_closed_surface(input, center)
+                    || cell_corners(i, j, k, grid)
+                        .into_iter()
+                        .any(|corner| point_inside_closed_surface(input, corner));
             }
         }
     }
@@ -922,6 +931,59 @@ fn occupied_cells(input: &BoundaryMeshInput, grid: &StructuredGrid) -> Vec<bool>
     } else {
         vec![true; grid.cell_count()]
     }
+}
+
+fn boundary_triangle_centroid_cells(input: &BoundaryMeshInput, grid: &StructuredGrid) -> Vec<bool> {
+    let mut cells = vec![false; grid.cell_count()];
+    if grid.cell_count() == 0 {
+        return cells;
+    }
+    for triangle in &input.triangles {
+        let Some(vertices) = triangle_vertices(input, triangle.node_ids) else {
+            continue;
+        };
+        let centroid = triangle_centroid(vertices);
+        let Some(i) = axis_cell_index(&grid.x, centroid[0]) else {
+            continue;
+        };
+        let Some(j) = axis_cell_index(&grid.y, centroid[1]) else {
+            continue;
+        };
+        let Some(k) = axis_cell_index(&grid.z, centroid[2]) else {
+            continue;
+        };
+        cells[grid.cell_index(i, j, k)] = true;
+    }
+    cells
+}
+
+fn axis_cell_index(axis: &[f64], value: f64) -> Option<usize> {
+    if axis.len() < 2 || !value.is_finite() {
+        return None;
+    }
+    let first = *axis.first()?;
+    let last = *axis.last()?;
+    if value < first || value > last {
+        return None;
+    }
+    if value == last {
+        return Some(axis.len() - 2);
+    }
+    let upper = axis.partition_point(|breakpoint| *breakpoint <= value);
+    upper.checked_sub(1).filter(|index| *index + 1 < axis.len())
+}
+
+fn cell_corners(i: usize, j: usize, k: usize, grid: &StructuredGrid) -> [[f64; 3]; 8] {
+    [
+        [grid.x[i], grid.y[j], grid.z[k]],
+        [grid.x[i + 1], grid.y[j], grid.z[k]],
+        [grid.x[i], grid.y[j + 1], grid.z[k]],
+        [grid.x[i + 1], grid.y[j + 1], grid.z[k]],
+        [grid.x[i], grid.y[j], grid.z[k + 1]],
+        [grid.x[i + 1], grid.y[j], grid.z[k + 1]],
+        [grid.x[i], grid.y[j + 1], grid.z[k + 1]],
+        [grid.x[i + 1], grid.y[j + 1], grid.z[k + 1]],
+    ]
 }
 
 fn largest_connected_occupied_component(
@@ -964,12 +1026,32 @@ fn largest_connected_occupied_component(
 
 fn point_inside_closed_surface(input: &BoundaryMeshInput, point: [f64; 3]) -> bool {
     let epsilon = boundary_max_span(input).max(1.0) * 1.0e-10;
-    let origin = [
-        point[0] - epsilon * 0.37,
-        point[1] + epsilon * 0.19,
-        point[2] + epsilon * 0.11,
+    let probes = [
+        ([1.0, 0.0, 0.0], [-0.37, 0.19, 0.11]),
+        ([0.0, 1.0, 0.0], [0.13, -0.41, 0.23]),
+        ([0.0, 0.0, 1.0], [0.17, 0.29, -0.43]),
     ];
-    let direction = [1.0, 0.0, 0.0];
+    probes
+        .into_iter()
+        .filter(|(direction, jitter)| {
+            ray_odd_intersection_count(input, point, *direction, *jitter, epsilon)
+        })
+        .count()
+        >= 2
+}
+
+fn ray_odd_intersection_count(
+    input: &BoundaryMeshInput,
+    point: [f64; 3],
+    direction: [f64; 3],
+    jitter: [f64; 3],
+    epsilon: f64,
+) -> bool {
+    let origin = [
+        point[0] + epsilon * jitter[0],
+        point[1] + epsilon * jitter[1],
+        point[2] + epsilon * jitter[2],
+    ];
     let mut intersections = Vec::<f64>::new();
     for triangle in &input.triangles {
         let Some(vertices) = triangle_vertices(input, triangle.node_ids) else {
@@ -1694,6 +1776,35 @@ mod tests {
         let retained = largest_connected_occupied_component(&grid, occupied);
 
         assert_eq!(retained, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn boundary_triangle_centroids_mark_intersected_cells_occupied() {
+        let input = BoundaryMeshInput {
+            mesh_id: "surface".to_string(),
+            source_geometry_id: "geo_surface".to_string(),
+            source_geometry_revision: 1,
+            source_geometry_sha256: None,
+            vertices: vec![[1.2, 0.1, 0.1], [1.8, 0.1, 0.1], [1.5, 0.8, 0.1]],
+            triangles: vec![BoundaryMeshTriangle {
+                triangle_id: 0,
+                node_ids: [0, 1, 2],
+                region_ids: vec!["region".to_string()],
+                provenance: Vec::new(),
+            }],
+            region_ids: vec!["region".to_string()],
+            bounds_min_m: [0.0, 0.0, 0.0],
+            bounds_max_m: [2.0, 1.0, 1.0],
+        };
+        let grid = StructuredGrid {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![0.0, 1.0],
+            z: vec![0.0, 1.0],
+        };
+
+        let cells = boundary_triangle_centroid_cells(&input, &grid);
+
+        assert_eq!(cells, vec![false, true]);
     }
 
     #[test]

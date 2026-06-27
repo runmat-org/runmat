@@ -595,10 +595,11 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
 
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_SOLID_ASSEMBLY"
-            && diag.message.contains("basis=solid_tet4_dense_stiffness")
+            && diag.message.contains("basis=solid_tet4_stiffness")
+            && diag.message.contains("storage=sparse_csr")
             && diag.message.contains("solid_node_count=4")
             && diag.message.contains("solid_element_count=1")
-            && diag.message.contains("dense_stiffness_present=true")
+            && diag.message.contains("stiffness_present=true")
     }));
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
