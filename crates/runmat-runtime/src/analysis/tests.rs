@@ -2085,6 +2085,29 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
+    let render_topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("analysis mesh backed run should persist render topology");
+    assert_eq!(render_topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    let render_mesh = render_topology
+        .meshes
+        .first()
+        .expect("render topology should contain analysis mesh boundary surface");
+    assert_eq!(
+        render_mesh.vertices.len(),
+        refined_payload["mesh"]["nodes"]
+            .as_array()
+            .expect("refined mesh nodes")
+            .len()
+    );
+    assert_eq!(
+        render_mesh.triangles.len(),
+        refined_payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("refined boundary faces")
+            .len()
+    );
     assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
             && diagnostic.message.contains(refined_artifact_path)

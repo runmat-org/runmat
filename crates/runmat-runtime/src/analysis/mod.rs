@@ -9445,7 +9445,8 @@ pub fn analysis_run_linear_static_with_options(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: render_topology_from_analysis_mesh(analysis_mesh.as_ref())
+            .or_else(|| render_topology_from_prep_context(prep_context.as_ref())),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -14196,6 +14197,49 @@ fn render_topology_from_prep_context(
         meshes: vec![AnalysisRenderMesh {
             mesh_id: "solver_surface".to_string(),
             vertices: prep.element_topology_node_coordinates_m.clone(),
+            triangles,
+        }],
+    })
+}
+
+fn render_topology_from_analysis_mesh(
+    mesh: Option<&AnalysisMeshArtifact>,
+) -> Option<AnalysisRenderTopology> {
+    let mesh = mesh?;
+    if mesh.nodes.is_empty() || mesh.boundary_faces.is_empty() {
+        return None;
+    }
+
+    let node_index_by_id = mesh
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index as u32))
+        .collect::<HashMap<_, _>>();
+    let triangles = mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| {
+            face.kind == runmat_meshing_core::BoundaryElementKind::Tri3 && face.node_ids.len() == 3
+        })
+        .filter_map(|face| {
+            Some([
+                *node_index_by_id.get(&face.node_ids[0])?,
+                *node_index_by_id.get(&face.node_ids[1])?,
+                *node_index_by_id.get(&face.node_ids[2])?,
+            ])
+        })
+        .collect::<Vec<_>>();
+    if triangles.is_empty() {
+        return None;
+    }
+
+    Some(AnalysisRenderTopology {
+        schema_version: "analysis_render_topology/v1".to_string(),
+        source: AnalysisRenderTopologySource::AnalysisMesh,
+        meshes: vec![AnalysisRenderMesh {
+            mesh_id: "analysis_mesh_boundary".to_string(),
+            vertices: mesh.nodes.iter().map(|node| node.coordinates_m).collect(),
             triangles,
         }],
     })

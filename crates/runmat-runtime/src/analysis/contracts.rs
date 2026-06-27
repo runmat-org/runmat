@@ -960,6 +960,7 @@ pub struct AnalysisRenderTopology {
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisRenderTopologySource {
     SolverPrep,
+    AnalysisMesh,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
