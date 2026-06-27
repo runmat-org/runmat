@@ -5101,6 +5101,52 @@ fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-fields-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = minimal_analysis_mesh();
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(
+        adaptive_iterations[0]["indicators"]
+            .as_array()
+            .expect("adaptive indicators")
+            .iter()
+            .all(|indicator| indicator["status"].as_str() == Some("skipped_missing_field"))
+    );
+    assert!(
+        adaptive_iterations[0]["markers"]
+            .as_array()
+            .expect("adaptive markers")
+            .is_empty()
+    );
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
     let root = temp_artifact_root("append-solved-adaptive-budget-summary");
     let _ = fs::remove_dir_all(&root);

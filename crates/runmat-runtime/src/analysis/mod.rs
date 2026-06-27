@@ -13510,8 +13510,10 @@ fn append_solved_adaptive_mesh_summary(
         markers.extend(new_markers);
         merge_sizing_update(&mut sizing_update, new_sizing_update);
     }
-    if !element_budget_reached && indicator_was_used(&indicators, "structural", "stress_gradient")
-    {
+    let stress_gradient_used = indicator_was_used(&indicators, "structural", "stress_gradient");
+    let strain_energy_density_used =
+        indicator_was_used(&indicators, "structural", "strain_energy_density");
+    if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
             let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
@@ -13524,9 +13526,7 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
-    if !element_budget_reached
-        && indicator_was_used(&indicators, "structural", "strain_energy_density")
-    {
+    if !element_budget_reached && strain_energy_density_used {
         if let Some(values) = strain_energy_density_values {
             let samples = structural_strain_energy_density_samples(&mesh, values);
             let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
@@ -13539,12 +13539,32 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
-    let convergence_status = if element_budget_reached {
-        AdaptiveConvergenceStatus::ElementBudgetReached
-    } else if markers.is_empty() {
-        AdaptiveConvergenceStatus::Converged
+    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
+        if element_budget_reached {
+            AdaptiveConvergenceStatus::ElementBudgetReached
+        } else if markers.is_empty() {
+            AdaptiveConvergenceStatus::Converged
+        } else {
+            AdaptiveConvergenceStatus::Pending
+        }
     } else {
-        AdaptiveConvergenceStatus::Pending
+        let marker_change = markers
+            .iter()
+            .map(|marker| marker.weight)
+            .filter(|weight| weight.is_finite())
+            .reduce(f64::max)
+            .unwrap_or(0.0);
+        runmat_meshing_core::evaluate_adaptive_convergence(
+            &options.refinement,
+            runmat_meshing_core::AdaptiveConvergenceMetrics {
+                completed_iterations: mesh.adaptive_iterations.len(),
+                element_budget_reached,
+                field_change: stress_gradient_used.then_some(marker_change),
+                energy_change: strain_energy_density_used.then_some(marker_change),
+                residual: None,
+            },
+        )
     };
 
     let mut updated_sizing = mesh.sizing.clone();
