@@ -3,7 +3,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::try_assemble_linear_system,
+    assembly::{try_assemble_linear_system, AssemblySummary},
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
@@ -195,6 +195,9 @@ pub fn run_linear_static_with_options(
             message: format!("analysis_mesh_artifact_path={path}{mesh_summary}"),
         });
     }
+    if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
+        diagnostics.push(diagnostic);
+    }
     if let (Some(residual_norm), Some(equation_scale)) = (
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),
@@ -308,6 +311,46 @@ pub fn run_linear_static_with_options(
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
         fields,
+    })
+}
+
+fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
+    if summary.structural_solid_element_count == 0 && summary.operator.stiffness_dense.is_none() {
+        return None;
+    }
+
+    let dense_stiffness_nnz = summary
+        .operator
+        .stiffness_dense
+        .as_ref()
+        .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
+        .unwrap_or(0);
+    let rhs_nonzero_count = summary
+        .operator
+        .rhs
+        .iter()
+        .filter(|value| value.abs() > 0.0)
+        .count();
+    let has_dense_solid_stiffness =
+        summary.operator.stiffness_dense.is_some() && summary.structural_solid_element_count > 0;
+
+    Some(FeaDiagnostic {
+        code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
+        severity: if has_dense_solid_stiffness {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=solid_tet4_dense_stiffness solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} dense_stiffness_nnz={} rhs_nonzero_count={} dense_stiffness_present={}",
+            summary.structural_node_count,
+            summary.structural_solid_element_count,
+            summary.dof_count,
+            summary.constrained_dof_count,
+            dense_stiffness_nnz,
+            rhs_nonzero_count,
+            summary.operator.stiffness_dense.is_some()
+        ),
     })
 }
 

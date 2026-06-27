@@ -36,6 +36,11 @@ use crate::{
     FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
+use runmat_meshing_core::{
+    artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
+    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
+    BoundaryElementKind, MeshSizingField, VolumeElementKind,
+};
 
 fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
     result.field(field_id).expect("field should be present")
@@ -567,6 +572,35 @@ fn convergence_diagnostics_are_emitted() {
 }
 
 #[test]
+fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            analysis_mesh: Some(single_tet_analysis_mesh()),
+            analysis_mesh_artifact_path: Some("analysis_mesh.json".to_string()),
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect("analysis-mesh-backed linear static solve should succeed");
+
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_SOLID_ASSEMBLY"
+            && diag.message.contains("basis=solid_tet4_dense_stiffness")
+            && diag.message.contains("solid_node_count=4")
+            && diag.message.contains("solid_element_count=1")
+            && diag.message.contains("dense_stiffness_present=true")
+    }));
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
+            && diag.message.contains("basis=solid_tet4_constant_strain")
+            && diag.message.contains("solver_mesh_node_count=4")
+            && diag.message.contains("solver_mesh_element_count=1")
+    }));
+}
+
+#[test]
 fn prepared_structural_recovery_uses_prep_connectivity_edges() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let result = crate::run_linear_static_with_options(
@@ -682,6 +716,63 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
             && diag.message.contains("element_geometry_edge_count=5")
             && diag.message.contains("element_geometry_coverage_ratio=1")
     }));
+}
+
+fn single_tet_analysis_mesh() -> AnalysisMeshArtifact {
+    AnalysisMeshArtifact {
+        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+        mesh_id: "single_tet".to_string(),
+        nodes: vec![
+            analysis_mesh_node(1, [0.0, 0.0, 0.0]),
+            analysis_mesh_node(2, [1.0, 0.0, 0.0]),
+            analysis_mesh_node(3, [0.0, 1.0, 0.0]),
+            analysis_mesh_node(4, [0.0, 0.0, 1.0]),
+        ],
+        volume_elements: vec![AnalysisVolumeElement {
+            element_id: "tet_1".to_string(),
+            kind: VolumeElementKind::Tet4,
+            node_ids: vec![1, 2, 3, 4],
+            material_region_id: "tip".to_string(),
+            provenance: Vec::new(),
+        }],
+        boundary_faces: vec![
+            analysis_boundary_face("root_face", vec![1, 2, 3], &["root"]),
+            analysis_boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
+        ],
+        boundary_edges: Vec::new(),
+        quality: AnalysisMeshQualityReport::default(),
+        sizing: MeshSizingField::default(),
+        adaptive_iterations: Vec::new(),
+        provenance: AnalysisMeshProvenance {
+            algorithm: "test".to_string(),
+            source_geometry_id: "geo:test".to_string(),
+            source_geometry_revision: 1,
+            source_geometry_sha256: None,
+        },
+    }
+}
+
+fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+    AnalysisMeshNode {
+        node_id,
+        coordinates_m,
+        provenance: Vec::new(),
+    }
+}
+
+fn analysis_boundary_face(
+    face_id: &str,
+    node_ids: Vec<u32>,
+    region_ids: &[&str],
+) -> AnalysisBoundaryFace {
+    AnalysisBoundaryFace {
+        face_id: face_id.to_string(),
+        kind: BoundaryElementKind::Tri3,
+        node_ids,
+        adjacent_volume_element_ids: Vec::new(),
+        region_ids: region_ids.iter().map(|region| region.to_string()).collect(),
+        provenance: Vec::new(),
+    }
 }
 
 #[test]
