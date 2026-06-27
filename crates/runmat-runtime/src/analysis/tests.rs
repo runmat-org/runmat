@@ -2154,6 +2154,47 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
 }
 
 #[test]
+fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-production-analysis-mesh");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Production;
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed with production mesh backend");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist production analysis mesh artifact path");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    assert_eq!(
+        payload["mesh"]["provenance"]["algorithm"].as_str(),
+        Some("production_topology_tet_candidate/v1")
+    );
+    assert_eq!(
+        payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("volume elements")
+            .len(),
+        12
+    );
+    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
