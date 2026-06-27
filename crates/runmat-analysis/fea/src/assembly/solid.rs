@@ -1,4 +1,11 @@
+use std::collections::BTreeMap;
+
 use runmat_meshing_core::{AnalysisMeshArtifact, VolumeElementKind};
+
+use super::elements::solid::{
+    global_stiffness_matrix as tet4_global_stiffness_matrix, SolidMaterial, Tet4ElementGeometry,
+    TET4_ELEMENT_DOF_COUNT, TET4_NODE_DOF_COUNT,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolidAssemblyTopology {
@@ -12,6 +19,9 @@ pub enum SolidAssemblyError {
     EmptyNodes,
     EmptyVolumeElements,
     UnsupportedVolumeElementKind { element_id: String },
+    UnknownElementNode { element_id: String, node_id: u32 },
+    InvalidElementNodeCount { element_id: String, actual: usize },
+    ElementStiffness { element_id: String, message: String },
 }
 
 pub fn solid_topology_from_analysis_mesh(
@@ -36,6 +46,83 @@ pub fn solid_topology_from_analysis_mesh(
         node_count: mesh.nodes.len(),
         volume_element_count: mesh.volume_elements.len(),
     })
+}
+
+pub fn assemble_solid_stiffness_dense(
+    mesh: &AnalysisMeshArtifact,
+    material: SolidMaterial,
+    base_dof_count: usize,
+) -> Result<Vec<f64>, SolidAssemblyError> {
+    let topology = solid_topology_from_analysis_mesh(mesh, base_dof_count)?;
+    let mut node_offsets = BTreeMap::<u32, usize>::new();
+    for (index, node) in mesh.nodes.iter().enumerate() {
+        node_offsets.insert(node.node_id, index * TET4_NODE_DOF_COUNT);
+    }
+
+    let mut dense = vec![0.0_f64; topology.dof_count * topology.dof_count];
+    for element in &mesh.volume_elements {
+        if element.node_ids.len() != 4 {
+            return Err(SolidAssemblyError::InvalidElementNodeCount {
+                element_id: element.element_id.clone(),
+                actual: element.node_ids.len(),
+            });
+        }
+        let mut nodes_m = [[0.0_f64; 3]; 4];
+        let mut dof_offsets = [0_usize; 4];
+        for (local_index, node_id) in element.node_ids.iter().copied().enumerate() {
+            let node_index = mesh
+                .nodes
+                .iter()
+                .position(|node| node.node_id == node_id)
+                .ok_or_else(|| SolidAssemblyError::UnknownElementNode {
+                    element_id: element.element_id.clone(),
+                    node_id,
+                })?;
+            nodes_m[local_index] = mesh.nodes[node_index].coordinates_m;
+            dof_offsets[local_index] = *node_offsets.get(&node_id).ok_or_else(|| {
+                SolidAssemblyError::UnknownElementNode {
+                    element_id: element.element_id.clone(),
+                    node_id,
+                }
+            })?;
+        }
+        let element_stiffness =
+            tet4_global_stiffness_matrix(material, Tet4ElementGeometry { nodes_m }).map_err(
+                |err| SolidAssemblyError::ElementStiffness {
+                    element_id: element.element_id.clone(),
+                    message: err.to_string(),
+                },
+            )?;
+        scatter_tet4(
+            &mut dense,
+            topology.dof_count,
+            dof_offsets,
+            &element_stiffness,
+        );
+    }
+    Ok(dense)
+}
+
+fn scatter_tet4(
+    dense: &mut [f64],
+    dof_count: usize,
+    dof_offsets: [usize; 4],
+    element_stiffness: &[[f64; TET4_ELEMENT_DOF_COUNT]; TET4_ELEMENT_DOF_COUNT],
+) {
+    for local_row_node in 0..4 {
+        for local_row_axis in 0..TET4_NODE_DOF_COUNT {
+            let local_row = local_row_node * TET4_NODE_DOF_COUNT + local_row_axis;
+            let global_row = dof_offsets[local_row_node] + local_row_axis;
+            for local_col_node in 0..4 {
+                for local_col_axis in 0..TET4_NODE_DOF_COUNT {
+                    let local_col = local_col_node * TET4_NODE_DOF_COUNT + local_col_axis;
+                    let global_col = dof_offsets[local_col_node] + local_col_axis;
+                    dense[global_row * dof_count + global_col] +=
+                        element_stiffness[local_row][local_col];
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -111,5 +198,29 @@ mod tests {
                 element_id: "tet_1".to_string()
             }
         );
+    }
+
+    #[test]
+    fn solid_stiffness_scatter_assembles_tet4_dense_matrix() {
+        let mesh = mesh(VolumeElementKind::Tet4);
+        let dense = assemble_solid_stiffness_dense(
+            &mesh,
+            SolidMaterial {
+                youngs_modulus_pa: 200.0e9,
+                poisson_ratio: 0.3,
+            },
+            3,
+        )
+        .expect("tet4 stiffness should assemble");
+        let dof_count = 12;
+        assert_eq!(dense.len(), dof_count * dof_count);
+        for row in 0..dof_count {
+            assert!(dense[row * dof_count + row] > 0.0);
+            for col in 0..dof_count {
+                assert!(
+                    (dense[row * dof_count + col] - dense[col * dof_count + row]).abs() < 1.0e-5
+                );
+            }
+        }
     }
 }
