@@ -13796,6 +13796,12 @@ fn append_solved_adaptive_mesh_summary(
         mesh.volume_elements.len(),
     );
     let has_electromagnetic_energy_density = electromagnetic_energy_density_values.is_some();
+    let acoustic_pressure_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+        mesh.volume_elements.len(),
+    );
+    let has_acoustic_pressure = acoustic_pressure_values.is_some();
     let boundary_load_region_ids =
         refinement_context_region_ids(&payload, "boundary_load_region_ids");
     let boundary_constraint_region_ids =
@@ -13829,7 +13835,10 @@ fn append_solved_adaptive_mesh_summary(
                         || (key.name == "electric_field_gradient" && has_electric_field)
                         || (key.name == "current_density_gradient" && has_current_density)
                         || (key.name == "energy_density"
-                            && has_electromagnetic_energy_density)));
+                            && has_electromagnetic_energy_density)))
+                || (key.namespace == "acoustic"
+                    && ((key.name == "pressure_gradient" && has_acoustic_pressure)
+                        || (key.name == "pressure_curvature" && has_acoustic_pressure)));
             RefinementIndicatorAvailability {
                 key,
                 applicable,
@@ -13878,6 +13887,10 @@ fn append_solved_adaptive_mesh_summary(
         indicator_was_used(&indicators, "electromagnetic", "current_density_gradient");
     let electromagnetic_energy_density_used =
         indicator_was_used(&indicators, "electromagnetic", "energy_density");
+    let acoustic_pressure_gradient_used =
+        indicator_was_used(&indicators, "acoustic", "pressure_gradient");
+    let acoustic_pressure_curvature_used =
+        indicator_was_used(&indicators, "acoustic", "pressure_curvature");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -14010,6 +14023,32 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
+    if !element_budget_reached && acoustic_pressure_gradient_used {
+        if let Some(values) = acoustic_pressure_values.as_deref() {
+            let samples = acoustic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "acoustic.pressure_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && acoustic_pressure_curvature_used {
+        if let Some(values) = acoustic_pressure_values.as_deref() {
+            let samples = acoustic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "acoustic.pressure_curvature",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
     let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform)
     {
         if element_budget_reached {
@@ -14031,7 +14070,10 @@ fn append_solved_adaptive_mesh_summary(
             runmat_meshing_core::AdaptiveConvergenceMetrics {
                 completed_iterations: mesh.adaptive_iterations.len(),
                 element_budget_reached,
-                field_change: stress_gradient_used.then_some(marker_change),
+                field_change: (stress_gradient_used
+                    || acoustic_pressure_gradient_used
+                    || acoustic_pressure_curvature_used)
+                    .then_some(marker_change),
                 energy_change: (strain_energy_density_used
                     || temperature_gradient_used
                     || heat_flux_gradient_used
@@ -14203,6 +14245,13 @@ fn thermal_element_gradient_samples(
 }
 
 fn electromagnetic_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn acoustic_element_gradient_samples(
     mesh: &AnalysisMeshArtifact,
     element_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
