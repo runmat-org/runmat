@@ -6,8 +6,9 @@ use runmat_plot::plots::{
 };
 
 use super::contracts::{
-    AnalysisRenderTopology, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisRunKind, AnalysisRunResult, AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisFieldDescriptor, AnalysisFieldLocation, AnalysisRenderTopology,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
+    AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
 };
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
 use super::{run_kind, storage};
@@ -210,11 +211,15 @@ fn mesh_result_figures(
         }
     }
 
+    let mut topology_warnings = Vec::new();
     for field in &fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
         let Some(scalar) = scalar_overlay(field, &mesh_counts, options) else {
+            if let Some(warning) = field_topology_mismatch_warning(field, &mesh_counts) {
+                topology_warnings.push(warning);
+            }
             continue;
         };
         let title = format!("FEA scalar field: {}", scalar.field_id);
@@ -247,6 +252,9 @@ fn mesh_result_figures(
             break;
         }
         let Some(vector) = vector_overlay(field, &mesh_counts, options) else {
+            if let Some(warning) = field_topology_mismatch_warning(field, &mesh_counts) {
+                topology_warnings.push(warning);
+            }
             continue;
         };
         let title = format!("FEA vector field: {}", vector.field_id);
@@ -274,6 +282,14 @@ fn mesh_result_figures(
     }
 
     if figures.is_empty() {
+        if let Some(warning) = topology_warnings.first() {
+            figures.push(warning_line_figure(
+                AnalysisGeneratedFigureKind::MeshResult,
+                "FEA field topology mismatch",
+                warning.clone(),
+            ));
+            return figures;
+        }
         if let Some(figure) = base_mesh_figure(
             geometry,
             render_topology,
@@ -714,6 +730,61 @@ fn collect_mesh_counts(figure: &Figure) -> Vec<MeshCounts> {
             _ => None,
         })
         .collect()
+}
+
+fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts]) -> Option<String> {
+    let values = host_values(field)?;
+    if values.is_empty() || meshes.is_empty() {
+        return None;
+    }
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    let topology_id = descriptor.topology_id.as_deref()?;
+    let actual_entities = field_entity_count(field, &descriptor, values.len());
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
+    let (location, expected_entities) = match descriptor.location {
+        AnalysisFieldLocation::Node => ("node", total_vertices),
+        AnalysisFieldLocation::Element | AnalysisFieldLocation::BoundaryFace => {
+            ("element", total_triangles)
+        }
+        AnalysisFieldLocation::Edge
+        | AnalysisFieldLocation::InterfaceFace
+        | AnalysisFieldLocation::Mode
+        | AnalysisFieldLocation::Global
+        | AnalysisFieldLocation::Unknown => return None,
+    };
+    if actual_entities == expected_entities {
+        return None;
+    }
+    Some(format!(
+        "field '{}' uses topology_id={} location={} element_kind={} value_count={} render_vertex_count={} render_triangle_count={}; cannot map field to the current render mesh",
+        field.field_id,
+        topology_id,
+        location,
+        descriptor.element_kind.as_deref().unwrap_or("none"),
+        actual_entities,
+        total_vertices,
+        total_triangles
+    ))
+}
+
+fn field_entity_count(
+    field: &AnalysisField,
+    descriptor: &AnalysisFieldDescriptor,
+    value_count: usize,
+) -> usize {
+    if matches!(
+        descriptor.location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return value_count;
+    }
+    if let Some(first_dim) = field.shape.first().copied() {
+        if field.shape.len() > 1 || descriptor.component_count.is_some() {
+            return first_dim;
+        }
+    }
+    value_count
 }
 
 fn scalar_overlay(
@@ -1265,5 +1336,29 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
         AnalysisRunKind::Fsi => "FSI",
         AnalysisRunKind::Nonlinear => "Nonlinear",
         AnalysisRunKind::Electromagnetic => "Electromagnetic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_topology_warning_reports_solver_mesh_mismatch() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![1], vec![42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 4,
+            triangles: 12,
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("mismatched Tet4 element field should produce a warning");
+
+        assert!(warning.contains("structural.von_mises"));
+        assert!(warning.contains("topology_id=analysis_mesh"));
+        assert!(warning.contains("element_kind=tet4"));
+        assert!(warning.contains("value_count=1"));
+        assert!(warning.contains("render_triangle_count=12"));
     }
 }
