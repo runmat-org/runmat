@@ -42,6 +42,7 @@ pub struct AnalysisFigureGenerationOptions {
     pub max_mesh_result_figures: usize,
     pub max_mesh_geometry_bytes: usize,
     pub edge_overlay_triangle_limit: usize,
+    pub show_solver_mesh_edges: bool,
     pub include_comparison: bool,
     pub include_trends: bool,
 }
@@ -54,6 +55,7 @@ impl Default for AnalysisFigureGenerationOptions {
             max_mesh_result_figures: 4,
             max_mesh_geometry_bytes: 256 * 1024 * 1024,
             edge_overlay_triangle_limit: 250_000,
+            show_solver_mesh_edges: false,
             include_comparison: true,
             include_trends: true,
         }
@@ -709,12 +711,14 @@ fn render_topology_figure(
         plot.set_face_color(Vec4::new(0.34, 0.57, 0.82, 1.0));
         plot.set_edge_color(Vec4::new(0.88, 0.93, 0.98, 0.82));
         plot.set_face_alpha(0.94);
-        if mesh.triangles.len() > options.edge_overlay_triangle_limit {
-            plot.set_edge_mode(MeshEdgeMode::None);
-            plot.set_edge_width(0.0);
-        } else {
+        if options.show_solver_mesh_edges
+            && mesh.triangles.len() <= options.edge_overlay_triangle_limit
+        {
             plot.set_edge_mode(MeshEdgeMode::All);
             plot.set_edge_width(0.28);
+        } else {
+            plot.set_edge_mode(MeshEdgeMode::None);
+            plot.set_edge_width(0.0);
         }
         figure.add_mesh_plot(plot);
     }
@@ -1375,6 +1379,59 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn simple_render_topology() -> AnalysisRenderTopology {
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: crate::analysis::contracts::AnalysisRenderTopologySource::SolverPrep,
+            meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
+                mesh_id: "analysis_mesh".to_string(),
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                triangles: vec![[0, 1, 2]],
+            }],
+        }
+    }
+
+    fn first_mesh_plot(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => Some(mesh),
+                _ => None,
+            })
+            .expect("figure should include a mesh plot")
+    }
+
+    #[test]
+    fn render_topology_edges_are_disabled_by_default() {
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.edge_mode(), MeshEdgeMode::None);
+        assert_eq!(plot.edge_width(), 0.0);
+    }
+
+    #[test]
+    fn render_topology_edges_can_be_enabled() {
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions {
+                show_solver_mesh_edges: true,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("solver topology should render");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.edge_mode(), MeshEdgeMode::All);
+        assert!(plot.edge_width() > 0.0);
+    }
 
     #[test]
     fn field_topology_warning_reports_solver_mesh_mismatch() {
