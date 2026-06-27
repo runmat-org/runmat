@@ -43,6 +43,7 @@ pub struct AnalysisFigureGenerationOptions {
     pub max_mesh_geometry_bytes: usize,
     pub edge_overlay_triangle_limit: usize,
     pub show_solver_mesh_edges: bool,
+    pub apply_deformation_overlay: bool,
     pub include_comparison: bool,
     pub include_trends: bool,
 }
@@ -56,6 +57,7 @@ impl Default for AnalysisFigureGenerationOptions {
             max_mesh_geometry_bytes: 256 * 1024 * 1024,
             edge_overlay_triangle_limit: 250_000,
             show_solver_mesh_edges: false,
+            apply_deformation_overlay: true,
             include_comparison: true,
             include_trends: true,
         }
@@ -188,10 +190,14 @@ fn mesh_result_figures(
         return Vec::new();
     }
 
-    let deformation = fields
-        .iter()
-        .filter(|field| is_deformation_candidate(&field.field_id))
-        .find_map(|field| deformation_overlay(field, &mesh_counts, &probe, options));
+    let deformation = if options.apply_deformation_overlay {
+        fields
+            .iter()
+            .filter(|field| is_deformation_candidate(&field.field_id))
+            .find_map(|field| deformation_overlay(field, &mesh_counts, &probe, options))
+    } else {
+        None
+    };
 
     let mut figures = Vec::new();
     if let Some(deformation) = deformation.as_ref() {
