@@ -13472,12 +13472,20 @@ fn append_solved_adaptive_mesh_summary(
             }
         })
         .collect::<Vec<_>>();
-    let indicators =
-        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+    let element_budget_reached =
+        options.max_elements > 0 && mesh.volume_elements.len() >= options.max_elements;
+    let indicators = plan_refinement_indicators(
+        &options.refinement,
+        &defaults,
+        &availability,
+        element_budget_reached,
+        false,
+    );
 
     let mut markers = Vec::new();
     let mut sizing_update = SizingFieldUpdate::default();
-    if indicator_was_used(&indicators, "structural", "stress_gradient") {
+    if !element_budget_reached && indicator_was_used(&indicators, "structural", "stress_gradient")
+    {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
             let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
@@ -13490,7 +13498,9 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
-    if indicator_was_used(&indicators, "structural", "strain_energy_density") {
+    if !element_budget_reached
+        && indicator_was_used(&indicators, "structural", "strain_energy_density")
+    {
         if let Some(values) = strain_energy_density_values {
             let samples = structural_strain_energy_density_samples(&mesh, values);
             let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
@@ -13503,7 +13513,9 @@ fn append_solved_adaptive_mesh_summary(
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
     }
-    let convergence_status = if markers.is_empty() {
+    let convergence_status = if element_budget_reached {
+        AdaptiveConvergenceStatus::ElementBudgetReached
+    } else if markers.is_empty() {
         AdaptiveConvergenceStatus::Converged
     } else {
         AdaptiveConvergenceStatus::Pending
