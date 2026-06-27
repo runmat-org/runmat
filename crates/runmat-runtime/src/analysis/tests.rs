@@ -9668,6 +9668,10 @@ fn analysis_generate_study_run_figures_returns_mesh_figures() {
                 .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
         })
         .expect("von Mises figure should be generated");
+    assert!(stress_figure
+        .topology_ids
+        .iter()
+        .any(|topology_id| topology_id == "analysis_mesh"));
     let persisted = storage::load_run_result(&run.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");

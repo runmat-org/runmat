@@ -30,6 +30,7 @@ pub struct AnalysisGeneratedFigure {
     pub kind: AnalysisGeneratedFigureKind,
     pub title: String,
     pub field_ids: Vec<String>,
+    pub topology_ids: Vec<String>,
     pub warnings: Vec<String>,
     pub figure: Figure,
 }
@@ -204,6 +205,7 @@ fn mesh_result_figures(
                     kind: AnalysisGeneratedFigureKind::MeshResult,
                     title: format!("FEA deformed shape: {}", deformation.field_id),
                     field_ids: vec![deformation.field_id.clone()],
+                    topology_ids: topology_ids_for_field_ids([deformation.field_id.as_str()]),
                     warnings,
                     figure,
                 });
@@ -242,6 +244,7 @@ fn mesh_result_figures(
             kind: AnalysisGeneratedFigureKind::MeshResult,
             title,
             field_ids: vec![scalar.field_id],
+            topology_ids: topology_ids_for_fields(std::iter::once(field)),
             warnings,
             figure,
         });
@@ -276,6 +279,7 @@ fn mesh_result_figures(
             kind: AnalysisGeneratedFigureKind::MeshResult,
             title,
             field_ids: vec![vector.field_id],
+            topology_ids: topology_ids_for_fields(std::iter::once(field)),
             warnings,
             figure,
         });
@@ -300,6 +304,7 @@ fn mesh_result_figures(
                 kind: AnalysisGeneratedFigureKind::MeshResult,
                 title: format!("FEA geometry result: {}", run.run_id),
                 field_ids: Vec::new(),
+                topology_ids: Vec::new(),
                 warnings: shared_warnings,
                 figure,
             });
@@ -332,6 +337,7 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                         .iter()
                         .map(|field| field.field_id.clone())
                         .collect(),
+                    topology_ids: topology_ids_for_fields(modal.mode_shapes.iter()),
                     warnings: Vec::new(),
                     figure,
                 });
@@ -557,6 +563,7 @@ fn comparison_figure(data: &AnalysisResultsCompareData) -> Option<AnalysisGenera
         kind: AnalysisGeneratedFigureKind::Comparison,
         title: "FEA run comparison".to_string(),
         field_ids: Vec::new(),
+        topology_ids: Vec::new(),
         warnings: Vec::new(),
         figure,
     })
@@ -591,6 +598,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
                 kind: AnalysisGeneratedFigureKind::Trend,
                 title: "FEA solve time trends".to_string(),
                 field_ids: Vec::new(),
+                topology_ids: Vec::new(),
                 warnings: Vec::new(),
                 figure,
             });
@@ -614,6 +622,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
             kind: AnalysisGeneratedFigureKind::Trend,
             title: "FEA publishable result trends".to_string(),
             field_ids: Vec::new(),
+            topology_ids: Vec::new(),
             warnings: Vec::new(),
             figure,
         });
@@ -1070,6 +1079,7 @@ fn line_figure(
     AnalysisGeneratedFigure {
         kind,
         title: title.to_string(),
+        topology_ids: topology_ids_for_field_ids(field_ids.iter().map(String::as_str)),
         field_ids,
         warnings,
         figure,
@@ -1093,9 +1103,32 @@ fn warning_line_figure(
         kind,
         title: title.to_string(),
         field_ids: Vec::new(),
+        topology_ids: Vec::new(),
         warnings: vec![warning],
         figure,
     }
+}
+
+fn topology_ids_for_fields<'a>(
+    fields: impl IntoIterator<Item = &'a AnalysisField>,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    for field in fields {
+        if let Some(topology_id) = AnalysisFieldDescriptor::from_field(field).topology_id {
+            if !ids.iter().any(|existing| existing == &topology_id) {
+                ids.push(topology_id);
+            }
+        }
+    }
+    ids
+}
+
+fn topology_ids_for_field_ids<'a>(field_ids: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let fields = field_ids
+        .into_iter()
+        .map(|field_id| AnalysisField::host_f64(field_id, vec![1], vec![0.0]))
+        .collect::<Vec<_>>();
+    topology_ids_for_fields(fields.iter())
 }
 
 fn previous_run_of_kind(current: &AnalysisRunResult) -> Result<Option<AnalysisRunResult>, String> {
