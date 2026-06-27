@@ -88,7 +88,7 @@ pub fn run_electromagnetic_with_options(
         Some(1),
         Some(5),
     );
-    let mut summary = assemble_linear_system(model, options.prep_context.clone(), None, None);
+    let mut summary = assemble_linear_system(model, options.prep_context.clone(), None, None, None);
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,
@@ -3614,6 +3614,7 @@ mod tests {
                 element_topology_element_areas_m2: vec![0.04, 0.04],
                 calibration_profile_override: None,
             }),
+            None,
             None,
             None,
         );

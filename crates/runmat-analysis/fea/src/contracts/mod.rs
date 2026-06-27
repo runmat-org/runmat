@@ -1,4 +1,5 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_meshing_core::AnalysisMeshArtifact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -540,6 +541,7 @@ pub struct LinearStaticSolveOptions {
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
     pub analysis_mesh_artifact_path: Option<String>,
+    pub analysis_mesh: Option<AnalysisMeshArtifact>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -551,6 +553,7 @@ impl Default for LinearStaticSolveOptions {
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
             analysis_mesh_artifact_path: None,
+            analysis_mesh: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }

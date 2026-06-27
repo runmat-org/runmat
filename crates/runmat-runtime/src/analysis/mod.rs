@@ -36,7 +36,8 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
-    generate_analysis_mesh, validate_analysis_mesh, ElementFamilyHint, MeshConnectivityClass,
+    generate_analysis_mesh, validate_analysis_mesh, AnalysisMeshArtifact, ElementFamilyHint,
+    MeshConnectivityClass,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9210,6 +9211,12 @@ pub fn analysis_run_linear_static_with_options(
         ANALYSIS_RUN_OP_VERSION,
         &context,
     )?;
+    let analysis_mesh = resolve_analysis_mesh_artifact(
+        options.analysis_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        &context,
+    )?;
     let run = run_linear_static_with_options(
         model,
         backend,
@@ -9221,6 +9228,7 @@ pub fn analysis_run_linear_static_with_options(
                 options.prep_calibration_profile,
             ),
             analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
+            analysis_mesh,
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -13088,6 +13096,82 @@ fn generate_and_persist_study_analysis_mesh(
     })
 }
 
+fn resolve_analysis_mesh_artifact(
+    analysis_mesh_artifact_path: Option<&str>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<Option<AnalysisMeshArtifact>, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(None);
+    };
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let mesh_value = payload
+        .get("mesh")
+        .cloned()
+        .unwrap_or_else(|| payload.clone());
+    let mesh = serde_json::from_value::<AnalysisMeshArtifact>(mesh_value).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to decode analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("analysis mesh artifact failed validation: {err:?}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    Ok(Some(mesh))
+}
+
 fn study_evidence_root() -> PathBuf {
     let config = current_fea_runtime_config();
     config
@@ -13155,6 +13239,10 @@ fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
 
 fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
     runmat_filesystem::create_dir_all(path.into())
+}
+
+fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
+    runmat_filesystem::read(path.into())
 }
 
 fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {

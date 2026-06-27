@@ -182,7 +182,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
         mz: 125.0,
     };
 
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None, None);
 
     assert_eq!(summary.dof_count, 3);
     assert_eq!(summary.structural_node_count, 1);
@@ -200,7 +200,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
 #[test]
 fn beam_assembly_uses_lumped_rotational_inertia() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None, None);
     let layout = &summary.structural_dof_layout;
     let node = 0usize;
     let mass = &summary.operator.mass_diag;

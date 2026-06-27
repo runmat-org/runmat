@@ -59,6 +59,7 @@ pub fn run_modal_with_options(
     let summary = assemble_linear_system(
         model,
         options.prep_context.clone(),
+        None,
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );

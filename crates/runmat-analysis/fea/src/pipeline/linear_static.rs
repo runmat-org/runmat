@@ -70,6 +70,7 @@ pub fn run_linear_static_with_options(
     let summary = assemble_linear_system(
         model,
         options.prep_context.clone(),
+        options.analysis_mesh.clone(),
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );
@@ -175,10 +176,22 @@ pub fn run_linear_static_with_options(
         ),
     }];
     if let Some(path) = options.analysis_mesh_artifact_path.as_ref() {
+        let mesh_summary = options
+            .analysis_mesh
+            .as_ref()
+            .map(|mesh| {
+                format!(
+                    " analysis_mesh_node_count={} analysis_mesh_volume_element_count={} analysis_mesh_boundary_face_count={}",
+                    mesh.nodes.len(),
+                    mesh.volume_elements.len(),
+                    mesh.boundary_faces.len()
+                )
+            })
+            .unwrap_or_default();
         diagnostics.push(FeaDiagnostic {
             code: "FEA_ANALYSIS_MESH_REFERENCE".to_string(),
             severity: FeaDiagnosticSeverity::Info,
-            message: format!("analysis_mesh_artifact_path={path}"),
+            message: format!("analysis_mesh_artifact_path={path}{mesh_summary}"),
         });
     }
     if let (Some(residual_norm), Some(equation_scale)) = (

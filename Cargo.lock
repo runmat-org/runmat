@@ -5383,6 +5383,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-geometry-core",
+ "runmat-meshing-core",
  "serde",
  "thiserror 1.0.69",
 ]

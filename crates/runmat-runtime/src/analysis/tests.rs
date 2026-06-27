@@ -2000,6 +2000,9 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
             && diagnostic.message.contains(artifact_path)
+            && diagnostic
+                .message
+                .contains("analysis_mesh_volume_element_count=")
     }));
     let _ = fs::remove_dir_all(&root);
 }

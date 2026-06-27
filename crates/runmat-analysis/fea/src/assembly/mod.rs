@@ -5,6 +5,7 @@ use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
     StructuralElementKind, StructuralModel,
 };
+use runmat_meshing_core::AnalysisMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 use self::{
@@ -295,6 +296,7 @@ pub struct ElectroThermalAssemblySummary {
 pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
+    analysis_mesh: Option<AnalysisMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
@@ -304,7 +306,10 @@ pub fn assemble_linear_system(
 
     let base_dof_count = (model.loads.len() * 3).max(3);
     let prep_context_ref = prep_context.as_ref();
-    let dof_count = if let Some(prep) = prep_context_ref {
+    let analysis_mesh_ref = analysis_mesh.as_ref();
+    let dof_count = if let Some(mesh) = analysis_mesh_ref {
+        mesh.nodes.len().saturating_mul(3).max(base_dof_count)
+    } else if let Some(prep) = prep_context_ref {
         let prep_dof = ((prep.prepared_node_count as f64) * prep.topology_dof_multiplier)
             .round()
             .max(base_dof_count as f64) as usize;
@@ -942,8 +947,12 @@ pub fn assemble_linear_system(
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
-        structural_solid_element_count: prep_context_ref
-            .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
+        structural_solid_element_count: analysis_mesh_ref
+            .map(|mesh| mesh.volume_elements.len())
+            .or_else(|| {
+                prep_context_ref
+                    .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
+            })
             .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
@@ -1673,7 +1682,10 @@ fn add_wrench_rhs(
     ];
     let mut moment_couple_applied = false;
 
-    if !couple.iter().all(|component| component.abs() <= f64::EPSILON) {
+    if !couple
+        .iter()
+        .all(|component| component.abs() <= f64::EPSILON)
+    {
         let mut coupling = [[0.0_f64; 3]; 3];
         let offsets = target_nodes
             .iter()
