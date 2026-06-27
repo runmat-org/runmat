@@ -5025,6 +5025,21 @@ fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
 }
 
 #[test]
+fn structural_boundary_region_samples_use_adjacent_volume_elements() {
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+
+    let samples = structural_boundary_region_samples(&mesh, &["tip".to_string()]);
+
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].entity_id, "tet_1");
+    assert_eq!(samples[0].indicator_value, 1.0);
+    assert!(
+        samples[0].current_size_m.is_finite() && samples[0].current_size_m > 0.0,
+        "sample should carry a valid local element size"
+    );
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
     let root = temp_artifact_root("append-solved-adaptive-summary");
     let _ = fs::remove_dir_all(&root);
@@ -5092,6 +5107,76 @@ fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
             .expect("sizing samples")
             .is_empty()
     );
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-region-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("structural")
+            && indicator["name"].as_str() == Some("load_regions")
+            && indicator["status"].as_str() == Some("used")
+    ));
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("structural")
+            && indicator["name"].as_str() == Some("constraint_regions")
+            && indicator["status"].as_str() == Some("used")
+    ));
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.load_regions")));
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.constraint_regions")));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
 }
 
 #[test]

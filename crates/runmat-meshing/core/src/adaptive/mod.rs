@@ -210,6 +210,8 @@ pub fn structural_static_default_refinement_indicators() -> Vec<RefinementIndica
     vec![
         RefinementIndicatorKey::new("structural", "stress_gradient"),
         RefinementIndicatorKey::new("structural", "strain_energy_density"),
+        RefinementIndicatorKey::new("structural", "load_regions"),
+        RefinementIndicatorKey::new("structural", "constraint_regions"),
     ]
 }
 
@@ -892,7 +894,9 @@ mod tests {
             defaults,
             vec![
                 key("structural", "stress_gradient"),
-                key("structural", "strain_energy_density")
+                key("structural", "strain_energy_density"),
+                key("structural", "load_regions"),
+                key("structural", "constraint_regions"),
             ]
         );
     }

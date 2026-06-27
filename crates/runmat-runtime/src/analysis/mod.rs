@@ -13389,6 +13389,7 @@ fn generate_and_persist_study_analysis_mesh(
             "geometry_revision": spec.geometry.revision,
             "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh": mesh,
         }),
@@ -13563,6 +13564,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "source_analysis_mesh_artifact_path": path,
             "analysis_profile": analysis_refinement_profile_label(spec.create_model_intent.profile),
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
+            "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh": refined_mesh,
         }),
@@ -13673,6 +13675,37 @@ fn analysis_refinement_run_kind_label(run_kind: AnalysisRunKind) -> &'static str
     }
 }
 
+fn analysis_refinement_context(spec: &AnalysisStudySpec) -> serde_json::Value {
+    let Some(model) = spec.model.as_ref() else {
+        return serde_json::json!({
+            "boundary_load_region_ids": [],
+            "boundary_constraint_region_ids": [],
+        });
+    };
+
+    let mut load_region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .collect::<Vec<_>>();
+    load_region_ids.sort();
+    load_region_ids.dedup();
+
+    let mut constraint_region_ids = model
+        .boundary_conditions
+        .iter()
+        .map(|boundary_condition| boundary_condition.region_id.clone())
+        .collect::<Vec<_>>();
+    constraint_region_ids.sort();
+    constraint_region_ids.dedup();
+
+    serde_json::json!({
+        "boundary_load_region_ids": load_region_ids,
+        "boundary_constraint_region_ids": constraint_region_ids,
+    })
+}
+
 fn append_solved_adaptive_mesh_summary(
     analysis_mesh_artifact_path: Option<&str>,
     fields: &[AnalysisField],
@@ -13727,13 +13760,23 @@ fn append_solved_adaptive_mesh_summary(
     let has_strain_energy_density = strain_energy_density_values
         .map(|values| values.len() == mesh.volume_elements.len())
         .unwrap_or(false);
+    let boundary_load_region_ids =
+        refinement_context_region_ids(&payload, "boundary_load_region_ids");
+    let boundary_constraint_region_ids =
+        refinement_context_region_ids(&payload, "boundary_constraint_region_ids");
+    let has_boundary_load_regions =
+        has_boundary_faces_for_regions(&mesh, boundary_load_region_ids.as_slice());
+    let has_boundary_constraint_regions =
+        has_boundary_faces_for_regions(&mesh, boundary_constraint_region_ids.as_slice());
     let availability = defaults
         .iter()
         .cloned()
         .map(|key| {
             let field_available = key.namespace == "structural"
                 && ((key.name == "stress_gradient" && has_von_mises)
-                    || (key.name == "strain_energy_density" && has_strain_energy_density));
+                    || (key.name == "strain_energy_density" && has_strain_energy_density)
+                    || (key.name == "load_regions" && has_boundary_load_regions)
+                    || (key.name == "constraint_regions" && has_boundary_constraint_regions));
             RefinementIndicatorAvailability {
                 key,
                 applicable: true,
@@ -13768,6 +13811,9 @@ fn append_solved_adaptive_mesh_summary(
     let stress_gradient_used = indicator_was_used(&indicators, "structural", "stress_gradient");
     let strain_energy_density_used =
         indicator_was_used(&indicators, "structural", "strain_energy_density");
+    let load_regions_used = indicator_was_used(&indicators, "structural", "load_regions");
+    let constraint_regions_used =
+        indicator_was_used(&indicators, "structural", "constraint_regions");
     if !element_budget_reached && stress_gradient_used {
         if let Some(values) = von_mises_values {
             let samples = structural_stress_gradient_samples(&mesh, values);
@@ -13780,6 +13826,30 @@ fn append_solved_adaptive_mesh_summary(
             markers.extend(new_markers);
             merge_sizing_update(&mut sizing_update, new_sizing_update);
         }
+    }
+    if !element_budget_reached && load_regions_used {
+        let samples =
+            structural_boundary_region_samples(&mesh, boundary_load_region_ids.as_slice());
+        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+            &samples,
+            "structural.load_regions",
+            RefinementMarkerOptions::default(),
+        )
+        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+        markers.extend(new_markers);
+        merge_sizing_update(&mut sizing_update, new_sizing_update);
+    }
+    if !element_budget_reached && constraint_regions_used {
+        let samples =
+            structural_boundary_region_samples(&mesh, boundary_constraint_region_ids.as_slice());
+        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+            &samples,
+            "structural.constraint_regions",
+            RefinementMarkerOptions::default(),
+        )
+        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+        markers.extend(new_markers);
+        merge_sizing_update(&mut sizing_update, new_sizing_update);
     }
     if !element_budget_reached && strain_energy_density_used {
         if let Some(values) = strain_energy_density_values {
@@ -13848,6 +13918,33 @@ fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Opt
         .and_then(AnalysisField::as_host_f64)
 }
 
+fn refinement_context_region_ids(payload: &serde_json::Value, key: &str) -> Vec<String> {
+    payload
+        .get("refinement_context")
+        .and_then(|context| context.get(key))
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            let mut ids = values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.dedup();
+            ids
+        })
+        .unwrap_or_default()
+}
+
+fn has_boundary_faces_for_regions(mesh: &AnalysisMeshArtifact, region_ids: &[String]) -> bool {
+    !region_ids.is_empty()
+        && mesh.boundary_faces.iter().any(|face| {
+            face.region_ids
+                .iter()
+                .any(|region_id| region_ids.iter().any(|target| target == region_id))
+        })
+}
+
 fn indicator_was_used(
     indicators: &[runmat_meshing_core::RefinementIndicatorSummary],
     namespace: &str,
@@ -13888,6 +13985,64 @@ fn structural_strain_energy_density_samples(
     strain_energy_density_values: &[f64],
 ) -> Vec<RefinementIndicatorSample> {
     structural_element_scalar_gradient_samples(mesh, strain_energy_density_values)
+}
+
+fn structural_boundary_region_samples(
+    mesh: &AnalysisMeshArtifact,
+    region_ids: &[String],
+) -> Vec<RefinementIndicatorSample> {
+    if region_ids.is_empty() {
+        return Vec::new();
+    }
+    let region_ids = region_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    let mut sampled_entity_ids = HashSet::new();
+    let mut samples = Vec::new();
+    for face in &mesh.boundary_faces {
+        if !face
+            .region_ids
+            .iter()
+            .any(|region_id| region_ids.contains(region_id.as_str()))
+        {
+            continue;
+        }
+        let Some(position_m) = element_centroid_m(mesh, &face.node_ids) else {
+            continue;
+        };
+        let fallback_size = element_characteristic_size_m(mesh, &face.node_ids);
+        if face.adjacent_volume_element_ids.is_empty() {
+            if sampled_entity_ids.insert(face.face_id.clone()) {
+                if let Some(current_size_m) = fallback_size {
+                    samples.push(RefinementIndicatorSample {
+                        entity_id: face.face_id.clone(),
+                        position_m,
+                        indicator_value: 1.0,
+                        current_size_m,
+                    });
+                }
+            }
+            continue;
+        }
+        for element_id in &face.adjacent_volume_element_ids {
+            if !sampled_entity_ids.insert(element_id.clone()) {
+                continue;
+            }
+            let current_size_m = mesh
+                .volume_elements
+                .iter()
+                .find(|element| element.element_id == *element_id)
+                .and_then(|element| element_characteristic_size_m(mesh, &element.node_ids))
+                .or(fallback_size);
+            if let Some(current_size_m) = current_size_m {
+                samples.push(RefinementIndicatorSample {
+                    entity_id: element_id.clone(),
+                    position_m,
+                    indicator_value: 1.0,
+                    current_size_m,
+                });
+            }
+        }
+    }
+    samples
 }
 
 fn structural_element_scalar_gradient_samples(
