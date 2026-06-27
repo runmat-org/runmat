@@ -593,6 +593,18 @@ fn resolve_mesh_options(
     if mesh.max_elements == 0 {
         return Err("mesh.max_elements must be greater than zero".to_string());
     }
+    if !matches!(mesh.kind, MeshKindRequest::Solid) {
+        return Err(format!(
+            "mesh.kind {:?} is not supported by the current analysis mesher; use mesh.kind: solid",
+            mesh.kind
+        ));
+    }
+    if !mesh.element.is_supported_for_solid_solve() {
+        return Err(format!(
+            "mesh.element {:?} is not supported for mesh.kind solid; use mesh.element: tet4",
+            mesh.element
+        ));
+    }
     if !mesh
         .refinement
         .convergence
@@ -2020,6 +2032,38 @@ target_size: -0.002
         .expect_err("negative target size should fail during parsing");
 
         assert!(err.to_string().contains("mesh.target_size"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unsupported_mesh_kind() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+kind: surrogate
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let err =
+            resolve_mesh_options(Some(&mesh)).expect_err("surrogate mesh kind is unsupported");
+
+        assert!(err.contains("mesh.kind"));
+        assert!(err.contains("solid"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unsupported_solid_element() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+element: hex8
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let err = resolve_mesh_options(Some(&mesh))
+            .expect_err("hex8 solid element is not supported yet");
+
+        assert!(err.contains("mesh.element"));
+        assert!(err.contains("tet4"));
     }
 
     #[test]
