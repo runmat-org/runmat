@@ -269,6 +269,22 @@ fn map_fea_run_error(
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ),
+        FeaRunError::Assembly(message) => operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ),
     }
 }
 

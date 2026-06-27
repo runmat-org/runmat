@@ -1085,6 +1085,10 @@ pub struct AnalysisFieldDescriptor {
     pub family: String,
     #[serde(default)]
     pub quantity: String,
+    #[serde(default)]
+    pub topology_id: Option<String>,
+    #[serde(default)]
+    pub element_kind: Option<String>,
     pub class_name: String,
     pub kind: AnalysisFieldKind,
     pub dtype: String,
@@ -1120,15 +1124,18 @@ impl AnalysisFieldDescriptor {
         }
         .to_string();
         let element_count = field.element_count();
+        let location = infer_field_location(&field.field_id);
         Self {
             field_id: field.field_id.clone(),
             family: infer_field_family(&field.field_id).to_string(),
             quantity: infer_field_quantity(&field.field_id).to_string(),
+            topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
+            element_kind: infer_field_element_kind(&field.field_id, location).map(str::to_string),
             class_name,
             kind,
             dtype: "double".to_string(),
             unit: infer_field_unit(&field.field_id).map(str::to_string),
-            location: infer_field_location(&field.field_id),
+            location,
             shape: field.shape.clone(),
             element_count,
             component_count: infer_component_count(&field.field_id, &field.shape),
@@ -1347,6 +1354,56 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
         return AnalysisFieldLocation::Node;
     }
     AnalysisFieldLocation::Element
+}
+
+fn infer_field_topology_id(
+    field_id: &str,
+    location: AnalysisFieldLocation,
+) -> Option<&'static str> {
+    let normalized = field_id.to_ascii_lowercase();
+    if location == AnalysisFieldLocation::Global || location == AnalysisFieldLocation::Mode {
+        return None;
+    }
+    if normalized.starts_with("structural.")
+        || normalized.starts_with("thermo_mechanical.")
+        || normalized.starts_with("transient.")
+        || normalized.starts_with("nonlinear.")
+    {
+        return Some("analysis_mesh");
+    }
+    if normalized.starts_with("thermal.")
+        || normalized.starts_with("electro_thermal.")
+        || normalized.starts_with("em.")
+        || normalized.starts_with("acoustic.")
+        || normalized.starts_with("cfd.")
+        || normalized.starts_with("cht.")
+        || normalized.starts_with("fsi.")
+    {
+        return Some("analysis_topology");
+    }
+    None
+}
+
+fn infer_field_element_kind(
+    field_id: &str,
+    location: AnalysisFieldLocation,
+) -> Option<&'static str> {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("beam_") {
+        return Some("beam2");
+    }
+    if normalized.contains("shell_") {
+        return Some("tri3");
+    }
+    if normalized.starts_with("structural.")
+        && matches!(
+            location,
+            AnalysisFieldLocation::Element | AnalysisFieldLocation::BoundaryFace
+        )
+    {
+        return Some("tet4");
+    }
+    None
 }
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
