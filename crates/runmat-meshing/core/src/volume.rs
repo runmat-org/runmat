@@ -177,7 +177,7 @@ impl StructuredTetMesher {
         let quality = quality_report(element_quality);
         mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
 
-        Ok(AnalysisMeshArtifact {
+        let mesh = AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
             mesh_id: format!("analysis_{}", input.mesh_id),
             nodes,
@@ -193,7 +193,8 @@ impl StructuredTetMesher {
                 source_geometry_revision: input.source_geometry_revision,
                 source_geometry_sha256: input.source_geometry_sha256.clone(),
             },
-        })
+        };
+        Ok(compact_analysis_mesh_nodes(mesh))
     }
 }
 
@@ -647,6 +648,55 @@ fn grid_nodes(grid: &StructuredGrid) -> Vec<AnalysisMeshNode> {
         }
     }
     nodes
+}
+
+fn compact_analysis_mesh_nodes(mut mesh: AnalysisMeshArtifact) -> AnalysisMeshArtifact {
+    let mut referenced_node_ids = BTreeMap::<u32, u32>::new();
+    for element in &mesh.volume_elements {
+        for node_id in &element.node_ids {
+            referenced_node_ids.entry(*node_id).or_default();
+        }
+    }
+    for face in &mesh.boundary_faces {
+        for node_id in &face.node_ids {
+            referenced_node_ids.entry(*node_id).or_default();
+        }
+    }
+
+    if referenced_node_ids.len() == mesh.nodes.len() {
+        return mesh;
+    }
+
+    let nodes_by_id = mesh
+        .nodes
+        .into_iter()
+        .map(|node| (node.node_id, node))
+        .collect::<BTreeMap<_, _>>();
+    let mut compact_nodes = Vec::with_capacity(referenced_node_ids.len());
+    for (new_index, (old_node_id, new_node_id)) in referenced_node_ids.iter_mut().enumerate() {
+        *new_node_id = new_index as u32 + 1;
+        if let Some(mut node) = nodes_by_id.get(old_node_id).cloned() {
+            node.node_id = *new_node_id;
+            compact_nodes.push(node);
+        }
+    }
+
+    for element in &mut mesh.volume_elements {
+        remap_node_ids(&mut element.node_ids, &referenced_node_ids);
+    }
+    for face in &mut mesh.boundary_faces {
+        remap_node_ids(&mut face.node_ids, &referenced_node_ids);
+    }
+    mesh.nodes = compact_nodes;
+    mesh
+}
+
+fn remap_node_ids(node_ids: &mut [u32], node_id_map: &BTreeMap<u32, u32>) {
+    for node_id in node_ids {
+        if let Some(new_node_id) = node_id_map.get(node_id) {
+            *node_id = *new_node_id;
+        }
+    }
 }
 
 fn grid_boundary_faces(
@@ -1290,6 +1340,8 @@ mod tests {
         validate_analysis_mesh(&mesh, Default::default()).expect("carved mesh should validate");
         assert!(!mesh.volume_elements.is_empty());
         assert!(mesh.volume_elements.len() < 4 * 4 * 4 * 6);
+        assert!(mesh.nodes.len() < 5 * 5 * 5);
+        assert!(all_nodes_are_referenced(&mesh));
         assert!(mesh.volume_elements.iter().all(|element| {
             let centroid = tet_centroid(
                 [
@@ -1310,6 +1362,18 @@ mod tests {
             .boundary_faces
             .iter()
             .all(|face| !face.adjacent_volume_element_ids.is_empty()));
+    }
+
+    fn all_nodes_are_referenced(mesh: &AnalysisMeshArtifact) -> bool {
+        mesh.nodes.iter().all(|node| {
+            mesh.volume_elements
+                .iter()
+                .any(|element| element.node_ids.contains(&node.node_id))
+                || mesh
+                    .boundary_faces
+                    .iter()
+                    .any(|face| face.node_ids.contains(&node.node_id))
+        })
     }
 
     #[test]
