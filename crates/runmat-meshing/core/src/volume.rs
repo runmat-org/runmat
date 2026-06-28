@@ -16,7 +16,10 @@ use crate::{
     },
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
+    sizing::{
+        AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+        SizingSampleRejection,
+    },
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
@@ -496,6 +499,23 @@ fn insert_local_sizing_breakpoints(
         }
         samples.push((sample.position_m, target_size_m, sample.reason));
     }
+    for sample in sizing.anisotropic_samples.clone() {
+        let Some(target_size_m) = anisotropic_sample_target_size(&sample, sizing) else {
+            sizing.rejected_samples.push(sizing_rejection(
+                sample.position_m,
+                sample
+                    .target_sizes_m
+                    .iter()
+                    .copied()
+                    .fold(f64::INFINITY, f64::min),
+                sample.reason,
+                "skipped_invalid",
+                "anisotropic sizing sample did not define a valid metric",
+            ));
+            continue;
+        };
+        samples.push((sample.position_m, target_size_m, sample.reason));
+    }
     samples.sort_by(|left, right| {
         left.1
             .total_cmp(&right.1)
@@ -627,6 +647,21 @@ fn clamped_sample_target_size(target_size_m: f64, sizing: &MeshSizingField) -> O
         target_size_m = target_size_m.min(max_size_m);
     }
     (target_size_m.is_finite() && target_size_m > 0.0).then_some(target_size_m)
+}
+
+fn anisotropic_sample_target_size(
+    sample: &AnisotropicSizingSample,
+    sizing: &MeshSizingField,
+) -> Option<f64> {
+    if !sample.is_valid_metric() {
+        return None;
+    }
+    let target_size_m = sample
+        .target_sizes_m
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    clamped_sample_target_size(target_size_m, sizing)
 }
 
 fn local_breakpoint_candidates(
@@ -2101,6 +2136,52 @@ mod tests {
             .collect::<Vec<_>>();
         let min_spacing = spacings.iter().copied().fold(f64::INFINITY, f64::min);
         assert!(min_spacing <= 0.5 + 1.0e-12);
+    }
+
+    #[test]
+    fn structured_fallback_consumes_valid_anisotropic_sizing_samples() {
+        let geometry = cube_geometry();
+        let mut options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        let sizing = MeshSizingField {
+            anisotropic_samples: vec![
+                AnisotropicSizingSample {
+                    position_m: [0.4, 0.4, 0.4],
+                    target_sizes_m: [0.25, 0.5, 0.75],
+                    directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    reason: Some("boundary_layer".to_string()),
+                },
+                AnisotropicSizingSample {
+                    position_m: [0.6, 0.6, 0.6],
+                    target_sizes_m: [0.25, -0.5, 0.75],
+                    directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    reason: Some("cad.proximity".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+            .expect("anisotropic sizing-driven fallback mesh should generate");
+
+        assert_eq!(mesh.sizing.applied_samples.len(), 1);
+        assert_eq!(
+            mesh.sizing.applied_samples[0].reason.as_deref(),
+            Some("boundary_layer")
+        );
+        assert_eq!(mesh.sizing.applied_samples[0].target_size_m, 0.25);
+        assert!(mesh.sizing.applied_samples[0].inserted_breakpoint_count > 0);
+        assert!(mesh.sizing.rejected_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("cad.proximity") && sample.status == "skipped_invalid"
+        }));
+        let x = unique_axis_coordinates(&mesh, 0);
+        assert!(x.iter().any(|value| (*value - 0.4).abs() <= 1.0e-12));
     }
 
     #[test]
