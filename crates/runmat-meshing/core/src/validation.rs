@@ -22,6 +22,7 @@ pub struct AnalysisMeshValidationOptions {
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
     pub require_no_fan_fallback: bool,
+    pub require_no_unrepaired_exact_quality: bool,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
 }
@@ -43,6 +44,7 @@ impl Default for AnalysisMeshValidationOptions {
             min_boundary_face_recovery_ratio: 0.0,
             min_boundary_edge_recovery_ratio: 0.0,
             require_no_fan_fallback: false,
+            require_no_unrepaired_exact_quality: false,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
         }
@@ -163,6 +165,11 @@ pub enum AnalysisMeshValidationError {
     FanFallbackRecoveryPresent {
         component_count: usize,
     },
+    UnrepairedExactQualityPresent {
+        boundary_adjacent_count: usize,
+        interior_seed_count: usize,
+        edge_star_count: usize,
+    },
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
@@ -236,6 +243,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         }
         AnalysisMeshValidationError::FanFallbackRecoveryPresent { .. } => {
             "fan_fallback_recovery_present"
+        }
+        AnalysisMeshValidationError::UnrepairedExactQualityPresent { .. } => {
+            "unrepaired_exact_quality_present"
         }
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
@@ -437,6 +447,7 @@ pub fn validate_analysis_mesh_with_options(
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
     validate_no_fan_fallback(mesh, options.require_no_fan_fallback)?;
+    validate_no_unrepaired_exact_quality(mesh, options.require_no_unrepaired_exact_quality)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_coverage_samples(
         mesh,
@@ -474,6 +485,30 @@ fn validate_no_fan_fallback(
     if require_no_fan_fallback && mesh.backend.tet_fan_fallback_component_count > 0 {
         return Err(AnalysisMeshValidationError::FanFallbackRecoveryPresent {
             component_count: mesh.backend.tet_fan_fallback_component_count,
+        });
+    }
+    Ok(())
+}
+
+fn validate_no_unrepaired_exact_quality(
+    mesh: &AnalysisMeshArtifact,
+    require_no_unrepaired_exact_quality: bool,
+) -> Result<(), AnalysisMeshValidationError> {
+    if !require_no_unrepaired_exact_quality {
+        return Ok(());
+    }
+    let boundary_adjacent_count = mesh
+        .backend
+        .tet_exact_quality_unrepaired_boundary_adjacent_count;
+    let interior_seed_count = mesh
+        .backend
+        .tet_exact_quality_unrepaired_interior_seed_count;
+    let edge_star_count = mesh.backend.tet_exact_quality_unrepaired_edge_star_count;
+    if boundary_adjacent_count > 0 || interior_seed_count > 0 || edge_star_count > 0 {
+        return Err(AnalysisMeshValidationError::UnrepairedExactQualityPresent {
+            boundary_adjacent_count,
+            interior_seed_count,
+            edge_star_count,
         });
     }
     Ok(())
@@ -1091,6 +1126,38 @@ mod tests {
         assert_eq!(
             analysis_mesh_validation_error_code(&err),
             "fan_fallback_recovery_present"
+        );
+    }
+
+    #[test]
+    fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
+        let mut mesh = valid_tet_mesh();
+        mesh.backend
+            .tet_exact_quality_unrepaired_boundary_adjacent_count = 2;
+        mesh.backend
+            .tet_exact_quality_unrepaired_interior_seed_count = 3;
+        mesh.backend.tet_exact_quality_unrepaired_edge_star_count = 5;
+
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                require_no_unrepaired_exact_quality: true,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("strict recovery policy should reject unrepaired exact-quality evidence");
+
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::UnrepairedExactQualityPresent {
+                boundary_adjacent_count: 2,
+                interior_seed_count: 3,
+                edge_star_count: 5,
+            }
+        );
+        assert_eq!(
+            analysis_mesh_validation_error_code(&err),
+            "unrepaired_exact_quality_present"
         );
     }
 

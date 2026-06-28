@@ -2423,6 +2423,7 @@ fn generated_production_mesh_validation_requires_strict_recovery() {
     let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
 
     assert!(options.require_no_fan_fallback);
+    assert!(options.require_no_unrepaired_exact_quality);
     assert_eq!(options.max_volume_component_count, Some(2));
     assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
     assert_eq!(options.min_coverage_sample_ratio, 1.0);

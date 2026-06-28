@@ -1263,6 +1263,7 @@ fn production_validation_options(
         min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
         require_no_fan_fallback: true,
+        require_no_unrepaired_exact_quality: true,
         ..AnalysisMeshValidationOptions::default()
     }
 }
@@ -1443,6 +1444,7 @@ mod tests {
             production_validation_options(&preparation, &VolumeMeshingOptions::default());
         assert!(!validation_options.coverage_sample_points_m.is_empty());
         assert_eq!(validation_options.min_coverage_sample_ratio, 1.0);
+        assert!(validation_options.require_no_unrepaired_exact_quality);
         assert!(validation_options
             .coverage_sample_points_m
             .iter()

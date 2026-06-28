@@ -250,6 +250,8 @@ pub struct MeshValidationEvidence {
     pub min_boundary_edge_recovery_ratio: f64,
     #[serde(default)]
     pub require_no_fan_fallback: bool,
+    #[serde(default)]
+    pub require_no_unrepaired_exact_quality: bool,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
     pub boundary_recovery: MeshBoundaryRecoveryEvidence,
@@ -338,6 +340,7 @@ fn validation_options_from_evidence(
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
         require_no_fan_fallback: validation.require_no_fan_fallback,
+        require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
     }
@@ -677,6 +680,7 @@ fn validation_evidence(
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
         require_no_fan_fallback: validation.require_no_fan_fallback,
+        require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
         boundary_recovery: boundary_recovery_evidence(mesh),
@@ -1045,6 +1049,7 @@ mod tests {
             vec![[0.1, 0.1, 0.1]]
         );
         assert!(evidence.validation.require_no_fan_fallback);
+        assert!(!evidence.validation.require_no_unrepaired_exact_quality);
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);
         assert_eq!(

@@ -13695,6 +13695,7 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     }
     if mesh.backend.backend == "production" {
         validation.require_no_fan_fallback = true;
+        validation.require_no_unrepaired_exact_quality = true;
         validation.coverage_sample_points_m = production_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
     }
