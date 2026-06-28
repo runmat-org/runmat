@@ -1358,10 +1358,10 @@ fn refine_component_seed_points(
         if seed_points.len() >= options.max_interior_seed_points {
             break;
         }
-        let seed_node_ids = seed_node_ids(first_seed_node_id, seed_points.len());
+        let current_seed_node_ids = seed_node_ids(first_seed_node_id, seed_points.len());
         let (status, candidate_tets) = component_insertion_tet_drafts(
             component,
-            &seed_node_ids,
+            &current_seed_node_ids,
             seed_points,
             surface_nodes,
             surface_elements,
@@ -1377,7 +1377,7 @@ fn refine_component_seed_points(
         let refinement_points = refinement_points_for_tets(
             &candidate_tets,
             surface_nodes,
-            &seed_node_ids,
+            &current_seed_node_ids,
             seed_points,
             tolerance,
             &classifier,
@@ -1388,19 +1388,47 @@ fn refine_component_seed_points(
         if refinement_points.points.is_empty() {
             break;
         }
-        pass_count += 1;
+        let mut accepted_this_pass = 0_usize;
+        let mut current_status = status;
+        let mut current_tets = candidate_tets;
         for point in refinement_points.points {
             if seed_points.len() >= options.max_interior_seed_points {
                 break;
             }
-            if !contains_point(seed_points, point, tolerance) {
-                seed_points.push(point);
-                inserted_point_count += 1;
+            if contains_point(seed_points, point, tolerance) {
+                continue;
             }
+            let current_quality = CandidateQualitySnapshot::from_tets(&current_tets, options);
+            let mut trial_seed_points = seed_points.clone();
+            trial_seed_points.push(point);
+            let trial_seed_node_ids = seed_node_ids(first_seed_node_id, trial_seed_points.len());
+            let (trial_status, trial_tets) = component_insertion_tet_drafts(
+                component,
+                &trial_seed_node_ids,
+                &trial_seed_points,
+                surface_nodes,
+                surface_elements,
+                surface,
+                options,
+                tolerance,
+            )?;
+            if trial_tets.is_empty() || (current_status.accepted && !trial_status.accepted) {
+                continue;
+            }
+            let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
+            if !candidate_quality_is_no_worse(trial_quality, current_quality) {
+                continue;
+            }
+            seed_points.push(point);
+            current_status = trial_status;
+            current_tets = trial_tets;
+            inserted_point_count += 1;
+            accepted_this_pass += 1;
         }
-        if status.accepted && inserted_point_count == 0 {
+        if accepted_this_pass == 0 {
             break;
         }
+        pass_count += 1;
     }
 
     Ok(SeedRefinementSummary {
@@ -3065,7 +3093,7 @@ mod tests {
     }
 
     #[test]
-    fn refinement_pass_adds_bounded_seed_points_for_candidate_quality() {
+    fn refinement_pass_rolls_back_quality_regressing_seed_points() {
         let (surface, volume_candidates) = cube_surface_and_volume_candidates();
 
         let candidates = form_tet_candidates(
@@ -3081,13 +3109,22 @@ mod tests {
         )
         .expect("Tet candidates should form with refinement");
 
-        assert!(candidates.interior_seed_points.len() > 9);
+        assert_eq!(candidates.interior_seed_points.len(), 9);
         assert!(candidates.interior_seed_points.len() <= 12);
-        assert_eq!(candidates.recovery.refinement_pass_count, 1);
-        assert!(candidates.recovery.refinement_point_count > 0);
+        assert_eq!(candidates.recovery.refinement_pass_count, 0);
+        assert_eq!(candidates.recovery.refinement_point_count, 0);
+        assert!(candidates.recovery.sizing_violation_count > 0);
         assert!(candidates.recovery.max_radius_edge_ratio.is_finite());
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+        assert_eq!(
+            candidates
+                .tets
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < 0.15)
+                .count(),
+            0
+        );
     }
 
     #[test]
