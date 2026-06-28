@@ -295,6 +295,16 @@ pub fn form_tet_candidates(
     if tets.is_empty() {
         return Err(TetCandidateError::EmptyCandidateSet);
     }
+    repair_exact_quality_tets(
+        &mut nodes,
+        &mut tets,
+        &mut interior_seed_points,
+        &mut next_node_id,
+        options,
+    )?;
+    if tets.is_empty() {
+        return Err(TetCandidateError::EmptyCandidateSet);
+    }
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
     let expected_volume_m3 = volume_candidates.total_volume_m3;
     let total_candidate_volume_ratio = if expected_volume_m3 > f64::EPSILON {
@@ -1443,9 +1453,13 @@ fn refinement_points_for_tets(
         {
             continue;
         }
-        let point = tet_circumsphere(points, tolerance)
-            .map(|(center, _)| center)
-            .unwrap_or_else(|| tet_centroid(points));
+        let point = if exact_quality_violation {
+            tet_centroid(points)
+        } else {
+            tet_circumsphere(points, tolerance)
+                .map(|(center, _)| center)
+                .unwrap_or_else(|| tet_centroid(points))
+        };
         let point = if classifier.contains_point(point) {
             point
         } else {
@@ -1683,6 +1697,187 @@ fn candidate_quality_is_no_worse(
         && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
         && proposed.min_exact_scaled_jacobian + 1.0e-12 >= current.min_exact_scaled_jacobian
         && proposed.max_aspect_ratio <= current.max_aspect_ratio * (1.0 + 1.0e-9)
+}
+
+fn repair_exact_quality_tets(
+    nodes: &mut Vec<TetCandidateNode>,
+    tets: &mut Vec<TetCandidate>,
+    interior_seed_points: &mut Vec<[f64; 3]>,
+    next_node_id: &mut u32,
+    options: TetCandidateOptions,
+) -> Result<(), TetCandidateError> {
+    let mut node_points = nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let mut repaired = Vec::<TetCandidate>::with_capacity(tets.len());
+    for tet in tets.iter() {
+        if tet.exact_scaled_jacobian >= options.min_scaled_jacobian {
+            repaired.push(tet.clone());
+            continue;
+        }
+        let points = candidate_tet_points(tet, &node_points)?;
+        let Some((split_point, candidates)) =
+            best_centroid_split_tets(tet, *next_node_id, points, options)
+        else {
+            repaired.push(tet.clone());
+            continue;
+        };
+        let candidate_below_threshold = candidates
+            .iter()
+            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        if candidates.len() == 4 && candidate_below_threshold == 0 {
+            let split_node_id = *next_node_id;
+            *next_node_id = next_node_id.saturating_add(1);
+            node_points.insert(split_node_id, split_point);
+            interior_seed_points.push(split_point);
+            nodes.push(TetCandidateNode {
+                node_id: split_node_id,
+                coordinates_m: split_point,
+                source: TetCandidateNodeSource::InteriorSeed,
+            });
+            repaired.extend(candidates);
+        } else {
+            repaired.push(tet.clone());
+        }
+    }
+    for (index, tet) in repaired.iter_mut().enumerate() {
+        tet.tet_id = index as u32;
+    }
+    *tets = repaired;
+    Ok(())
+}
+
+fn best_centroid_split_tets(
+    tet: &TetCandidate,
+    split_node_id: u32,
+    points: [[f64; 3]; 4],
+    options: TetCandidateOptions,
+) -> Option<([f64; 3], Vec<TetCandidate>)> {
+    let centroid = tet_centroid(points);
+    let mut best = None::<([f64; 3], Vec<TetCandidate>, usize, f64)>;
+    for split_point in centroid_repair_points(centroid, points) {
+        let candidates = centroid_split_tets(tet, split_node_id, split_point, points, options);
+        if candidates.len() != 4 {
+            continue;
+        }
+        let below_threshold_count = candidates
+            .iter()
+            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        let min_exact = candidates
+            .iter()
+            .map(|candidate| candidate.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        if best.as_ref().is_none_or(|(_, _, best_count, best_min)| {
+            below_threshold_count < *best_count
+                || (below_threshold_count == *best_count && min_exact > *best_min)
+        }) {
+            best = Some((split_point, candidates, below_threshold_count, min_exact));
+        }
+    }
+    best.map(|(point, candidates, _, _)| (point, candidates))
+}
+
+fn centroid_repair_points(centroid: [f64; 3], points: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
+    let mut candidates = Vec::with_capacity(9);
+    candidates.push(centroid);
+    for point in points {
+        candidates.push([
+            centroid[0] * 0.75 + point[0] * 0.25,
+            centroid[1] * 0.75 + point[1] * 0.25,
+            centroid[2] * 0.75 + point[2] * 0.25,
+        ]);
+        candidates.push([
+            centroid[0] * 0.50 + point[0] * 0.50,
+            centroid[1] * 0.50 + point[1] * 0.50,
+            centroid[2] * 0.50 + point[2] * 0.50,
+        ]);
+    }
+    candidates
+}
+
+fn centroid_split_tets(
+    tet: &TetCandidate,
+    split_node_id: u32,
+    split_point: [f64; 3],
+    points: [[f64; 3]; 4],
+    options: TetCandidateOptions,
+) -> Vec<TetCandidate> {
+    let faces = [
+        (
+            [tet.node_ids[0], tet.node_ids[1], tet.node_ids[2]],
+            [points[0], points[1], points[2]],
+        ),
+        (
+            [tet.node_ids[0], tet.node_ids[1], tet.node_ids[3]],
+            [points[0], points[1], points[3]],
+        ),
+        (
+            [tet.node_ids[0], tet.node_ids[2], tet.node_ids[3]],
+            [points[0], points[2], points[3]],
+        ),
+        (
+            [tet.node_ids[1], tet.node_ids[2], tet.node_ids[3]],
+            [points[1], points[2], points[3]],
+        ),
+    ];
+    let mut split_tets = Vec::<TetCandidate>::with_capacity(4);
+    for (face_node_ids, face_points) in faces {
+        let node_ids = [
+            face_node_ids[0],
+            face_node_ids[1],
+            face_node_ids[2],
+            split_node_id,
+        ];
+        let split_points = [face_points[0], face_points[1], face_points[2], split_point];
+        let Some(candidate) = raw_candidate_tet(
+            tet.component_id,
+            tet.source_surface_element_id,
+            &tet.region_ids,
+            node_ids,
+            split_points,
+            options,
+        ) else {
+            return Vec::new();
+        };
+        split_tets.push(candidate);
+    }
+    split_tets
+}
+
+fn raw_candidate_tet(
+    component_id: u32,
+    source_surface_element_id: u32,
+    region_ids: &[String],
+    mut node_ids: [u32; 4],
+    points: [[f64; 3]; 4],
+    options: TetCandidateOptions,
+) -> Option<TetCandidate> {
+    let mut signed_volume_m3 = tet_signed_volume(points);
+    if signed_volume_m3 < 0.0 {
+        node_ids.swap(1, 2);
+        signed_volume_m3 = -signed_volume_m3;
+    }
+    let volume_m3 = signed_volume_m3.abs();
+    if volume_m3 < options.min_volume_m3 {
+        return None;
+    }
+    let aspect_ratio = tet_edge_aspect_ratio(points);
+    if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
+        return None;
+    }
+    Some(TetCandidate {
+        tet_id: 0,
+        component_id,
+        node_ids,
+        source_surface_element_id,
+        region_ids: region_ids.to_vec(),
+        volume_m3,
+        aspect_ratio,
+        exact_scaled_jacobian: tet_scaled_jacobian(points),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

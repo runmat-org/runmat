@@ -189,7 +189,7 @@ fn tet_candidate_options_for_mesh(
         max_dense_recovery_nodes: options.max_elements.max(1).min(250_000),
         max_refinement_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
-            _ => 2,
+            _ => 3,
         },
         max_radius_edge_ratio: 2.5,
         sizing_compliance_tolerance: 0.35,
@@ -843,10 +843,7 @@ mod tests {
                     < QualityThresholds::default().min_scaled_jacobian)
                 .count()
         );
-        assert!(mesh
-            .backend
-            .tet_exact_scaled_jacobian_below_threshold_count
-            < 24);
+        assert!(mesh.backend.tet_exact_scaled_jacobian_below_threshold_count < 24);
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
