@@ -17,7 +17,7 @@ use crate::{
         CurveDiscretizationOptions,
     },
     options::{MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions},
-    predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
+    predicate::{distance_squared, dot, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
@@ -297,6 +297,16 @@ fn production_effective_sizing(
             }
             effective.samples.push(sample);
         }
+        for sample in cad_proximity_sizing_samples(topology) {
+            if effective
+                .samples
+                .iter()
+                .any(|existing| distance_squared(existing.position_m, sample.position_m) <= 1.0e-24)
+            {
+                continue;
+            }
+            effective.samples.push(sample);
+        }
     }
     for sample in cad_interface_sizing_samples(topology, options.refinement.focus.interfaces) {
         if effective
@@ -417,6 +427,75 @@ fn cad_interface_sizing_samples(
             })
         })
         .collect()
+}
+
+fn cad_proximity_sizing_samples(topology: &SourceTopologyModel) -> Vec<SizingSample> {
+    let max_span = (0..3)
+        .map(|axis| topology.bounds_max_m[axis] - topology.bounds_min_m[axis])
+        .fold(0.0_f64, f64::max);
+    if !max_span.is_finite() || max_span <= 0.0 {
+        return Vec::new();
+    }
+    let threshold_m = max_span * 0.35;
+    let mut samples = Vec::<SizingSample>::new();
+    for left_index in 0..topology.faces.len() {
+        let left = &topology.faces[left_index];
+        let Some(left_centroid) = topology_face_centroid(topology, left.node_ids) else {
+            continue;
+        };
+        for right in topology.faces.iter().skip(left_index + 1) {
+            if left
+                .node_ids
+                .iter()
+                .any(|node_id| right.node_ids.contains(node_id))
+            {
+                continue;
+            }
+            if dot(left.unit_normal, right.unit_normal) > -0.75 {
+                continue;
+            }
+            let Some(right_centroid) = topology_face_centroid(topology, right.node_ids) else {
+                continue;
+            };
+            let gap_m = distance_squared(left_centroid, right_centroid).sqrt();
+            if !gap_m.is_finite() || gap_m <= 0.0 || gap_m > threshold_m {
+                continue;
+            }
+            samples.push(SizingSample {
+                position_m: [
+                    (left_centroid[0] + right_centroid[0]) * 0.5,
+                    (left_centroid[1] + right_centroid[1]) * 0.5,
+                    (left_centroid[2] + right_centroid[2]) * 0.5,
+                ],
+                target_size_m: gap_m * 0.5,
+                reason: Some("cad.proximity".to_string()),
+            });
+        }
+    }
+    samples
+}
+
+fn topology_face_centroid(topology: &SourceTopologyModel, node_ids: [u32; 3]) -> Option<[f64; 3]> {
+    let a = topology
+        .vertices
+        .get(node_ids[0] as usize)
+        .filter(|vertex| vertex.vertex_id == node_ids[0])?
+        .coordinates_m;
+    let b = topology
+        .vertices
+        .get(node_ids[1] as usize)
+        .filter(|vertex| vertex.vertex_id == node_ids[1])?
+        .coordinates_m;
+    let c = topology
+        .vertices
+        .get(node_ids[2] as usize)
+        .filter(|vertex| vertex.vertex_id == node_ids[2])?
+        .coordinates_m;
+    Some([
+        (a[0] + b[0] + c[0]) / 3.0,
+        (a[1] + b[1] + c[1]) / 3.0,
+        (a[2] + b[2] + c[2]) / 3.0,
+    ])
 }
 
 fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingOptions) -> f64 {
@@ -1351,7 +1430,7 @@ mod tests {
     }
 
     #[test]
-    fn production_sizing_includes_small_feature_edge_samples() {
+    fn production_sizing_includes_small_feature_edge_and_proximity_samples() {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.5);
         options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
@@ -1370,7 +1449,10 @@ mod tests {
         assert!(sizing.samples.iter().any(|sample| {
             sample.reason.as_deref() == Some("cad.feature_edge") && sample.target_size_m < 0.1
         }));
-        assert_eq!(requested_refinement_points(Some(&sizing)).1, 4);
+        assert!(sizing.samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("cad.proximity") && sample.target_size_m < 0.1
+        }));
+        assert!(requested_refinement_points(Some(&sizing)).1 > 4);
     }
 
     #[test]
