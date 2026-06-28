@@ -10,6 +10,7 @@ use crate::{
     backend::{select_volume_backend, MeshBackendKind},
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
+    predicate::tet_scaled_jacobian,
     production::generate_production_analysis_mesh,
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
@@ -155,9 +156,13 @@ impl StructuredTetMesher {
                         let oriented = orient_tet(tet, &nodes);
                         let volume_m3 = tet_volume(oriented, &nodes).abs();
                         let aspect_ratio = tet_aspect_ratio(oriented, &nodes);
+                        let exact_scaled_jacobian = tet_points(oriented, &nodes)
+                            .map(tet_scaled_jacobian)
+                            .unwrap_or(0.0);
                         element_quality.push(ElementQuality {
                             element_id: element_id.clone(),
                             scaled_jacobian: 1.0 / aspect_ratio.max(1.0),
+                            exact_scaled_jacobian,
                             aspect_ratio,
                             volume_m3,
                         });
@@ -1159,6 +1164,10 @@ fn quality_report(
         .iter()
         .map(|element| element.scaled_jacobian)
         .fold(f64::INFINITY, f64::min);
+    let min_exact_scaled_jacobian = elements
+        .iter()
+        .map(|element| element.exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
     let max_aspect_ratio = elements
         .iter()
         .map(|element| element.aspect_ratio)
@@ -1183,6 +1192,7 @@ fn quality_report(
         .fold(0.0_f64, f64::max);
     AnalysisMeshQualityReport {
         min_scaled_jacobian,
+        min_exact_scaled_jacobian,
         mean_aspect_ratio,
         max_aspect_ratio,
         inverted_element_count: 0,
@@ -1286,9 +1296,13 @@ fn element_quality_for_nodes(
             return None;
         }
         let aspect_ratio = tet_aspect_ratio(node_ids, nodes);
+        let exact_scaled_jacobian = tet_points(node_ids, nodes)
+            .map(tet_scaled_jacobian)
+            .unwrap_or(0.0);
         qualities.push(ElementQuality {
             element_id: element.element_id.clone(),
             scaled_jacobian: 1.0 / aspect_ratio.max(1.0),
+            exact_scaled_jacobian,
             aspect_ratio,
             volume_m3,
         });

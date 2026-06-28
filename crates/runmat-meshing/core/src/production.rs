@@ -17,7 +17,7 @@ use crate::{
         CurveDiscretizationOptions,
     },
     options::{MeshTargetSize, VolumeMeshingOptions},
-    predicate::{distance_squared, tet_centroid, triangle_centroid},
+    predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality},
     sizing::MeshSizingField,
@@ -316,6 +316,7 @@ fn analysis_mesh_from_preparation(
         quality_elements.push(ElementQuality {
             element_id,
             scaled_jacobian: (1.0 / tet.aspect_ratio.max(1.0)).min(1.0),
+            exact_scaled_jacobian: tet_scaled_jacobian(tet_points),
             aspect_ratio: tet.aspect_ratio,
             volume_m3: tet.volume_m3,
         });
@@ -675,6 +676,10 @@ fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
         .iter()
         .map(|element| element.scaled_jacobian)
         .fold(f64::INFINITY, f64::min);
+    let min_exact_scaled_jacobian = elements
+        .iter()
+        .map(|element| element.exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
     let max_aspect_ratio = elements
         .iter()
         .map(|element| element.aspect_ratio)
@@ -686,6 +691,7 @@ fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
         / elements.len() as f64;
     AnalysisMeshQualityReport {
         min_scaled_jacobian,
+        min_exact_scaled_jacobian,
         mean_aspect_ratio,
         max_aspect_ratio,
         inverted_element_count: 0,
@@ -815,6 +821,13 @@ mod tests {
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
+        );
+        assert!(mesh.quality.min_exact_scaled_jacobian.is_finite());
+        assert!(
+            mesh.quality
+                .elements
+                .iter()
+                .all(|element| element.exact_scaled_jacobian.is_finite())
         );
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);

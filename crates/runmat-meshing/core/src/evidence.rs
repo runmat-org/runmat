@@ -49,6 +49,8 @@ pub struct MeshSizingEvidence {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshQualityEvidence {
     pub min_scaled_jacobian: f64,
+    #[serde(default)]
+    pub min_exact_scaled_jacobian: f64,
     pub mean_aspect_ratio: f64,
     pub max_aspect_ratio: f64,
     pub inverted_element_count: usize,
@@ -188,6 +190,7 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
 
     MeshQualityEvidence {
         min_scaled_jacobian: mesh.quality.min_scaled_jacobian,
+        min_exact_scaled_jacobian: mesh.quality.min_exact_scaled_jacobian,
         mean_aspect_ratio: mesh.quality.mean_aspect_ratio,
         max_aspect_ratio: mesh.quality.max_aspect_ratio,
         inverted_element_count: mesh.quality.inverted_element_count,
@@ -417,6 +420,7 @@ mod tests {
             ],
             quality: AnalysisMeshQualityReport {
                 min_scaled_jacobian: 0.5,
+                min_exact_scaled_jacobian: 0.45,
                 mean_aspect_ratio: 2.0,
                 max_aspect_ratio: 2.0,
                 inverted_element_count: 0,
@@ -425,6 +429,7 @@ mod tests {
                 elements: vec![ElementQuality {
                     element_id: "tet_1".to_string(),
                     scaled_jacobian: 0.5,
+                    exact_scaled_jacobian: 0.45,
                     aspect_ratio: 2.0,
                     volume_m3: 1.0 / 6.0,
                 }],

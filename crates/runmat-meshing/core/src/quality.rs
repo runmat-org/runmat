@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct ElementQuality {
     pub element_id: String,
     pub scaled_jacobian: f64,
+    #[serde(default)]
+    pub exact_scaled_jacobian: f64,
     pub aspect_ratio: f64,
     pub volume_m3: f64,
 }
@@ -11,6 +13,8 @@ pub struct ElementQuality {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisMeshQualityReport {
     pub min_scaled_jacobian: f64,
+    #[serde(default)]
+    pub min_exact_scaled_jacobian: f64,
     pub mean_aspect_ratio: f64,
     pub max_aspect_ratio: f64,
     pub inverted_element_count: usize,
@@ -26,6 +30,7 @@ impl Default for AnalysisMeshQualityReport {
     fn default() -> Self {
         Self {
             min_scaled_jacobian: 1.0,
+            min_exact_scaled_jacobian: 1.0,
             mean_aspect_ratio: 1.0,
             max_aspect_ratio: 1.0,
             inverted_element_count: 0,
