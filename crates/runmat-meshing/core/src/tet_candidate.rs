@@ -2170,50 +2170,50 @@ fn smooth_component_seed_points(
             &classifier,
             options,
         )?;
-        if proposed == *seed_points {
-            break;
-        }
-        let (proposed_status, proposed_tets) = component_insertion_tet_drafts(
-            component,
-            &seed_node_ids,
-            &proposed,
-            surface_nodes,
-            surface_elements,
-            surface,
-            options,
-            tolerance,
-        )?;
-        if !proposed_status.accepted && current_status.accepted {
-            rejected_edit_count += 1;
-            break;
-        }
-        let proposed_quality = CandidateQualitySnapshot::from_tets(&proposed_tets, options);
-        if candidate_quality_is_no_worse(proposed_quality, current_quality) {
-            let moved_count = seed_points
-                .iter()
-                .zip(proposed.iter())
-                .filter(|(left, right)| !tolerance.point_nearly_equal(**left, **right, 1.0))
-                .count();
-            if moved_count == 0 {
-                break;
+        if proposed != *seed_points {
+            let (proposed_status, proposed_tets) = component_insertion_tet_drafts(
+                component,
+                &seed_node_ids,
+                &proposed,
+                surface_nodes,
+                surface_elements,
+                surface,
+                options,
+                tolerance,
+            )?;
+            if !proposed_status.accepted && current_status.accepted {
+                rejected_edit_count += 1;
+            } else {
+                let proposed_quality = CandidateQualitySnapshot::from_tets(&proposed_tets, options);
+                if candidate_quality_is_no_worse(proposed_quality, current_quality) {
+                    let moved_count = seed_points
+                        .iter()
+                        .zip(proposed.iter())
+                        .filter(|(left, right)| !tolerance.point_nearly_equal(**left, **right, 1.0))
+                        .count();
+                    if moved_count > 0 {
+                        *seed_points = proposed;
+                        final_quality = Some(proposed_quality);
+                        pass_count += 1;
+                        smoothed_point_count += moved_count;
+                        sliver_removed_count += current_quality
+                            .sliver_count
+                            .saturating_sub(proposed_quality.sliver_count);
+                        continue;
+                    }
+                } else {
+                    rejected_edit_count += 1;
+                }
             }
-            *seed_points = proposed;
-            final_quality = Some(proposed_quality);
-            pass_count += 1;
-            smoothed_point_count += moved_count;
-            sliver_removed_count += current_quality
-                .sliver_count
-                .saturating_sub(proposed_quality.sliver_count);
-            continue;
         }
 
-        rejected_edit_count += 1;
         let Some((locally_smoothed, local_quality)) = best_local_seed_smoothing(
             component,
             seed_points,
             &proposed,
             &seed_node_ids,
             &current_tets,
+            &classifier,
             surface_nodes,
             surface_elements,
             surface,
@@ -2258,6 +2258,7 @@ fn best_local_seed_smoothing(
     proposed_points: &[[f64; 3]],
     seed_node_ids: &[u32],
     current_tets: &[TetCandidate],
+    classifier: &ComponentSurfaceClassifier,
     surface_nodes: &BTreeMap<u32, [f64; 3]>,
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
     surface: &SurfaceDiscretization,
@@ -2269,38 +2270,109 @@ fn best_local_seed_smoothing(
     let seed_indices = optimization_target_seed_indices(current_tets, seed_node_ids, options);
     let mut best = None::<(Vec<[f64; 3]>, CandidateQualitySnapshot)>;
     for index in seed_indices {
-        let proposed_point = proposed_points[index];
-        if tolerance.point_nearly_equal(seed_points[index], proposed_point, 1.0) {
-            continue;
-        }
-        let mut trial = seed_points.to_vec();
-        trial[index] = proposed_point;
-        let (trial_status, trial_tets) = component_insertion_tet_drafts(
-            component,
-            seed_node_ids,
-            &trial,
-            surface_nodes,
-            surface_elements,
-            surface,
-            options,
+        for proposed_point in local_seed_smoothing_candidate_points(
+            seed_points[index],
+            proposed_points[index],
+            classifier,
             tolerance,
-        )?;
-        if !trial_status.accepted && current_status_accepted {
-            continue;
-        }
-        let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
-        if !candidate_quality_is_no_worse(trial_quality, current_quality)
-            || !candidate_quality_is_better(trial_quality, current_quality)
-        {
-            continue;
-        }
-        if best.as_ref().is_none_or(|(_, best_quality)| {
-            candidate_quality_is_better(trial_quality, *best_quality)
-        }) {
-            best = Some((trial, trial_quality));
+        ) {
+            let mut trial = seed_points.to_vec();
+            trial[index] = proposed_point;
+            let (trial_status, trial_tets) = component_insertion_tet_drafts(
+                component,
+                seed_node_ids,
+                &trial,
+                surface_nodes,
+                surface_elements,
+                surface,
+                options,
+                tolerance,
+            )?;
+            if !trial_status.accepted && current_status_accepted {
+                continue;
+            }
+            let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
+            if !candidate_quality_is_no_worse(trial_quality, current_quality)
+                || !candidate_quality_is_better(trial_quality, current_quality)
+            {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(_, best_quality)| {
+                candidate_quality_is_better(trial_quality, *best_quality)
+            }) {
+                best = Some((trial, trial_quality));
+            }
         }
     }
     Ok(best)
+}
+
+fn local_seed_smoothing_candidate_points(
+    current: [f64; 3],
+    proposed: [f64; 3],
+    classifier: &ComponentSurfaceClassifier,
+    tolerance: MeshingTolerance,
+) -> Vec<[f64; 3]> {
+    let mut candidates = Vec::<[f64; 3]>::new();
+    push_local_seed_smoothing_candidate(&mut candidates, current, proposed, classifier, tolerance);
+    push_local_seed_smoothing_candidate(
+        &mut candidates,
+        current,
+        scale(add(current, proposed), 0.5),
+        classifier,
+        tolerance,
+    );
+
+    let proposed_distance = distance(current, proposed);
+    let clearance = classifier.nearest_surface_distance(current);
+    let radius = if proposed_distance.is_finite() && proposed_distance > tolerance.absolute_m {
+        proposed_distance * 0.5
+    } else if clearance.is_finite() && clearance > tolerance.absolute_m {
+        clearance * 0.05
+    } else {
+        0.0
+    };
+    if radius <= tolerance.absolute_m {
+        return candidates;
+    }
+    let directions = [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ];
+    for fraction in [0.5, 1.0] {
+        for direction in directions {
+            push_local_seed_smoothing_candidate(
+                &mut candidates,
+                current,
+                add(current, scale(direction, radius * fraction)),
+                classifier,
+                tolerance,
+            );
+        }
+    }
+    candidates
+}
+
+fn push_local_seed_smoothing_candidate(
+    candidates: &mut Vec<[f64; 3]>,
+    current: [f64; 3],
+    candidate: [f64; 3],
+    classifier: &ComponentSurfaceClassifier,
+    tolerance: MeshingTolerance,
+) {
+    if tolerance.point_nearly_equal(candidate, current, 1.0)
+        || !classifier.contains_point(candidate)
+        || candidates
+            .iter()
+            .any(|existing| tolerance.point_nearly_equal(*existing, candidate, 1.0))
+    {
+        return;
+    }
+    candidates.push(candidate);
 }
 
 fn optimization_target_seed_indices(
@@ -5490,6 +5562,34 @@ mod tests {
         let seed_indices = optimization_target_seed_indices(&[tet], &[1, 3], options);
 
         assert_eq!(seed_indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn local_smoothing_candidates_include_bounded_stencil_when_proposed_is_unchanged() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance =
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
+        let classifier =
+            ComponentSurfaceClassifier::new(component, &surface, &surface_elements, tolerance)
+                .expect("classifier should build");
+        let current = [0.5, 0.5, 0.5];
+
+        let candidates =
+            local_seed_smoothing_candidate_points(current, current, &classifier, tolerance);
+
+        assert!(!candidates.is_empty());
+        assert!(candidates
+            .iter()
+            .all(|candidate| classifier.contains_point(*candidate)));
+        assert!(candidates
+            .iter()
+            .all(|candidate| !tolerance.point_nearly_equal(*candidate, current, 1.0)));
     }
 
     #[test]
