@@ -95,6 +95,8 @@ pub struct TetCandidateSet {
     pub interior_seed_points: Vec<[f64; 3]>,
     #[serde(default)]
     pub accepted_requested_refinement_points: Vec<[f64; 3]>,
+    #[serde(default)]
+    pub accepted_requested_refinement_sample_indices: Vec<usize>,
     pub recovery: TetRecoveryReport,
     pub total_volume_m3: f64,
 }
@@ -205,7 +207,7 @@ pub fn form_tet_candidates(
         .saturating_add(1);
 
     let mut interior_seed_points = Vec::<[f64; 3]>::new();
-    let mut accepted_requested_refinement_seed_points = Vec::<(u32, [f64; 3])>::new();
+    let mut accepted_requested_refinement_seed_points = Vec::<(u32, [f64; 3], usize)>::new();
     let mut insertion_component_count = 0_usize;
     let mut fan_fallback_component_count = 0_usize;
     let mut refinement_pass_count = 0_usize;
@@ -282,8 +284,11 @@ pub fn form_tet_candidates(
         for accepted in &refinement.accepted_requested_points {
             let index = accepted.seed_index;
             if index < component_seed_node_ids.len() {
-                accepted_requested_refinement_seed_points
-                    .push((component_seed_node_ids[index], accepted.requested_point));
+                accepted_requested_refinement_seed_points.push((
+                    component_seed_node_ids[index],
+                    accepted.requested_point,
+                    accepted.requested_id,
+                ));
             }
         }
         interior_seed_points.extend(component_seed_points.iter().copied());
@@ -348,9 +353,17 @@ pub fn form_tet_candidates(
         .iter()
         .map(|node| node.node_id)
         .collect::<BTreeSet<_>>();
-    let accepted_requested_refinement_points = accepted_requested_refinement_seed_points
+    let retained_requested_refinement = accepted_requested_refinement_seed_points
         .into_iter()
-        .filter_map(|(node_id, point)| retained_node_ids.contains(&node_id).then_some(point))
+        .filter(|(node_id, _, _)| retained_node_ids.contains(node_id))
+        .collect::<Vec<_>>();
+    let accepted_requested_refinement_points = retained_requested_refinement
+        .iter()
+        .map(|(_, point, _)| *point)
+        .collect::<Vec<_>>();
+    let accepted_requested_refinement_sample_indices = retained_requested_refinement
+        .iter()
+        .map(|(_, _, requested_id)| *requested_id)
         .collect::<Vec<_>>();
     accepted_requested_refinement_point_count = accepted_requested_refinement_points.len();
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
@@ -371,6 +384,7 @@ pub fn form_tet_candidates(
         tets,
         interior_seed_points,
         accepted_requested_refinement_points,
+        accepted_requested_refinement_sample_indices,
         recovery: TetRecoveryReport {
             component_count,
             insertion_component_count,
@@ -1399,6 +1413,7 @@ struct SeedRefinementSummary {
 struct AcceptedRequestedRefinementPoint {
     seed_index: usize,
     requested_point: [f64; 3],
+    requested_id: usize,
 }
 
 fn refine_component_seed_points(
@@ -1466,6 +1481,7 @@ fn refine_component_seed_points(
             &classifier,
             options,
             point_budget,
+            &accepted_requested_ids,
         )?;
         requested_point_count += refinement_points.requested_point_count;
         sizing_violation_count += refinement_points.sizing_violation_count;
@@ -1533,6 +1549,7 @@ fn refine_component_seed_points(
                 accepted_requested_points.push(AcceptedRequestedRefinementPoint {
                     seed_index,
                     requested_point: point,
+                    requested_id,
                 });
             }
             accepted_this_pass += 1;
@@ -1577,6 +1594,7 @@ fn refinement_points_for_tets(
     classifier: &ComponentSurfaceClassifier,
     options: TetCandidateOptions,
     point_budget: usize,
+    accepted_requested_ids: &BTreeSet<usize>,
 ) -> Result<RefinementPointSet, TetCandidateError> {
     let Some(target_size_m) = options.interior_target_size_m else {
         return Ok(RefinementPointSet {
@@ -1595,6 +1613,9 @@ fn refinement_points_for_tets(
         .take(options.requested_refinement_point_count)
         .enumerate()
     {
+        if accepted_requested_ids.contains(&requested_id) {
+            continue;
+        }
         if classifier.contains_point(*point) && !contains_point(seed_points, *point, tolerance) {
             for (candidate_index, candidate_point) in requested_refinement_candidate_points(
                 *point,
@@ -1746,6 +1767,38 @@ fn requested_refinement_candidate_points(
             && !contains_point(seed_points, candidate, tolerance)
         {
             candidates.push(candidate);
+        }
+    }
+    let anchor_distance = distance(requested_point, anchor);
+    let base_radius = target_size_m
+        .min(anchor_distance * 0.5)
+        .min(clearance * 0.5)
+        .max(tolerance.absolute_m * 10.0);
+    let local_radii = [base_radius * 0.5, base_radius];
+    let local_directions = [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ];
+    for radius in local_radii {
+        if !radius.is_finite() || radius <= tolerance.absolute_m {
+            continue;
+        }
+        for direction in local_directions {
+            let candidate = [
+                requested_point[0] + direction[0] * radius,
+                requested_point[1] + direction[1] * radius,
+                requested_point[2] + direction[2] * radius,
+            ];
+            if classifier.contains_point(candidate)
+                && !contains_point(&candidates, candidate, tolerance)
+                && !contains_point(seed_points, candidate, tolerance)
+            {
+                candidates.push(candidate);
+            }
         }
     }
     candidates
@@ -4404,6 +4457,10 @@ mod tests {
             candidates.accepted_requested_refinement_points,
             vec![requested_refinement_points[0]]
         );
+        assert_eq!(
+            candidates.accepted_requested_refinement_sample_indices,
+            vec![0]
+        );
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
         assert_eq!(
             candidates
@@ -4456,6 +4513,10 @@ mod tests {
             .iter()
             .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
         assert_eq!(candidates.accepted_requested_refinement_points.len(), 1);
+        assert_eq!(
+            candidates.accepted_requested_refinement_sample_indices,
+            vec![0]
+        );
         assert!(
             distance_squared(
                 candidates.accepted_requested_refinement_points[0],
@@ -4532,6 +4593,10 @@ mod tests {
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(candidates.accepted_requested_refinement_points.len(), 1);
+        assert_eq!(
+            candidates.accepted_requested_refinement_sample_indices,
+            vec![0]
+        );
         assert!(
             distance_squared(
                 candidates.accepted_requested_refinement_points[0],
@@ -4554,6 +4619,48 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn requested_refinement_surrogates_include_bounded_local_stencil() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance = MeshingTolerance::default();
+        let classifier =
+            ComponentSurfaceClassifier::new(component, &surface, &surface_elements, tolerance)
+                .expect("classifier should build");
+        let requested_point = [0.3, 0.3, 0.3];
+        let seed_points = [[0.5, 0.5, 0.5]];
+
+        let candidates = requested_refinement_candidate_points(
+            requested_point,
+            &seed_points,
+            &classifier,
+            0.4,
+            tolerance,
+        );
+
+        assert!(candidates.len() > 4);
+        assert!(candidates.len() <= 16);
+        assert_eq!(candidates[0], requested_point);
+        assert!(candidates
+            .iter()
+            .all(|candidate| classifier.contains_point(*candidate)));
+        assert!(candidates.iter().any(|candidate| {
+            candidate[0] > requested_point[0]
+                && (candidate[1] - requested_point[1]).abs() <= f64::EPSILON
+                && (candidate[2] - requested_point[2]).abs() <= f64::EPSILON
+        }));
+        for (left_index, left) in candidates.iter().enumerate() {
+            for right in candidates.iter().skip(left_index + 1) {
+                assert!(!tolerance.point_nearly_equal(*left, *right, 1.0));
+            }
+        }
     }
 
     #[test]

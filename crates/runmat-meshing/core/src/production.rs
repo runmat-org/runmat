@@ -770,9 +770,15 @@ fn production_mesh_sizing(
     }
     if let Some(sizing) = sizing {
         let mut seen_positions = Vec::<[f64; 3]>::new();
+        let accepted_requested_sample_indices = preparation
+            .tet_candidates
+            .accepted_requested_refinement_sample_indices
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
         mesh_sizing.applied_samples.clear();
         mesh_sizing.rejected_samples.clear();
-        for sample in &sizing.samples {
+        for (sample_index, sample) in sizing.samples.iter().enumerate() {
             let valid_position = sample.position_m.iter().all(|value| value.is_finite());
             let valid_size = sample.target_size_m.is_finite() && sample.target_size_m > 0.0;
             if !valid_position || !valid_size {
@@ -811,7 +817,8 @@ fn production_mesh_sizing(
                     .tet_candidates
                     .accepted_requested_refinement_points
                     .iter()
-                    .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24),
+                    .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+                    || accepted_requested_sample_indices.contains(&sample_index),
             );
             let detail = if inserted_breakpoint_count > 0 {
                 "production_requested_tet_seed_accepted"
