@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub const INTERNAL_SOURCE_EDGE_ID: u32 = u32::MAX;
+const FACE_AREA_RECOVERY_TOLERANCE: f64 = 1.0e-8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceDiscretizationOptions {
@@ -476,6 +477,8 @@ fn append_curve_driven_face_elements(
         return ExactCadSampleSurfaceReport::default();
     }
 
+    let node_start = nodes.len();
+    let element_start = elements.len();
     let mut boundary_edge_ids = BTreeMap::<[u32; 2], u32>::new();
     for segment in segments {
         boundary_edge_ids.insert(
@@ -485,9 +488,14 @@ fn append_curve_driven_face_elements(
     }
 
     let mut points = boundary_triangulation_points(frame, segments, nodes);
+    let boundary_point_count = points.len();
     let sample_report = append_exact_face_domain_sample_points(face, frame, nodes, &mut points);
     append_face_lattice_points(face, frame, segments, nodes, &mut points);
-    let triangles = triangulate_face_points(&points);
+    let triangles = if boundary_point_count == 3 {
+        triangulate_triangle_points_by_insertion(&points, boundary_point_count)
+    } else {
+        triangulate_face_points(&points)
+    };
     if triangles.is_empty() {
         append_curve_fan_face_elements(face, frame, segments, nodes, elements);
         return sample_report;
@@ -547,6 +555,14 @@ fn append_curve_driven_face_elements(
             area_m2: triangle_area(coordinates),
             unit_normal: frame.unit_normal,
         });
+    }
+    if !face_area_is_recovered(face, &elements[element_start..])
+        || !face_edges_are_recovered(&elements[element_start..], &boundary_edge_ids)
+    {
+        nodes.truncate(node_start);
+        elements.truncate(element_start);
+        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        return sample_report.rejected_after_area_guard();
     }
     sample_report
 }
@@ -628,6 +644,53 @@ struct ExactCadSampleSurfaceReport {
     rejected_count: usize,
 }
 
+impl ExactCadSampleSurfaceReport {
+    fn rejected_after_area_guard(self) -> Self {
+        Self {
+            accepted_count: 0,
+            rejected_count: self.rejected_count + self.accepted_count,
+        }
+    }
+}
+
+fn face_area_is_recovered(face: &SourceTopologyFace, elements: &[SurfaceElement]) -> bool {
+    if elements.is_empty() {
+        return false;
+    }
+    let recovered_area_m2 = elements
+        .iter()
+        .filter(|element| element.source_face_id == face.face_id)
+        .map(|element| element.area_m2)
+        .sum::<f64>();
+    if !recovered_area_m2.is_finite() || !face.area_m2.is_finite() || face.area_m2 <= 0.0 {
+        return false;
+    }
+    ((recovered_area_m2 - face.area_m2).abs() / face.area_m2) <= FACE_AREA_RECOVERY_TOLERANCE
+}
+
+fn face_edges_are_recovered(
+    elements: &[SurfaceElement],
+    boundary_edge_ids: &BTreeMap<[u32; 2], u32>,
+) -> bool {
+    let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+    for element in elements {
+        for edge in [
+            sorted_node_pair(element.node_ids[0], element.node_ids[1]),
+            sorted_node_pair(element.node_ids[1], element.node_ids[2]),
+            sorted_node_pair(element.node_ids[2], element.node_ids[0]),
+        ] {
+            *edge_counts.entry(edge).or_default() += 1;
+        }
+    }
+    edge_counts.into_iter().all(|(edge, count)| {
+        if boundary_edge_ids.contains_key(&edge) {
+            count == 1
+        } else {
+            count == 2
+        }
+    })
+}
+
 fn append_exact_face_domain_sample_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
@@ -652,9 +715,10 @@ fn append_exact_face_domain_sample_points(
             report.rejected_count += 1;
             continue;
         }
+        let local_uv = frame_local_uv(frame, projection.point_m);
         if points
             .iter()
-            .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
+            .any(|point| distance2_2d(point.uv, local_uv) <= 1.0e-24)
         {
             report.rejected_count += 1;
             continue;
@@ -667,11 +731,16 @@ fn append_exact_face_domain_sample_points(
         });
         points.push(FaceTriangulationPoint {
             node_id,
-            uv: projection.uv,
+            uv: local_uv,
         });
         report.accepted_count += 1;
     }
     report
+}
+
+fn frame_local_uv(frame: &crate::CadFaceEvaluationFrame, point_m: [f64; 3]) -> [f64; 2] {
+    let relative = sub(point_m, frame.origin_m);
+    [dot(relative, frame.u_axis), dot(relative, frame.v_axis)]
 }
 
 fn has_exact_face_domain_samples(frame: &crate::CadFaceEvaluationFrame) -> bool {
@@ -839,6 +908,119 @@ fn triangulate_face_points(points: &[FaceTriangulationPoint]) -> Vec<FaceTriangl
             point_in_polygon_2d(centroid, &polygon)
         })
         .collect()
+}
+
+fn triangulate_triangle_points_by_insertion(
+    points: &[FaceTriangulationPoint],
+    boundary_point_count: usize,
+) -> Vec<FaceTriangle> {
+    if boundary_point_count != 3 || points.len() < 3 {
+        return Vec::new();
+    }
+    let mut triangles = vec![FaceTriangle {
+        point_indices: [0, 1, 2],
+    }];
+    for point_index in boundary_point_count..points.len() {
+        let edge_hits = triangles
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(triangle_index, triangle)| {
+                triangle_edge_containing_point(point_index, triangle, points)
+                    .map(|edge| (triangle_index, triangle, edge))
+            })
+            .collect::<Vec<_>>();
+        if !edge_hits.is_empty() {
+            for (triangle_index, triangle, edge) in edge_hits.into_iter().rev() {
+                triangles.swap_remove(triangle_index);
+                let opposite = triangle
+                    .point_indices
+                    .into_iter()
+                    .find(|index| *index != edge[0] && *index != edge[1])
+                    .expect("triangle edge should have an opposite point");
+                push_non_degenerate_face_triangle(
+                    &mut triangles,
+                    [edge[0], point_index, opposite],
+                    points,
+                );
+                push_non_degenerate_face_triangle(
+                    &mut triangles,
+                    [point_index, edge[1], opposite],
+                    points,
+                );
+            }
+            continue;
+        }
+        let Some((triangle_index, triangle)) =
+            triangles.iter().copied().enumerate().find(|(_, triangle)| {
+                point_in_triangle_2d(
+                    points[point_index].uv,
+                    triangle.point_indices.map(|index| points[index].uv),
+                )
+            })
+        else {
+            continue;
+        };
+        triangles.swap_remove(triangle_index);
+        for point_indices in [
+            [
+                triangle.point_indices[0],
+                triangle.point_indices[1],
+                point_index,
+            ],
+            [
+                triangle.point_indices[1],
+                triangle.point_indices[2],
+                point_index,
+            ],
+            [
+                triangle.point_indices[2],
+                triangle.point_indices[0],
+                point_index,
+            ],
+        ] {
+            push_non_degenerate_face_triangle(&mut triangles, point_indices, points);
+        }
+    }
+    triangles
+}
+
+fn triangle_edge_containing_point(
+    point_index: usize,
+    triangle: FaceTriangle,
+    points: &[FaceTriangulationPoint],
+) -> Option<[usize; 2]> {
+    let point = points[point_index].uv;
+    for edge in triangle_edges_2d(triangle.point_indices) {
+        if point_on_segment_2d(point, points[edge[0]].uv, points[edge[1]].uv) {
+            return Some(edge);
+        }
+    }
+    None
+}
+
+fn push_non_degenerate_face_triangle(
+    triangles: &mut Vec<FaceTriangle>,
+    point_indices: [usize; 3],
+    points: &[FaceTriangulationPoint],
+) {
+    if triangle_area_2d(point_indices.map(|index| points[index].uv)).abs() > f64::EPSILON {
+        triangles.push(FaceTriangle { point_indices });
+    }
+}
+
+fn point_in_triangle_2d(point: [f64; 2], triangle: [[f64; 2]; 3]) -> bool {
+    let area = triangle_area_2d(triangle);
+    if area.abs() <= f64::EPSILON {
+        return false;
+    }
+    let sign = if area >= 0.0 { 1.0 } else { -1.0 };
+    let edge_areas = [
+        triangle_area_2d([triangle[0], triangle[1], point]) * sign,
+        triangle_area_2d([triangle[1], triangle[2], point]) * sign,
+        triangle_area_2d([triangle[2], triangle[0], point]) * sign,
+    ];
+    edge_areas.iter().all(|value| *value >= -1.0e-12)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1291,10 +1473,62 @@ mod tests {
             .nodes
             .iter()
             .any(|node| node.coordinates_m == [0.25, 0.25, 0.0]));
+        assert!(
+            (surface
+                .elements
+                .iter()
+                .map(|element| element.area_m2)
+                .sum::<f64>()
+                - topology.faces[0].area_m2)
+                .abs()
+                <= 1.0e-12
+        );
         assert!(surface
             .elements
             .iter()
-            .any(|element| element.parametric_node_uv.contains(&[0.25, 0.25])));
+            .all(|element| element.cad_face_id == Some("face_a".to_string())));
+    }
+
+    #[test]
+    fn curve_driven_cad_surface_preserves_area_with_multiple_exact_samples() {
+        let topology = single_triangle_topology();
+        let cad_topology =
+            crate::build_cad_topology(&geometry_with_area_regressing_face_samples(), &topology)
+                .expect("cad topology");
+        let cad_evaluation =
+            crate::build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let curves = crate::discretize_topology_curves(
+            &topology,
+            crate::CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 1,
+            },
+        )
+        .expect("curves should discretize");
+
+        let surface = discretize_cad_surfaces_with_curves(
+            &topology,
+            &cad_evaluation,
+            &curves,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 1,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("cad-owned curve surface should discretize");
+        let recovered_area = surface
+            .elements
+            .iter()
+            .filter(|element| element.source_face_id == 7)
+            .map(|element| element.area_m2)
+            .sum::<f64>();
+
+        assert_eq!(surface.nodes.len(), topology.vertices.len() + 3);
+        assert_eq!(surface.elements.len(), 7);
+        assert_eq!(surface.exact_cad_sample_node_count, 3);
+        assert_eq!(surface.rejected_exact_cad_sample_count, 0);
+        assert!((recovered_area - topology.faces[0].area_m2).abs() <= 1.0e-12);
         assert!(surface
             .elements
             .iter()
@@ -1466,6 +1700,37 @@ mod tests {
             }],
             curves: Vec::new(),
         }];
+        geometry
+    }
+
+    fn geometry_with_area_regressing_face_samples() -> runmat_geometry_core::GeometryAsset {
+        let mut geometry = geometry_with_face_domain_sample();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.30, 0.10, 0.0],
+                uv: Some([0.30, 0.10]),
+                projected_point_m: Some([0.30, 0.10, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.75, 0.10, 0.0],
+                uv: Some([0.75, 0.10]),
+                projected_point_m: Some([0.75, 0.10, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.70, 0.25, 0.0],
+                uv: Some([0.70, 0.25]),
+                projected_point_m: Some([0.70, 0.25, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
         geometry
     }
 }
