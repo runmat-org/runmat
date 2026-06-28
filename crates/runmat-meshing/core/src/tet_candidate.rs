@@ -423,6 +423,7 @@ fn append_component_insertion_tets(
                     .fold(0.0_f64, f64::max),
             });
         }
+        return Ok(InsertionStatus::rejected(0.0, f64::INFINITY));
     }
 
     let (_draft_status, accepted_tets) = component_insertion_tet_drafts(
@@ -1762,6 +1763,25 @@ mod tests {
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn dense_components_do_not_fall_through_to_global_insertion_when_recovery_fails() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let err = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                max_global_insertion_points: 4,
+                allow_fan_fallback: false,
+                sliver_aspect_ratio: 1.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect_err("dense rejected recovery should not fall through to global insertion");
+
+        assert_eq!(err, TetCandidateError::RecoveryFailed { component_id: 0 });
     }
 
     #[test]
