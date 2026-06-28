@@ -1944,6 +1944,7 @@ fn repair_exact_quality_tets_once(
         .collect::<BTreeMap<_, _>>();
     let mut repaired = Vec::<TetCandidate>::with_capacity(tets.len());
     let face_adjacency = tet_face_adjacency(tets);
+    let edge_adjacency = tet_edge_adjacency(tets);
     let mut consumed = vec![false; tets.len()];
     let mut changed = false;
     for (tet_index, tet) in tets.iter().enumerate() {
@@ -1954,9 +1955,27 @@ fn repair_exact_quality_tets_once(
             repaired.push(tet.clone());
             continue;
         }
+        if let Some((neighbor_indices, candidates)) =
+            best_three_tet_edge_reconnection(tet_index, tets, &edge_adjacency, &node_points, options)?
+        {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            changed = true;
+            repaired.extend(candidates);
+            continue;
+        }
         if let Some((neighbor_index, candidates)) =
             best_two_tet_reconnection(tet_index, tets, &face_adjacency, &node_points, options)?
         {
+            if consumed[neighbor_index] {
+                repaired.push(tet.clone());
+                continue;
+            }
             consumed[tet_index] = true;
             consumed[neighbor_index] = true;
             changed = true;
@@ -2029,6 +2048,157 @@ fn tet_node_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {
 fn sorted_node_face(mut face: [u32; 3]) -> [u32; 3] {
     face.sort();
     face
+}
+
+fn tet_edge_adjacency(tets: &[TetCandidate]) -> BTreeMap<[u32; 2], Vec<usize>> {
+    let mut adjacency = BTreeMap::<[u32; 2], Vec<usize>>::new();
+    for (tet_index, tet) in tets.iter().enumerate() {
+        for edge in tet_node_edges(tet.node_ids) {
+            adjacency.entry(edge).or_default().push(tet_index);
+        }
+    }
+    adjacency
+}
+
+fn tet_node_edges(node_ids: [u32; 4]) -> [[u32; 2]; 6] {
+    [
+        sorted_node_edge([node_ids[0], node_ids[1]]),
+        sorted_node_edge([node_ids[0], node_ids[2]]),
+        sorted_node_edge([node_ids[0], node_ids[3]]),
+        sorted_node_edge([node_ids[1], node_ids[2]]),
+        sorted_node_edge([node_ids[1], node_ids[3]]),
+        sorted_node_edge([node_ids[2], node_ids[3]]),
+    ]
+}
+
+fn sorted_node_edge(mut edge: [u32; 2]) -> [u32; 2] {
+    edge.sort();
+    edge
+}
+
+fn best_three_tet_edge_reconnection(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    for edge in tet_node_edges(tet.node_ids) {
+        let Some(adjacent) = edge_adjacency.get(&edge) else {
+            continue;
+        };
+        if adjacent.len() != 3 || !adjacent.contains(&tet_index) {
+            continue;
+        }
+        let original_below_count = adjacent
+            .iter()
+            .filter(|index| tets[**index].exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        let Some(candidates) =
+            three_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_below_count = candidates
+            .iter()
+            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        if candidate_below_count >= original_below_count {
+            continue;
+        }
+        let min_exact = candidates
+            .iter()
+            .map(|candidate| candidate.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_below_count, best_min_exact)| {
+                candidate_below_count < *best_below_count
+                    || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
+            })
+        {
+            best = Some((adjacent.clone(), candidates, candidate_below_count, min_exact));
+        }
+    }
+    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+}
+
+fn three_tet_edge_reconnection_candidates(
+    adjacent: &[usize],
+    edge: [u32; 2],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let mut ring = BTreeSet::<u32>::new();
+    let mut original_volume = 0.0_f64;
+    let reference = &tets[adjacent[0]];
+    for index in adjacent {
+        let tet = &tets[*index];
+        original_volume += tet.volume_m3;
+        if !tet.node_ids.contains(&edge[0]) || !tet.node_ids.contains(&edge[1]) {
+            return Ok(None);
+        }
+        for node_id in tet.node_ids {
+            if !edge.contains(&node_id) {
+                ring.insert(node_id);
+            }
+        }
+    }
+    if ring.len() != 3 {
+        return Ok(None);
+    }
+    let ring = ring.into_iter().collect::<Vec<_>>();
+    let candidate_node_ids = [
+        [edge[0], ring[0], ring[1], ring[2]],
+        [edge[1], ring[0], ring[2], ring[1]],
+    ];
+    let mut candidates = Vec::<TetCandidate>::with_capacity(2);
+    for node_ids in candidate_node_ids {
+        let points = [
+            *node_points
+                .get(&node_ids[0])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[0],
+                })?,
+            *node_points
+                .get(&node_ids[1])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[1],
+                })?,
+            *node_points
+                .get(&node_ids[2])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[2],
+                })?,
+            *node_points
+                .get(&node_ids[3])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[3],
+                })?,
+        ];
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            points,
+            options,
+        ) else {
+            return Ok(None);
+        };
+        candidates.push(candidate);
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok(None);
+    }
+    Ok(Some(candidates))
 }
 
 fn best_two_tet_reconnection(
@@ -3376,6 +3546,55 @@ mod tests {
                 [9.0, 0.0, 0.0]
             ]
         );
+    }
+
+    #[test]
+    fn three_tet_edge_reconnection_repairs_long_edge_slivers() {
+        let root_three = 3.0_f64.sqrt();
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [-0.5, root_three * 0.5, 0.0]),
+            (4, [-0.5, -root_three * 0.5, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.5,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 2]]
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tets.iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            3
+        );
+
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        let (reconnected_indices, candidates) =
+            best_three_tet_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
+                .expect("reconnection should evaluate")
+                .expect("three-tet edge reconnection should be available");
+
+        assert_eq!(reconnected_indices, vec![0, 1, 2]);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
     }
 
     #[test]
