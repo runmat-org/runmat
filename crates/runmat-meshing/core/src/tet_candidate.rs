@@ -25,6 +25,7 @@ pub struct TetCandidateOptions {
     pub max_refinement_passes: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_compliance_tolerance: f64,
+    pub max_quality_recovery_seed_candidates: usize,
     pub max_optimization_passes: usize,
     pub smoothing_relaxation: f64,
     pub sliver_aspect_ratio: f64,
@@ -42,6 +43,7 @@ impl Default for TetCandidateOptions {
             max_refinement_passes: 0,
             max_radius_edge_ratio: 3.0,
             sizing_compliance_tolerance: 0.25,
+            max_quality_recovery_seed_candidates: 16,
             max_optimization_passes: 0,
             smoothing_relaxation: 0.35,
             sliver_aspect_ratio: 20.0,
@@ -320,6 +322,7 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options.max_aspect_ratio <= 0.0
         || options.max_interior_seed_points == 0
         || options.max_global_insertion_points < 4
+        || options.max_quality_recovery_seed_candidates == 0
         || !options.max_radius_edge_ratio.is_finite()
         || options.max_radius_edge_ratio <= 0.0
         || !options.sizing_compliance_tolerance.is_finite()
@@ -1253,9 +1256,9 @@ fn select_component_fan_seed_point(
     options: TetCandidateOptions,
 ) -> Result<[f64; 3], TetCandidateError> {
     let mut best_score = None::<FanSeedScore>;
-    for point in seed_points {
+    for point in quality_recovery_seed_candidates(seed_points, options) {
         let score =
-            score_fan_seed_point(component, *point, surface_nodes, surface_elements, options)?;
+            score_fan_seed_point(component, point, surface_nodes, surface_elements, options)?;
         if best_score.is_none_or(|best| fan_seed_score_is_better(score, best)) {
             best_score = Some(score);
         }
@@ -1263,6 +1266,29 @@ fn select_component_fan_seed_point(
     Ok(best_score
         .map(|score| score.point)
         .unwrap_or_else(|| component_interior_point(component)))
+}
+
+fn quality_recovery_seed_candidates(
+    seed_points: &[[f64; 3]],
+    options: TetCandidateOptions,
+) -> Vec<[f64; 3]> {
+    if seed_points.len() <= options.max_quality_recovery_seed_candidates {
+        return seed_points.to_vec();
+    }
+    let candidate_count = options.max_quality_recovery_seed_candidates;
+    let mut candidates = Vec::<[f64; 3]>::with_capacity(candidate_count);
+    for candidate_index in 0..candidate_count {
+        let seed_index = if candidate_count == 1 {
+            0
+        } else {
+            candidate_index * (seed_points.len() - 1) / (candidate_count - 1)
+        };
+        let point = seed_points[seed_index];
+        if !candidates.contains(&point) {
+            candidates.push(point);
+        }
+    }
+    candidates
 }
 
 fn score_fan_seed_point(
@@ -1736,6 +1762,31 @@ mod tests {
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn quality_recovery_seed_candidates_are_bounded_and_deterministic() {
+        let seed_points = (0..10)
+            .map(|index| [index as f64, 0.0, 0.0])
+            .collect::<Vec<_>>();
+
+        let candidates = quality_recovery_seed_candidates(
+            &seed_points,
+            TetCandidateOptions {
+                max_quality_recovery_seed_candidates: 4,
+                ..TetCandidateOptions::default()
+            },
+        );
+
+        assert_eq!(
+            candidates,
+            vec![
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [6.0, 0.0, 0.0],
+                [9.0, 0.0, 0.0]
+            ]
+        );
     }
 
     #[test]
