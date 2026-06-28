@@ -167,6 +167,8 @@ struct FeaMeshValidationDocument {
     min_boundary_face_recovery_ratio: Option<f64>,
     #[serde(default)]
     min_boundary_edge_recovery_ratio: Option<f64>,
+    #[serde(default)]
+    max_volume_components: Option<usize>,
 }
 
 impl Default for FeaMeshValidationDocument {
@@ -179,6 +181,7 @@ impl Default for FeaMeshValidationDocument {
             min_boundary_area_ratio: None,
             min_boundary_face_recovery_ratio: None,
             min_boundary_edge_recovery_ratio: None,
+            max_volume_components: None,
         }
     }
 }
@@ -795,6 +798,10 @@ fn resolve_mesh_validation_policy(
         validation.min_boundary_edge_recovery_ratio,
         &mut policy.min_boundary_edge_recovery_ratio,
     )?;
+    if matches!(validation.max_volume_components, Some(0)) {
+        return Err("mesh.validation.max_volume_components must be greater than zero".to_string());
+    }
+    policy.max_volume_component_count = validation.max_volume_components;
     Ok(policy)
 }
 
@@ -2168,6 +2175,7 @@ validation:
   coverage: strict
   quality: strict
   min_bounds_coverage_ratio: 0.95
+  max_volume_components: 2
 "#,
         )
         .expect("mesh document should parse validation policy");
@@ -2181,6 +2189,7 @@ validation:
         assert_eq!(options.validation.min_boundary_area_ratio, 1.0);
         assert_eq!(options.validation.min_boundary_face_recovery_ratio, 1.0);
         assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 1.0);
+        assert_eq!(options.validation.max_volume_component_count, Some(2));
         assert_eq!(
             options.validation.quality,
             QualityThresholds {
@@ -2237,6 +2246,19 @@ validation:
             .expect_err("invalid validation ratio should fail");
 
         assert!(err.contains("mesh.validation.min_volume_coverage_ratio"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  max_volume_components: 0
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid component count should fail");
+
+        assert!(err.contains("mesh.validation.max_volume_components"));
     }
 
     #[test]

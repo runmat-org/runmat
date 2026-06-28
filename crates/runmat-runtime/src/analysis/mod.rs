@@ -13599,6 +13599,7 @@ fn analysis_mesh_validation_options_for_study(
     AnalysisMeshValidationOptions {
         quality: options.validation.quality,
         max_volume_element_count: Some(options.max_elements),
+        max_volume_component_count: options.validation.max_volume_component_count,
         expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
         min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
         min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
@@ -13618,7 +13619,9 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     let mut validation = analysis_mesh_validation_options_for_study(spec, options);
     if mesh.backend.backend != "production" {
         validation.min_boundary_edge_recovery_ratio = 0.0;
-    } else if mesh.backend.volume_candidate_count > 0 {
+    } else if validation.max_volume_component_count.is_none()
+        && mesh.backend.volume_candidate_count > 0
+    {
         validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
     }
     validation

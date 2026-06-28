@@ -192,6 +192,8 @@ pub struct MeshValidationPolicyOptions {
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
+    #[serde(default)]
+    pub max_volume_component_count: Option<usize>,
 }
 
 impl Default for MeshValidationPolicyOptions {
@@ -203,6 +205,7 @@ impl Default for MeshValidationPolicyOptions {
             min_boundary_area_ratio: 0.90,
             min_boundary_face_recovery_ratio: 1.0,
             min_boundary_edge_recovery_ratio: 1.0,
+            max_volume_component_count: None,
         }
     }
 }
