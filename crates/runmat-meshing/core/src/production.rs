@@ -915,6 +915,7 @@ fn production_validation_options(
         min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
+        require_no_fan_fallback: true,
         ..AnalysisMeshValidationOptions::default()
     }
 }

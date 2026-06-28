@@ -164,6 +164,8 @@ pub struct MeshValidationEvidence {
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
+    #[serde(default)]
+    pub require_no_fan_fallback: bool,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
     pub boundary_recovery: MeshBoundaryRecoveryEvidence,
@@ -221,6 +223,7 @@ fn validation_options_from_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
+        require_no_fan_fallback: validation.require_no_fan_fallback,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
     }
@@ -470,6 +473,7 @@ fn validation_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
+        require_no_fan_fallback: validation.require_no_fan_fallback,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
         boundary_recovery: boundary_recovery_evidence(mesh),
@@ -723,6 +727,7 @@ mod tests {
         let validation = AnalysisMeshValidationOptions {
             max_volume_element_count: Some(7),
             max_volume_component_count: Some(1),
+            require_no_fan_fallback: true,
             ..AnalysisMeshValidationOptions::default()
         };
         let evidence = build_mesh_evidence_artifact(&mesh, &validation);
@@ -743,6 +748,7 @@ mod tests {
         assert_eq!(evidence.validation.max_volume_element_count, Some(7));
         assert_eq!(evidence.validation.volume_component_count, 1);
         assert_eq!(evidence.validation.max_volume_component_count, Some(1));
+        assert!(evidence.validation.require_no_fan_fallback);
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);
         assert_eq!(

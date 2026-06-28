@@ -19,6 +19,7 @@ pub struct AnalysisMeshValidationOptions {
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
+    pub require_no_fan_fallback: bool,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
 }
@@ -37,6 +38,7 @@ impl Default for AnalysisMeshValidationOptions {
             min_boundary_area_ratio: 0.90,
             min_boundary_face_recovery_ratio: 0.0,
             min_boundary_edge_recovery_ratio: 0.0,
+            require_no_fan_fallback: false,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
         }
@@ -150,6 +152,9 @@ pub enum AnalysisMeshValidationError {
         recovery_ratio: String,
         required_ratio: String,
     },
+    FanFallbackRecoveryPresent {
+        component_count: usize,
+    },
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
@@ -219,6 +224,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         }
         AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
             "boundary_edge_recovery_failed"
+        }
+        AnalysisMeshValidationError::FanFallbackRecoveryPresent { .. } => {
+            "fan_fallback_recovery_present"
         }
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
@@ -419,6 +427,7 @@ pub fn validate_analysis_mesh_with_options(
 
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
+    validate_no_fan_fallback(mesh, options.require_no_fan_fallback)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_bounds_coverage(
         mesh,
@@ -442,6 +451,18 @@ pub fn validate_analysis_mesh_with_options(
         options.min_boundary_edge_recovery_ratio,
     )?;
     validate_quality(mesh, options.quality)
+}
+
+fn validate_no_fan_fallback(
+    mesh: &AnalysisMeshArtifact,
+    require_no_fan_fallback: bool,
+) -> Result<(), AnalysisMeshValidationError> {
+    if require_no_fan_fallback && mesh.backend.tet_fan_fallback_component_count > 0 {
+        return Err(AnalysisMeshValidationError::FanFallbackRecoveryPresent {
+            component_count: mesh.backend.tet_fan_fallback_component_count,
+        });
+    }
+    Ok(())
 }
 
 fn validate_volume_component_count(
@@ -971,6 +992,30 @@ mod tests {
                 element_count: 1,
                 max_element_count: 0,
             }
+        );
+    }
+
+    #[test]
+    fn rejects_fan_fallback_recovery_when_policy_requires_strict_recovery() {
+        let mut mesh = valid_tet_mesh();
+        mesh.backend.tet_fan_fallback_component_count = 1;
+
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                require_no_fan_fallback: true,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("strict recovery policy should reject fan fallback evidence");
+
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::FanFallbackRecoveryPresent { component_count: 1 }
+        );
+        assert_eq!(
+            analysis_mesh_validation_error_code(&err),
+            "fan_fallback_recovery_present"
         );
     }
 
