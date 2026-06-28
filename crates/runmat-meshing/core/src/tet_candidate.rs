@@ -1627,10 +1627,12 @@ fn refinement_points_for_tets(
             .into_iter()
             .enumerate()
             {
+                let requested_distance_m = distance(candidate_point, *point);
                 ranked.push(RankedRefinementPoint {
                     point: candidate_point,
                     score: requested_refinement_score(candidate_index),
                     requested_id: Some(requested_id),
+                    requested_distance_m,
                     quality_driven: false,
                 });
             }
@@ -1680,15 +1682,11 @@ fn refinement_points_for_tets(
                 .max(max_edge_m / target_size_m)
                 .max(exact_quality_error),
             requested_id: None,
+            requested_distance_m: f64::INFINITY,
             quality_driven: sizing_violation || exact_quality_violation,
         });
     }
-    ranked.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| right.quality_driven.cmp(&left.quality_driven))
-    });
+    ranked.sort_by(compare_ranked_refinement_points);
     let mut points = Vec::<RefinementPointCandidate>::new();
     let mut unrequested_point_count = 0_usize;
     for ranked_point in ranked {
@@ -1722,7 +1720,37 @@ struct RankedRefinementPoint {
     point: [f64; 3],
     score: f64,
     requested_id: Option<usize>,
+    requested_distance_m: f64,
     quality_driven: bool,
+}
+
+fn compare_ranked_refinement_points(
+    left: &RankedRefinementPoint,
+    right: &RankedRefinementPoint,
+) -> std::cmp::Ordering {
+    right
+        .score
+        .total_cmp(&left.score)
+        .then_with(|| match (left.requested_id, right.requested_id) {
+            (Some(left_id), Some(right_id)) => left_id
+                .cmp(&right_id)
+                .then_with(|| {
+                    left.requested_distance_m
+                        .total_cmp(&right.requested_distance_m)
+                })
+                .then_with(|| compare_points_lexicographically(left.point, right.point)),
+            _ => right
+                .quality_driven
+                .cmp(&left.quality_driven)
+                .then_with(|| compare_points_lexicographically(left.point, right.point)),
+        })
+}
+
+fn compare_points_lexicographically(left: [f64; 3], right: [f64; 3]) -> std::cmp::Ordering {
+    left[0]
+        .total_cmp(&right[0])
+        .then_with(|| left[1].total_cmp(&right[1]))
+        .then_with(|| left[2].total_cmp(&right[2]))
 }
 
 fn requested_refinement_score(candidate_index: usize) -> f64 {
@@ -4718,6 +4746,57 @@ mod tests {
                 assert!(!tolerance.point_nearly_equal(*left, *right, 1.0));
             }
         }
+    }
+
+    #[test]
+    fn requested_refinement_ranking_is_deterministic_and_distance_aware() {
+        let mut ranked = vec![
+            RankedRefinementPoint {
+                point: [0.4, 0.0, 0.0],
+                score: requested_refinement_score(1),
+                requested_id: Some(1),
+                requested_distance_m: 0.2,
+                quality_driven: false,
+            },
+            RankedRefinementPoint {
+                point: [0.3, 0.0, 0.0],
+                score: requested_refinement_score(1),
+                requested_id: Some(0),
+                requested_distance_m: 0.3,
+                quality_driven: false,
+            },
+            RankedRefinementPoint {
+                point: [0.1, 0.0, 0.0],
+                score: requested_refinement_score(0),
+                requested_id: Some(1),
+                requested_distance_m: 0.1,
+                quality_driven: false,
+            },
+            RankedRefinementPoint {
+                point: [0.2, 0.0, 0.0],
+                score: requested_refinement_score(0),
+                requested_id: Some(1),
+                requested_distance_m: 0.2,
+                quality_driven: false,
+            },
+            RankedRefinementPoint {
+                point: [0.0, 0.0, 0.0],
+                score: 10.0,
+                requested_id: None,
+                requested_distance_m: f64::INFINITY,
+                quality_driven: true,
+            },
+        ];
+
+        ranked.sort_by(compare_ranked_refinement_points);
+
+        assert_eq!(ranked[0].requested_id, Some(1));
+        assert_eq!(ranked[0].point, [0.1, 0.0, 0.0]);
+        assert_eq!(ranked[1].requested_id, Some(1));
+        assert_eq!(ranked[1].point, [0.2, 0.0, 0.0]);
+        assert_eq!(ranked[2].requested_id, Some(0));
+        assert_eq!(ranked[3].requested_id, Some(1));
+        assert_eq!(ranked[4].requested_id, None);
     }
 
     #[test]
