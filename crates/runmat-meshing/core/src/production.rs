@@ -1666,6 +1666,119 @@ mod tests {
     }
 
     #[test]
+    fn production_mesh_preserves_boundary_and_material_region_provenance() {
+        let options = VolumeMeshingOptions::default();
+        let preparation = prepare_production_mesh(&cube_geometry(), &options)
+            .expect("production preparation should generate");
+        let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect("production mesh should generate from multi-region fixture");
+        let evidence = crate::build_mesh_evidence_artifact(
+            &mesh,
+            &production_validation_options(&preparation, &options),
+        );
+
+        assert!(mesh
+            .boundary_faces
+            .iter()
+            .any(|face| face.region_ids.iter().any(|region| region == "root")));
+        assert!(mesh
+            .boundary_faces
+            .iter()
+            .any(|face| face.region_ids.iter().any(|region| region == "tip")));
+        assert!(mesh
+            .boundary_edges
+            .iter()
+            .any(|edge| edge.region_ids.iter().any(|region| region == "root")));
+        assert!(mesh
+            .boundary_edges
+            .iter()
+            .any(|edge| edge.region_ids.iter().any(|region| region == "tip")));
+        assert!(mesh
+            .volume_elements
+            .iter()
+            .any(|element| element.material_region_id == "root"));
+        assert!(mesh
+            .volume_elements
+            .iter()
+            .any(|element| element.material_region_id == "tip"));
+        assert!(mesh.boundary_faces.iter().all(|face| {
+            face.provenance.iter().any(|provenance| {
+                provenance.source_entity_kind == SourceEntityKind::Face
+                    && provenance.region_ids == face.region_ids
+            })
+        }));
+        assert!(mesh.boundary_edges.iter().all(|edge| {
+            edge.provenance.iter().any(|provenance| {
+                provenance.source_entity_kind == SourceEntityKind::Edge
+                    && provenance.region_ids == edge.region_ids
+            })
+        }));
+        assert!(mesh.volume_elements.iter().all(|element| {
+            element.provenance.iter().any(|provenance| {
+                provenance.source_entity_kind == SourceEntityKind::Face
+                    && provenance
+                        .region_ids
+                        .iter()
+                        .any(|region| region == &element.material_region_id)
+            })
+        }));
+        assert!(
+            evidence
+                .regions
+                .boundary_region_face_counts
+                .get("root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .boundary_region_face_counts
+                .get("tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .boundary_region_edge_counts
+                .get("root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .boundary_region_edge_counts
+                .get("tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .material_region_element_counts
+                .get("root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .material_region_element_counts
+                .get("tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+    }
+
+    #[test]
     fn production_sizing_includes_cad_curvature_samples() {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.5);
