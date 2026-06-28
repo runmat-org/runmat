@@ -214,6 +214,10 @@ pub fn build_cad_evaluation_model(
 }
 
 pub fn project_to_face(frame: &CadFaceEvaluationFrame, point: Point3) -> CadFaceProjection {
+    if let Some(projection) = sample_backed_projection(frame, point) {
+        return projection;
+    }
+
     let relative = sub(point, frame.origin_m);
     let normal_distance = dot(relative, frame.unit_normal);
     let projected = sub(point, scale(frame.unit_normal, normal_distance));
@@ -227,6 +231,48 @@ pub fn project_to_face(frame: &CadFaceEvaluationFrame, point: Point3) -> CadFace
         distance_m: normal_distance.abs(),
         unit_normal: frame.unit_normal,
     }
+}
+
+fn sample_backed_projection(
+    frame: &CadFaceEvaluationFrame,
+    point: Point3,
+) -> Option<CadFaceProjection> {
+    frame
+        .evaluator_samples
+        .iter()
+        .filter(|sample| exact_backend_sample_is_valid(sample))
+        .filter_map(|sample| projection_from_matching_sample(frame, point, sample))
+        .min_by(|left, right| left.distance_m.total_cmp(&right.distance_m))
+}
+
+fn projection_from_matching_sample(
+    frame: &CadFaceEvaluationFrame,
+    point: Point3,
+    sample: &CadFaceEvaluationSample,
+) -> Option<CadFaceProjection> {
+    let uv = sample.uv?;
+    if !uv.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    let projected = exact_backend_sample_point(sample);
+    let projection_error_m = sample.projection_error_m.unwrap_or(0.0);
+    let match_tolerance_m = projection_error_m.max(1.0e-10);
+    let point_to_query_m = norm(sub(point, sample.point_m));
+    let point_to_projected_m = norm(sub(point, projected));
+    if point_to_query_m > match_tolerance_m && point_to_projected_m > match_tolerance_m {
+        return None;
+    }
+    let unit_normal = sample
+        .unit_normal
+        .and_then(normalized_sample_normal)
+        .map(|normal| orient_sample_normal(normal, frame.unit_normal))
+        .unwrap_or(frame.unit_normal);
+    Some(CadFaceProjection {
+        point_m: projected,
+        uv,
+        distance_m: point_to_projected_m,
+        unit_normal,
+    })
 }
 
 pub fn summarize_cad_evaluation(
@@ -391,6 +437,23 @@ fn exact_backend_sample_point(sample: &CadFaceEvaluationSample) -> Point3 {
         .projected_point_m
         .filter(|point| finite_point(*point))
         .unwrap_or(sample.point_m)
+}
+
+fn normalized_sample_normal(unit_normal: Point3) -> Option<Point3> {
+    let normal_length = norm(unit_normal);
+    if normal_length.is_finite() && normal_length > 0.0 {
+        Some(scale(unit_normal, 1.0 / normal_length))
+    } else {
+        None
+    }
+}
+
+fn orient_sample_normal(unit_normal: Point3, frame_unit_normal: Point3) -> Point3 {
+    if dot(unit_normal, frame_unit_normal) < 0.0 {
+        scale(unit_normal, -1.0)
+    } else {
+        unit_normal
+    }
 }
 
 fn evaluator_max_projection_error(face: &CadFace) -> f64 {
@@ -724,6 +787,40 @@ mod tests {
             Some([0.5, 0.5, 1.0])
         );
         assert_eq!(frame.evaluator_max_projection_error_m, 0.02);
+    }
+
+    #[test]
+    fn exact_backend_query_samples_drive_matching_projection() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.5, 1.02],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 2.0]),
+                projection_error_m: Some(0.02),
+            }];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+        let query_projection = project_to_face(frame, [0.5, 0.5, 1.02]);
+        let projected_point_projection = project_to_face(frame, [0.5, 0.5, 1.0]);
+        let fallback_projection = project_to_face(frame, [0.25, 0.25, 1.02]);
+
+        assert_eq!(query_projection.point_m, [0.5, 0.5, 1.0]);
+        assert_eq!(query_projection.uv, [0.5, 0.5]);
+        assert!((query_projection.distance_m - 0.02).abs() <= 1.0e-12);
+        assert_eq!(query_projection.unit_normal, [0.0, 0.0, 1.0]);
+        assert_eq!(projected_point_projection.point_m, [0.5, 0.5, 1.0]);
+        assert_eq!(projected_point_projection.uv, [0.5, 0.5]);
+        assert_ne!(fallback_projection.uv, [0.5, 0.5]);
     }
 
     #[test]
