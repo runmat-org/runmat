@@ -778,14 +778,32 @@ mod tests {
                 name: "Face 1".to_string(),
                 ownership: None,
             }],
-            face_evaluation_samples: vec![crate::occt::OcctRawFaceEvaluationSample {
-                face_id: 0,
-                u: 0.25,
-                v: 0.5,
-                point_m: [0.25, 0.5, 0.0],
-                unit_normal: [0.0, 0.0, 1.0],
-                projection_error_m: 0.0,
-            }],
+            face_evaluation_samples: vec![
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.25,
+                    v: 0.5,
+                    point_m: [0.25, 0.5, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.5,
+                    v: 0.25,
+                    point_m: [0.5, 0.25, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+                crate::occt::OcctRawFaceEvaluationSample {
+                    face_id: 0,
+                    u: 0.5,
+                    v: 0.75,
+                    point_m: [0.5, 0.75, 0.0],
+                    unit_normal: [0.0, 0.0, 1.0],
+                    projection_error_m: 0.0,
+                },
+            ],
             assembly: None,
             warnings: Vec::new(),
         };
@@ -820,7 +838,7 @@ mod tests {
             result.asset.source_geometry.cad_evaluators[0].faces[0]
                 .evaluation_samples
                 .len(),
-            1
+            3
         );
         assert_eq!(
             result.asset.source_geometry.cad_evaluators[0].faces[0].evaluation_samples[0].source,

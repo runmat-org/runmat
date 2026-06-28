@@ -672,22 +672,13 @@ bool finite_value(double value) {
   return std::isfinite(value);
 }
 
-void append_face_evaluation_sample(OcctImportPayload& result,
-                                   const TopoDS_Face& face,
-                                   std::uint64_t face_id,
-                                   const OcctImportOptions& options) {
+void append_face_evaluation_sample_at(OcctImportPayload& result,
+                                      const TopoDS_Face& face,
+                                      std::uint64_t face_id,
+                                      Standard_Real u,
+                                      Standard_Real v,
+                                      const OcctImportOptions& options) {
   check_cancelled(options);
-  Standard_Real u_min = 0.0;
-  Standard_Real u_max = 0.0;
-  Standard_Real v_min = 0.0;
-  Standard_Real v_max = 0.0;
-  BRepTools::UVBounds(face, u_min, u_max, v_min, v_max);
-  if (!finite_value(u_min) || !finite_value(u_max) || !finite_value(v_min) ||
-      !finite_value(v_max)) {
-    return;
-  }
-  const Standard_Real u = 0.5 * (u_min + u_max);
-  const Standard_Real v = 0.5 * (v_min + v_max);
   if (!finite_value(u) || !finite_value(v)) {
     return;
   }
@@ -724,6 +715,33 @@ void append_face_evaluation_sample(OcctImportPayload& result,
     return;
   }
   result.face_evaluation_samples.push_back(sample);
+}
+
+void append_face_evaluation_sample(OcctImportPayload& result,
+                                   const TopoDS_Face& face,
+                                   std::uint64_t face_id,
+                                   const OcctImportOptions& options) {
+  check_cancelled(options);
+  Standard_Real u_min = 0.0;
+  Standard_Real u_max = 0.0;
+  Standard_Real v_min = 0.0;
+  Standard_Real v_max = 0.0;
+  BRepTools::UVBounds(face, u_min, u_max, v_min, v_max);
+  if (!finite_value(u_min) || !finite_value(u_max) || !finite_value(v_min) ||
+      !finite_value(v_max) || u_max <= u_min || v_max <= v_min) {
+    return;
+  }
+  const Standard_Real u_mid = 0.5 * (u_min + u_max);
+  const Standard_Real v_mid = 0.5 * (v_min + v_max);
+  const Standard_Real u_low = u_min + 0.25 * (u_max - u_min);
+  const Standard_Real u_high = u_min + 0.75 * (u_max - u_min);
+  const Standard_Real v_low = v_min + 0.25 * (v_max - v_min);
+  const Standard_Real v_high = v_min + 0.75 * (v_max - v_min);
+  append_face_evaluation_sample_at(result, face, face_id, u_mid, v_mid, options);
+  append_face_evaluation_sample_at(result, face, face_id, u_low, v_mid, options);
+  append_face_evaluation_sample_at(result, face, face_id, u_high, v_mid, options);
+  append_face_evaluation_sample_at(result, face, face_id, u_mid, v_low, options);
+  append_face_evaluation_sample_at(result, face, face_id, u_mid, v_high, options);
 }
 
 void append_face_mesh(OcctImportPayload& result,
