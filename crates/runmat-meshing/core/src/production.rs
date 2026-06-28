@@ -123,7 +123,7 @@ fn prepare_production_mesh_internal(
         .map_err(ProductionMeshError::CadEvaluation)?;
     let cad_evaluation_report = summarize_cad_evaluation(&cad_evaluation, &topology)
         .map_err(ProductionMeshError::CadEvaluation)?;
-    let effective_sizing = production_effective_sizing(&cad_evaluation, options, sizing);
+    let effective_sizing = production_effective_sizing(&topology, &cad_evaluation, options, sizing);
     let curves = discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
         .map_err(ProductionMeshError::Curve)?;
     let surface = discretize_cad_surfaces_with_curves(
@@ -259,6 +259,7 @@ fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 
 }
 
 fn production_effective_sizing(
+    topology: &SourceTopologyModel,
     cad_evaluation: &CadEvaluationModel,
     options: &VolumeMeshingOptions,
     sizing: Option<&MeshSizingField>,
@@ -275,6 +276,18 @@ fn production_effective_sizing(
                 MeshTargetSize::LengthM(_) | MeshTargetSize::Auto => None,
             });
         for sample in cad_curvature_sizing_samples(cad_evaluation, base_target_size_m) {
+            if effective
+                .samples
+                .iter()
+                .any(|existing| distance_squared(existing.position_m, sample.position_m) <= 1.0e-24)
+            {
+                continue;
+            }
+            effective.samples.push(sample);
+        }
+    }
+    if options.refinement.focus.small_features {
+        for sample in cad_feature_edge_sizing_samples(topology) {
             if effective
                 .samples
                 .iter()
@@ -318,6 +331,42 @@ fn cad_curvature_sizing_samples(
                 position_m: frame.origin_m,
                 target_size_m,
                 reason: Some("cad.curvature".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn cad_feature_edge_sizing_samples(topology: &SourceTopologyModel) -> Vec<SizingSample> {
+    let max_span = (0..3)
+        .map(|axis| topology.bounds_max_m[axis] - topology.bounds_min_m[axis])
+        .fold(0.0_f64, f64::max);
+    if !max_span.is_finite() || max_span <= 0.0 {
+        return Vec::new();
+    }
+    let threshold_m = max_span * 0.35;
+    topology
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            if !edge.length_m.is_finite() || edge.length_m <= 0.0 || edge.length_m > threshold_m {
+                return None;
+            }
+            let left = topology
+                .vertices
+                .get(edge.node_ids[0] as usize)
+                .filter(|vertex| vertex.vertex_id == edge.node_ids[0])?;
+            let right = topology
+                .vertices
+                .get(edge.node_ids[1] as usize)
+                .filter(|vertex| vertex.vertex_id == edge.node_ids[1])?;
+            Some(SizingSample {
+                position_m: [
+                    (left.coordinates_m[0] + right.coordinates_m[0]) * 0.5,
+                    (left.coordinates_m[1] + right.coordinates_m[1]) * 0.5,
+                    (left.coordinates_m[2] + right.coordinates_m[2]) * 0.5,
+                ],
+                target_size_m: edge.length_m * 0.5,
+                reason: Some("cad.feature_edge".to_string()),
             })
         })
         .collect()
@@ -1255,6 +1304,28 @@ mod tests {
     }
 
     #[test]
+    fn production_sizing_includes_small_feature_edge_samples() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.5);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = true;
+
+        let geometry = thin_box_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+        let cad_evaluation =
+            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let sizing = production_effective_sizing(&topology, &cad_evaluation, &options, None)
+            .expect("feature-edge sizing");
+
+        assert!(sizing.samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("cad.feature_edge") && sample.target_size_m < 0.1
+        }));
+        assert_eq!(requested_refinement_points(Some(&sizing)).1, 4);
+    }
+
+    #[test]
     fn quality_report_summarizes_boundary_projection_error() {
         let quality = quality_report(
             vec![ElementQuality {
@@ -1445,6 +1516,20 @@ mod tests {
             }],
             curves: Vec::new(),
         }];
+        geometry
+    }
+
+    fn thin_box_geometry() -> GeometryAsset {
+        let mut geometry = cube_geometry();
+        geometry.geometry_id = "geo_production_thin_box".to_string();
+        geometry.source.sha256 = "generic-thin-box".to_string();
+        if let Some(surface) = geometry.surface_meshes.first_mut() {
+            for vertex in &mut surface.vertices {
+                if vertex[2] > 0.0 {
+                    vertex[2] = 0.1;
+                }
+            }
+        }
         geometry
     }
 }
