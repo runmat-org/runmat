@@ -2045,6 +2045,7 @@ fn repair_exact_quality_tets_once(
             &node_adjacency,
             &interior_node_ids,
             &node_points,
+            InteriorSeedCollapseScope::FourTetOnly,
             options,
         )? {
             if neighbor_indices.iter().any(|index| consumed[*index]) {
@@ -2090,6 +2091,27 @@ fn repair_exact_quality_tets_once(
             }
             summary.changed = true;
             summary.seed_star_relocation_count += 1;
+            repaired.extend(candidates);
+            continue;
+        }
+        if let Some((neighbor_indices, candidates)) = best_interior_seed_node_collapse(
+            tet_index,
+            tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            InteriorSeedCollapseScope::LargerStarsOnly,
+            options,
+        )? {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.seed_star_collapse_count += 1;
             repaired.extend(candidates);
             continue;
         }
@@ -2285,12 +2307,19 @@ fn tet_node_adjacency(tets: &[TetCandidate]) -> BTreeMap<u32, Vec<usize>> {
     adjacency
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteriorSeedCollapseScope {
+    FourTetOnly,
+    LargerStarsOnly,
+}
+
 fn best_interior_seed_node_collapse(
     tet_index: usize,
     tets: &[TetCandidate],
     node_adjacency: &BTreeMap<u32, Vec<usize>>,
     interior_node_ids: &BTreeSet<u32>,
     node_points: &BTreeMap<u32, [f64; 3]>,
+    scope: InteriorSeedCollapseScope,
     options: TetCandidateOptions,
 ) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
     let tet = &tets[tet_index];
@@ -2303,7 +2332,11 @@ fn best_interior_seed_node_collapse(
         let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
             continue;
         };
-        if adjacent.len() != 4 || !adjacent.contains(&tet_index) {
+        let adjacent_len_matches_scope = match scope {
+            InteriorSeedCollapseScope::FourTetOnly => adjacent.len() == 4,
+            InteriorSeedCollapseScope::LargerStarsOnly => (5..=24).contains(&adjacent.len()),
+        };
+        if !adjacent_len_matches_scope || !adjacent.contains(&tet_index) {
             continue;
         }
         let original_below_count = adjacent
@@ -2380,7 +2413,13 @@ fn interior_seed_node_collapse_candidates(
         }
     }
     if boundary_nodes.len() != 4 {
-        return Ok(None);
+        return generalized_interior_seed_node_collapse_candidates(
+            reference,
+            original_volume,
+            &boundary_nodes,
+            node_points,
+            options,
+        );
     }
     let node_ids = boundary_nodes.into_iter().collect::<Vec<_>>();
     let node_ids = [node_ids[0], node_ids[1], node_ids[2], node_ids[3]];
@@ -2420,6 +2459,57 @@ fn interior_seed_node_collapse_candidates(
         return Ok(None);
     }
     Ok(Some(vec![candidate]))
+}
+
+fn generalized_interior_seed_node_collapse_candidates(
+    reference: &TetCandidate,
+    original_volume: f64,
+    boundary_nodes: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    if boundary_nodes.len() < 5 || boundary_nodes.len() > 24 {
+        return Ok(None);
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok(None);
+        };
+        candidates.push(candidate);
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok(None);
+    }
+    Ok(Some(candidates))
 }
 
 fn best_interior_seed_node_relocation(
@@ -4535,6 +4625,77 @@ mod tests {
         assert!((split_tets[0].volume_m3 - outer_tet.volume_m3).abs() < 1.0e-12);
         assert!(!nodes.iter().any(|node| node.node_id == 4));
         assert!(interior_seed_points.is_empty());
+    }
+
+    #[test]
+    fn larger_interior_seed_star_collapse_reconstructs_boundary_only_cavity() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.35,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 1.2]),
+            (1, [0.0, 0.0, -1.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.1, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+            (6, [0.78, 0.0, 0.0]),
+        ]);
+        let tet_node_ids = [
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 5],
+            [6, 0, 5, 2],
+            [6, 1, 3, 2],
+            [6, 1, 4, 3],
+            [6, 1, 5, 4],
+            [6, 1, 2, 5],
+        ];
+        let tets = tet_node_ids
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let original_below_count = tets
+            .iter()
+            .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        assert!(original_below_count > 0);
+        let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let node_adjacency = tet_node_adjacency(&tets);
+        let interior_node_ids = BTreeSet::from([6]);
+        let (indices, candidates) = best_interior_seed_node_collapse(
+            0,
+            &tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            InteriorSeedCollapseScope::LargerStarsOnly,
+            options,
+        )
+        .expect("collapse should evaluate")
+        .expect("larger seed-star collapse should be available");
+
+        assert_eq!(indices.len(), 8);
+        assert!(
+            candidates.len() < tets.len(),
+            "collapse should replace the interior star with fewer boundary-only Tets"
+        );
+        assert!(candidates.iter().all(|tet| !tet.node_ids.contains(&6)));
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        let collapsed_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((collapsed_volume - original_volume).abs() < 1.0e-12);
     }
 
     #[test]
