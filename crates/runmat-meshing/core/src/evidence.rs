@@ -78,8 +78,24 @@ pub struct MeshQualityEvidence {
     pub min_scaled_jacobian: f64,
     #[serde(default)]
     pub min_exact_scaled_jacobian: f64,
+    #[serde(default)]
+    pub scaled_jacobian_p05: Option<f64>,
+    #[serde(default)]
+    pub scaled_jacobian_p50: Option<f64>,
+    #[serde(default)]
+    pub scaled_jacobian_p95: Option<f64>,
+    #[serde(default)]
+    pub exact_scaled_jacobian_p05: Option<f64>,
+    #[serde(default)]
+    pub exact_scaled_jacobian_p50: Option<f64>,
+    #[serde(default)]
+    pub exact_scaled_jacobian_p95: Option<f64>,
     pub mean_aspect_ratio: f64,
     pub max_aspect_ratio: f64,
+    #[serde(default)]
+    pub aspect_ratio_p50: Option<f64>,
+    #[serde(default)]
+    pub aspect_ratio_p95: Option<f64>,
     pub inverted_element_count: usize,
     pub mean_boundary_projection_error_m: f64,
     pub max_boundary_projection_error_m: f64,
@@ -263,6 +279,9 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
     let mut exact_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut aspect_ratio_bins = BTreeMap::<String, usize>::new();
     let mut volume_bins = BTreeMap::<String, usize>::new();
+    let mut scaled_jacobians = Vec::<f64>::new();
+    let mut exact_scaled_jacobians = Vec::<f64>::new();
+    let mut aspect_ratios = Vec::<f64>::new();
     for element in &mesh.quality.elements {
         *scaled_jacobian_bins
             .entry(scaled_jacobian_bin(element.scaled_jacobian))
@@ -276,13 +295,33 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
         *volume_bins
             .entry(volume_bin(element.volume_m3))
             .or_default() += 1;
+        if element.scaled_jacobian.is_finite() {
+            scaled_jacobians.push(element.scaled_jacobian);
+        }
+        if element.exact_scaled_jacobian.is_finite() {
+            exact_scaled_jacobians.push(element.exact_scaled_jacobian);
+        }
+        if element.aspect_ratio.is_finite() {
+            aspect_ratios.push(element.aspect_ratio);
+        }
     }
+    scaled_jacobians.sort_by(f64::total_cmp);
+    exact_scaled_jacobians.sort_by(f64::total_cmp);
+    aspect_ratios.sort_by(f64::total_cmp);
 
     MeshQualityEvidence {
         min_scaled_jacobian: mesh.quality.min_scaled_jacobian,
         min_exact_scaled_jacobian: mesh.quality.min_exact_scaled_jacobian,
+        scaled_jacobian_p05: percentile(&scaled_jacobians, 0.05),
+        scaled_jacobian_p50: percentile(&scaled_jacobians, 0.50),
+        scaled_jacobian_p95: percentile(&scaled_jacobians, 0.95),
+        exact_scaled_jacobian_p05: percentile(&exact_scaled_jacobians, 0.05),
+        exact_scaled_jacobian_p50: percentile(&exact_scaled_jacobians, 0.50),
+        exact_scaled_jacobian_p95: percentile(&exact_scaled_jacobians, 0.95),
         mean_aspect_ratio: mesh.quality.mean_aspect_ratio,
         max_aspect_ratio: mesh.quality.max_aspect_ratio,
+        aspect_ratio_p50: percentile(&aspect_ratios, 0.50),
+        aspect_ratio_p95: percentile(&aspect_ratios, 0.95),
         inverted_element_count: mesh.quality.inverted_element_count,
         mean_boundary_projection_error_m: mesh.quality.mean_boundary_projection_error_m,
         max_boundary_projection_error_m: mesh.quality.max_boundary_projection_error_m,
@@ -292,6 +331,15 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
         aspect_ratio_bins,
         volume_bins,
     }
+}
+
+fn percentile(sorted_values: &[f64], ratio: f64) -> Option<f64> {
+    if sorted_values.is_empty() {
+        return None;
+    }
+    let ratio = ratio.clamp(0.0, 1.0);
+    let index = ((sorted_values.len() - 1) as f64 * ratio).round() as usize;
+    sorted_values.get(index).copied()
 }
 
 fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
@@ -702,6 +750,14 @@ mod tests {
             Some(&1)
         );
         assert_eq!(evidence.quality.min_exact_scaled_jacobian, 0.45);
+        assert_eq!(evidence.quality.scaled_jacobian_p05, Some(0.5));
+        assert_eq!(evidence.quality.scaled_jacobian_p50, Some(0.5));
+        assert_eq!(evidence.quality.scaled_jacobian_p95, Some(0.5));
+        assert_eq!(evidence.quality.exact_scaled_jacobian_p05, Some(0.45));
+        assert_eq!(evidence.quality.exact_scaled_jacobian_p50, Some(0.45));
+        assert_eq!(evidence.quality.exact_scaled_jacobian_p95, Some(0.45));
+        assert_eq!(evidence.quality.aspect_ratio_p50, Some(2.0));
+        assert_eq!(evidence.quality.aspect_ratio_p95, Some(2.0));
         assert_eq!(
             evidence
                 .quality
