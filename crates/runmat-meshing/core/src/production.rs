@@ -952,6 +952,9 @@ fn production_backend_summary(
             .to_string(),
         cad_face_frame_count: preparation.cad_evaluation_report.face_frame_count,
         cad_evaluation_evaluator_face_count: preparation.cad_evaluation_report.evaluator_face_count,
+        cad_evaluation_live_query_face_count: preparation
+            .cad_evaluation_report
+            .live_query_face_count,
         cad_evaluation_exact_query_face_count: preparation
             .cad_evaluation_report
             .exact_query_face_count,

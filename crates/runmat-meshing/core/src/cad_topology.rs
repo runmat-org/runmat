@@ -54,6 +54,18 @@ pub struct CadFace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_face_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_id: Option<String>,
+    #[serde(default)]
+    pub evaluator_supports_point_evaluation: bool,
+    #[serde(default)]
+    pub evaluator_supports_projection: bool,
+    #[serde(default)]
+    pub evaluator_supports_normal: bool,
+    #[serde(default)]
+    pub evaluator_supports_derivatives: bool,
+    #[serde(default)]
+    pub evaluator_supports_curvature: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_reference_point_m: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_unit_normal: Option<[f64; 3]>,
@@ -174,6 +186,16 @@ pub fn build_cad_topology(
                     ),
                 },
                 imported_face_id,
+                evaluator_id: evaluator_face.map(|face| face.evaluator_id.clone()),
+                evaluator_supports_point_evaluation: evaluator_face
+                    .is_some_and(|face| face.supports_point_evaluation),
+                evaluator_supports_projection: evaluator_face
+                    .is_some_and(|face| face.supports_projection),
+                evaluator_supports_normal: evaluator_face.is_some_and(|face| face.supports_normal),
+                evaluator_supports_derivatives: evaluator_face
+                    .is_some_and(|face| face.supports_derivatives),
+                evaluator_supports_curvature: evaluator_face
+                    .is_some_and(|face| face.supports_curvature),
                 evaluator_reference_point_m: evaluator_face.and_then(|face| face.reference_point_m),
                 evaluator_unit_normal: evaluator_face.and_then(|face| face.reference_unit_normal),
                 evaluator_samples: evaluator_face

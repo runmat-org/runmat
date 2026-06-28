@@ -52,9 +52,10 @@ pub use benchmark::{
 };
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use cad_eval::{
-    build_cad_evaluation_model, project_to_face, summarize_cad_evaluation, CadEvaluationError,
-    CadEvaluationModel, CadEvaluationReport, CadEvaluationSource, CadFaceEvaluationFrame,
-    CadFaceProjection,
+    build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
+    summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,
+    CadEvaluationSource, CadFaceEvaluationFrame, CadFaceEvaluationRequest,
+    CadFaceEvaluatorProvider, CadFaceProjection, NoopCadFaceEvaluatorProvider,
 };
 pub use cad_topology::{
     build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,

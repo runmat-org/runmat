@@ -31,6 +31,8 @@ pub struct CadFaceEvaluationFrame {
     #[serde(default)]
     pub exact_query_backed: bool,
     #[serde(default)]
+    pub live_query_backed: bool,
+    #[serde(default)]
     pub evaluator_sample_count: usize,
     #[serde(default)]
     pub evaluator_max_projection_error_m: f64,
@@ -57,6 +59,8 @@ pub struct CadEvaluationReport {
     pub source: CadEvaluationSource,
     pub face_frame_count: usize,
     pub evaluator_face_count: usize,
+    #[serde(default)]
+    pub live_query_face_count: usize,
     #[serde(default)]
     pub exact_query_face_count: usize,
     #[serde(default)]
@@ -109,9 +113,49 @@ impl std::fmt::Display for CadEvaluationError {
 
 impl std::error::Error for CadEvaluationError {}
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadFaceEvaluationRequest<'a> {
+    pub face_id: &'a str,
+    pub source_face_id: u32,
+    pub imported_face_id: Option<u64>,
+    pub evaluator_id: Option<&'a str>,
+    pub supports_point_evaluation: bool,
+    pub supports_projection: bool,
+    pub supports_normal: bool,
+    pub supports_derivatives: bool,
+    pub supports_curvature: bool,
+    pub reference_point_m: Point3,
+    pub reference_unit_normal: Point3,
+}
+
+pub trait CadFaceEvaluatorProvider {
+    fn evaluate_face(&self, request: &CadFaceEvaluationRequest<'_>)
+        -> Vec<CadFaceEvaluationSample>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopCadFaceEvaluatorProvider;
+
+impl CadFaceEvaluatorProvider for NoopCadFaceEvaluatorProvider {
+    fn evaluate_face(
+        &self,
+        _request: &CadFaceEvaluationRequest<'_>,
+    ) -> Vec<CadFaceEvaluationSample> {
+        Vec::new()
+    }
+}
+
 pub fn build_cad_evaluation_model(
     cad_topology: &CadTopologyModel,
     topology: &SourceTopologyModel,
+) -> Result<CadEvaluationModel, CadEvaluationError> {
+    build_cad_evaluation_model_with_provider(cad_topology, topology, &NoopCadFaceEvaluatorProvider)
+}
+
+pub fn build_cad_evaluation_model_with_provider(
+    cad_topology: &CadTopologyModel,
+    topology: &SourceTopologyModel,
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
 ) -> Result<CadEvaluationModel, CadEvaluationError> {
     if cad_topology.faces.is_empty() {
         return Err(CadEvaluationError::EmptyFaces);
@@ -136,8 +180,23 @@ pub fn build_cad_evaluation_model(
             topology_vertex(topology, source_face.node_ids[1])?,
             topology_vertex(topology, source_face.node_ids[2])?,
         ];
-        let exact_sample = exact_backend_sample(face);
-        let evaluator_max_projection_error_m = evaluator_max_projection_error(face);
+        let fallback_reference_point_m = face
+            .evaluator_reference_point_m
+            .unwrap_or_else(|| triangle_centroid(points));
+        let fallback_unit_normal = face
+            .evaluator_unit_normal
+            .unwrap_or(source_face.unit_normal);
+        let live_samples = live_evaluator_samples(
+            evaluator_provider,
+            face,
+            source_face_id,
+            fallback_reference_point_m,
+            fallback_unit_normal,
+        );
+        let live_query_backed = !live_samples.is_empty();
+        let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples);
+        let exact_sample = exact_backend_sample(&evaluator_samples);
+        let evaluator_max_projection_error_m = evaluator_max_projection_error(&evaluator_samples);
         let frame = face_frame(
             face.entity_id.id.clone(),
             source_face_id,
@@ -150,15 +209,22 @@ pub fn build_cad_evaluation_model(
             exact_sample
                 .map(exact_backend_sample_point)
                 .or(face.evaluator_reference_point_m),
-            face.evaluator_unit_normal.is_some() || !face.evaluator_samples.is_empty(),
+            face.evaluator_id.is_some()
+                || face.evaluator_unit_normal.is_some()
+                || !evaluator_samples.is_empty(),
             exact_sample.is_some(),
-            face.evaluator_samples.len(),
+            live_query_backed,
+            evaluator_samples.len(),
             evaluator_max_projection_error_m,
-            bounded_evaluator_samples(face),
+            evaluator_samples,
         )?;
         frames.push(frame);
     }
     let evaluator_backed_frame_count = frames.iter().filter(|frame| frame.evaluator_backed).count();
+    let live_query_face_count = frames
+        .iter()
+        .filter(|frame| frame.live_query_backed)
+        .count();
     let exact_query_face_count = frames
         .iter()
         .filter(|frame| frame.exact_query_backed)
@@ -190,10 +256,12 @@ pub fn build_cad_evaluation_model(
         source: evaluation_source(
             frames.len(),
             evaluator_backed_frame_count,
+            live_query_face_count,
             exact_query_face_count,
         ),
         face_frame_count: frames.len(),
         evaluator_face_count: cad_topology.report.evaluator_face_count,
+        live_query_face_count,
         exact_query_face_count,
         evaluator_sample_count,
         normal_query_count: frames.len(),
@@ -311,6 +379,7 @@ pub fn summarize_cad_evaluation(
         source: model.source,
         face_frame_count: model.face_frames.len(),
         evaluator_face_count: model.report.evaluator_face_count,
+        live_query_face_count: model.report.live_query_face_count,
         exact_query_face_count: model.report.exact_query_face_count,
         evaluator_sample_count: model.report.evaluator_sample_count,
         normal_query_count: model.face_frames.len(),
@@ -332,6 +401,7 @@ fn face_frame(
     evaluator_reference_point_m: Option<Point3>,
     evaluator_backed: bool,
     exact_query_backed: bool,
+    live_query_backed: bool,
     evaluator_sample_count: usize,
     evaluator_max_projection_error_m: f64,
     evaluator_samples: Vec<CadFaceEvaluationSample>,
@@ -363,6 +433,7 @@ fn face_frame(
         area_m2,
         evaluator_backed,
         exact_query_backed,
+        live_query_backed,
         evaluator_sample_count,
         evaluator_max_projection_error_m,
         evaluator_samples,
@@ -375,9 +446,12 @@ fn face_frame(
 fn evaluation_source(
     _face_frame_count: usize,
     evaluator_backed_frame_count: usize,
+    live_query_face_count: usize,
     exact_query_face_count: usize,
 ) -> CadEvaluationSource {
-    if evaluator_backed_frame_count > 0 || exact_query_face_count > 0 {
+    if live_query_face_count > 0 {
+        CadEvaluationSource::ParametricCad
+    } else if evaluator_backed_frame_count > 0 || exact_query_face_count > 0 {
         CadEvaluationSource::ImportedEvaluatorSamples
     } else {
         CadEvaluationSource::PlanarFacetApproximation
@@ -399,8 +473,8 @@ fn orient_unit_normal_to_source_triangle(unit_normal: Point3, points: Triangle3)
     }
 }
 
-fn exact_backend_sample(face: &CadFace) -> Option<&CadFaceEvaluationSample> {
-    face.evaluator_samples
+fn exact_backend_sample(samples: &[CadFaceEvaluationSample]) -> Option<&CadFaceEvaluationSample> {
+    samples
         .iter()
         .filter(|sample| exact_backend_sample_is_valid(sample))
         .min_by(|left, right| compare_exact_backend_samples(left, right))
@@ -454,35 +528,77 @@ fn orient_sample_normal(unit_normal: Point3, frame_unit_normal: Point3) -> Point
     }
 }
 
-fn evaluator_max_projection_error(face: &CadFace) -> f64 {
-    face.evaluator_samples
+fn evaluator_max_projection_error(samples: &[CadFaceEvaluationSample]) -> f64 {
+    samples
         .iter()
         .filter_map(|sample| sample.projection_error_m)
         .filter(|error| error.is_finite() && *error >= 0.0)
         .fold(0.0_f64, f64::max)
 }
 
-fn bounded_evaluator_samples(face: &CadFace) -> Vec<CadFaceEvaluationSample> {
-    face.evaluator_samples
-        .iter()
-        .filter(|sample| {
-            finite_point(sample.point_m)
-                && sample
-                    .projected_point_m
-                    .is_none_or(|point| finite_point(point))
-                && sample
-                    .uv
-                    .is_none_or(|uv| uv.iter().all(|value| value.is_finite()))
-                && sample
-                    .unit_normal
-                    .is_none_or(|normal| finite_point(normal) && norm(normal) > 0.0)
-                && sample
-                    .projection_error_m
-                    .is_none_or(|error| error.is_finite() && error >= 0.0)
-        })
+fn live_evaluator_samples(
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
+    face: &CadFace,
+    source_face_id: u32,
+    reference_point_m: Point3,
+    reference_unit_normal: Point3,
+) -> Vec<CadFaceEvaluationSample> {
+    if face.evaluator_id.is_none()
+        || !(face.evaluator_supports_point_evaluation
+            || face.evaluator_supports_projection
+            || face.evaluator_supports_normal
+            || face.evaluator_supports_derivatives
+            || face.evaluator_supports_curvature)
+    {
+        return Vec::new();
+    }
+    let request = CadFaceEvaluationRequest {
+        face_id: &face.entity_id.id,
+        source_face_id,
+        imported_face_id: face.imported_face_id,
+        evaluator_id: face.evaluator_id.as_deref(),
+        supports_point_evaluation: face.evaluator_supports_point_evaluation,
+        supports_projection: face.evaluator_supports_projection,
+        supports_normal: face.evaluator_supports_normal,
+        supports_derivatives: face.evaluator_supports_derivatives,
+        supports_curvature: face.evaluator_supports_curvature,
+        reference_point_m,
+        reference_unit_normal,
+    };
+    evaluator_provider
+        .evaluate_face(&request)
+        .into_iter()
+        .filter(bounded_sample_is_valid)
         .take(8)
-        .cloned()
         .collect()
+}
+
+fn merged_bounded_evaluator_samples(
+    face: &CadFace,
+    live_samples: Vec<CadFaceEvaluationSample>,
+) -> Vec<CadFaceEvaluationSample> {
+    live_samples
+        .into_iter()
+        .chain(face.evaluator_samples.iter().cloned())
+        .filter(|sample| bounded_sample_is_valid(sample))
+        .take(8)
+        .collect()
+}
+
+fn bounded_sample_is_valid(sample: &CadFaceEvaluationSample) -> bool {
+    finite_point(sample.point_m)
+        && sample
+            .projected_point_m
+            .is_none_or(|point| finite_point(point))
+        && sample
+            .uv
+            .is_none_or(|uv| uv.iter().all(|value| value.is_finite()))
+        && sample
+            .unit_normal
+            .is_none_or(|normal| finite_point(normal) && norm(normal) > 0.0)
+        && sample
+            .projection_error_m
+            .is_none_or(|error| error.is_finite() && error >= 0.0)
 }
 
 fn estimate_uv_derivatives(
@@ -668,6 +784,80 @@ mod tests {
     }
 
     #[test]
+    fn no_op_provider_keeps_imported_evaluator_metadata_sample_based() {
+        let topology = cube_topology();
+        let geometry = geometry_with_face_evaluator();
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model_with_provider(
+            &cad_topology,
+            &topology,
+            &NoopCadFaceEvaluatorProvider,
+        )
+        .expect("evaluation model");
+
+        assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
+        assert_eq!(model.report.live_query_face_count, 0);
+        assert_eq!(model.report.exact_query_face_count, 0);
+        assert!(model
+            .face_frames
+            .iter()
+            .all(|frame| !frame.live_query_backed));
+    }
+
+    #[test]
+    fn live_evaluator_provider_samples_drive_parametric_cad_frames() {
+        #[derive(Debug)]
+        struct LiveProvider;
+
+        impl CadFaceEvaluatorProvider for LiveProvider {
+            fn evaluate_face(
+                &self,
+                request: &CadFaceEvaluationRequest<'_>,
+            ) -> Vec<CadFaceEvaluationSample> {
+                assert_eq!(request.imported_face_id, Some(1));
+                assert_eq!(request.evaluator_id, Some("cad_face_1"));
+                assert!(request.supports_projection);
+                assert!(request.supports_normal);
+                assert_eq!(request.reference_point_m, [0.25, 0.25, 0.75]);
+                assert_eq!(request.reference_unit_normal, [0.0, 0.0, 1.0]);
+                vec![CadFaceEvaluationSample {
+                    source: CadFaceEvaluationSampleSource::BackendQuery,
+                    point_m: [0.5, 0.5, 1.01],
+                    uv: Some([0.5, 0.5]),
+                    projected_point_m: Some([0.5, 0.5, 1.0]),
+                    unit_normal: Some([0.0, 0.0, 1.0]),
+                    projection_error_m: Some(0.01),
+                }]
+            }
+        }
+
+        let topology = cube_topology();
+        let geometry = geometry_with_face_evaluator();
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model =
+            build_cad_evaluation_model_with_provider(&cad_topology, &topology, &LiveProvider)
+                .expect("evaluation model");
+        let report = summarize_cad_evaluation(&model, &topology).expect("summary");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.live_query_backed)
+            .expect("live-query frame");
+
+        assert_eq!(model.source, CadEvaluationSource::ParametricCad);
+        assert_eq!(model.report.live_query_face_count, 2);
+        assert_eq!(model.report.exact_query_face_count, 2);
+        assert_eq!(model.report.evaluator_sample_count, 2);
+        assert_eq!(report.live_query_face_count, 2);
+        assert_eq!(report.source, CadEvaluationSource::ParametricCad);
+        assert_eq!(frame.origin_m, [0.5, 0.5, 1.0]);
+        assert_eq!(frame.evaluator_samples.len(), 1);
+        assert_eq!(frame.evaluator_max_projection_error_m, 0.01);
+    }
+
+    #[test]
     fn exact_backend_query_samples_drive_parametric_cad_frames() {
         let topology = cube_topology();
         let mut geometry = geometry_with_face_evaluator();
@@ -705,7 +895,7 @@ mod tests {
     #[test]
     fn all_backend_query_samples_remain_imported_sample_source() {
         assert_eq!(
-            evaluation_source(2, 2, 2),
+            evaluation_source(2, 2, 0, 2),
             CadEvaluationSource::ImportedEvaluatorSamples
         );
     }
