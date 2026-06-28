@@ -107,6 +107,14 @@ pub fn prepare_production_mesh(
     geometry: &GeometryAsset,
     options: &VolumeMeshingOptions,
 ) -> Result<ProductionMeshPreparation, ProductionMeshError> {
+    prepare_production_mesh_internal(geometry, options, None)
+}
+
+fn prepare_production_mesh_internal(
+    geometry: &GeometryAsset,
+    options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
+) -> Result<ProductionMeshPreparation, ProductionMeshError> {
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
     let cad_topology =
         build_cad_topology(geometry, &topology).map_err(ProductionMeshError::CadTopology)?;
@@ -137,7 +145,7 @@ pub fn prepare_production_mesh(
     let tet_candidates = form_tet_candidates(
         &surface,
         &volume_candidates,
-        tet_candidate_options_for_mesh(&topology, options),
+        tet_candidate_options_for_mesh(&topology, options, sizing),
     )
     .map_err(ProductionMeshError::TetCandidate)?;
 
@@ -175,7 +183,7 @@ pub fn generate_production_analysis_mesh_with_sizing(
     if effective_target_size_m < base_target_size_m {
         effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
     }
-    let preparation = prepare_production_mesh(geometry, &effective_options)?;
+    let preparation = prepare_production_mesh_internal(geometry, &effective_options, Some(sizing))?;
     analysis_mesh_from_preparation(&preparation, &effective_options, Some(sizing))
 }
 
@@ -194,10 +202,14 @@ fn curve_options_for_mesh(
 fn tet_candidate_options_for_mesh(
     topology: &SourceTopologyModel,
     options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
 ) -> TetCandidateOptions {
     let quality = QualityThresholds::default();
+    let requested_refinement = requested_refinement_points(sizing);
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
+        requested_refinement_points: requested_refinement.0,
+        requested_refinement_point_count: requested_refinement.1,
         max_interior_seed_points: options.max_elements.max(1).min(512),
         max_global_insertion_points: options.max_elements.max(1).min(4096),
         allow_fan_fallback: false,
@@ -215,6 +227,31 @@ fn tet_candidate_options_for_mesh(
         sliver_aspect_ratio: 1.0 / quality.min_scaled_jacobian,
         ..TetCandidateOptions::default()
     }
+}
+
+fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 16], usize) {
+    let Some(sizing) = sizing else {
+        return ([[0.0; 3]; 16], 0);
+    };
+    let mut points = [[0.0; 3]; 16];
+    let mut count = 0_usize;
+    for sample in &sizing.samples {
+        if !sample.target_size_m.is_finite()
+            || sample.target_size_m <= 0.0
+            || sample.position_m.iter().any(|value| !value.is_finite())
+            || points[..count]
+                .iter()
+                .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+        {
+            continue;
+        }
+        points[count] = sample.position_m;
+        count += 1;
+        if count >= points.len() {
+            break;
+        }
+    }
+    (points, count)
 }
 
 fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingOptions) -> f64 {
@@ -545,6 +582,14 @@ fn production_backend_summary(
             .total_candidate_volume_ratio,
         tet_refinement_pass_count: preparation.tet_candidates.recovery.refinement_pass_count,
         tet_refinement_point_count: preparation.tet_candidates.recovery.refinement_point_count,
+        tet_requested_refinement_point_count: preparation
+            .tet_candidates
+            .recovery
+            .requested_refinement_point_count,
+        tet_accepted_requested_refinement_point_count: preparation
+            .tet_candidates
+            .recovery
+            .accepted_requested_refinement_point_count,
         tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
         tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
         tet_min_exact_scaled_jacobian: preparation

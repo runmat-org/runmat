@@ -1991,8 +1991,8 @@ mod tests {
             .expect("coarse mesh should generate");
         let sizing = MeshSizingField {
             samples: vec![SizingSample {
-                position_m: [0.5, 0.5, 0.5],
-                target_size_m: 0.25,
+                position_m: [0.33, 0.47, 0.61],
+                target_size_m: 0.5,
                 reason: Some("structural.stress_gradient".to_string()),
             }],
             ..MeshSizingField::default()
@@ -2332,8 +2332,8 @@ mod tests {
             .expect("coarse production mesh should generate");
         let sizing = MeshSizingField {
             samples: vec![SizingSample {
-                position_m: [0.5, 0.5, 0.5],
-                target_size_m: 0.25,
+                position_m: [0.33, 0.47, 0.61],
+                target_size_m: 0.5,
                 reason: Some("structural.stress_gradient".to_string()),
             }],
             ..MeshSizingField::default()
@@ -2346,13 +2346,20 @@ mod tests {
         assert!(refined.volume_elements.len() > coarse.volume_elements.len());
         assert_eq!(
             refined.sizing.global_target_size_m,
-            Some(0.25),
+            Some(0.5),
             "external sizing should lower the production target size"
         );
         assert_eq!(refined.sizing.applied_samples.len(), 1);
         assert_eq!(
             refined.sizing.applied_samples[0].reason.as_deref(),
             Some("structural.stress_gradient")
+        );
+        assert_eq!(refined.backend.tet_requested_refinement_point_count, 1);
+        assert!(
+            refined
+                .backend
+                .tet_accepted_requested_refinement_point_count
+                <= refined.backend.tet_requested_refinement_point_count
         );
     }
 

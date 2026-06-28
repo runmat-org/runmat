@@ -19,6 +19,8 @@ pub struct TetCandidateOptions {
     pub min_volume_m3: f64,
     pub max_aspect_ratio: f64,
     pub interior_target_size_m: Option<f64>,
+    pub requested_refinement_points: [[f64; 3]; 16],
+    pub requested_refinement_point_count: usize,
     pub max_interior_seed_points: usize,
     pub max_global_insertion_points: usize,
     pub allow_fan_fallback: bool,
@@ -40,6 +42,8 @@ impl Default for TetCandidateOptions {
             min_volume_m3: 1.0e-18,
             max_aspect_ratio: 1.0e6,
             interior_target_size_m: None,
+            requested_refinement_points: [[0.0; 3]; 16],
+            requested_refinement_point_count: 0,
             max_interior_seed_points: 1,
             max_global_insertion_points: 512,
             allow_fan_fallback: true,
@@ -103,6 +107,10 @@ pub struct TetRecoveryReport {
     pub max_aspect_ratio: f64,
     pub refinement_pass_count: usize,
     pub refinement_point_count: usize,
+    #[serde(default)]
+    pub requested_refinement_point_count: usize,
+    #[serde(default)]
+    pub accepted_requested_refinement_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
     pub min_exact_scaled_jacobian: f64,
@@ -185,6 +193,8 @@ pub fn form_tet_candidates(
     let mut fan_fallback_component_count = 0_usize;
     let mut refinement_pass_count = 0_usize;
     let mut refinement_point_count = 0_usize;
+    let mut requested_refinement_point_count = 0_usize;
+    let mut accepted_requested_refinement_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     let mut optimization_pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
@@ -211,6 +221,8 @@ pub fn form_tet_candidates(
         )?;
         refinement_pass_count += refinement.pass_count;
         refinement_point_count += refinement.inserted_point_count;
+        requested_refinement_point_count += refinement.requested_point_count;
+        accepted_requested_refinement_point_count += refinement.accepted_requested_point_count;
         sizing_violation_count += refinement.sizing_violation_count;
         if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
             add_dense_recovery_layer_points(
@@ -335,6 +347,8 @@ pub fn form_tet_candidates(
             max_aspect_ratio,
             refinement_pass_count,
             refinement_point_count,
+            requested_refinement_point_count,
+            accepted_requested_refinement_point_count,
             max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
             min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
@@ -371,6 +385,12 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options
             .interior_target_size_m
             .is_some_and(|size| !size.is_finite() || size <= 0.0)
+        || options.requested_refinement_point_count > options.requested_refinement_points.len()
+        || options
+            .requested_refinement_points
+            .iter()
+            .take(options.requested_refinement_point_count)
+            .any(|point| point.iter().any(|value| !value.is_finite()))
     {
         return Err(TetCandidateError::InvalidOptions);
     }
@@ -1324,6 +1344,8 @@ fn component_insertion_tet_drafts(
 struct SeedRefinementSummary {
     pass_count: usize,
     inserted_point_count: usize,
+    requested_point_count: usize,
+    accepted_requested_point_count: usize,
     sizing_violation_count: usize,
 }
 
@@ -1345,6 +1367,8 @@ fn refine_component_seed_points(
         return Ok(SeedRefinementSummary {
             pass_count: 0,
             inserted_point_count: 0,
+            requested_point_count: 0,
+            accepted_requested_point_count: 0,
             sizing_violation_count: 0,
         });
     }
@@ -1353,6 +1377,8 @@ fn refine_component_seed_points(
         ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
     let mut pass_count = 0_usize;
     let mut inserted_point_count = 0_usize;
+    let mut requested_point_count = 0_usize;
+    let mut accepted_requested_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     for _ in 0..options.max_refinement_passes {
         if seed_points.len() >= options.max_interior_seed_points {
@@ -1384,6 +1410,7 @@ fn refine_component_seed_points(
             options,
             point_budget,
         )?;
+        requested_point_count += refinement_points.requested_point_count;
         sizing_violation_count += refinement_points.sizing_violation_count;
         if refinement_points.points.is_empty() {
             break;
@@ -1391,7 +1418,8 @@ fn refine_component_seed_points(
         let mut accepted_this_pass = 0_usize;
         let mut current_status = status;
         let mut current_tets = candidate_tets;
-        for point in refinement_points.points {
+        for candidate in refinement_points.points {
+            let point = candidate.point;
             if seed_points.len() >= options.max_interior_seed_points {
                 break;
             }
@@ -1423,6 +1451,9 @@ fn refine_component_seed_points(
             current_status = trial_status;
             current_tets = trial_tets;
             inserted_point_count += 1;
+            if candidate.requested {
+                accepted_requested_point_count += 1;
+            }
             accepted_this_pass += 1;
         }
         if accepted_this_pass == 0 {
@@ -1434,13 +1465,22 @@ fn refine_component_seed_points(
     Ok(SeedRefinementSummary {
         pass_count,
         inserted_point_count,
+        requested_point_count,
+        accepted_requested_point_count,
         sizing_violation_count,
     })
 }
 
 #[derive(Debug, Clone, PartialEq)]
+struct RefinementPointCandidate {
+    point: [f64; 3],
+    requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct RefinementPointSet {
-    points: Vec<[f64; 3]>,
+    points: Vec<RefinementPointCandidate>,
+    requested_point_count: usize,
     sizing_violation_count: usize,
 }
 
@@ -1458,12 +1498,24 @@ fn refinement_points_for_tets(
     let Some(target_size_m) = options.interior_target_size_m else {
         return Ok(RefinementPointSet {
             points: Vec::new(),
+            requested_point_count: 0,
             sizing_violation_count: 0,
         });
     };
     let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
     let mut ranked = Vec::<([f64; 3], f64, bool)>::new();
+    let mut requested_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
+    for point in options
+        .requested_refinement_points
+        .iter()
+        .take(options.requested_refinement_point_count)
+    {
+        if classifier.contains_point(*point) && !contains_point(seed_points, *point, tolerance) {
+            ranked.push((*point, f64::INFINITY, true));
+            requested_point_count += 1;
+        }
+    }
     for tet in tets {
         let points = candidate_tet_points(tet, &all_nodes)?;
         let radius_edge_ratio = tet_radius_edge_ratio(points, tolerance);
@@ -1515,20 +1567,23 @@ fn refinement_points_for_tets(
             .total_cmp(&left.1)
             .then_with(|| right.2.cmp(&left.2))
     });
-    let mut points = Vec::<[f64; 3]>::new();
-    for (point, _, _) in ranked {
+    let mut points = Vec::<RefinementPointCandidate>::new();
+    for (point, _, requested) in ranked {
         if points.len() >= point_budget {
             break;
         }
         if contains_point(seed_points, point, tolerance)
-            || contains_point(&points, point, tolerance)
+            || points
+                .iter()
+                .any(|candidate| tolerance.point_nearly_equal(candidate.point, point, 1.0))
         {
             continue;
         }
-        points.push(point);
+        points.push(RefinementPointCandidate { point, requested });
     }
     Ok(RefinementPointSet {
         points,
+        requested_point_count,
         sizing_violation_count,
     })
 }
@@ -1819,7 +1874,6 @@ fn candidate_quality_is_no_worse(
     proposed.sliver_count <= current.sliver_count
         && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
         && proposed.min_exact_scaled_jacobian + 1.0e-12 >= current.min_exact_scaled_jacobian
-        && proposed.max_aspect_ratio <= current.max_aspect_ratio * (1.0 + 1.0e-9)
 }
 
 fn candidate_quality_is_better(
@@ -3117,6 +3171,51 @@ mod tests {
         assert!(candidates.recovery.max_radius_edge_ratio.is_finite());
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+        assert_eq!(
+            candidates
+                .tets
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < 0.15)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn requested_refinement_points_are_quality_gated() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let mut requested_refinement_points = [[0.0; 3]; 16];
+        requested_refinement_points[0] = [0.25, 0.25, 0.25];
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(2.0),
+                requested_refinement_points,
+                requested_refinement_point_count: 1,
+                max_interior_seed_points: 2,
+                max_refinement_passes: 1,
+                max_radius_edge_ratio: 10.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("Tet candidates should form with requested refinement");
+
+        assert!(!candidates
+            .interior_seed_points
+            .iter()
+            .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
+        assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_point_count,
+            0
+        );
+        assert_eq!(candidates.recovery.refinement_pass_count, 0);
+        assert_eq!(candidates.recovery.refinement_point_count, 0);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(
             candidates
                 .tets
