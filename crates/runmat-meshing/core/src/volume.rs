@@ -2446,6 +2446,12 @@ mod tests {
             Some("structural.stress_gradient")
         );
         assert_eq!(refined.backend.tet_requested_refinement_point_count, 1);
+        assert_eq!(
+            refined.sizing.applied_samples[0].inserted_breakpoint_count,
+            refined
+                .backend
+                .tet_accepted_requested_refinement_point_count
+        );
         assert!(
             refined
                 .backend

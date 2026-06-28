@@ -485,7 +485,7 @@ fn analysis_mesh_from_preparation(
                 .iter()
                 .map(|element| element.max_projection_error_m),
         ),
-        sizing: production_mesh_sizing(options, sizing),
+        sizing: production_mesh_sizing(options, sizing, preparation),
         backend,
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
@@ -503,6 +503,7 @@ fn analysis_mesh_from_preparation(
 fn production_mesh_sizing(
     options: &VolumeMeshingOptions,
     sizing: Option<&MeshSizingField>,
+    preparation: &ProductionMeshPreparation,
 ) -> MeshSizingField {
     let mut mesh_sizing = sizing.cloned().unwrap_or_default();
     if mesh_sizing.global_target_size_m.is_none() {
@@ -558,12 +559,24 @@ fn production_mesh_sizing(
                 continue;
             }
             seen_positions.push(sample.position_m);
+            let inserted_breakpoint_count = usize::from(
+                preparation
+                    .tet_candidates
+                    .interior_seed_points
+                    .iter()
+                    .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24),
+            );
+            let detail = if inserted_breakpoint_count > 0 {
+                "production_requested_tet_seed_accepted"
+            } else {
+                "production_requested_tet_seed_rejected_by_recovery"
+            };
             mesh_sizing.applied_samples.push(SizingSampleApplication {
                 position_m: sample.position_m,
                 target_size_m,
-                inserted_breakpoint_count: 1,
+                inserted_breakpoint_count,
                 reason: sample.reason.clone(),
-                detail: Some("production_global_target_refinement".to_string()),
+                detail: Some(detail.to_string()),
             });
         }
     }
