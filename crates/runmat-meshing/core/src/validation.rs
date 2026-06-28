@@ -9,6 +9,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisMeshValidationOptions {
     pub quality: QualityThresholds,
+    pub max_volume_element_count: Option<usize>,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -25,6 +26,7 @@ impl Default for AnalysisMeshValidationOptions {
     fn default() -> Self {
         Self {
             quality: QualityThresholds::default(),
+            max_volume_element_count: None,
             expected_bounds_m: None,
             min_bounds_coverage_ratio: 0.90,
             expected_volume_m3: None,
@@ -117,6 +119,10 @@ pub enum AnalysisMeshValidationError {
     QualityThresholdFailed {
         reason: String,
     },
+    ElementBudgetExceeded {
+        element_count: usize,
+        max_element_count: usize,
+    },
     BoundsCoverageFailed {
         axis: usize,
         coverage_ratio: String,
@@ -173,6 +179,14 @@ pub fn validate_analysis_mesh_with_options(
     }
     if mesh.volume_elements.is_empty() {
         return Err(AnalysisMeshValidationError::EmptyVolumeElements);
+    }
+    if let Some(max_element_count) = options.max_volume_element_count {
+        if mesh.volume_elements.len() > max_element_count {
+            return Err(AnalysisMeshValidationError::ElementBudgetExceeded {
+                element_count: mesh.volume_elements.len(),
+                max_element_count,
+            });
+        }
     }
 
     let mut node_ids = BTreeSet::<u32>::new();
@@ -779,6 +793,26 @@ mod tests {
         let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
             .expect_err("empty volume elements should fail");
         assert_eq!(err, AnalysisMeshValidationError::EmptyVolumeElements);
+    }
+
+    #[test]
+    fn rejects_mesh_that_exceeds_element_budget() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                max_volume_element_count: Some(0),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("element budget overrun should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::ElementBudgetExceeded {
+                element_count: 1,
+                max_element_count: 0,
+            }
+        );
     }
 
     #[test]

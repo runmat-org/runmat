@@ -98,6 +98,10 @@ pub struct MeshRegionEvidence {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshValidationEvidence {
     pub quality: QualityThresholds,
+    #[serde(default)]
+    pub volume_element_count: usize,
+    #[serde(default)]
+    pub max_volume_element_count: Option<usize>,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -296,6 +300,8 @@ fn validation_evidence(
 ) -> MeshValidationEvidence {
     MeshValidationEvidence {
         quality: validation.quality,
+        volume_element_count: mesh.volume_elements.len(),
+        max_volume_element_count: validation.max_volume_element_count,
         expected_bounds_m: validation.expected_bounds_m,
         min_bounds_coverage_ratio: validation.min_bounds_coverage_ratio,
         expected_volume_m3: validation.expected_volume_m3,
@@ -535,8 +541,11 @@ mod tests {
             },
         };
 
-        let evidence =
-            build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
+        let validation = AnalysisMeshValidationOptions {
+            max_volume_element_count: Some(7),
+            ..AnalysisMeshValidationOptions::default()
+        };
+        let evidence = build_mesh_evidence_artifact(&mesh, &validation);
 
         assert_eq!(evidence.schema_version, MESH_EVIDENCE_SCHEMA_VERSION);
         assert_eq!(evidence.cad.topology_source, "semantic_cad");
@@ -547,6 +556,8 @@ mod tests {
         assert_eq!(evidence.cad.max_projection_error_m, 2.0e-6);
         assert_eq!(evidence.cad.surface_max_projection_error_m, 3.0e-6);
         assert_eq!(evidence.topology.node_count, 4);
+        assert_eq!(evidence.validation.volume_element_count, 1);
+        assert_eq!(evidence.validation.max_volume_element_count, Some(7));
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),

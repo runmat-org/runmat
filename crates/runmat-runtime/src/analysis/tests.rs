@@ -2332,6 +2332,7 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     spec.model = Some(sample_model());
 
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.max_elements = 42_000;
     mesh_options.validation.min_bounds_coverage_ratio = 0.95;
     mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
@@ -2352,6 +2353,7 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
         vec!["root".to_string(), "tip".to_string()]
     );
     assert_eq!(options.min_bounds_coverage_ratio, 0.95);
+    assert_eq!(options.max_volume_element_count, Some(42_000));
     assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
     assert_eq!(
         options.quality,

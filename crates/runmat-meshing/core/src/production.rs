@@ -858,6 +858,7 @@ fn production_validation_options(
 ) -> AnalysisMeshValidationOptions {
     AnalysisMeshValidationOptions {
         quality: options.validation.quality,
+        max_volume_element_count: Some(options.max_elements),
         expected_bounds_m: Some([
             preparation.topology.bounds_min_m,
             preparation.topology.bounds_max_m,
