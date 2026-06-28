@@ -2266,7 +2266,7 @@ fn best_local_seed_smoothing(
     current_status_accepted: bool,
     current_quality: CandidateQualitySnapshot,
 ) -> Result<Option<(Vec<[f64; 3]>, CandidateQualitySnapshot)>, TetCandidateError> {
-    let seed_indices = exact_quality_violation_seed_indices(current_tets, seed_node_ids, options);
+    let seed_indices = optimization_target_seed_indices(current_tets, seed_node_ids, options);
     let mut best = None::<(Vec<[f64; 3]>, CandidateQualitySnapshot)>;
     for index in seed_indices {
         let proposed_point = proposed_points[index];
@@ -2303,7 +2303,7 @@ fn best_local_seed_smoothing(
     Ok(best)
 }
 
-fn exact_quality_violation_seed_indices(
+fn optimization_target_seed_indices(
     tets: &[TetCandidate],
     seed_node_ids: &[u32],
     options: TetCandidateOptions,
@@ -2315,7 +2315,9 @@ fn exact_quality_violation_seed_indices(
         .collect::<BTreeMap<_, _>>();
     let mut indices = BTreeSet::<usize>::new();
     for tet in tets {
-        if tet.exact_scaled_jacobian >= options.min_scaled_jacobian {
+        if tet.exact_scaled_jacobian >= options.min_scaled_jacobian
+            && tet.aspect_ratio <= options.sliver_aspect_ratio
+        {
             continue;
         }
         for node_id in tet.node_ids {
@@ -5458,6 +5460,36 @@ mod tests {
         assert_eq!(aggregate.final_max_aspect_ratio(), 7.0);
         assert_eq!(aggregate.initial_min_exact_scaled_jacobian(), 0.30);
         assert_eq!(aggregate.final_min_exact_scaled_jacobian(), 0.40);
+    }
+
+    #[test]
+    fn optimization_targets_include_sliver_only_seed_tets() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [-0.5, 3.0_f64.sqrt() * 0.5, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.01,
+            sliver_aspect_ratio: 2.0,
+            ..TetCandidateOptions::default()
+        };
+        let tet = raw_candidate_tet(
+            0,
+            0,
+            &[],
+            [0, 1, 2, 3],
+            [0, 1, 2, 3].map(|node_id| node_points[&node_id]),
+            options,
+        )
+        .expect("sliver-only fixture tet should be valid");
+        assert!(tet.exact_scaled_jacobian >= options.min_scaled_jacobian);
+        assert!(tet.aspect_ratio > options.sliver_aspect_ratio);
+
+        let seed_indices = optimization_target_seed_indices(&[tet], &[1, 3], options);
+
+        assert_eq!(seed_indices, vec![0, 1]);
     }
 
     #[test]
