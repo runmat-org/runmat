@@ -2323,6 +2323,10 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
         Some(1)
     );
     assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["require_no_fan_fallback"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
         evidence_payload["mesh_evidence"]["validation"]["boundary_recovery"]
             ["boundary_face_recovery_ratio"]
             .as_f64(),
@@ -2398,6 +2402,20 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
             allow_inverted_elements: false,
         }
     );
+}
+
+#[test]
+fn generated_production_mesh_validation_requires_strict_recovery() {
+    let spec = sample_linear_static_study_spec();
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "production".to_string();
+    mesh.backend.volume_candidate_count = 2;
+
+    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
+
+    assert!(options.require_no_fan_fallback);
+    assert_eq!(options.max_volume_component_count, Some(2));
 }
 
 #[test]

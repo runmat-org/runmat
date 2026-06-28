@@ -13629,6 +13629,9 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     {
         validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
     }
+    if mesh.backend.backend == "production" {
+        validation.require_no_fan_fallback = true;
+    }
     validation
 }
 
