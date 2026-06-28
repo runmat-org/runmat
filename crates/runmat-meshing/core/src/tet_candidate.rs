@@ -22,6 +22,8 @@ pub struct TetCandidateOptions {
     pub max_interior_seed_points: usize,
     pub max_global_insertion_points: usize,
     pub allow_fan_fallback: bool,
+    pub dense_recovery_layer_count: usize,
+    pub max_dense_recovery_nodes: usize,
     pub max_refinement_passes: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_compliance_tolerance: f64,
@@ -40,6 +42,8 @@ impl Default for TetCandidateOptions {
             max_interior_seed_points: 1,
             max_global_insertion_points: 512,
             allow_fan_fallback: true,
+            dense_recovery_layer_count: 4,
+            max_dense_recovery_nodes: 20_000,
             max_refinement_passes: 0,
             max_radius_edge_ratio: 3.0,
             sizing_compliance_tolerance: 0.25,
@@ -215,6 +219,16 @@ pub fn form_tet_candidates(
         optimization_pass_count += optimization.pass_count;
         smoothed_point_count += optimization.smoothed_point_count;
         sliver_candidate_count += optimization.sliver_candidate_count;
+        if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
+            add_dense_recovery_layer_points(
+                component,
+                &mut component_seed_points,
+                &surface_nodes,
+                &surface_elements,
+                options,
+                tolerance,
+            )?;
+        }
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -322,6 +336,8 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options.max_aspect_ratio <= 0.0
         || options.max_interior_seed_points == 0
         || options.max_global_insertion_points < 4
+        || options.dense_recovery_layer_count < 2
+        || options.max_dense_recovery_nodes == 0
         || options.max_quality_recovery_seed_candidates == 0
         || !options.max_radius_edge_ratio.is_finite()
         || options.max_radius_edge_ratio <= 0.0
@@ -389,6 +405,142 @@ fn append_component_tets(
     Ok(())
 }
 
+fn append_candidate_tet(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    mut node_ids: [u32; 4],
+    points: [[f64; 3]; 4],
+    options: TetCandidateOptions,
+    tets: &mut Vec<TetCandidate>,
+) {
+    let mut signed_volume_m3 = tet_signed_volume(points);
+    if signed_volume_m3 < 0.0 {
+        node_ids.swap(1, 2);
+        signed_volume_m3 = -signed_volume_m3;
+    }
+    let volume_m3 = signed_volume_m3.abs();
+    if volume_m3 < options.min_volume_m3 {
+        return;
+    }
+    let aspect_ratio = tet_edge_aspect_ratio(points);
+    if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
+        return;
+    }
+    tets.push(TetCandidate {
+        tet_id: tets.len() as u32,
+        component_id: component.component_id,
+        node_ids,
+        source_surface_element_id: element.element_id,
+        region_ids: element.region_ids.clone(),
+        volume_m3,
+        aspect_ratio,
+    });
+}
+
+fn add_dense_recovery_layer_points(
+    component: &VolumeCandidateComponent,
+    seed_points: &mut Vec<[f64; 3]>,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+) -> Result<(), TetCandidateError> {
+    if options.dense_recovery_layer_count < 2 || seed_points.is_empty() {
+        return Ok(());
+    }
+    let fan_seed_point = select_component_fan_seed_point(
+        component,
+        seed_points,
+        surface_nodes,
+        surface_elements,
+        options,
+    )?;
+    if let Some(fan_index) = seed_points
+        .iter()
+        .position(|point| tolerance.point_nearly_equal(*point, fan_seed_point, 1.0))
+    {
+        seed_points.swap(0, fan_index);
+    } else {
+        seed_points.push(fan_seed_point);
+        let fan_index = seed_points.len() - 1;
+        seed_points.swap(0, fan_index);
+    }
+    let max_extra_points = options
+        .max_dense_recovery_nodes
+        .saturating_sub(component.node_ids.len())
+        .saturating_sub(seed_points.len());
+    if max_extra_points == 0 {
+        return Ok(());
+    }
+
+    let mut inserted = 0_usize;
+    for node_id in component_surface_node_ids(component, surface_elements)? {
+        if inserted >= max_extra_points {
+            break;
+        }
+        let boundary_point = *surface_nodes
+            .get(&node_id)
+            .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?;
+        for layer in 1..options.dense_recovery_layer_count {
+            if inserted >= max_extra_points {
+                break;
+            }
+            let point = dense_recovery_layer_point(boundary_point, fan_seed_point, layer, options);
+            if contains_point(seed_points, point, tolerance) {
+                continue;
+            }
+            seed_points.push(point);
+            inserted += 1;
+        }
+    }
+    Ok(())
+}
+
+fn dense_recovery_layer_point(
+    boundary_point: [f64; 3],
+    fan_seed_point: [f64; 3],
+    layer: usize,
+    options: TetCandidateOptions,
+) -> [f64; 3] {
+    let t = layer as f64 / options.dense_recovery_layer_count as f64;
+    [
+        boundary_point[0] * (1.0 - t) + fan_seed_point[0] * t,
+        boundary_point[1] * (1.0 - t) + fan_seed_point[1] * t,
+        boundary_point[2] * (1.0 - t) + fan_seed_point[2] * t,
+    ]
+}
+
+fn node_id_for_seed_point(
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    point: [f64; 3],
+    tolerance: MeshingTolerance,
+) -> Option<u32> {
+    seed_node_ids
+        .iter()
+        .zip(seed_points.iter())
+        .find_map(|(node_id, seed_point)| {
+            tolerance
+                .point_nearly_equal(*seed_point, point, 1.0)
+                .then_some(*node_id)
+        })
+}
+
+fn seed_nodes_by_point(
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+) -> BTreeMap<[u64; 3], (u32, [f64; 3])> {
+    seed_node_ids
+        .iter()
+        .zip(seed_points.iter())
+        .map(|(node_id, point)| (point_key(*point), (*node_id, *point)))
+        .collect()
+}
+
+fn point_key(point: [f64; 3]) -> [u64; 3] {
+    [point[0].to_bits(), point[1].to_bits(), point[2].to_bits()]
+}
+
 fn append_component_insertion_tets(
     component: &VolumeCandidateComponent,
     seed_node_ids: &[u32],
@@ -401,6 +553,29 @@ fn append_component_insertion_tets(
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
     if dense_component_for_global_insertion(component, seed_node_ids.len(), options) {
+        if let Some(layered_tets) = quality_recovery_layered_star_tets(
+            component,
+            seed_node_ids,
+            seed_points,
+            surface_nodes,
+            surface_elements,
+            options,
+            tolerance,
+        )? {
+            for mut tet in layered_tets {
+                tet.tet_id = tets.len() as u32;
+                tets.push(tet);
+            }
+            return Ok(InsertionStatus {
+                accepted: true,
+                volume_ratio: 1.0,
+                max_aspect_ratio: tets
+                    .iter()
+                    .filter(|tet| tet.component_id == component.component_id)
+                    .map(|tet| tet.aspect_ratio)
+                    .fold(0.0_f64, f64::max),
+            });
+        }
         if let Some(star_tets) = quality_recovery_star_tets(
             component,
             seed_node_ids,
@@ -508,6 +683,247 @@ fn quality_recovery_star_tets(
     )?;
     let status = insertion_tet_status(component, &tets, options);
     Ok(status.accepted.then_some(tets))
+}
+
+fn quality_recovery_layered_star_tets(
+    component: &VolumeCandidateComponent,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    if options.dense_recovery_layer_count < 2
+        || seed_node_ids.is_empty()
+        || seed_node_ids.len() != seed_points.len()
+    {
+        return Ok(None);
+    }
+    let Some(fan_seed_point) = select_layered_fan_seed_point(
+        component,
+        seed_points,
+        surface_nodes,
+        surface_elements,
+        options,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(fan_seed_node_id) =
+        node_id_for_seed_point(seed_node_ids, seed_points, fan_seed_point, tolerance)
+    else {
+        return Ok(None);
+    };
+    let seed_nodes_by_point = seed_nodes_by_point(seed_node_ids, seed_points);
+    let mut tets = Vec::<TetCandidate>::new();
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        append_layered_surface_tets(
+            component,
+            element,
+            fan_seed_node_id,
+            fan_seed_point,
+            &seed_nodes_by_point,
+            surface_nodes,
+            options,
+            &mut tets,
+        )?;
+    }
+    let status = insertion_tet_status(component, &tets, options);
+    Ok(status.accepted.then_some(tets))
+}
+
+fn select_layered_fan_seed_point(
+    component: &VolumeCandidateComponent,
+    seed_points: &[[f64; 3]],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+) -> Result<Option<[f64; 3]>, TetCandidateError> {
+    let seed_keys = seed_points
+        .iter()
+        .map(|point| point_key(*point))
+        .collect::<BTreeSet<_>>();
+    let mut best_score = None::<FanSeedScore>;
+    for point in quality_recovery_seed_candidates(seed_points, options) {
+        if !dense_recovery_layer_nodes_exist(
+            component,
+            point,
+            surface_nodes,
+            surface_elements,
+            options,
+            &seed_keys,
+        )? {
+            continue;
+        }
+        let score =
+            score_fan_seed_point(component, point, surface_nodes, surface_elements, options)?;
+        if best_score.is_none_or(|best| fan_seed_score_is_better(score, best)) {
+            best_score = Some(score);
+        }
+    }
+    Ok(best_score.map(|score| score.point))
+}
+
+fn dense_recovery_layer_nodes_exist(
+    component: &VolumeCandidateComponent,
+    fan_seed_point: [f64; 3],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    seed_keys: &BTreeSet<[u64; 3]>,
+) -> Result<bool, TetCandidateError> {
+    for node_id in component_surface_node_ids(component, surface_elements)? {
+        let boundary_point = *surface_nodes
+            .get(&node_id)
+            .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?;
+        for layer in 1..options.dense_recovery_layer_count {
+            let point = dense_recovery_layer_point(boundary_point, fan_seed_point, layer, options);
+            if !seed_keys.contains(&point_key(point)) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn component_surface_node_ids(
+    component: &VolumeCandidateComponent,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+) -> Result<BTreeSet<u32>, TetCandidateError> {
+    let mut node_ids = BTreeSet::<u32>::new();
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        node_ids.extend(element.node_ids);
+    }
+    Ok(node_ids)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_layered_surface_tets(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    fan_seed_node_id: u32,
+    fan_seed_point: [f64; 3],
+    seed_nodes_by_point: &BTreeMap<[u64; 3], (u32, [f64; 3])>,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    tets: &mut Vec<TetCandidate>,
+) -> Result<(), TetCandidateError> {
+    let mut layer_node_ids = Vec::<[u32; 3]>::new();
+    let mut layer_points = Vec::<[[f64; 3]; 3]>::new();
+    layer_node_ids.push(element.node_ids);
+    layer_points.push([
+        *surface_nodes
+            .get(&element.node_ids[0])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[0],
+            })?,
+        *surface_nodes
+            .get(&element.node_ids[1])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[1],
+            })?,
+        *surface_nodes
+            .get(&element.node_ids[2])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[2],
+            })?,
+    ]);
+    for layer in 1..options.dense_recovery_layer_count {
+        let mut ids = [0_u32; 3];
+        let mut points = [[0.0; 3]; 3];
+        for corner in 0..3 {
+            let point =
+                dense_recovery_layer_point(layer_points[0][corner], fan_seed_point, layer, options);
+            let Some((node_id, coordinates_m)) =
+                seed_nodes_by_point.get(&point_key(point)).copied()
+            else {
+                return Ok(());
+            };
+            ids[corner] = node_id;
+            points[corner] = coordinates_m;
+        }
+        layer_node_ids.push(ids);
+        layer_points.push(points);
+    }
+
+    for layer in 0..layer_node_ids.len().saturating_sub(1) {
+        let outer_ids = layer_node_ids[layer];
+        let inner_ids = layer_node_ids[layer + 1];
+        let outer_points = layer_points[layer];
+        let inner_points = layer_points[layer + 1];
+        append_candidate_tet(
+            component,
+            element,
+            [outer_ids[0], outer_ids[1], outer_ids[2], inner_ids[0]],
+            [
+                outer_points[0],
+                outer_points[1],
+                outer_points[2],
+                inner_points[0],
+            ],
+            options,
+            tets,
+        );
+        append_candidate_tet(
+            component,
+            element,
+            [outer_ids[1], inner_ids[1], outer_ids[2], inner_ids[0]],
+            [
+                outer_points[1],
+                inner_points[1],
+                outer_points[2],
+                inner_points[0],
+            ],
+            options,
+            tets,
+        );
+        append_candidate_tet(
+            component,
+            element,
+            [inner_ids[1], inner_ids[2], outer_ids[2], inner_ids[0]],
+            [
+                inner_points[1],
+                inner_points[2],
+                outer_points[2],
+                inner_points[0],
+            ],
+            options,
+            tets,
+        );
+    }
+    let last_index = layer_node_ids.len() - 1;
+    append_candidate_tet(
+        component,
+        element,
+        [
+            layer_node_ids[last_index][0],
+            layer_node_ids[last_index][1],
+            layer_node_ids[last_index][2],
+            fan_seed_node_id,
+        ],
+        [
+            layer_points[last_index][0],
+            layer_points[last_index][1],
+            layer_points[last_index][2],
+            fan_seed_point,
+        ],
+        options,
+        tets,
+    );
+    Ok(())
 }
 
 fn component_insertion_tet_drafts(

@@ -184,6 +184,8 @@ fn tet_candidate_options_for_mesh(
         max_interior_seed_points: options.max_elements.max(1).min(128),
         max_global_insertion_points: options.max_elements.max(1).min(4096),
         allow_fan_fallback: false,
+        dense_recovery_layer_count: 8,
+        max_dense_recovery_nodes: options.max_elements.max(1).min(250_000),
         max_refinement_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
             _ => 2,
@@ -195,7 +197,7 @@ fn tet_candidate_options_for_mesh(
             _ => 2,
         },
         smoothing_relaxation: 0.30,
-        sliver_aspect_ratio: 20.0,
+        sliver_aspect_ratio: 40.0,
         ..TetCandidateOptions::default()
     }
 }
