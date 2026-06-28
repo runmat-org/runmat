@@ -1070,6 +1070,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .untangling_relocated_seed_count,
+        tet_untangling_reconnected_edge_star_count: preparation
+            .tet_candidates
+            .recovery
+            .untangling_reconnected_edge_star_count,
         tet_exact_quality_repair_pass_count: preparation
             .tet_candidates
             .recovery

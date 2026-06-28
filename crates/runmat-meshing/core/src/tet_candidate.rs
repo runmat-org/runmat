@@ -153,6 +153,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub untangling_relocated_seed_count: usize,
     #[serde(default)]
+    pub untangling_reconnected_edge_star_count: usize,
+    #[serde(default)]
     pub exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub exact_quality_reconnected_cavity_count: usize,
@@ -492,6 +494,7 @@ pub fn form_tet_candidates(
                 .final_min_exact_scaled_jacobian(),
             untangling_pass_count: untangling.pass_count,
             untangling_relocated_seed_count: untangling.relocated_seed_count,
+            untangling_reconnected_edge_star_count: untangling.reconnected_edge_star_count,
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
             exact_quality_reconnection_quality_gain_count: repair.reconnection_quality_gain_count,
@@ -3216,6 +3219,7 @@ fn replace_interior_seed_point(
 struct UntanglingSummary {
     pass_count: usize,
     relocated_seed_count: usize,
+    reconnected_edge_star_count: usize,
 }
 
 fn untangle_near_singular_tets(
@@ -3239,6 +3243,7 @@ fn untangle_near_singular_tets(
             .map(|node| (node.node_id, node.coordinates_m))
             .collect::<BTreeMap<_, _>>();
         let node_adjacency = tet_node_adjacency(tets);
+        let edge_adjacency = tet_edge_adjacency(tets);
         let interior_node_ids = nodes
             .iter()
             .filter_map(|node| {
@@ -3250,7 +3255,7 @@ fn untangle_near_singular_tets(
             if tet.exact_scaled_jacobian >= threshold {
                 continue;
             }
-            let Some((interior_node_id, relocated_point, indices, candidates)) =
+            if let Some((interior_node_id, relocated_point, indices, candidates)) =
                 best_interior_seed_node_untangling(
                     tet_index,
                     tets,
@@ -3260,25 +3265,38 @@ fn untangle_near_singular_tets(
                     threshold,
                     options,
                 )?
-            else {
-                continue;
-            };
-            let old_point = node_points.get(&interior_node_id).copied().ok_or(
-                TetCandidateError::MissingSurfaceNode {
-                    node_id: interior_node_id,
-                },
-            )?;
-            for node in nodes.iter_mut() {
-                if node.node_id == interior_node_id {
-                    node.coordinates_m = relocated_point;
+            {
+                let old_point = node_points.get(&interior_node_id).copied().ok_or(
+                    TetCandidateError::MissingSurfaceNode {
+                        node_id: interior_node_id,
+                    },
+                )?;
+                for node in nodes.iter_mut() {
+                    if node.node_id == interior_node_id {
+                        node.coordinates_m = relocated_point;
+                    }
                 }
+                replace_interior_seed_point(interior_seed_points, old_point, relocated_point);
+                replace_tet_indices(tets, &indices, candidates);
+                applied = true;
+                summary.pass_count += 1;
+                summary.relocated_seed_count += 1;
+                break;
             }
-            replace_interior_seed_point(interior_seed_points, old_point, relocated_point);
-            replace_tet_indices(tets, &indices, candidates);
-            applied = true;
-            summary.pass_count += 1;
-            summary.relocated_seed_count += 1;
-            break;
+            if let Some((indices, candidates)) = best_edge_star_untangling(
+                tet_index,
+                tets,
+                &edge_adjacency,
+                &node_points,
+                threshold,
+                options,
+            )? {
+                replace_tet_indices(tets, &indices, candidates);
+                applied = true;
+                summary.pass_count += 1;
+                summary.reconnected_edge_star_count += 1;
+                break;
+            }
         }
         if !applied {
             break;
@@ -3745,6 +3763,75 @@ fn best_interior_seed_node_untangling(
     }
     Ok(best
         .map(|(node_id, point, indices, candidates, _, _)| (node_id, point, indices, candidates)))
+}
+
+fn best_edge_star_untangling(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    threshold: f64,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    for edge in tet_node_edges(tet.node_ids) {
+        let Some(adjacent) = edge_adjacency.get(&edge) else {
+            continue;
+        };
+        if !(3..=8).contains(&adjacent.len()) || !adjacent.contains(&tet_index) {
+            continue;
+        }
+        let original_near_singular_count =
+            count_tets_below_exact_quality(adjacent.iter().map(|index| &tets[*index]), threshold);
+        if original_near_singular_count == 0 {
+            continue;
+        }
+        let original_full_bad_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+        let candidates = if adjacent.len() == 3 {
+            three_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        } else {
+            multi_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        };
+        let Some(candidates) = candidates else {
+            continue;
+        };
+        let candidate_full_bad_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        if candidate_full_bad_count > original_full_bad_count {
+            continue;
+        }
+        let candidate_near_singular_count =
+            count_tets_below_exact_quality(candidates.iter(), threshold);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        let improves = candidate_near_singular_count < original_near_singular_count
+            || (candidate_near_singular_count == original_near_singular_count
+                && candidate_min_exact > original_min_exact + 1.0e-12);
+        if !improves {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_count, best_min_exact)| {
+                candidate_near_singular_count < *best_count
+                    || (candidate_near_singular_count == *best_count
+                        && candidate_min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                adjacent.clone(),
+                candidates,
+                candidate_near_singular_count,
+                candidate_min_exact,
+            ));
+        }
+    }
+    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
 }
 
 fn interior_seed_node_relocation_points(
@@ -6651,6 +6738,94 @@ mod tests {
         let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn edge_star_untangling_reconnects_near_singular_edge_star() {
+        let root_three = 3.0_f64.sqrt();
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [-0.5, root_three * 0.5, 0.0]),
+            (4, [-0.5, -root_three * 0.5, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 2.0,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 2]]
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let threshold = untangling_exact_quality_threshold(options);
+        assert!(count_tets_below_exact_quality(tets.iter(), threshold) > 0);
+        let edge_adjacency = tet_edge_adjacency(&tets);
+
+        let (indices, candidates) =
+            best_edge_star_untangling(0, &tets, &edge_adjacency, &node_points, threshold, options)
+                .expect("edge-star untangling should evaluate")
+                .expect("edge-star untangling should be available");
+
+        assert_eq!(indices, vec![0, 1, 2]);
+        assert_eq!(
+            count_tets_below_exact_quality(candidates.iter(), threshold),
+            0
+        );
+        assert!(
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian)
+                <= count_exact_quality_violations(tets.iter(), options.min_scaled_jacobian)
+        );
+    }
+
+    #[test]
+    fn untangling_reconnects_edge_star_when_no_seed_relocation_is_available() {
+        let root_three = 3.0_f64.sqrt();
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [-0.5, root_three * 0.5, 0.0]),
+            (4, [-0.5, -root_three * 0.5, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 2.0,
+            max_refinement_passes: 1,
+            ..TetCandidateOptions::default()
+        };
+        let mut tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 2]]
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let mut nodes = node_points
+            .iter()
+            .map(|(node_id, coordinates_m)| TetCandidateNode {
+                node_id: *node_id,
+                coordinates_m: *coordinates_m,
+                source: TetCandidateNodeSource::Surface,
+            })
+            .collect::<Vec<_>>();
+        let threshold = untangling_exact_quality_threshold(options);
+        assert!(count_tets_below_exact_quality(tets.iter(), threshold) > 0);
+        let mut interior_seed_points = Vec::new();
+
+        let summary =
+            untangle_near_singular_tets(&mut nodes, &mut tets, &mut interior_seed_points, options)
+                .expect("untangling should evaluate");
+
+        assert_eq!(summary.pass_count, 1);
+        assert_eq!(summary.relocated_seed_count, 0);
+        assert_eq!(summary.reconnected_edge_star_count, 1);
+        assert_eq!(count_tets_below_exact_quality(tets.iter(), threshold), 0);
+        assert!(interior_seed_points.is_empty());
     }
 
     #[test]
