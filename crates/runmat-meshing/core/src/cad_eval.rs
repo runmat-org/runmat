@@ -36,6 +36,12 @@ pub struct CadFaceEvaluationFrame {
     pub evaluator_max_projection_error_m: f64,
     #[serde(default)]
     pub evaluator_samples: Vec<CadFaceEvaluationSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub u_derivative_m_per_uv: Option<Point3>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v_derivative_m_per_uv: Option<Point3>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_curvature_estimate_1_per_m: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -57,8 +63,14 @@ pub struct CadEvaluationReport {
     pub evaluator_sample_count: usize,
     pub normal_query_count: usize,
     pub projection_query_count: usize,
+    #[serde(default)]
+    pub derivative_query_count: usize,
+    #[serde(default)]
+    pub curvature_query_count: usize,
     pub max_projection_error_m: f64,
     pub max_normal_deviation: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_curvature_estimate_1_per_m: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -159,6 +171,21 @@ pub fn build_cad_evaluation_model(
         .iter()
         .map(|frame| frame.evaluator_max_projection_error_m)
         .fold(0.0_f64, f64::max);
+    let derivative_query_count = frames
+        .iter()
+        .filter(|frame| {
+            frame.u_derivative_m_per_uv.is_some() && frame.v_derivative_m_per_uv.is_some()
+        })
+        .count();
+    let curvature_query_count = frames
+        .iter()
+        .filter(|frame| frame.max_curvature_estimate_1_per_m.is_some())
+        .count();
+    let max_curvature_estimate_1_per_m = max_optional_curvature(
+        frames
+            .iter()
+            .filter_map(|frame| frame.max_curvature_estimate_1_per_m),
+    );
     let report = CadEvaluationReport {
         source: evaluation_source(
             frames.len(),
@@ -171,8 +198,11 @@ pub fn build_cad_evaluation_model(
         evaluator_sample_count,
         normal_query_count: frames.len(),
         projection_query_count: frames.len(),
+        derivative_query_count,
+        curvature_query_count,
         max_projection_error_m: max_evaluator_projection_error_m,
         max_normal_deviation: 0.0,
+        max_curvature_estimate_1_per_m,
     };
     Ok(CadEvaluationModel {
         source_geometry_id: cad_topology.source_geometry_id.clone(),
@@ -239,8 +269,11 @@ pub fn summarize_cad_evaluation(
         evaluator_sample_count: model.report.evaluator_sample_count,
         normal_query_count: model.face_frames.len(),
         projection_query_count,
+        derivative_query_count: model.report.derivative_query_count,
+        curvature_query_count: model.report.curvature_query_count,
         max_projection_error_m,
         max_normal_deviation,
+        max_curvature_estimate_1_per_m: model.report.max_curvature_estimate_1_per_m,
     })
 }
 
@@ -268,6 +301,9 @@ fn face_frame(
     if v_length <= f64::EPSILON {
         return Err(CadEvaluationError::DegenerateFace { source_face_id });
     }
+    let (u_derivative_m_per_uv, v_derivative_m_per_uv) =
+        estimate_uv_derivatives(&evaluator_samples);
+    let max_curvature_estimate_1_per_m = estimate_max_curvature(&evaluator_samples);
     Ok(CadFaceEvaluationFrame {
         face_id,
         source_face_id,
@@ -281,6 +317,9 @@ fn face_frame(
         evaluator_sample_count,
         evaluator_max_projection_error_m,
         evaluator_samples,
+        u_derivative_m_per_uv,
+        v_derivative_m_per_uv,
+        max_curvature_estimate_1_per_m,
     })
 }
 
@@ -340,6 +379,94 @@ fn bounded_evaluator_samples(face: &CadFace) -> Vec<CadFaceEvaluationSample> {
         .take(8)
         .cloned()
         .collect()
+}
+
+fn estimate_uv_derivatives(
+    samples: &[CadFaceEvaluationSample],
+) -> (Option<Point3>, Option<Point3>) {
+    let samples = samples
+        .iter()
+        .filter_map(|sample| {
+            let uv = sample.uv?;
+            (finite_point(sample.point_m) && uv.iter().all(|value| value.is_finite()))
+                .then_some((uv, sample.point_m))
+        })
+        .collect::<Vec<_>>();
+    for base_index in 0..samples.len() {
+        for u_index in 0..samples.len() {
+            for v_index in 0..samples.len() {
+                if base_index == u_index || base_index == v_index || u_index == v_index {
+                    continue;
+                }
+                let (base_uv, base_point) = samples[base_index];
+                let (u_uv, u_point) = samples[u_index];
+                let (v_uv, v_point) = samples[v_index];
+                let du = [u_uv[0] - base_uv[0], u_uv[1] - base_uv[1]];
+                let dv = [v_uv[0] - base_uv[0], v_uv[1] - base_uv[1]];
+                let determinant = du[0] * dv[1] - du[1] * dv[0];
+                if !determinant.is_finite() || determinant.abs() <= 1.0e-12 {
+                    continue;
+                }
+                let dp_u = sub(u_point, base_point);
+                let dp_v = sub(v_point, base_point);
+                let inv_det = 1.0 / determinant;
+                let derivative_u = [
+                    (dp_u[0] * dv[1] - dp_v[0] * du[1]) * inv_det,
+                    (dp_u[1] * dv[1] - dp_v[1] * du[1]) * inv_det,
+                    (dp_u[2] * dv[1] - dp_v[2] * du[1]) * inv_det,
+                ];
+                let derivative_v = [
+                    (dp_v[0] * du[0] - dp_u[0] * dv[0]) * inv_det,
+                    (dp_v[1] * du[0] - dp_u[1] * dv[0]) * inv_det,
+                    (dp_v[2] * du[0] - dp_u[2] * dv[0]) * inv_det,
+                ];
+                if finite_point(derivative_u) && finite_point(derivative_v) {
+                    return (Some(derivative_u), Some(derivative_v));
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
+fn estimate_max_curvature(samples: &[CadFaceEvaluationSample]) -> Option<f64> {
+    let samples = samples
+        .iter()
+        .filter_map(|sample| {
+            let normal = sample.unit_normal?;
+            (finite_point(sample.point_m) && finite_point(normal) && norm(normal) > 0.0)
+                .then_some((sample.point_m, scale(normal, 1.0 / norm(normal))))
+        })
+        .collect::<Vec<_>>();
+    let mut max_curvature = None::<f64>;
+    for left_index in 0..samples.len() {
+        for right_index in (left_index + 1)..samples.len() {
+            let distance_m = norm(sub(samples[left_index].0, samples[right_index].0));
+            if !distance_m.is_finite() || distance_m <= 1.0e-12 {
+                continue;
+            }
+            let normal_delta = norm(sub(samples[left_index].1, samples[right_index].1));
+            if !normal_delta.is_finite() {
+                continue;
+            }
+            let curvature = normal_delta / distance_m;
+            if curvature.is_finite() {
+                max_curvature =
+                    Some(max_curvature.map_or(curvature, |current| current.max(curvature)));
+            }
+        }
+    }
+    max_curvature
+}
+
+fn max_optional_curvature(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let mut max_value = None::<f64>;
+    for value in values {
+        if value.is_finite() && value >= 0.0 {
+            max_value = Some(max_value.map_or(value, |current| current.max(value)));
+        }
+    }
+    max_value
 }
 
 fn finite_point(point: Point3) -> bool {
@@ -449,6 +576,59 @@ mod tests {
         assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
         assert_eq!(frame.evaluator_samples.len(), 1);
         assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
+    }
+
+    #[test]
+    fn backend_samples_expose_derivative_and_curvature_estimates() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 0.0, 1.0],
+                uv: Some([0.0, 0.0]),
+                projected_point_m: Some([0.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [1.0, 0.0, 1.0],
+                uv: Some([1.0, 0.0]),
+                projected_point_m: Some([1.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.05, 0.998749217771909]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 1.0, 1.0],
+                uv: Some([0.0, 1.0]),
+                projected_point_m: Some([0.0, 1.0, 1.0]),
+                unit_normal: Some([0.04, 0.0, 0.9991996797437437]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let report = summarize_cad_evaluation(&model, &topology).expect("summary");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.evaluator_samples.len() == 3)
+            .expect("sample-backed frame");
+
+        assert_eq!(model.report.derivative_query_count, 2);
+        assert_eq!(model.report.curvature_query_count, 2);
+        assert_eq!(report.derivative_query_count, 2);
+        assert_eq!(report.curvature_query_count, 2);
+        assert_eq!(frame.u_derivative_m_per_uv, Some([1.0, 0.0, 0.0]));
+        assert_eq!(frame.v_derivative_m_per_uv, Some([0.0, 1.0, 0.0]));
+        assert!(frame.max_curvature_estimate_1_per_m.unwrap_or(0.0) > 0.0);
+        assert_eq!(
+            report.max_curvature_estimate_1_per_m,
+            model.report.max_curvature_estimate_1_per_m
+        );
     }
 
     fn cube_topology() -> SourceTopologyModel {
