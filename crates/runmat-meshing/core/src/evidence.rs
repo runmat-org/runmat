@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     artifact::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
-    validation::{volume_component_count, AnalysisMeshValidationOptions},
+    validation::{
+        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,
+        AnalysisMeshValidationOptions,
+    },
 };
 
 pub const MESH_EVIDENCE_SCHEMA_VERSION: &str = "mesh-evidence/v1";
@@ -97,6 +100,12 @@ pub struct MeshRegionEvidence {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshValidationEvidence {
+    #[serde(default = "default_solve_ready")]
+    pub solve_ready: bool,
+    #[serde(default)]
+    pub validation_error_code: Option<String>,
+    #[serde(default)]
+    pub validation_error_message: Option<String>,
     pub quality: QualityThresholds,
     #[serde(default)]
     pub volume_element_count: usize,
@@ -302,7 +311,20 @@ fn validation_evidence(
     mesh: &AnalysisMeshArtifact,
     validation: &AnalysisMeshValidationOptions,
 ) -> MeshValidationEvidence {
+    let validation_result = validate_analysis_mesh_with_options(mesh, validation.clone());
+    let (solve_ready, validation_error_code, validation_error_message) = match validation_result {
+        Ok(()) => (true, None, None),
+        Err(err) => (
+            false,
+            Some(validation_error_code(&err).to_string()),
+            Some(format!("{err:?}")),
+        ),
+    };
+
     MeshValidationEvidence {
+        solve_ready,
+        validation_error_code,
+        validation_error_message,
         quality: validation.quality,
         volume_element_count: mesh.volume_elements.len(),
         max_volume_element_count: validation.max_volume_element_count,
@@ -319,6 +341,81 @@ fn validation_evidence(
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
         boundary_recovery: boundary_recovery_evidence(mesh),
+    }
+}
+
+fn default_solve_ready() -> bool {
+    true
+}
+
+fn validation_error_code(error: &AnalysisMeshValidationError) -> &'static str {
+    match error {
+        AnalysisMeshValidationError::UnsupportedSchema { .. } => "unsupported_schema",
+        AnalysisMeshValidationError::EmptyNodes => "empty_nodes",
+        AnalysisMeshValidationError::EmptyVolumeElements => "empty_volume_elements",
+        AnalysisMeshValidationError::DuplicateNodeId { .. } => "duplicate_node_id",
+        AnalysisMeshValidationError::NonFiniteNodeCoordinate { .. } => "non_finite_node_coordinate",
+        AnalysisMeshValidationError::DuplicateElementId { .. } => "duplicate_element_id",
+        AnalysisMeshValidationError::UnsupportedVolumeElementKind { .. } => {
+            "unsupported_volume_element_kind"
+        }
+        AnalysisMeshValidationError::WrongVolumeElementNodeCount { .. } => {
+            "wrong_volume_element_node_count"
+        }
+        AnalysisMeshValidationError::UnknownVolumeElementNode { .. } => {
+            "unknown_volume_element_node"
+        }
+        AnalysisMeshValidationError::RepeatedVolumeElementNode { .. } => {
+            "repeated_volume_element_node"
+        }
+        AnalysisMeshValidationError::MissingMaterialRegion { .. } => "missing_material_region",
+        AnalysisMeshValidationError::DuplicateBoundaryFaceId { .. } => "duplicate_boundary_face_id",
+        AnalysisMeshValidationError::UnsupportedBoundaryElementKind { .. } => {
+            "unsupported_boundary_element_kind"
+        }
+        AnalysisMeshValidationError::WrongBoundaryFaceNodeCount { .. } => {
+            "wrong_boundary_face_node_count"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryFaceNode { .. } => "unknown_boundary_face_node",
+        AnalysisMeshValidationError::RepeatedBoundaryFaceNode { .. } => {
+            "repeated_boundary_face_node"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryAdjacentElement { .. } => {
+            "unknown_boundary_adjacent_element"
+        }
+        AnalysisMeshValidationError::DuplicateBoundaryEdgeId { .. } => "duplicate_boundary_edge_id",
+        AnalysisMeshValidationError::WrongBoundaryEdgeNodeCount { .. } => {
+            "wrong_boundary_edge_node_count"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryEdgeNode { .. } => "unknown_boundary_edge_node",
+        AnalysisMeshValidationError::RepeatedBoundaryEdgeNode { .. } => {
+            "repeated_boundary_edge_node"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryEdgeAdjacentFace { .. } => {
+            "unknown_boundary_edge_adjacent_face"
+        }
+        AnalysisMeshValidationError::QualityThresholdFailed { .. } => "quality_threshold_failed",
+        AnalysisMeshValidationError::ElementBudgetExceeded { .. } => "element_budget_exceeded",
+        AnalysisMeshValidationError::VolumeComponentCountExceeded { .. } => {
+            "volume_component_count_exceeded"
+        }
+        AnalysisMeshValidationError::BoundsCoverageFailed { .. } => "bounds_coverage_failed",
+        AnalysisMeshValidationError::VolumeCoverageFailed { .. } => "volume_coverage_failed",
+        AnalysisMeshValidationError::BoundaryAreaCoverageFailed { .. } => {
+            "boundary_area_coverage_failed"
+        }
+        AnalysisMeshValidationError::BoundaryFaceRecoveryFailed { .. } => {
+            "boundary_face_recovery_failed"
+        }
+        AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
+            "boundary_edge_recovery_failed"
+        }
+        AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
+            "missing_required_boundary_region"
+        }
+        AnalysisMeshValidationError::MissingRequiredMaterialRegion { .. } => {
+            "missing_required_material_region"
+        }
     }
 }
 
@@ -555,6 +652,9 @@ mod tests {
         let evidence = build_mesh_evidence_artifact(&mesh, &validation);
 
         assert_eq!(evidence.schema_version, MESH_EVIDENCE_SCHEMA_VERSION);
+        assert!(evidence.validation.solve_ready);
+        assert_eq!(evidence.validation.validation_error_code, None);
+        assert_eq!(evidence.validation.validation_error_message, None);
         assert_eq!(evidence.cad.topology_source, "semantic_cad");
         assert_eq!(evidence.cad.evaluation_source, "imported_evaluator_samples");
         assert_eq!(evidence.cad.imported_face_count, 3);
@@ -609,6 +709,22 @@ mod tests {
                 .contains("sample detail should not be copied")
                 == false
         );
+
+        let failed_validation = AnalysisMeshValidationOptions {
+            max_volume_element_count: Some(0),
+            ..AnalysisMeshValidationOptions::default()
+        };
+        let failed_evidence = build_mesh_evidence_artifact(&mesh, &failed_validation);
+        assert!(!failed_evidence.validation.solve_ready);
+        assert_eq!(
+            failed_evidence.validation.validation_error_code.as_deref(),
+            Some("element_budget_exceeded")
+        );
+        assert!(failed_evidence
+            .validation
+            .validation_error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("ElementBudgetExceeded")));
     }
 
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
