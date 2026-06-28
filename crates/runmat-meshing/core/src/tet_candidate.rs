@@ -165,6 +165,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_boundary_adjacent_reconnected_cavity_count: usize,
     #[serde(default)]
+    pub exact_quality_expanded_connected_reconnected_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_split_cavity_count: usize,
     #[serde(default)]
     pub exact_quality_seed_star_collapse_count: usize,
@@ -499,6 +501,8 @@ pub fn form_tet_candidates(
                 .connected_reconnected_cavity_count,
             exact_quality_boundary_adjacent_reconnected_cavity_count: repair
                 .boundary_adjacent_reconnected_cavity_count,
+            exact_quality_expanded_connected_reconnected_cavity_count: repair
+                .expanded_connected_reconnected_cavity_count,
             exact_quality_split_cavity_count: repair.split_cavity_count,
             exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
             exact_quality_seed_star_relocation_count: repair.seed_star_relocation_count,
@@ -2750,6 +2754,7 @@ struct TetQualityRepairSummary {
     face_neighbor_reconnected_cavity_count: usize,
     connected_reconnected_cavity_count: usize,
     boundary_adjacent_reconnected_cavity_count: usize,
+    expanded_connected_reconnected_cavity_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2763,6 +2768,7 @@ struct TetQualityRepairPassSummary {
     face_neighbor_reconnected_cavity_count: usize,
     connected_reconnected_cavity_count: usize,
     boundary_adjacent_reconnected_cavity_count: usize,
+    expanded_connected_reconnected_cavity_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2802,6 +2808,8 @@ fn repair_exact_quality_tets(
         summary.connected_reconnected_cavity_count += pass.connected_reconnected_cavity_count;
         summary.boundary_adjacent_reconnected_cavity_count +=
             pass.boundary_adjacent_reconnected_cavity_count;
+        summary.expanded_connected_reconnected_cavity_count +=
+            pass.expanded_connected_reconnected_cavity_count;
         summary.split_cavity_count += pass.split_cavity_count;
         summary.seed_star_collapse_count += pass.seed_star_collapse_count;
         summary.seed_star_relocation_count += pass.seed_star_relocation_count;
@@ -3054,6 +3062,29 @@ fn repair_exact_quality_tets_once(
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
             summary.boundary_adjacent_reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
+            repaired.extend(candidates);
+            continue;
+        }
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_expanded_connected_bad_cavity_reconnection(
+                tet_index,
+                tets,
+                &face_adjacency,
+                &node_points,
+                options,
+            )?
+        {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
+            summary.expanded_connected_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
@@ -4381,6 +4412,53 @@ fn best_connected_bad_cavity_reconnection(
     Ok(Some((adjacent, candidates, quality_gain_only)))
 }
 
+fn best_expanded_connected_bad_cavity_reconnection(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+    let adjacent = connected_bad_tet_cavity_with_face_closure_layers(
+        tet_index,
+        tets,
+        face_adjacency,
+        options,
+        2,
+    );
+    if adjacent.len() < 5 || adjacent.len() > 16 {
+        return Ok(None);
+    }
+    let one_layer_count =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options).len();
+    if adjacent.len() <= one_layer_count {
+        return Ok(None);
+    }
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let Some(candidates) =
+        face_neighbor_cavity_reconnection_candidates(&adjacent, tets, node_points, options)?
+    else {
+        return Ok(None);
+    };
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let min_exact = min_exact_scaled_jacobian(candidates.iter());
+    if !cavity_reconnection_improves_quality(
+        candidate_below_count,
+        min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        return Ok(None);
+    }
+    let quality_gain_only = candidate_below_count == original_below_count;
+    Ok(Some((adjacent, candidates, quality_gain_only)))
+}
+
 fn best_boundary_adjacent_cavity_reconnection(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -4461,18 +4539,36 @@ fn connected_bad_tet_cavity_with_face_closure(
     face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
     options: TetCandidateOptions,
 ) -> Vec<usize> {
+    connected_bad_tet_cavity_with_face_closure_layers(tet_index, tets, face_adjacency, options, 1)
+}
+
+fn connected_bad_tet_cavity_with_face_closure_layers(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    options: TetCandidateOptions,
+    layer_count: usize,
+) -> Vec<usize> {
     let mut adjacent = connected_bad_tet_cavity(tet_index, tets, face_adjacency, options)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    for index in adjacent.clone() {
-        for face in tet_node_faces(tets[index].node_ids).map(sorted_node_face) {
-            if let Some(face_neighbors) = face_adjacency.get(&face) {
-                for neighbor in face_neighbors {
-                    if tets[*neighbor].component_id == tets[tet_index].component_id {
-                        adjacent.insert(*neighbor);
+    for _ in 0..layer_count {
+        let mut changed = false;
+        for index in adjacent.clone() {
+            for face in tet_node_faces(tets[index].node_ids).map(sorted_node_face) {
+                if let Some(face_neighbors) = face_adjacency.get(&face) {
+                    for neighbor in face_neighbors {
+                        if tets[*neighbor].component_id == tets[tet_index].component_id
+                            && adjacent.insert(*neighbor)
+                        {
+                            changed = true;
+                        }
                     }
                 }
             }
+        }
+        if !changed {
+            break;
         }
     }
     adjacent.into_iter().collect()
@@ -7358,6 +7454,44 @@ mod tests {
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
         assert_eq!(repair.split_cavity_count, 0);
+    }
+
+    #[test]
+    fn connected_bad_cavity_face_closure_layers_expand_bounded() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [
+            ([0, 1, 2, 3], 0.1),
+            ([0, 1, 2, 4], 0.8),
+            ([0, 1, 4, 5], 0.8),
+        ]
+        .into_iter()
+        .map(|(node_ids, exact_scaled_jacobian)| TetCandidate {
+            tet_id: 0,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+        let face_adjacency = tet_face_adjacency(&tets);
+        let one_layer =
+            connected_bad_tet_cavity_with_face_closure(0, &tets, &face_adjacency, options);
+        let two_layer = connected_bad_tet_cavity_with_face_closure_layers(
+            0,
+            &tets,
+            &face_adjacency,
+            options,
+            2,
+        );
+        assert_eq!(one_layer, vec![0, 1]);
+        assert_eq!(two_layer, vec![0, 1, 2]);
     }
 
     #[test]
