@@ -22,6 +22,10 @@ pub enum AdaptiveConvergenceStatus {
 pub struct AdaptiveConvergenceMetrics {
     pub completed_iterations: usize,
     pub element_budget_reached: bool,
+    pub previous_node_count: Option<usize>,
+    pub current_node_count: Option<usize>,
+    pub previous_element_count: Option<usize>,
+    pub current_element_count: Option<usize>,
     pub field_change: Option<f64>,
     pub energy_change: Option<f64>,
     pub residual: Option<f64>,
@@ -42,6 +46,20 @@ pub fn evaluate_adaptive_convergence(
     }
     if metrics.completed_iterations >= options.max_iterations {
         return AdaptiveConvergenceStatus::MaxIterationsReached;
+    }
+    if metrics.completed_iterations > 0
+        && matches!(
+            (
+                metrics.previous_node_count,
+                metrics.current_node_count,
+                metrics.previous_element_count,
+                metrics.current_element_count,
+            ),
+            (Some(previous_nodes), Some(current_nodes), Some(previous_elements), Some(current_elements))
+                if current_nodes <= previous_nodes && current_elements <= previous_elements
+        )
+    {
+        return AdaptiveConvergenceStatus::Converged;
     }
 
     let mut considered_metric = false;
@@ -632,6 +650,43 @@ mod tests {
         );
         assert_eq!(
             evaluate_adaptive_convergence(&options, AdaptiveConvergenceMetrics::default()),
+            AdaptiveConvergenceStatus::Pending
+        );
+    }
+
+    #[test]
+    fn adaptive_convergence_detects_no_topology_growth() {
+        let options = MeshRefinementOptions {
+            strategy: RefinementStrategy::Adaptive,
+            ..MeshRefinementOptions::default()
+        };
+
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    completed_iterations: 1,
+                    previous_node_count: Some(24),
+                    current_node_count: Some(24),
+                    previous_element_count: Some(48),
+                    current_element_count: Some(48),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
+            AdaptiveConvergenceStatus::Converged
+        );
+        assert_eq!(
+            evaluate_adaptive_convergence(
+                &options,
+                AdaptiveConvergenceMetrics {
+                    completed_iterations: 1,
+                    previous_node_count: Some(24),
+                    current_node_count: Some(25),
+                    previous_element_count: Some(48),
+                    current_element_count: Some(49),
+                    ..AdaptiveConvergenceMetrics::default()
+                }
+            ),
             AdaptiveConvergenceStatus::Pending
         );
     }

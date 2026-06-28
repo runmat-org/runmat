@@ -14130,7 +14130,20 @@ fn generate_and_persist_refined_study_analysis_mesh(
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
-    if !refinement_effect_topology_changed(&refinement_effect) {
+    let refinement_convergence = runmat_meshing_core::evaluate_adaptive_convergence(
+        &options.refinement,
+        runmat_meshing_core::AdaptiveConvergenceMetrics {
+            completed_iterations: mesh.adaptive_iterations.len(),
+            previous_node_count: Some(mesh.nodes.len()),
+            current_node_count: Some(refined_mesh.nodes.len()),
+            previous_element_count: Some(mesh.volume_elements.len()),
+            current_element_count: Some(refined_mesh.volume_elements.len()),
+            ..runmat_meshing_core::AdaptiveConvergenceMetrics::default()
+        },
+    );
+    if refinement_convergence == AdaptiveConvergenceStatus::Converged
+        && !refinement_effect_topology_changed(&refinement_effect)
+    {
         mark_latest_adaptive_iteration_converged(
             &path_buf,
             payload,
@@ -14933,6 +14946,7 @@ fn append_solved_adaptive_mesh_summary(
                     || electromagnetic_energy_density_used)
                     .then_some(marker_change),
                 residual: None,
+                ..runmat_meshing_core::AdaptiveConvergenceMetrics::default()
             },
         )
     };
