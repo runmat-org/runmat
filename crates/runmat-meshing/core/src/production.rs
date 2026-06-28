@@ -20,7 +20,10 @@ use crate::{
     predicate::{distance_squared, dot, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
+    sizing::{
+        AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+        SizingSampleRejection,
+    },
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
         discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
@@ -255,6 +258,20 @@ fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 
             break;
         }
     }
+    for sample in &sizing.anisotropic_samples {
+        if !sample.is_valid_metric()
+            || points[..count]
+                .iter()
+                .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+        {
+            continue;
+        }
+        points[count] = sample.position_m;
+        count += 1;
+        if count >= points.len() {
+            break;
+        }
+    }
     (points, count)
 }
 
@@ -265,6 +282,16 @@ fn production_effective_sizing(
     sizing: Option<&MeshSizingField>,
 ) -> Option<MeshSizingField> {
     let mut effective = sizing.cloned().unwrap_or_default();
+    for sample in anisotropic_equivalent_sizing_samples(&effective.anisotropic_samples) {
+        if effective
+            .samples
+            .iter()
+            .any(|existing| distance_squared(existing.position_m, sample.position_m) <= 1.0e-24)
+        {
+            continue;
+        }
+        effective.samples.push(sample);
+    }
     if options.refinement.focus.curvature {
         let base_target_size_m = effective
             .global_target_size_m
@@ -323,6 +350,28 @@ fn production_effective_sizing(
     } else {
         None
     }
+}
+
+fn anisotropic_equivalent_sizing_samples(samples: &[AnisotropicSizingSample]) -> Vec<SizingSample> {
+    samples
+        .iter()
+        .filter(|sample| sample.is_valid_metric())
+        .filter_map(|sample| {
+            let target_size_m = sample
+                .target_sizes_m
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            (target_size_m.is_finite() && target_size_m > 0.0).then_some(SizingSample {
+                position_m: sample.position_m,
+                target_size_m,
+                reason: sample
+                    .reason
+                    .clone()
+                    .or_else(|| Some("anisotropic.metric".to_string())),
+            })
+        })
+        .collect()
 }
 
 fn cad_curvature_sizing_samples(
@@ -535,6 +584,16 @@ fn production_sizing_target_size(
             );
             target_size_m = target_size_m.min(sample_target_size_m);
         }
+    }
+    for sample in anisotropic_equivalent_sizing_samples(&sizing.anisotropic_samples) {
+        let sample_target_size_m = production_sample_target_size(
+            sample.target_size_m,
+            Some(global_target_size_m),
+            sizing.growth_rate.or(options.growth_rate),
+            sizing.min_size_m.or(options.min_size_m),
+            sizing.max_size_m.or(options.max_size_m),
+        );
+        target_size_m = target_size_m.min(sample_target_size_m);
     }
     if let Some(min_size_m) = sizing.min_size_m.or(options.min_size_m) {
         if min_size_m.is_finite() && min_size_m > 0.0 {
@@ -1507,6 +1566,55 @@ mod tests {
             sample.reason.as_deref() == Some("cad.proximity") && sample.target_size_m < 0.1
         }));
         assert!(requested_refinement_points(Some(&sizing)).1 > 4);
+    }
+
+    #[test]
+    fn production_sizing_consumes_valid_anisotropic_samples_conservatively() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.5);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            anisotropic_samples: vec![
+                AnisotropicSizingSample {
+                    position_m: [0.25, 0.25, 0.25],
+                    target_sizes_m: [0.05, 0.2, 0.4],
+                    directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    reason: Some("boundary_layer".to_string()),
+                },
+                AnisotropicSizingSample {
+                    position_m: [0.75, 0.75, 0.75],
+                    target_sizes_m: [0.05, -0.2, 0.4],
+                    directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    reason: Some("cad.proximity".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+        let geometry = cube_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+        let cad_evaluation =
+            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+
+        let effective =
+            production_effective_sizing(&topology, &cad_evaluation, &options, Some(&sizing))
+                .expect("anisotropic sizing should produce an effective sizing field");
+
+        assert_eq!(effective.anisotropic_samples.len(), 2);
+        assert!(effective.samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("boundary_layer")
+                && sample.position_m == [0.25, 0.25, 0.25]
+                && (sample.target_size_m - 0.05).abs() <= 1.0e-12
+        }));
+        assert!(!effective
+            .samples
+            .iter()
+            .any(|sample| sample.position_m == [0.75, 0.75, 0.75]));
+        assert_eq!(requested_refinement_points(Some(&effective)).1, 1);
+        assert_eq!(production_sizing_target_size(0.5, &sizing, &options), 0.05);
     }
 
     #[test]
