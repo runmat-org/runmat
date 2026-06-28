@@ -256,6 +256,8 @@ pub struct MeshTetRecoveryEvidence {
 pub struct MeshRegionEvidence {
     pub material_region_element_counts: BTreeMap<String, usize>,
     pub boundary_region_face_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub boundary_region_recovered_face_counts: BTreeMap<String, usize>,
     pub boundary_region_edge_counts: BTreeMap<String, usize>,
 }
 
@@ -726,11 +728,17 @@ fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
     }
 
     let mut boundary_region_face_counts = BTreeMap::<String, usize>::new();
+    let mut boundary_region_recovered_face_counts = BTreeMap::<String, usize>::new();
     for face in &mesh.boundary_faces {
         for region_id in &face.region_ids {
             *boundary_region_face_counts
                 .entry(region_id.clone())
                 .or_default() += 1;
+            if !face.adjacent_volume_element_ids.is_empty() {
+                *boundary_region_recovered_face_counts
+                    .entry(region_id.clone())
+                    .or_default() += 1;
+            }
         }
     }
 
@@ -746,6 +754,7 @@ fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
     MeshRegionEvidence {
         material_region_element_counts,
         boundary_region_face_counts,
+        boundary_region_recovered_face_counts,
         boundary_region_edge_counts,
     }
 }
@@ -1425,6 +1434,13 @@ mod tests {
         );
         assert_eq!(
             evidence.regions.boundary_region_face_counts.get("fixed"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .regions
+                .boundary_region_recovered_face_counts
+                .get("fixed"),
             Some(&1)
         );
         assert_eq!(evidence.quality.min_exact_scaled_jacobian, 0.45);

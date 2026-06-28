@@ -175,6 +175,9 @@ pub enum AnalysisMeshValidationError {
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
+    MissingRequiredBoundaryRegionRecovery {
+        region_id: String,
+    },
     MissingRequiredMaterialRegion {
         region_id: String,
     },
@@ -251,6 +254,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         }
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
+        }
+        AnalysisMeshValidationError::MissingRequiredBoundaryRegionRecovery { .. } => {
+            "missing_required_boundary_region_recovery"
         }
         AnalysisMeshValidationError::MissingRequiredMaterialRegion { .. } => {
             "missing_required_material_region"
@@ -639,11 +645,24 @@ fn validate_required_boundary_regions(
         .iter()
         .flat_map(|face| face.region_ids.iter().map(String::as_str))
         .collect::<BTreeSet<_>>();
+    let recovered = mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| !face.adjacent_volume_element_ids.is_empty())
+        .flat_map(|face| face.region_ids.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>();
     for region_id in required_region_ids {
         if !present.contains(region_id.as_str()) {
             return Err(AnalysisMeshValidationError::MissingRequiredBoundaryRegion {
                 region_id: region_id.clone(),
             });
+        }
+        if !recovered.contains(region_id.as_str()) {
+            return Err(
+                AnalysisMeshValidationError::MissingRequiredBoundaryRegionRecovery {
+                    region_id: region_id.clone(),
+                },
+            );
         }
     }
     Ok(())
@@ -1616,6 +1635,26 @@ mod tests {
             err,
             AnalysisMeshValidationError::MissingRequiredBoundaryRegion {
                 region_id: "loaded".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_required_boundary_region_without_recovered_face() {
+        let mut mesh = valid_tet_mesh();
+        mesh.boundary_faces[0].adjacent_volume_element_ids.clear();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                required_boundary_region_ids: vec!["fixed".to_string()],
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("unrecovered boundary region should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::MissingRequiredBoundaryRegionRecovery {
+                region_id: "fixed".to_string()
             }
         );
     }
