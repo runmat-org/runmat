@@ -1515,8 +1515,7 @@ impl ComponentSurfaceClassifier {
 
     fn ray_has_odd_surface_intersections(&self, origin: [f64; 3], direction: [f64; 3]) -> bool {
         let mut intersections = Vec::<f64>::new();
-        let query_bounds = ray_query_bounds(origin, direction, self.grid_index.bounds());
-        for entry in self.grid_index.query_bounds(query_bounds) {
+        for entry in self.grid_index.query_ray(origin, direction) {
             let Some(triangle) = self.triangles_by_element_id.get(&entry.payload).copied() else {
                 continue;
             };
@@ -1532,21 +1531,6 @@ impl ComponentSurfaceClassifier {
         intersections.dedup_by(|left, right| (*left - *right).abs() <= self.tolerance.absolute_m);
         intersections.len() % 2 == 1
     }
-}
-
-fn ray_query_bounds(origin: [f64; 3], direction: [f64; 3], bounds: Aabb3) -> Aabb3 {
-    let mut query = bounds;
-    for axis in 0..3 {
-        if direction[axis].abs() <= f64::EPSILON {
-            query.min_m[axis] = origin[axis];
-            query.max_m[axis] = origin[axis];
-        } else if direction[axis] > 0.0 {
-            query.min_m[axis] = origin[axis].max(bounds.min_m[axis]);
-        } else {
-            query.max_m[axis] = origin[axis].min(bounds.max_m[axis]);
-        }
-    }
-    query
 }
 
 fn surface_element_points(
