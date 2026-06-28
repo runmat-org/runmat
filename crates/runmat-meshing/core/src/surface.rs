@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cad_eval::{project_to_face, CadEvaluationModel},
     curve::{CurveDiscretization, CurveNode},
-    predicate::triangle_area,
+    predicate::{cross, dot, sub, triangle_area},
     source_topology::{SourceTopologyFace, SourceTopologyModel},
 };
 
@@ -259,48 +259,7 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut nodes,
             &mut curve_node_to_surface_node,
         )?;
-        let centroid = face_centroid_from_segments(&nodes, &segments);
-        let centroid_projection = project_to_face(frame, centroid);
-        let centroid_node_id = nodes.len() as u32;
-        nodes.push(SurfaceNode {
-            node_id: centroid_node_id,
-            source_vertex_id: u32::MAX,
-            coordinates_m: centroid,
-        });
-
-        for segment in segments {
-            let points = [
-                nodes[segment.node_ids[0] as usize].coordinates_m,
-                nodes[segment.node_ids[1] as usize].coordinates_m,
-                centroid,
-            ];
-            let left_projection = project_to_face(frame, points[0]);
-            let right_projection = project_to_face(frame, points[1]);
-            let max_projection_error_m = left_projection
-                .distance_m
-                .max(right_projection.distance_m)
-                .max(centroid_projection.distance_m);
-            elements.push(SurfaceElement {
-                element_id: elements.len() as u32,
-                source_face_id: face.face_id,
-                cad_face_id: Some(frame.face_id.clone()),
-                source_edge_ids: [
-                    segment.source_edge_id,
-                    INTERNAL_SOURCE_EDGE_ID,
-                    INTERNAL_SOURCE_EDGE_ID,
-                ],
-                node_ids: [segment.node_ids[0], segment.node_ids[1], centroid_node_id],
-                parametric_node_uv: [
-                    left_projection.uv,
-                    right_projection.uv,
-                    centroid_projection.uv,
-                ],
-                max_projection_error_m,
-                region_ids: face.region_ids.clone(),
-                area_m2: triangle_area(points),
-                unit_normal: frame.unit_normal,
-            });
-        }
+        append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
     }
 
     Ok(SurfaceDiscretization { nodes, elements })
@@ -310,6 +269,17 @@ pub fn discretize_cad_surfaces_with_curves(
 struct FaceCurveSegment {
     node_ids: [u32; 2],
     source_edge_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FaceTriangulationPoint {
+    node_id: u32,
+    uv: [f64; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FaceTriangle {
+    point_indices: [usize; 3],
 }
 
 fn curve_nodes_by_source_edge(curves: &CurveDiscretization) -> BTreeMap<u32, Vec<&CurveNode>> {
@@ -467,6 +437,489 @@ fn face_centroid_from_segments(nodes: &[SurfaceNode], segments: &[FaceCurveSegme
         return [0.0, 0.0, 0.0];
     }
     [sum[0] / count, sum[1] / count, sum[2] / count]
+}
+
+fn append_curve_driven_face_elements(
+    face: &SourceTopologyFace,
+    frame: &crate::CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &mut Vec<SurfaceNode>,
+    elements: &mut Vec<SurfaceElement>,
+) {
+    if segments.len() <= 3 {
+        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        return;
+    }
+
+    let mut boundary_edge_ids = BTreeMap::<[u32; 2], u32>::new();
+    for segment in segments {
+        boundary_edge_ids.insert(
+            sorted_node_pair(segment.node_ids[0], segment.node_ids[1]),
+            segment.source_edge_id,
+        );
+    }
+
+    let mut points = boundary_triangulation_points(frame, segments, nodes);
+    append_face_lattice_points(face, frame, segments, nodes, &mut points);
+    let triangles = triangulate_face_points(&points);
+    if triangles.is_empty() {
+        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        return;
+    }
+
+    for triangle in triangles {
+        let mut node_ids = triangle.point_indices.map(|index| points[index].node_id);
+        if node_ids[0] == node_ids[1] || node_ids[1] == node_ids[2] || node_ids[2] == node_ids[0] {
+            continue;
+        }
+        let mut parametric_node_uv = triangle.point_indices.map(|index| points[index].uv);
+        let mut coordinates = node_ids.map(|node_id| nodes[node_id as usize].coordinates_m);
+        if triangle_area(coordinates) <= f64::EPSILON {
+            continue;
+        }
+        if dot(
+            cross(
+                sub(coordinates[1], coordinates[0]),
+                sub(coordinates[2], coordinates[0]),
+            ),
+            frame.unit_normal,
+        ) < 0.0
+        {
+            node_ids.swap(1, 2);
+            parametric_node_uv.swap(1, 2);
+            coordinates.swap(1, 2);
+        }
+        let source_edge_ids = [
+            boundary_edge_ids
+                .get(&sorted_node_pair(node_ids[0], node_ids[1]))
+                .copied()
+                .unwrap_or(INTERNAL_SOURCE_EDGE_ID),
+            boundary_edge_ids
+                .get(&sorted_node_pair(node_ids[1], node_ids[2]))
+                .copied()
+                .unwrap_or(INTERNAL_SOURCE_EDGE_ID),
+            boundary_edge_ids
+                .get(&sorted_node_pair(node_ids[2], node_ids[0]))
+                .copied()
+                .unwrap_or(INTERNAL_SOURCE_EDGE_ID),
+        ];
+        let max_projection_error_m = node_ids
+            .iter()
+            .map(|node_id| {
+                project_to_face(frame, nodes[*node_id as usize].coordinates_m).distance_m
+            })
+            .fold(0.0_f64, f64::max);
+        elements.push(SurfaceElement {
+            element_id: elements.len() as u32,
+            source_face_id: face.face_id,
+            cad_face_id: Some(frame.face_id.clone()),
+            source_edge_ids,
+            node_ids,
+            parametric_node_uv,
+            max_projection_error_m,
+            region_ids: face.region_ids.clone(),
+            area_m2: triangle_area(coordinates),
+            unit_normal: frame.unit_normal,
+        });
+    }
+}
+
+fn append_curve_fan_face_elements(
+    face: &SourceTopologyFace,
+    frame: &crate::CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &mut Vec<SurfaceNode>,
+    elements: &mut Vec<SurfaceElement>,
+) {
+    let centroid = face_centroid_from_segments(nodes, segments);
+    let centroid_projection = project_to_face(frame, centroid);
+    let centroid_node_id = nodes.len() as u32;
+    nodes.push(SurfaceNode {
+        node_id: centroid_node_id,
+        source_vertex_id: u32::MAX,
+        coordinates_m: centroid,
+    });
+
+    for segment in segments {
+        let points = [
+            nodes[segment.node_ids[0] as usize].coordinates_m,
+            nodes[segment.node_ids[1] as usize].coordinates_m,
+            centroid,
+        ];
+        let left_projection = project_to_face(frame, points[0]);
+        let right_projection = project_to_face(frame, points[1]);
+        let max_projection_error_m = left_projection
+            .distance_m
+            .max(right_projection.distance_m)
+            .max(centroid_projection.distance_m);
+        elements.push(SurfaceElement {
+            element_id: elements.len() as u32,
+            source_face_id: face.face_id,
+            cad_face_id: Some(frame.face_id.clone()),
+            source_edge_ids: [
+                segment.source_edge_id,
+                INTERNAL_SOURCE_EDGE_ID,
+                INTERNAL_SOURCE_EDGE_ID,
+            ],
+            node_ids: [segment.node_ids[0], segment.node_ids[1], centroid_node_id],
+            parametric_node_uv: [
+                left_projection.uv,
+                right_projection.uv,
+                centroid_projection.uv,
+            ],
+            max_projection_error_m,
+            region_ids: face.region_ids.clone(),
+            area_m2: triangle_area(points),
+            unit_normal: frame.unit_normal,
+        });
+    }
+}
+
+fn boundary_triangulation_points(
+    frame: &crate::CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &[SurfaceNode],
+) -> Vec<FaceTriangulationPoint> {
+    let mut points = Vec::<FaceTriangulationPoint>::new();
+    for segment in segments {
+        for node_id in segment.node_ids {
+            if points.iter().any(|point| point.node_id == node_id) {
+                continue;
+            }
+            points.push(FaceTriangulationPoint {
+                node_id,
+                uv: project_to_face(frame, nodes[node_id as usize].coordinates_m).uv,
+            });
+        }
+    }
+    points
+}
+
+fn append_face_lattice_points(
+    face: &SourceTopologyFace,
+    frame: &crate::CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &mut Vec<SurfaceNode>,
+    points: &mut Vec<FaceTriangulationPoint>,
+) {
+    let segment_count = segments_per_source_edge(segments)
+        .into_values()
+        .max()
+        .unwrap_or(1)
+        .max(2);
+    if segment_count <= 2 {
+        return;
+    }
+    let corners = face
+        .node_ids
+        .map(|node_id| nodes[node_id as usize].coordinates_m);
+    for i in 1..segment_count {
+        for j in 1..(segment_count - i) {
+            let u = i as f64 / segment_count as f64;
+            let v = j as f64 / segment_count as f64;
+            let w = 1.0 - u - v;
+            if w <= f64::EPSILON {
+                continue;
+            }
+            let coordinates = [
+                corners[0][0] * w + corners[1][0] * u + corners[2][0] * v,
+                corners[0][1] * w + corners[1][1] * u + corners[2][1] * v,
+                corners[0][2] * w + corners[1][2] * u + corners[2][2] * v,
+            ];
+            let projection = project_to_face(frame, coordinates);
+            if points
+                .iter()
+                .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
+            {
+                continue;
+            }
+            let node_id = nodes.len() as u32;
+            nodes.push(SurfaceNode {
+                node_id,
+                source_vertex_id: u32::MAX,
+                coordinates_m: projection.point_m,
+            });
+            points.push(FaceTriangulationPoint {
+                node_id,
+                uv: projection.uv,
+            });
+        }
+    }
+}
+
+fn segments_per_source_edge(segments: &[FaceCurveSegment]) -> BTreeMap<u32, usize> {
+    let mut counts = BTreeMap::<u32, usize>::new();
+    for segment in segments {
+        *counts.entry(segment.source_edge_id).or_default() += 1;
+    }
+    counts
+}
+
+fn triangulate_face_points(points: &[FaceTriangulationPoint]) -> Vec<FaceTriangle> {
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let mut work_points = points
+        .iter()
+        .map(|point| TriangulationPoint {
+            uv: point.uv,
+            original_index: Some(0),
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    for (index, point) in work_points.iter_mut().enumerate() {
+        point.original_index = Some(index);
+    }
+    let super_start = work_points.len();
+    work_points.extend(super_triangle_points(points));
+    let mut triangles = vec![TriangulationTriangle {
+        point_indices: [super_start, super_start + 1, super_start + 2],
+    }];
+
+    for point_index in 0..points.len() {
+        let point = work_points[point_index].uv;
+        let mut bad_indices = Vec::<usize>::new();
+        for (triangle_index, triangle) in triangles.iter().enumerate() {
+            if circumcircle_contains(
+                triangle.point_indices.map(|index| work_points[index].uv),
+                point,
+            ) {
+                bad_indices.push(triangle_index);
+            }
+        }
+        if bad_indices.is_empty() {
+            continue;
+        }
+        let bad_set = bad_indices
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut edge_counts = BTreeMap::<[usize; 2], usize>::new();
+        for triangle_index in &bad_indices {
+            for edge in triangle_edges_2d(triangles[*triangle_index].point_indices) {
+                *edge_counts
+                    .entry(sorted_index_pair(edge[0], edge[1]))
+                    .or_default() += 1;
+            }
+        }
+        let cavity_edges = edge_counts
+            .into_iter()
+            .filter_map(|(edge, count)| (count == 1).then_some(edge))
+            .collect::<Vec<_>>();
+        triangles = triangles
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, triangle)| (!bad_set.contains(&index)).then_some(triangle))
+            .collect();
+        for edge in cavity_edges {
+            let point_indices = [edge[0], edge[1], point_index];
+            if triangle_area_2d(point_indices.map(|index| work_points[index].uv)).abs()
+                > f64::EPSILON
+            {
+                triangles.push(TriangulationTriangle { point_indices });
+            }
+        }
+    }
+
+    let polygon = boundary_polygon(points);
+    triangles
+        .into_iter()
+        .filter(|triangle| {
+            !triangle
+                .point_indices
+                .iter()
+                .any(|index| work_points[*index].is_super)
+        })
+        .filter_map(|triangle| {
+            let point_indices = triangle
+                .point_indices
+                .map(|index| work_points[index].original_index);
+            Some(FaceTriangle {
+                point_indices: [point_indices[0]?, point_indices[1]?, point_indices[2]?],
+            })
+        })
+        .filter(|triangle| {
+            let centroid =
+                triangle_centroid_2d(triangle.point_indices.map(|index| points[index].uv));
+            point_in_polygon_2d(centroid, &polygon)
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TriangulationPoint {
+    uv: [f64; 2],
+    original_index: Option<usize>,
+    is_super: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TriangulationTriangle {
+    point_indices: [usize; 3],
+}
+
+fn super_triangle_points(points: &[FaceTriangulationPoint]) -> [TriangulationPoint; 3] {
+    let mut min = points[0].uv;
+    let mut max = points[0].uv;
+    for point in points {
+        min[0] = min[0].min(point.uv[0]);
+        min[1] = min[1].min(point.uv[1]);
+        max[0] = max[0].max(point.uv[0]);
+        max[1] = max[1].max(point.uv[1]);
+    }
+    let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+    let span = (max[0] - min[0]).max(max[1] - min[1]).max(1.0);
+    [
+        TriangulationPoint {
+            uv: [center[0] - 32.0 * span, center[1] - span],
+            original_index: None,
+            is_super: true,
+        },
+        TriangulationPoint {
+            uv: [center[0], center[1] + 32.0 * span],
+            original_index: None,
+            is_super: true,
+        },
+        TriangulationPoint {
+            uv: [center[0] + 32.0 * span, center[1] - span],
+            original_index: None,
+            is_super: true,
+        },
+    ]
+}
+
+fn circumcircle_contains(triangle: [[f64; 2]; 3], point: [f64; 2]) -> bool {
+    let ax = triangle[0][0] - point[0];
+    let ay = triangle[0][1] - point[1];
+    let bx = triangle[1][0] - point[0];
+    let by = triangle[1][1] - point[1];
+    let cx = triangle[2][0] - point[0];
+    let cy = triangle[2][1] - point[1];
+    let determinant = (ax * ax + ay * ay) * (bx * cy - by * cx)
+        - (bx * bx + by * by) * (ax * cy - ay * cx)
+        + (cx * cx + cy * cy) * (ax * by - ay * bx);
+    let orientation = triangle_area_2d(triangle);
+    if orientation > 0.0 {
+        determinant > -1.0e-12
+    } else {
+        determinant < 1.0e-12
+    }
+}
+
+fn triangle_edges_2d(point_indices: [usize; 3]) -> [[usize; 2]; 3] {
+    [
+        [point_indices[0], point_indices[1]],
+        [point_indices[1], point_indices[2]],
+        [point_indices[2], point_indices[0]],
+    ]
+}
+
+fn triangle_area_2d(points: [[f64; 2]; 3]) -> f64 {
+    0.5 * ((points[1][0] - points[0][0]) * (points[2][1] - points[0][1])
+        - (points[1][1] - points[0][1]) * (points[2][0] - points[0][0]))
+}
+
+fn triangle_centroid_2d(points: [[f64; 2]; 3]) -> [f64; 2] {
+    [
+        (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+        (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+    ]
+}
+
+fn boundary_polygon(points: &[FaceTriangulationPoint]) -> Vec<[f64; 2]> {
+    convex_hull_2d(&points.iter().map(|point| point.uv).collect::<Vec<_>>())
+}
+
+fn convex_hull_2d(points: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let mut sorted = points.to_vec();
+    sorted.sort_by(|left, right| {
+        left[0]
+            .total_cmp(&right[0])
+            .then_with(|| left[1].total_cmp(&right[1]))
+    });
+    sorted.dedup_by(|left, right| distance2_2d(*left, *right) <= 1.0e-24);
+    if sorted.len() <= 3 {
+        return sorted;
+    }
+    let mut lower = Vec::<[f64; 2]>::new();
+    for point in &sorted {
+        while lower.len() >= 2
+            && cross_2d(lower[lower.len() - 2], lower[lower.len() - 1], *point) <= 1.0e-12
+        {
+            lower.pop();
+        }
+        lower.push(*point);
+    }
+    let mut upper = Vec::<[f64; 2]>::new();
+    for point in sorted.iter().rev() {
+        while upper.len() >= 2
+            && cross_2d(upper[upper.len() - 2], upper[upper.len() - 1], *point) <= 1.0e-12
+        {
+            upper.pop();
+        }
+        upper.push(*point);
+    }
+    lower.pop();
+    upper.pop();
+    lower.extend(upper);
+    lower
+}
+
+fn point_in_polygon_2d(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut previous = polygon[polygon.len() - 1];
+    for current in polygon {
+        if point_on_segment_2d(point, previous, *current) {
+            return true;
+        }
+        let denominator = previous[1] - current[1];
+        let crosses = denominator.abs() > f64::EPSILON
+            && ((current[1] > point[1]) != (previous[1] > point[1]))
+            && point[0]
+                < (previous[0] - current[0]) * (point[1] - current[1]) / denominator + current[0];
+        if crosses {
+            inside = !inside;
+        }
+        previous = *current;
+    }
+    inside
+}
+
+fn point_on_segment_2d(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> bool {
+    cross_2d(start, end, point).abs() <= 1.0e-10
+        && point[0] >= start[0].min(end[0]) - 1.0e-10
+        && point[0] <= start[0].max(end[0]) + 1.0e-10
+        && point[1] >= start[1].min(end[1]) - 1.0e-10
+        && point[1] <= start[1].max(end[1]) + 1.0e-10
+}
+
+fn cross_2d(origin: [f64; 2], left: [f64; 2], right: [f64; 2]) -> f64 {
+    (left[0] - origin[0]) * (right[1] - origin[1]) - (left[1] - origin[1]) * (right[0] - origin[0])
+}
+
+fn distance2_2d(left: [f64; 2], right: [f64; 2]) -> f64 {
+    let dx = left[0] - right[0];
+    let dy = left[1] - right[1];
+    dx * dx + dy * dy
+}
+
+fn sorted_node_pair(left: u32, right: u32) -> [u32; 2] {
+    if left <= right {
+        [left, right]
+    } else {
+        [right, left]
+    }
+}
+
+fn sorted_index_pair(left: usize, right: usize) -> [usize; 2] {
+    if left <= right {
+        [left, right]
+    } else {
+        [right, left]
+    }
 }
 
 fn append_centroid_subdivision(
@@ -653,12 +1106,23 @@ mod tests {
         )
         .expect("cad-owned curve surface should discretize");
 
-        assert_eq!(surface.elements.len(), 6);
+        assert_eq!(surface.elements.len(), 4);
         assert!(surface.nodes.len() > topology.vertices.len());
-        assert!(surface.elements.iter().all(|element| {
-            element.cad_face_id == Some("cad_face_7".to_string())
-                && element.source_edge_ids[1] == INTERNAL_SOURCE_EDGE_ID
-                && element.source_edge_ids[2] == INTERNAL_SOURCE_EDGE_ID
+        assert!(surface
+            .elements
+            .iter()
+            .all(|element| element.cad_face_id == Some("cad_face_7".to_string())));
+        assert!(surface.elements.iter().any(|element| {
+            element
+                .source_edge_ids
+                .iter()
+                .any(|edge_id| *edge_id != INTERNAL_SOURCE_EDGE_ID)
+        }));
+        assert!(surface.elements.iter().any(|element| {
+            element
+                .source_edge_ids
+                .iter()
+                .any(|edge_id| *edge_id == INTERNAL_SOURCE_EDGE_ID)
         }));
     }
 

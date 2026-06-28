@@ -121,7 +121,7 @@ pub fn prepare_production_mesh(
         &cad_evaluation,
         &curves,
         SurfaceDiscretizationOptions {
-            max_curve_segments_per_edge: 2,
+            max_curve_segments_per_edge: 8,
             ..SurfaceDiscretizationOptions::default()
         },
     )
@@ -718,7 +718,7 @@ mod tests {
             preparation.cad_evaluation_report.max_projection_error_m,
             0.0
         );
-        assert_eq!(preparation.surface.elements.len(), 72);
+        assert_eq!(preparation.surface.elements.len(), 768);
         assert_eq!(surface_cad_face_count(&preparation.surface), 12);
         assert_eq!(
             surface_max_cad_projection_error_m(&preparation.surface),
@@ -735,7 +735,7 @@ mod tests {
             18
         );
         assert_eq!(preparation.surface_validation.face_coverage_ratio, 1.0);
-        assert_eq!(preparation.surface_recovery.surface_element_count, 72);
+        assert_eq!(preparation.surface_recovery.surface_element_count, 768);
         assert_eq!(preparation.surface_recovery.open_edge_count, 0);
         assert_eq!(preparation.surface_recovery.nonmanifold_edge_count, 0);
         assert_eq!(preparation.surface_recovery.source_face_coverage_ratio, 1.0);
@@ -770,8 +770,8 @@ mod tests {
             .expect("production candidate mesh should validate");
         assert!(mesh.nodes.len() > 9);
         assert!(mesh.volume_elements.len() > 12);
-        assert_eq!(mesh.boundary_faces.len(), 72);
-        assert_eq!(mesh.boundary_edges.len(), 108);
+        assert_eq!(mesh.boundary_faces.len(), 768);
+        assert_eq!(mesh.boundary_edges.len(), 1152);
         assert!(mesh
             .boundary_edges
             .iter()
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(mesh.backend.cad_evaluation_evaluator_face_count, 0);
         assert_eq!(mesh.backend.cad_projection_query_count, 36);
         assert_eq!(mesh.backend.cad_max_projection_error_m, 0.0);
-        assert_eq!(mesh.backend.surface_element_count, 72);
+        assert_eq!(mesh.backend.surface_element_count, 768);
         assert_eq!(mesh.backend.surface_source_edge_loop_count, 18);
         assert_eq!(mesh.backend.surface_closed_edge_loop_count, 18);
         assert_eq!(mesh.backend.surface_face_coverage_ratio, 1.0);
