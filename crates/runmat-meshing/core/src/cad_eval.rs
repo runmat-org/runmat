@@ -373,13 +373,11 @@ fn face_frame(
 }
 
 fn evaluation_source(
-    face_frame_count: usize,
+    _face_frame_count: usize,
     evaluator_backed_frame_count: usize,
     exact_query_face_count: usize,
 ) -> CadEvaluationSource {
-    if face_frame_count > 0 && exact_query_face_count == face_frame_count {
-        CadEvaluationSource::ParametricCad
-    } else if evaluator_backed_frame_count > 0 {
+    if evaluator_backed_frame_count > 0 || exact_query_face_count > 0 {
         CadEvaluationSource::ImportedEvaluatorSamples
     } else {
         CadEvaluationSource::PlanarFacetApproximation
@@ -702,6 +700,14 @@ mod tests {
         assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
         assert_eq!(frame.evaluator_samples.len(), 1);
         assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
+    }
+
+    #[test]
+    fn all_backend_query_samples_remain_imported_sample_source() {
+        assert_eq!(
+            evaluation_source(2, 2, 2),
+            CadEvaluationSource::ImportedEvaluatorSamples
+        );
     }
 
     #[test]
