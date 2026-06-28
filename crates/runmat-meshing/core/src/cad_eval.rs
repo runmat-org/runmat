@@ -32,6 +32,10 @@ pub struct CadFaceEvaluationFrame {
     pub exact_query_backed: bool,
     #[serde(default)]
     pub evaluator_sample_count: usize,
+    #[serde(default)]
+    pub evaluator_max_projection_error_m: f64,
+    #[serde(default)]
+    pub evaluator_samples: Vec<CadFaceEvaluationSample>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -121,6 +125,7 @@ pub fn build_cad_evaluation_model(
             topology_vertex(topology, source_face.node_ids[2])?,
         ];
         let exact_sample = exact_backend_sample(face);
+        let evaluator_max_projection_error_m = evaluator_max_projection_error(face);
         let frame = face_frame(
             face.entity_id.id.clone(),
             source_face_id,
@@ -136,6 +141,8 @@ pub fn build_cad_evaluation_model(
             face.evaluator_unit_normal.is_some() || !face.evaluator_samples.is_empty(),
             exact_sample.is_some(),
             face.evaluator_samples.len(),
+            evaluator_max_projection_error_m,
+            bounded_evaluator_samples(face),
         )?;
         frames.push(frame);
     }
@@ -148,6 +155,10 @@ pub fn build_cad_evaluation_model(
         .iter()
         .map(|frame| frame.evaluator_sample_count)
         .sum();
+    let max_evaluator_projection_error_m = frames
+        .iter()
+        .map(|frame| frame.evaluator_max_projection_error_m)
+        .fold(0.0_f64, f64::max);
     let report = CadEvaluationReport {
         source: evaluation_source(
             frames.len(),
@@ -160,7 +171,7 @@ pub fn build_cad_evaluation_model(
         evaluator_sample_count,
         normal_query_count: frames.len(),
         projection_query_count: frames.len(),
-        max_projection_error_m: 0.0,
+        max_projection_error_m: max_evaluator_projection_error_m,
         max_normal_deviation: 0.0,
     };
     Ok(CadEvaluationModel {
@@ -216,6 +227,7 @@ pub fn summarize_cad_evaluation(
             projection_query_count += 1;
             max_projection_error_m = max_projection_error_m.max(projection.distance_m);
         }
+        max_projection_error_m = max_projection_error_m.max(frame.evaluator_max_projection_error_m);
         max_normal_deviation =
             max_normal_deviation.max(1.0 - dot(frame.unit_normal, source_face.unit_normal).abs());
     }
@@ -242,6 +254,8 @@ fn face_frame(
     evaluator_backed: bool,
     exact_query_backed: bool,
     evaluator_sample_count: usize,
+    evaluator_max_projection_error_m: f64,
+    evaluator_samples: Vec<CadFaceEvaluationSample>,
 ) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
     let edge = sub(points[1], points[0]);
     let edge_length = norm(edge);
@@ -265,6 +279,8 @@ fn face_frame(
         evaluator_backed,
         exact_query_backed,
         evaluator_sample_count,
+        evaluator_max_projection_error_m,
+        evaluator_samples,
     })
 }
 
@@ -293,6 +309,37 @@ fn exact_backend_sample(face: &CadFace) -> Option<&CadFaceEvaluationSample> {
                 .projection_error_m
                 .is_none_or(|error| error.is_finite() && error >= 0.0)
     })
+}
+
+fn evaluator_max_projection_error(face: &CadFace) -> f64 {
+    face.evaluator_samples
+        .iter()
+        .filter_map(|sample| sample.projection_error_m)
+        .filter(|error| error.is_finite() && *error >= 0.0)
+        .fold(0.0_f64, f64::max)
+}
+
+fn bounded_evaluator_samples(face: &CadFace) -> Vec<CadFaceEvaluationSample> {
+    face.evaluator_samples
+        .iter()
+        .filter(|sample| {
+            finite_point(sample.point_m)
+                && sample
+                    .projected_point_m
+                    .is_none_or(|point| finite_point(point))
+                && sample
+                    .uv
+                    .is_none_or(|uv| uv.iter().all(|value| value.is_finite()))
+                && sample
+                    .unit_normal
+                    .is_none_or(|normal| finite_point(normal) && norm(normal) > 0.0)
+                && sample
+                    .projection_error_m
+                    .is_none_or(|error| error.is_finite() && error >= 0.0)
+        })
+        .take(8)
+        .cloned()
+        .collect()
 }
 
 fn finite_point(point: Point3) -> bool {
@@ -380,15 +427,18 @@ mod tests {
                 uv: Some([0.5, 0.5]),
                 projected_point_m: Some([0.5, 0.5, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
-                projection_error_m: Some(0.0),
+                projection_error_m: Some(2.0e-6),
             }];
         let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
 
         let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let report = summarize_cad_evaluation(&model, &topology).expect("summary");
 
         assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
         assert_eq!(model.report.evaluator_sample_count, 2);
         assert_eq!(model.report.exact_query_face_count, 2);
+        assert_eq!(model.report.max_projection_error_m, 2.0e-6);
+        assert_eq!(report.max_projection_error_m, 2.0e-6);
         let frame = model
             .face_frames
             .iter()
@@ -396,6 +446,9 @@ mod tests {
             .expect("one frame should be exact-query backed");
         assert_eq!(frame.origin_m, [0.5, 0.5, 1.0]);
         assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
+        assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
+        assert_eq!(frame.evaluator_samples.len(), 1);
+        assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
     }
 
     fn cube_topology() -> SourceTopologyModel {
