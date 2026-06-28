@@ -1699,11 +1699,12 @@ fn requested_refinement_candidate_points(
     tolerance: MeshingTolerance,
 ) -> Vec<[f64; 3]> {
     let mut candidates = vec![requested_point];
-    let clearance = classifier.nearest_surface_distance(requested_point);
-    let safe_clearance = target_size_m.min(1.0) * 0.01;
-    if clearance <= safe_clearance.max(tolerance.absolute_m * 10.0) || seed_points.is_empty() {
+    if seed_points.is_empty() {
         return candidates;
     }
+    let clearance = classifier.nearest_surface_distance(requested_point);
+    let safe_clearance = target_size_m.min(1.0) * 0.01;
+    let near_boundary = clearance <= safe_clearance.max(tolerance.absolute_m * 10.0);
     let anchor = seed_points
         .iter()
         .copied()
@@ -1712,11 +1713,16 @@ fn requested_refinement_candidate_points(
                 .total_cmp(&distance_squared(*right, requested_point))
         })
         .unwrap_or(requested_point);
-    for fraction in [0.25, 0.5, 0.75] {
+    let fractions: &[f64] = if near_boundary {
+        &[0.25, 0.5, 0.75, 0.9]
+    } else {
+        &[0.25, 0.5, 0.75]
+    };
+    for fraction in fractions {
         let candidate = [
-            requested_point[0] * (1.0 - fraction) + anchor[0] * fraction,
-            requested_point[1] * (1.0 - fraction) + anchor[1] * fraction,
-            requested_point[2] * (1.0 - fraction) + anchor[2] * fraction,
+            requested_point[0] * (1.0 - *fraction) + anchor[0] * *fraction,
+            requested_point[1] * (1.0 - *fraction) + anchor[1] * *fraction,
+            requested_point[2] * (1.0 - *fraction) + anchor[2] * *fraction,
         ];
         if classifier.contains_point(candidate)
             && !contains_point(&candidates, candidate, tolerance)
@@ -4402,7 +4408,7 @@ mod tests {
     }
 
     #[test]
-    fn requested_refinement_points_still_reject_exact_quality_violations() {
+    fn boundary_adjacent_requested_refinement_uses_quality_safe_surrogate() {
         let (surface, volume_candidates) = cube_surface_and_volume_candidates();
         let mut requested_refinement_points = [[0.0; 3]; 16];
         requested_refinement_points[0] = [1.0e-6, 1.0e-6, 1.0e-6];
@@ -4426,16 +4432,30 @@ mod tests {
             .interior_seed_points
             .iter()
             .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
-        assert!(candidates.accepted_requested_refinement_points.is_empty());
+        assert_eq!(candidates.accepted_requested_refinement_points.len(), 1);
+        assert!(
+            distance_squared(
+                candidates.accepted_requested_refinement_points[0],
+                requested_refinement_points[0]
+            ) > 1.0e-12,
+            "accepted point should move inward from the boundary-adjacent request"
+        );
+        assert!(candidates
+            .interior_seed_points
+            .iter()
+            .any(|point| distance_squared(
+                *point,
+                candidates.accepted_requested_refinement_points[0]
+            ) <= 1.0e-24));
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
         assert_eq!(
             candidates
                 .recovery
                 .accepted_requested_refinement_point_count,
-            0
+            1
         );
-        assert_eq!(candidates.recovery.refinement_pass_count, 0);
-        assert_eq!(candidates.recovery.refinement_point_count, 0);
+        assert_eq!(candidates.recovery.refinement_pass_count, 1);
+        assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(
             candidates
                 .tets
