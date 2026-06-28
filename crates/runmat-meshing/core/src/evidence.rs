@@ -22,6 +22,8 @@ pub struct MeshEvidenceArtifact {
     pub topology: MeshTopologyEvidence,
     pub sizing: MeshSizingEvidence,
     pub quality: MeshQualityEvidence,
+    #[serde(default)]
+    pub tet_recovery: MeshTetRecoveryEvidence,
     pub regions: MeshRegionEvidence,
     pub validation: MeshValidationEvidence,
 }
@@ -113,6 +115,23 @@ pub struct MeshQualityEvidence {
     pub volume_bins: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MeshTetRecoveryEvidence {
+    pub candidate_count: usize,
+    pub recovered_component_ratio: f64,
+    pub fan_fallback_component_count: usize,
+    pub candidate_volume_ratio: f64,
+    pub refinement_pass_count: usize,
+    pub refinement_point_count: usize,
+    pub optimization_pass_count: usize,
+    pub smoothed_point_count: usize,
+    pub sliver_candidate_count: usize,
+    pub exact_quality_repair_pass_count: usize,
+    pub exact_quality_reconnected_cavity_count: usize,
+    pub exact_quality_split_cavity_count: usize,
+    pub exact_quality_seed_star_collapse_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshRegionEvidence {
     pub material_region_element_counts: BTreeMap<String, usize>,
@@ -181,6 +200,7 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         topology: topology_evidence(mesh),
         sizing: sizing_evidence(mesh),
         quality: quality_evidence(mesh),
+        tet_recovery: tet_recovery_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
     }
@@ -352,6 +372,28 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
         exact_scaled_jacobian_bins,
         aspect_ratio_bins,
         volume_bins,
+    }
+}
+
+fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence {
+    MeshTetRecoveryEvidence {
+        candidate_count: mesh.backend.tet_candidate_count,
+        recovered_component_ratio: mesh.backend.tet_recovered_component_ratio,
+        fan_fallback_component_count: mesh.backend.tet_fan_fallback_component_count,
+        candidate_volume_ratio: mesh.backend.tet_candidate_volume_ratio,
+        refinement_pass_count: mesh.backend.tet_refinement_pass_count,
+        refinement_point_count: mesh.backend.tet_refinement_point_count,
+        optimization_pass_count: mesh.backend.tet_optimization_pass_count,
+        smoothed_point_count: mesh.backend.tet_smoothed_point_count,
+        sliver_candidate_count: mesh.backend.tet_sliver_candidate_count,
+        exact_quality_repair_pass_count: mesh.backend.tet_exact_quality_repair_pass_count,
+        exact_quality_reconnected_cavity_count: mesh
+            .backend
+            .tet_exact_quality_reconnected_cavity_count,
+        exact_quality_split_cavity_count: mesh.backend.tet_exact_quality_split_cavity_count,
+        exact_quality_seed_star_collapse_count: mesh
+            .backend
+            .tet_exact_quality_seed_star_collapse_count,
     }
 }
 
@@ -652,8 +694,21 @@ mod tests {
                 cad_max_normal_deviation: 1.0e-5,
                 surface_cad_face_count: 3,
                 surface_max_cad_projection_error_m: 3.0e-6,
+                tet_candidate_count: 12,
+                tet_recovered_component_ratio: 1.0,
+                tet_fan_fallback_component_count: 0,
+                tet_candidate_volume_ratio: 0.99,
+                tet_refinement_pass_count: 2,
+                tet_refinement_point_count: 5,
                 tet_requested_refinement_point_count: 4,
                 tet_accepted_requested_refinement_point_count: 3,
+                tet_optimization_pass_count: 1,
+                tet_smoothed_point_count: 2,
+                tet_sliver_candidate_count: 1,
+                tet_exact_quality_repair_pass_count: 1,
+                tet_exact_quality_reconnected_cavity_count: 2,
+                tet_exact_quality_split_cavity_count: 3,
+                tet_exact_quality_seed_star_collapse_count: 4,
                 ..MeshBackendSummary::default()
             },
             adaptive_iterations: Vec::new(),
@@ -703,6 +758,24 @@ mod tests {
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),
             Some(&1)
+        );
+        assert_eq!(evidence.tet_recovery.candidate_count, 12);
+        assert_eq!(evidence.tet_recovery.recovered_component_ratio, 1.0);
+        assert_eq!(evidence.tet_recovery.candidate_volume_ratio, 0.99);
+        assert_eq!(evidence.tet_recovery.refinement_pass_count, 2);
+        assert_eq!(evidence.tet_recovery.refinement_point_count, 5);
+        assert_eq!(evidence.tet_recovery.optimization_pass_count, 1);
+        assert_eq!(evidence.tet_recovery.smoothed_point_count, 2);
+        assert_eq!(evidence.tet_recovery.sliver_candidate_count, 1);
+        assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
+        assert_eq!(
+            evidence.tet_recovery.exact_quality_reconnected_cavity_count,
+            2
+        );
+        assert_eq!(evidence.tet_recovery.exact_quality_split_cavity_count, 3);
+        assert_eq!(
+            evidence.tet_recovery.exact_quality_seed_star_collapse_count,
+            4
         );
         assert_eq!(evidence.sizing.growth_rate, Some(1.4));
         assert_eq!(
