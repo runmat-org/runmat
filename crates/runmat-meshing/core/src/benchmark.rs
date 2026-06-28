@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub const MESH_BENCHMARK_SCHEMA_VERSION: &str = "mesh-benchmark/v1";
+pub const MESH_BENCHMARK_SUITE_SCHEMA_VERSION: &str = "mesh-benchmark-suite/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +104,29 @@ pub struct MeshBenchmarkSolveReadiness {
     pub validation_error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBenchmarkSuiteReport {
+    pub schema_version: String,
+    pub suite_id: String,
+    pub summary: MeshBenchmarkSuiteSummary,
+    pub reports: Vec<MeshBenchmarkReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBenchmarkSuiteSummary {
+    pub report_count: usize,
+    pub solve_ready_count: usize,
+    pub failed_count: usize,
+    pub worst_min_scaled_jacobian: Option<f64>,
+    pub worst_min_exact_scaled_jacobian: Option<f64>,
+    pub worst_max_aspect_ratio: Option<f64>,
+    pub worst_boundary_projection_error_m: Option<f64>,
+    pub worst_volume_coverage_error: Option<f64>,
+    pub worst_boundary_area_error: Option<f64>,
+    pub total_ms: Option<f64>,
+    pub failure_counts_by_code: BTreeMap<String, usize>,
+}
+
 pub fn build_mesh_benchmark_report(
     mesh: &AnalysisMeshArtifact,
     validation: &AnalysisMeshValidationOptions,
@@ -156,6 +180,107 @@ pub fn build_mesh_benchmark_report(
             validation_error_code: evidence.validation.validation_error_code,
             validation_error_message: evidence.validation.validation_error_message,
         },
+    }
+}
+
+pub fn build_mesh_benchmark_suite_report(
+    suite_id: impl Into<String>,
+    reports: Vec<MeshBenchmarkReport>,
+) -> MeshBenchmarkSuiteReport {
+    let summary = mesh_benchmark_suite_summary(&reports);
+    MeshBenchmarkSuiteReport {
+        schema_version: MESH_BENCHMARK_SUITE_SCHEMA_VERSION.to_string(),
+        suite_id: suite_id.into(),
+        summary,
+        reports,
+    }
+}
+
+fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmarkSuiteSummary {
+    let solve_ready_count = reports
+        .iter()
+        .filter(|report| report.solve_readiness.solve_ready)
+        .count();
+    let mut failure_counts_by_code = BTreeMap::<String, usize>::new();
+    for report in reports {
+        if report.solve_readiness.solve_ready {
+            continue;
+        }
+        let code = report
+            .solve_readiness
+            .validation_error_code
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        *failure_counts_by_code.entry(code).or_default() += 1;
+    }
+    MeshBenchmarkSuiteSummary {
+        report_count: reports.len(),
+        solve_ready_count,
+        failed_count: reports.len().saturating_sub(solve_ready_count),
+        worst_min_scaled_jacobian: finite_min(
+            reports
+                .iter()
+                .map(|report| report.quality.min_scaled_jacobian),
+        ),
+        worst_min_exact_scaled_jacobian: finite_min(
+            reports
+                .iter()
+                .map(|report| report.quality.min_exact_scaled_jacobian),
+        ),
+        worst_max_aspect_ratio: finite_max(
+            reports.iter().map(|report| report.quality.max_aspect_ratio),
+        ),
+        worst_boundary_projection_error_m: finite_max(
+            reports
+                .iter()
+                .map(|report| report.quality.max_boundary_projection_error_m),
+        ),
+        worst_volume_coverage_error: finite_max(reports.iter().filter_map(|report| {
+            report
+                .coverage
+                .volume_coverage_ratio
+                .map(coverage_ratio_error)
+        })),
+        worst_boundary_area_error: finite_max(reports.iter().filter_map(|report| {
+            report
+                .coverage
+                .boundary_area_ratio
+                .map(coverage_ratio_error)
+        })),
+        total_ms: finite_sum(reports.iter().filter_map(|report| report.timing.total_ms)),
+        failure_counts_by_code,
+    }
+}
+
+fn finite_min(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .reduce(f64::min)
+}
+
+fn finite_max(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .reduce(f64::max)
+}
+
+fn finite_sum(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    let mut count = 0_usize;
+    let mut sum = 0.0_f64;
+    for value in values.into_iter().filter(|value| value.is_finite()) {
+        count += 1;
+        sum += value;
+    }
+    (count > 0).then_some(sum)
+}
+
+fn coverage_ratio_error(ratio: f64) -> f64 {
+    if ratio.is_finite() {
+        (1.0 - ratio).abs()
+    } else {
+        f64::INFINITY
     }
 }
 
@@ -279,6 +404,54 @@ mod tests {
             Some("volume_coverage_failed")
         );
         assert_eq!(report.coverage.volume_coverage_ratio, Some(1.0 / 6.0));
+    }
+
+    #[test]
+    fn suite_report_aggregates_failures_and_worst_metrics() {
+        let mesh = fixture_mesh();
+        let ready_validation = AnalysisMeshValidationOptions {
+            expected_volume_m3: Some(1.0 / 6.0),
+            expected_boundary_area_m2: Some(0.5),
+            ..AnalysisMeshValidationOptions::default()
+        };
+        let failed_validation = AnalysisMeshValidationOptions {
+            expected_volume_m3: Some(1.0),
+            min_volume_coverage_ratio: 0.95,
+            ..AnalysisMeshValidationOptions::default()
+        };
+        let mut ready = build_mesh_benchmark_report(
+            &mesh,
+            &ready_validation,
+            MeshBenchmarkInput::new("ready", MeshBenchmarkTier::Solid3d),
+        );
+        ready.timing.total_ms = Some(4.0);
+        let mut failed = build_mesh_benchmark_report(
+            &mesh,
+            &failed_validation,
+            MeshBenchmarkInput::new("failed", MeshBenchmarkTier::Solid3d),
+        );
+        failed.timing.total_ms = Some(6.0);
+
+        let suite = build_mesh_benchmark_suite_report("smoke", vec![ready, failed]);
+
+        assert_eq!(suite.schema_version, MESH_BENCHMARK_SUITE_SCHEMA_VERSION);
+        assert_eq!(suite.summary.report_count, 2);
+        assert_eq!(suite.summary.solve_ready_count, 1);
+        assert_eq!(suite.summary.failed_count, 1);
+        assert_eq!(
+            suite
+                .summary
+                .failure_counts_by_code
+                .get("volume_coverage_failed"),
+            Some(&1)
+        );
+        assert_eq!(suite.summary.worst_min_exact_scaled_jacobian, Some(0.45));
+        assert_eq!(suite.summary.worst_max_aspect_ratio, Some(2.0));
+        assert_eq!(
+            suite.summary.worst_volume_coverage_error,
+            Some(1.0 - 1.0 / 6.0)
+        );
+        assert_eq!(suite.summary.total_ms, Some(10.0));
     }
 
     fn fixture_mesh() -> AnalysisMeshArtifact {

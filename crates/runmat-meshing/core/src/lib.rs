@@ -40,9 +40,11 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use benchmark::{
-    build_mesh_benchmark_report, MeshBenchmarkCoverageMetrics, MeshBenchmarkInput,
-    MeshBenchmarkReport, MeshBenchmarkSolveReadiness, MeshBenchmarkTier, MeshBenchmarkTiming,
+    build_mesh_benchmark_report, build_mesh_benchmark_suite_report, MeshBenchmarkCoverageMetrics,
+    MeshBenchmarkInput, MeshBenchmarkReport, MeshBenchmarkSolveReadiness, MeshBenchmarkSuiteReport,
+    MeshBenchmarkSuiteSummary, MeshBenchmarkTier, MeshBenchmarkTiming,
     MeshBenchmarkTopologyMetrics, MESH_BENCHMARK_SCHEMA_VERSION,
+    MESH_BENCHMARK_SUITE_SCHEMA_VERSION,
 };
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use cad_eval::{
