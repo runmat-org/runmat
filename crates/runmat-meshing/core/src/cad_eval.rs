@@ -470,20 +470,21 @@ fn face_frame(
     if v_length <= f64::EPSILON {
         return Err(CadEvaluationError::DegenerateFace { source_face_id });
     }
+    let origin_m = evaluator_reference_point_m.unwrap_or_else(|| triangle_centroid(points));
     let (u_derivative_m_per_uv, v_derivative_m_per_uv) =
         estimate_uv_derivatives(&evaluator_samples);
     let max_curvature_estimate_1_per_m = estimate_max_curvature(&evaluator_samples, unit_normal);
     let (uv_bounds, uv_bounds_sample_count, uv_domain_source) = cad_uv_domain_summary(
         &evaluator_samples,
         points,
-        evaluator_reference_point_m,
+        origin_m,
         u_axis,
         scale(v_axis, 1.0 / v_length),
     );
     Ok(CadFaceEvaluationFrame {
         face_id,
         source_face_id,
-        origin_m: evaluator_reference_point_m.unwrap_or_else(|| triangle_centroid(points)),
+        origin_m,
         u_axis,
         v_axis: scale(v_axis, 1.0 / v_length),
         unit_normal,
@@ -521,7 +522,7 @@ fn evaluation_source(
 fn cad_uv_domain_summary(
     evaluator_samples: &[CadFaceEvaluationSample],
     source_points: Triangle3,
-    evaluator_reference_point_m: Option<Point3>,
+    origin: Point3,
     u_axis: Point3,
     v_axis: Point3,
 ) -> (Option<[[f64; 2]; 2]>, usize, Option<String>) {
@@ -539,7 +540,6 @@ fn cad_uv_domain_summary(
         );
     }
 
-    let origin = evaluator_reference_point_m.unwrap_or_else(|| triangle_centroid(source_points));
     let fallback_uvs = source_points
         .iter()
         .map(|point| {

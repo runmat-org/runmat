@@ -71,6 +71,7 @@ pub enum SurfaceDiscretizationError {
     MissingCadFaceFrame { source_face_id: u32 },
     MissingCurveEdge { source_edge_id: u32 },
     InvalidFaceEdgeOrientation { face_id: u32, edge_id: u32 },
+    CadProjectionOutsideFaceDomain { face_id: u32, node_id: u32 },
 }
 
 impl std::fmt::Display for SurfaceDiscretizationError {
@@ -95,6 +96,10 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             Self::InvalidFaceEdgeOrientation { face_id, edge_id } => write!(
                 formatter,
                 "source face {face_id} cannot orient source edge {edge_id} along its boundary"
+            ),
+            Self::CadProjectionOutsideFaceDomain { face_id, node_id } => write!(
+                formatter,
+                "source face {face_id} node {node_id} projects outside the CAD face domain"
             ),
         }
     }
@@ -189,6 +194,12 @@ pub fn discretize_cad_surfaces(
                 })?;
             corner_points[index] = point;
             let projection = project_to_face(frame, point);
+            if !projection.uv_in_bounds {
+                return Err(SurfaceDiscretizationError::CadProjectionOutsideFaceDomain {
+                    face_id: face.face_id,
+                    node_id,
+                });
+            }
             parametric_node_uv[index] = projection.uv;
             max_projection_error_m = max_projection_error_m.max(projection.distance_m);
         }
@@ -196,6 +207,12 @@ pub fn discretize_cad_surfaces(
         if options.centroid_subdivision {
             let centroid = triangle_centroid(corner_points);
             let centroid_projection = project_to_face(frame, centroid);
+            if !centroid_projection.uv_in_bounds {
+                return Err(SurfaceDiscretizationError::CadProjectionOutsideFaceDomain {
+                    face_id: face.face_id,
+                    node_id: u32::MAX,
+                });
+            }
             max_projection_error_m = max_projection_error_m.max(centroid_projection.distance_m);
             append_centroid_subdivision(
                 face,
@@ -799,6 +816,9 @@ fn append_face_lattice_points(
                 corners[0][2] * w + corners[1][2] * u + corners[2][2] * v,
             ];
             let projection = project_to_face(frame, coordinates);
+            if !projection.uv_in_bounds {
+                continue;
+            }
             if !point_in_polygon_2d(projection.uv, boundary_polygon) {
                 continue;
             }
@@ -1352,6 +1372,56 @@ mod tests {
         );
         assert_eq!(surface.elements[0].parametric_node_uv.len(), 3);
         assert_eq!(surface.elements[0].max_projection_error_m, 0.0);
+    }
+
+    #[test]
+    fn rejects_cad_surface_vertex_outside_uv_domain() {
+        let topology = single_triangle_topology();
+        let mut geometry = geometry_with_face_domain_sample();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 0.0, 0.0],
+                uv: Some([0.0, 0.0]),
+                projected_point_m: Some([0.0, 0.0, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.0, 0.0],
+                uv: Some([0.5, 0.0]),
+                projected_point_m: Some([0.5, 0.0, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 0.5, 0.0],
+                uv: Some([0.0, 0.5]),
+                projected_point_m: Some([0.0, 0.5, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        let cad_topology = crate::build_cad_topology(&geometry, &topology).expect("cad topology");
+        let cad_evaluation =
+            crate::build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+
+        let err = discretize_cad_surfaces(
+            &topology,
+            &cad_evaluation,
+            SurfaceDiscretizationOptions::default(),
+        )
+        .expect_err("out-of-domain source vertex should fail");
+
+        assert_eq!(
+            err,
+            SurfaceDiscretizationError::CadProjectionOutsideFaceDomain {
+                face_id: 7,
+                node_id: 1,
+            }
+        );
     }
 
     #[test]
