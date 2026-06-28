@@ -2475,20 +2475,31 @@ fn optimization_target_seed_indices(
         .enumerate()
         .map(|(index, node_id)| (*node_id, index))
         .collect::<BTreeMap<_, _>>();
-    let mut indices = BTreeSet::<usize>::new();
+    let mut scores = BTreeMap::<usize, (usize, usize)>::new();
     for tet in tets {
-        if tet.exact_scaled_jacobian >= options.min_scaled_jacobian
-            && tet.aspect_ratio <= options.sliver_aspect_ratio
-        {
+        let exact_quality_target = tet.exact_scaled_jacobian < options.min_scaled_jacobian;
+        let sliver_target = tet.aspect_ratio > options.sliver_aspect_ratio;
+        if !exact_quality_target && !sliver_target {
             continue;
         }
         for node_id in tet.node_ids {
             if let Some(index) = seed_index.get(&node_id) {
-                indices.insert(*index);
+                let score = scores.entry(*index).or_default();
+                score.0 += usize::from(exact_quality_target);
+                score.1 += usize::from(sliver_target);
             }
         }
     }
-    indices.into_iter().collect()
+    let mut indices = scores.into_iter().collect::<Vec<(usize, (usize, usize))>>();
+    indices.sort_by(|(left_index, left_score), (right_index, right_score)| {
+        right_score
+            .0
+            .cmp(&left_score.0)
+            .then_with(|| right_score.1.cmp(&left_score.1))
+            .then_with(|| left_index.cmp(right_index))
+    });
+    indices.truncate(options.max_quality_recovery_seed_candidates);
+    indices.into_iter().map(|(index, _)| index).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -5652,6 +5663,52 @@ mod tests {
         let seed_indices = optimization_target_seed_indices(&[tet], &[1, 3], options);
 
         assert_eq!(seed_indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn optimization_targets_are_ranked_and_bounded() {
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.25,
+            sliver_aspect_ratio: 8.0,
+            max_quality_recovery_seed_candidates: 3,
+            ..TetCandidateOptions::default()
+        };
+        let tets = vec![
+            TetCandidate {
+                tet_id: 0,
+                component_id: 0,
+                node_ids: [10, 11, 12, 20],
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 2.0,
+                exact_scaled_jacobian: 0.1,
+            },
+            TetCandidate {
+                tet_id: 1,
+                component_id: 0,
+                node_ids: [10, 11, 13, 21],
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 10.0,
+                exact_scaled_jacobian: 0.4,
+            },
+            TetCandidate {
+                tet_id: 2,
+                component_id: 0,
+                node_ids: [12, 13, 14, 22],
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 12.0,
+                exact_scaled_jacobian: 0.5,
+            },
+        ];
+
+        let seed_indices = optimization_target_seed_indices(&tets, &[10, 11, 12, 13, 14], options);
+
+        assert_eq!(seed_indices, vec![0, 1, 2]);
     }
 
     #[test]
