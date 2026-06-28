@@ -270,6 +270,26 @@ fn validate_volume_meshing_options(options: &VolumeMeshingOptions) -> Result<(),
             return Err(MeshingError::InvalidTargetSize);
         }
     }
+    if let Some(min_size_m) = options.min_size_m {
+        if !min_size_m.is_finite() || min_size_m <= 0.0 {
+            return Err(MeshingError::InvalidTargetSize);
+        }
+    }
+    if let Some(max_size_m) = options.max_size_m {
+        if !max_size_m.is_finite() || max_size_m <= 0.0 {
+            return Err(MeshingError::InvalidTargetSize);
+        }
+    }
+    if let (Some(min_size_m), Some(max_size_m)) = (options.min_size_m, options.max_size_m) {
+        if min_size_m > max_size_m {
+            return Err(MeshingError::InvalidTargetSize);
+        }
+    }
+    if let Some(growth_rate) = options.growth_rate {
+        if !growth_rate.is_finite() || growth_rate < 1.0 {
+            return Err(MeshingError::InvalidTargetSize);
+        }
+    }
     Ok(())
 }
 
@@ -1178,7 +1198,7 @@ fn target_size_m(
     options: &VolumeMeshingOptions,
     grid: &StructuredGrid,
 ) -> Option<f64> {
-    match options.target_size {
+    let target_size = match options.target_size {
         MeshTargetSize::LengthM(value) => Some(value),
         MeshTargetSize::Auto => grid.min_cell_size().or_else(|| {
             let max_span = (0..3)
@@ -1186,7 +1206,18 @@ fn target_size_m(
                 .fold(0.0_f64, f64::max);
             Some(max_span)
         }),
+    };
+    target_size.map(|value| clamp_mesh_target_size(value, options))
+}
+
+fn clamp_mesh_target_size(mut value: f64, options: &VolumeMeshingOptions) -> f64 {
+    if let Some(min_size_m) = options.min_size_m {
+        value = value.max(min_size_m);
     }
+    if let Some(max_size_m) = options.max_size_m {
+        value = value.min(max_size_m);
+    }
+    value
 }
 
 fn quality_report(
@@ -2285,6 +2316,33 @@ mod tests {
     }
 
     #[test]
+    fn invalid_sizing_envelope_options_are_rejected() {
+        let geometry = cube_geometry();
+        let err = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                min_size_m: Some(0.2),
+                max_size_m: Some(0.1),
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect_err("invalid min/max envelope should fail");
+
+        assert_eq!(err, MeshingError::InvalidTargetSize);
+
+        let err = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                growth_rate: Some(0.99),
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect_err("invalid growth rate should fail");
+
+        assert_eq!(err, MeshingError::InvalidTargetSize);
+    }
+
+    #[test]
     fn auto_backend_uses_production_backend_by_default() {
         let geometry = cube_geometry();
         let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
@@ -2325,6 +2383,9 @@ mod tests {
         let options = VolumeMeshingOptions {
             backend: MeshBackendKind::Production,
             target_size: MeshTargetSize::LengthM(1.0),
+            min_size_m: Some(0.4),
+            max_size_m: Some(0.75),
+            growth_rate: Some(1.25),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
         };
@@ -2349,6 +2410,8 @@ mod tests {
             Some(0.5),
             "external sizing should lower the production target size"
         );
+        assert_eq!(refined.sizing.min_size_m, Some(0.4));
+        assert_eq!(refined.sizing.max_size_m, Some(0.75));
         assert_eq!(refined.sizing.applied_samples.len(), 1);
         assert_eq!(
             refined.sizing.applied_samples[0].reason.as_deref(),

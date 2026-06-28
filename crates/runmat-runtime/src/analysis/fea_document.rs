@@ -139,6 +139,12 @@ struct FeaMeshDocument {
     #[serde(default, deserialize_with = "deserialize_optional_mesh_target_size")]
     target_size: Option<MeshTargetSize>,
     #[serde(default)]
+    min_size: Option<f64>,
+    #[serde(default)]
+    max_size: Option<f64>,
+    #[serde(default)]
+    growth_rate: Option<f64>,
+    #[serde(default)]
     refinement: FeaMeshRefinementDocument,
     #[serde(default)]
     validation: FeaMeshValidationDocument,
@@ -638,6 +644,26 @@ fn resolve_mesh_options(
             mesh.element
         ));
     }
+    if let Some(min_size) = mesh.min_size {
+        if !min_size.is_finite() || min_size <= 0.0 {
+            return Err("mesh.min_size must be finite and positive".to_string());
+        }
+    }
+    if let Some(max_size) = mesh.max_size {
+        if !max_size.is_finite() || max_size <= 0.0 {
+            return Err("mesh.max_size must be finite and positive".to_string());
+        }
+    }
+    if let (Some(min_size), Some(max_size)) = (mesh.min_size, mesh.max_size) {
+        if min_size > max_size {
+            return Err("mesh.min_size must be less than or equal to mesh.max_size".to_string());
+        }
+    }
+    if let Some(growth_rate) = mesh.growth_rate {
+        if !growth_rate.is_finite() || growth_rate < 1.0 {
+            return Err("mesh.growth_rate must be finite and at least 1.0".to_string());
+        }
+    }
     if !mesh
         .refinement
         .convergence
@@ -708,6 +734,9 @@ fn resolve_mesh_options(
         profile: mesh.profile,
         max_elements: mesh.max_elements,
         target_size: mesh.target_size.unwrap_or(MeshTargetSize::Auto),
+        min_size_m: mesh.min_size,
+        max_size_m: mesh.max_size,
+        growth_rate: mesh.growth_rate,
         refinement: MeshRefinementOptions {
             strategy: mesh.refinement.strategy,
             max_iterations: mesh.refinement.max_iterations,
@@ -1974,6 +2003,9 @@ element_order: linear
 profile: adaptive
 max_elements: 250000
 target_size: auto
+min_size: 0.001
+max_size: 0.02
+growth_rate: 1.35
 refinement:
   strategy: auto
   max_iterations: 4
@@ -2012,6 +2044,9 @@ refinement:
         assert_eq!(options.profile, MeshProfile::Adaptive);
         assert_eq!(options.max_elements, 250_000);
         assert_eq!(options.target_size, MeshTargetSize::Auto);
+        assert_eq!(options.min_size_m, Some(0.001));
+        assert_eq!(options.max_size_m, Some(0.02));
+        assert_eq!(options.growth_rate, Some(1.35));
         assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
         assert_eq!(options.refinement.max_iterations, 4);
         assert_eq!(options.refinement.convergence.field_change_tolerance, 0.05);
@@ -2099,6 +2134,35 @@ validation:
             .expect_err("invalid validation ratio should fail");
 
         assert!(err.contains("mesh.validation.min_volume_coverage_ratio"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_size_envelope_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+min_size: 0.02
+max_size: 0.01
+growth_rate: 1.2
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid size envelope should fail");
+        assert!(err.contains("mesh.min_size"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+min_size: 0.001
+max_size: 0.01
+growth_rate: 0.95
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid growth rate should fail");
+        assert!(err.contains("mesh.growth_rate"));
     }
 
     #[test]

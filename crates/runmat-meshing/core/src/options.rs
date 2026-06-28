@@ -215,6 +215,12 @@ pub struct VolumeMeshingOptions {
     pub profile: MeshProfile,
     pub max_elements: usize,
     pub target_size: MeshTargetSize,
+    #[serde(default)]
+    pub min_size_m: Option<f64>,
+    #[serde(default)]
+    pub max_size_m: Option<f64>,
+    #[serde(default)]
+    pub growth_rate: Option<f64>,
     pub refinement: MeshRefinementOptions,
     #[serde(default)]
     pub validation: MeshValidationPolicyOptions,
@@ -230,6 +236,9 @@ impl Default for VolumeMeshingOptions {
             profile: MeshProfile::AnalysisReady,
             max_elements: 250_000,
             target_size: MeshTargetSize::Auto,
+            min_size_m: None,
+            max_size_m: None,
+            growth_rate: None,
             refinement: MeshRefinementOptions::default(),
             validation: MeshValidationPolicyOptions::default(),
         }

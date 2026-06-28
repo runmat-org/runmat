@@ -784,6 +784,8 @@ run:
 fn mesh_options_convert_study_unit_lengths_to_si_before_meshing() {
     let options = runmat_meshing_core::VolumeMeshingOptions {
         target_size: runmat_meshing_core::MeshTargetSize::LengthM(15.0),
+        min_size_m: Some(2.0),
+        max_size_m: Some(25.0),
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
 
@@ -793,6 +795,8 @@ fn mesh_options_convert_study_unit_lengths_to_si_before_meshing() {
         converted.target_size,
         runmat_meshing_core::MeshTargetSize::LengthM(0.015)
     );
+    assert_eq!(converted.min_size_m, Some(0.002));
+    assert_eq!(converted.max_size_m, Some(0.025));
 }
 
 #[test]

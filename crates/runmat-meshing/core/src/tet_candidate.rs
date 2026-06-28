@@ -1955,9 +1955,13 @@ fn repair_exact_quality_tets_once(
             repaired.push(tet.clone());
             continue;
         }
-        if let Some((neighbor_indices, candidates)) =
-            best_three_tet_edge_reconnection(tet_index, tets, &edge_adjacency, &node_points, options)?
-        {
+        if let Some((neighbor_indices, candidates)) = best_three_tet_edge_reconnection(
+            tet_index,
+            tets,
+            &edge_adjacency,
+            &node_points,
+            options,
+        )? {
             if neighbor_indices.iter().any(|index| consumed[*index]) {
                 repaired.push(tet.clone());
                 continue;
@@ -2119,7 +2123,12 @@ fn best_three_tet_edge_reconnection(
                     || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
             })
         {
-            best = Some((adjacent.clone(), candidates, candidate_below_count, min_exact));
+            best = Some((
+                adjacent.clone(),
+                candidates,
+                candidate_below_count,
+                min_exact,
+            ));
         }
     }
     Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))

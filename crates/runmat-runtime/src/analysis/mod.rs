@@ -13579,9 +13579,15 @@ fn mesh_options_in_si_units(
     mut options: VolumeMeshingOptions,
     geometry_units: UnitSystem,
 ) -> VolumeMeshingOptions {
+    let scale = geometry_unit_scale_to_meters(geometry_units);
     if let MeshTargetSize::LengthM(length) = options.target_size {
-        options.target_size =
-            MeshTargetSize::LengthM(length * geometry_unit_scale_to_meters(geometry_units));
+        options.target_size = MeshTargetSize::LengthM(length * scale);
+    }
+    if let Some(min_size_m) = options.min_size_m {
+        options.min_size_m = Some(min_size_m * scale);
+    }
+    if let Some(max_size_m) = options.max_size_m {
+        options.max_size_m = Some(max_size_m * scale);
     }
     options
 }
