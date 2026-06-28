@@ -1,6 +1,7 @@
 pub mod adaptive;
 pub mod artifact;
 pub mod backend;
+pub mod benchmark;
 pub mod boundary;
 pub mod cad_eval;
 pub mod cad_topology;
@@ -38,6 +39,11 @@ pub use artifact::{
     AnalysisVolumeElement, MeshBackendSummary,
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
+pub use benchmark::{
+    build_mesh_benchmark_report, MeshBenchmarkCoverageMetrics, MeshBenchmarkInput,
+    MeshBenchmarkReport, MeshBenchmarkSolveReadiness, MeshBenchmarkTier, MeshBenchmarkTiming,
+    MeshBenchmarkTopologyMetrics, MESH_BENCHMARK_SCHEMA_VERSION,
+};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use cad_eval::{
     build_cad_evaluation_model, project_to_face, summarize_cad_evaluation, CadEvaluationError,
