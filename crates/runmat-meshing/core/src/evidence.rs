@@ -75,6 +75,12 @@ pub struct MeshSizingEvidence {
     pub sample_count: usize,
     #[serde(default)]
     pub generated_cad_sample_count: usize,
+    #[serde(default)]
+    pub anisotropic_sample_count: usize,
+    #[serde(default)]
+    pub valid_anisotropic_sample_count: usize,
+    #[serde(default)]
+    pub invalid_anisotropic_sample_count: usize,
     pub applied_sample_count: usize,
     pub rejected_sample_count: usize,
     pub inserted_breakpoint_count: usize,
@@ -96,6 +102,10 @@ pub struct MeshSizingEvidence {
     pub requested_tet_refinement_surrogate_ratio: Option<f64>,
     #[serde(default)]
     pub generated_cad_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub anisotropic_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub invalid_anisotropic_by_reason: BTreeMap<String, usize>,
     pub applied_by_reason: BTreeMap<String, usize>,
     pub rejected_by_status: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<String, usize>,
@@ -302,6 +312,20 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         }
     }
 
+    let mut anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    let mut invalid_anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    for sample in &mesh.sizing.anisotropic_samples {
+        let reason = sample
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *anisotropic_by_reason.entry(reason.clone()).or_default() += 1;
+        if !sample.is_valid_metric() {
+            *invalid_anisotropic_by_reason.entry(reason).or_default() += 1;
+        }
+    }
+    let invalid_anisotropic_sample_count = invalid_anisotropic_by_reason.values().sum::<usize>();
+
     let mut applied_by_reason = BTreeMap::<String, usize>::new();
     let mut inserted_breakpoint_by_reason = BTreeMap::<String, usize>::new();
     let mut uninserted_sample_by_reason = BTreeMap::<String, usize>::new();
@@ -347,6 +371,13 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         growth_rate: mesh.sizing.growth_rate,
         sample_count: mesh.sizing.samples.len(),
         generated_cad_sample_count: generated_cad_by_reason.values().sum(),
+        anisotropic_sample_count: mesh.sizing.anisotropic_samples.len(),
+        valid_anisotropic_sample_count: mesh
+            .sizing
+            .anisotropic_samples
+            .len()
+            .saturating_sub(invalid_anisotropic_sample_count),
+        invalid_anisotropic_sample_count,
         applied_sample_count: mesh.sizing.applied_samples.len(),
         rejected_sample_count: mesh.sizing.rejected_samples.len(),
         inserted_breakpoint_count,
@@ -381,6 +412,8 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
             None
         },
         generated_cad_by_reason,
+        anisotropic_by_reason,
+        invalid_anisotropic_by_reason,
         applied_by_reason,
         rejected_by_status,
         rejected_by_reason,
@@ -682,7 +715,10 @@ mod tests {
         },
         provenance::AnalysisMeshProvenance,
         quality::{AnalysisMeshQualityReport, ElementQuality},
-        sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
+        sizing::{
+            AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+            SizingSampleRejection,
+        },
         topology::{BoundaryElementKind, VolumeElementKind},
     };
 
@@ -750,6 +786,20 @@ mod tests {
                         position_m: [0.0, 0.5, 0.0],
                         target_size_m: 0.15,
                         reason: Some("cad.interface".to_string()),
+                    },
+                ],
+                anisotropic_samples: vec![
+                    AnisotropicSizingSample {
+                        position_m: [0.2, 0.2, 0.2],
+                        target_sizes_m: [0.02, 0.04, 0.08],
+                        directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                        reason: Some("boundary_layer".to_string()),
+                    },
+                    AnisotropicSizingSample {
+                        position_m: [0.3, 0.2, 0.2],
+                        target_sizes_m: [0.02, -0.04, 0.08],
+                        directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                        reason: Some("cad.proximity".to_string()),
                     },
                 ],
                 applied_samples: vec![
@@ -886,6 +936,20 @@ mod tests {
         );
         assert_eq!(evidence.sizing.sample_count, 3);
         assert_eq!(evidence.sizing.generated_cad_sample_count, 2);
+        assert_eq!(evidence.sizing.anisotropic_sample_count, 2);
+        assert_eq!(evidence.sizing.valid_anisotropic_sample_count, 1);
+        assert_eq!(evidence.sizing.invalid_anisotropic_sample_count, 1);
+        assert_eq!(
+            evidence.sizing.anisotropic_by_reason.get("boundary_layer"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .invalid_anisotropic_by_reason
+                .get("cad.proximity"),
+            Some(&1)
+        );
         assert_eq!(
             evidence.sizing.generated_cad_by_reason.get("cad.curvature"),
             Some(&1)

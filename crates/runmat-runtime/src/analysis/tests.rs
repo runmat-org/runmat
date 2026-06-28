@@ -6438,6 +6438,20 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
     mesh.backend.tet_accepted_requested_refinement_point_count = 3;
     mesh.backend
         .tet_accepted_requested_refinement_surrogate_point_count = 2;
+    mesh.sizing.anisotropic_samples = vec![
+        runmat_meshing_core::AnisotropicSizingSample {
+            position_m: [0.2, 0.2, 0.2],
+            target_sizes_m: [0.02, 0.04, 0.08],
+            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            reason: Some("boundary_layer".to_string()),
+        },
+        runmat_meshing_core::AnisotropicSizingSample {
+            position_m: [0.3, 0.2, 0.2],
+            target_sizes_m: [0.02, -0.04, 0.08],
+            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            reason: Some("cad.proximity".to_string()),
+        },
+    ];
 
     let summary = sizing_application_summary(&mesh);
 
@@ -6479,6 +6493,17 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
     assert_eq!(
         summary["requested_tet_refinement"]["surrogate_ratio"].as_f64(),
         Some(2.0 / 3.0)
+    );
+    assert_eq!(summary["anisotropic"]["total"].as_u64(), Some(2));
+    assert_eq!(summary["anisotropic"]["valid_count"].as_u64(), Some(1));
+    assert_eq!(summary["anisotropic"]["invalid_count"].as_u64(), Some(1));
+    assert_eq!(
+        summary["anisotropic"]["by_reason"]["boundary_layer"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["anisotropic"]["invalid_by_reason"]["cad.proximity"].as_u64(),
+        Some(1)
     );
 }
 

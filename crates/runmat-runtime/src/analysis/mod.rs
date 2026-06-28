@@ -14953,12 +14953,32 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
     let accepted_surrogate = mesh
         .backend
         .tet_accepted_requested_refinement_surrogate_point_count;
+    let mut anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    let mut invalid_anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    for sample in &mesh.sizing.anisotropic_samples {
+        let reason = sample
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *anisotropic_by_reason.entry(reason.clone()).or_default() += 1;
+        if !sample.is_valid_metric() {
+            *invalid_anisotropic_by_reason.entry(reason).or_default() += 1;
+        }
+    }
+    let invalid_anisotropic_count = invalid_anisotropic_by_reason.values().sum::<usize>();
     serde_json::json!({
         "total": mesh.sizing.applied_samples.len(),
         "inserted_breakpoint_count": inserted_breakpoint_count,
         "by_reason": by_reason,
         "inserted_breakpoints_by_reason": inserted_breakpoints_by_reason,
         "uninserted_by_reason": uninserted_by_reason,
+        "anisotropic": {
+            "total": mesh.sizing.anisotropic_samples.len(),
+            "valid_count": mesh.sizing.anisotropic_samples.len().saturating_sub(invalid_anisotropic_count),
+            "invalid_count": invalid_anisotropic_count,
+            "by_reason": anisotropic_by_reason,
+            "invalid_by_reason": invalid_anisotropic_by_reason,
+        },
         "requested_tet_refinement": {
             "requested_count": mesh.backend.tet_requested_refinement_point_count,
             "accepted_count": accepted_requested,

@@ -76,7 +76,10 @@ pub use production::{
 };
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
-pub use sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection};
+pub use sizing::{
+    AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+    SizingSampleRejection,
+};
 pub use source_topology::{
     extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
     SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
