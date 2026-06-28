@@ -2823,10 +2823,10 @@ fn best_interior_seed_node_collapse(
         if !adjacent_len_matches_scope || !adjacent.contains(&tet_index) {
             continue;
         }
-        let original_below_count = adjacent
-            .iter()
-            .filter(|index| tets[**index].exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
         let Some(candidates) = interior_seed_node_collapse_candidates(
             adjacent,
             interior_node_id,
@@ -3017,10 +3017,10 @@ fn best_interior_seed_node_relocation(
         if adjacent.len() < 5 || adjacent.len() > 24 || !adjacent.contains(&tet_index) {
             continue;
         }
-        let original_below_count = adjacent
-            .iter()
-            .filter(|index| tets[**index].exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
         if original_below_count == 0 {
             continue;
         }
@@ -3247,26 +3247,28 @@ fn best_three_tet_edge_reconnection(
         if adjacent.len() != 3 || !adjacent.contains(&tet_index) {
             continue;
         }
-        let original_below_count = adjacent
-            .iter()
-            .filter(|index| tets[**index].exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
         let Some(candidates) =
             three_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
         else {
             continue;
         };
-        let candidate_below_count = candidates
-            .iter()
-            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
-        if candidate_below_count >= original_below_count {
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if !cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
             continue;
         }
-        let min_exact = candidates
-            .iter()
-            .map(|candidate| candidate.exact_scaled_jacobian)
-            .fold(f64::INFINITY, f64::min);
         if best
             .as_ref()
             .is_none_or(|(_, _, best_below_count, best_min_exact)| {
@@ -3301,26 +3303,28 @@ fn best_multi_tet_edge_reconnection(
         if adjacent.len() < 4 || adjacent.len() > 8 || !adjacent.contains(&tet_index) {
             continue;
         }
-        let original_below_count = adjacent
-            .iter()
-            .filter(|index| tets[**index].exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
         let Some(candidates) =
             multi_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
         else {
             continue;
         };
-        let candidate_below_count = candidates
-            .iter()
-            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
-        if candidate_below_count >= original_below_count {
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if !cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
             continue;
         }
-        let min_exact = candidates
-            .iter()
-            .map(|candidate| candidate.exact_scaled_jacobian)
-            .fold(f64::INFINITY, f64::min);
         if best
             .as_ref()
             .is_none_or(|(_, _, best_below_count, best_min_exact)| {
@@ -3605,22 +3609,25 @@ fn best_two_tet_reconnection(
         let original_below_count =
             usize::from(tet.exact_scaled_jacobian < options.min_scaled_jacobian)
                 + usize::from(neighbor.exact_scaled_jacobian < options.min_scaled_jacobian);
+        let original_min_exact = tet
+            .exact_scaled_jacobian
+            .min(neighbor.exact_scaled_jacobian);
         let Some(candidates) =
             two_tet_reconnection_candidates(tet, neighbor, shared_face, node_points, options)?
         else {
             continue;
         };
-        let candidate_below_count = candidates
-            .iter()
-            .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
-            .count();
-        if candidate_below_count >= original_below_count {
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if !cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
             continue;
         }
-        let min_exact = candidates
-            .iter()
-            .map(|candidate| candidate.exact_scaled_jacobian)
-            .fold(f64::INFINITY, f64::min);
         if best
             .as_ref()
             .is_none_or(|(_, _, best_below_count, best_min_exact)| {
@@ -3632,6 +3639,30 @@ fn best_two_tet_reconnection(
         }
     }
     Ok(best.map(|(neighbor_index, candidates, _, _)| (neighbor_index, candidates)))
+}
+
+fn count_exact_quality_violations<'a>(
+    tets: impl Iterator<Item = &'a TetCandidate>,
+    min_scaled_jacobian: f64,
+) -> usize {
+    tets.filter(|tet| tet.exact_scaled_jacobian < min_scaled_jacobian)
+        .count()
+}
+
+fn min_exact_scaled_jacobian<'a>(tets: impl Iterator<Item = &'a TetCandidate>) -> f64 {
+    tets.map(|tet| tet.exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn cavity_reconnection_improves_quality(
+    candidate_below_count: usize,
+    candidate_min_exact: f64,
+    original_below_count: usize,
+    original_min_exact: f64,
+) -> bool {
+    candidate_below_count < original_below_count
+        || (candidate_below_count == original_below_count
+            && candidate_min_exact > original_min_exact + 1.0e-12)
 }
 
 fn two_tet_reconnection_candidates(
@@ -5192,6 +5223,15 @@ mod tests {
         assert_eq!(aggregate.final_max_aspect_ratio(), 7.0);
         assert_eq!(aggregate.initial_min_exact_scaled_jacobian(), 0.30);
         assert_eq!(aggregate.final_min_exact_scaled_jacobian(), 0.40);
+    }
+
+    #[test]
+    fn cavity_reconnection_acceptance_tracks_strict_quality_improvement() {
+        assert!(cavity_reconnection_improves_quality(1, 0.05, 2, 0.10));
+        assert!(cavity_reconnection_improves_quality(2, 0.12, 2, 0.10));
+        assert!(!cavity_reconnection_improves_quality(2, 0.10, 2, 0.10));
+        assert!(!cavity_reconnection_improves_quality(2, 0.09, 2, 0.10));
+        assert!(!cavity_reconnection_improves_quality(3, 0.20, 2, 0.10));
     }
 
     #[test]
