@@ -13597,6 +13597,7 @@ fn analysis_mesh_validation_options_for_study(
     options: &VolumeMeshingOptions,
 ) -> AnalysisMeshValidationOptions {
     AnalysisMeshValidationOptions {
+        quality: options.validation.quality,
         expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
         min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
         min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,

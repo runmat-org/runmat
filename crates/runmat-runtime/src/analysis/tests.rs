@@ -2334,6 +2334,11 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     mesh_options.validation.min_bounds_coverage_ratio = 0.95;
     mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
+    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
+        min_scaled_jacobian: 0.25,
+        max_aspect_ratio: 10.0,
+        allow_inverted_elements: false,
+    };
     let options = analysis_mesh_validation_options_for_study(&spec, &mesh_options);
 
     assert_eq!(
@@ -2346,6 +2351,14 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     );
     assert_eq!(options.min_bounds_coverage_ratio, 0.95);
     assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
+    assert_eq!(
+        options.quality,
+        runmat_meshing_core::QualityThresholds {
+            min_scaled_jacobian: 0.25,
+            max_aspect_ratio: 10.0,
+            allow_inverted_elements: false,
+        }
+    );
 }
 
 #[test]

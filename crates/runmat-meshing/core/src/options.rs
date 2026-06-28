@@ -4,8 +4,7 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::MeshBackendKind;
-use crate::topology::VolumeElementKind;
+use crate::{backend::MeshBackendKind, quality::QualityThresholds, topology::VolumeElementKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -186,6 +185,8 @@ pub type AdaptiveMeshingOptions = MeshRefinementOptions;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshValidationPolicyOptions {
+    #[serde(default)]
+    pub quality: QualityThresholds,
     pub min_bounds_coverage_ratio: f64,
     pub min_volume_coverage_ratio: f64,
     pub min_boundary_area_ratio: f64,
@@ -196,6 +197,7 @@ pub struct MeshValidationPolicyOptions {
 impl Default for MeshValidationPolicyOptions {
     fn default() -> Self {
         Self {
+            quality: QualityThresholds::default(),
             min_bounds_coverage_ratio: 0.90,
             min_volume_coverage_ratio: 0.90,
             min_boundary_area_ratio: 0.90,
