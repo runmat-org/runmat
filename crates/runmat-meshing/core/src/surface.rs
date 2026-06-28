@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::CadFaceEvaluationSampleSource;
 use serde::{Deserialize, Serialize};
@@ -66,12 +66,40 @@ pub struct SurfaceDiscretization {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceDiscretizationError {
-    MissingFaceVertex { face_id: u32, node_id: u32 },
-    MissingFaceEdge { face_id: u32, edge_id: u32 },
-    MissingCadFaceFrame { source_face_id: u32 },
-    MissingCurveEdge { source_edge_id: u32 },
-    InvalidFaceEdgeOrientation { face_id: u32, edge_id: u32 },
-    CadProjectionOutsideFaceDomain { face_id: u32, node_id: u32 },
+    MissingFaceVertex {
+        face_id: u32,
+        node_id: u32,
+    },
+    MissingFaceEdge {
+        face_id: u32,
+        edge_id: u32,
+    },
+    MissingCadFaceFrame {
+        source_face_id: u32,
+    },
+    MissingCurveEdge {
+        source_edge_id: u32,
+    },
+    InvalidFaceEdgeOrientation {
+        face_id: u32,
+        edge_id: u32,
+    },
+    CadProjectionOutsideFaceDomain {
+        face_id: u32,
+        node_id: u32,
+    },
+    EmptyFaceLoop {
+        face_id: u32,
+    },
+    InvalidFaceLoopTopology {
+        face_id: u32,
+        node_id: u32,
+        incident_segment_count: usize,
+    },
+    MultipleFaceLoopsUnsupported {
+        face_id: u32,
+        loop_count: usize,
+    },
 }
 
 impl std::fmt::Display for SurfaceDiscretizationError {
@@ -100,6 +128,24 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             Self::CadProjectionOutsideFaceDomain { face_id, node_id } => write!(
                 formatter,
                 "source face {face_id} node {node_id} projects outside the CAD face domain"
+            ),
+            Self::EmptyFaceLoop { face_id } => {
+                write!(formatter, "source face {face_id} has an empty boundary loop")
+            }
+            Self::InvalidFaceLoopTopology {
+                face_id,
+                node_id,
+                incident_segment_count,
+            } => write!(
+                formatter,
+                "source face {face_id} boundary node {node_id} has {incident_segment_count} incident curve segments"
+            ),
+            Self::MultipleFaceLoopsUnsupported {
+                face_id,
+                loop_count,
+            } => write!(
+                formatter,
+                "source face {face_id} has {loop_count} boundary loops; holed or multi-loop faces are not supported by this surface triangulation path yet"
             ),
         }
     }
@@ -294,6 +340,7 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut nodes,
             &mut curve_node_to_surface_node,
         )?;
+        validate_face_curve_loop_topology(face.face_id, &segments)?;
         let sample_report =
             append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
         exact_cad_sample_node_count += sample_report.accepted_count;
@@ -391,6 +438,65 @@ fn oriented_face_curve_segments(
         }
     }
     Ok(segments)
+}
+
+fn validate_face_curve_loop_topology(
+    face_id: u32,
+    segments: &[FaceCurveSegment],
+) -> Result<(), SurfaceDiscretizationError> {
+    if segments.is_empty() {
+        return Err(SurfaceDiscretizationError::EmptyFaceLoop { face_id });
+    }
+
+    let mut adjacency = BTreeMap::<u32, Vec<u32>>::new();
+    for segment in segments {
+        adjacency
+            .entry(segment.node_ids[0])
+            .or_default()
+            .push(segment.node_ids[1]);
+        adjacency
+            .entry(segment.node_ids[1])
+            .or_default()
+            .push(segment.node_ids[0]);
+    }
+
+    for (node_id, adjacent_nodes) in &adjacency {
+        if adjacent_nodes.len() != 2 {
+            return Err(SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                face_id,
+                node_id: *node_id,
+                incident_segment_count: adjacent_nodes.len(),
+            });
+        }
+    }
+
+    let mut visited = BTreeSet::<u32>::new();
+    let mut loop_count = 0_usize;
+    for node_id in adjacency.keys() {
+        if !visited.insert(*node_id) {
+            continue;
+        }
+        loop_count += 1;
+        let mut stack = vec![*node_id];
+        while let Some(current) = stack.pop() {
+            if let Some(adjacent_nodes) = adjacency.get(&current) {
+                for adjacent_node in adjacent_nodes {
+                    if visited.insert(*adjacent_node) {
+                        stack.push(*adjacent_node);
+                    }
+                }
+            }
+        }
+    }
+
+    if loop_count != 1 {
+        return Err(SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
+            face_id,
+            loop_count,
+        });
+    }
+
+    Ok(())
 }
 
 fn face_edge_for_nodes<'a>(
@@ -1686,6 +1792,73 @@ mod tests {
             point_in_polygon_2d(centroid, &trim_loop)
         }));
         assert_surface_edges_are_recovered(&surface.elements, &[[0, 3], [1, 3], [1, 2], [0, 2]]);
+    }
+
+    #[test]
+    fn rejects_multiple_face_curve_loops_before_triangulation() {
+        let segments = vec![
+            FaceCurveSegment {
+                node_ids: [0, 1],
+                source_edge_id: 0,
+            },
+            FaceCurveSegment {
+                node_ids: [1, 2],
+                source_edge_id: 1,
+            },
+            FaceCurveSegment {
+                node_ids: [2, 0],
+                source_edge_id: 2,
+            },
+            FaceCurveSegment {
+                node_ids: [3, 4],
+                source_edge_id: 3,
+            },
+            FaceCurveSegment {
+                node_ids: [4, 5],
+                source_edge_id: 4,
+            },
+            FaceCurveSegment {
+                node_ids: [5, 3],
+                source_edge_id: 5,
+            },
+        ];
+
+        let err = validate_face_curve_loop_topology(7, &segments)
+            .expect_err("multi-loop face topology should fail closed");
+
+        assert_eq!(
+            err,
+            SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
+                face_id: 7,
+                loop_count: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_open_face_curve_loop_before_triangulation() {
+        let segments = vec![
+            FaceCurveSegment {
+                node_ids: [0, 1],
+                source_edge_id: 0,
+            },
+            FaceCurveSegment {
+                node_ids: [1, 2],
+                source_edge_id: 1,
+            },
+        ];
+
+        let err = validate_face_curve_loop_topology(7, &segments)
+            .expect_err("open face loop should fail closed");
+
+        assert_eq!(
+            err,
+            SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                face_id: 7,
+                node_id: 0,
+                incident_segment_count: 1,
+            }
+        );
     }
 
     #[test]
