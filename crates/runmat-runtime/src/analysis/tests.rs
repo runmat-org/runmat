@@ -76,7 +76,8 @@ use runmat_geometry_core::{
 use runmat_meshing_core::{
     artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
     AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
-    BoundaryElementKind, MeshSizingField, VolumeElementKind,
+    BoundaryElementKind, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
+    VolumeElementKind,
 };
 
 use super::*;
@@ -2411,11 +2412,47 @@ fn generated_production_mesh_validation_requires_strict_recovery() {
     let mut mesh = minimal_analysis_mesh();
     mesh.backend.backend = "production".to_string();
     mesh.backend.volume_candidate_count = 2;
+    mesh.nodes[0].provenance.push(MeshEntityProvenance {
+        source_geometry_id: "geo:test".to_string(),
+        source_geometry_revision: 1,
+        source_entity_kind: SourceEntityKind::Body,
+        source_entity_id: "seed_1".to_string(),
+        region_ids: Vec::new(),
+    });
 
     let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
 
     assert!(options.require_no_fan_fallback);
     assert_eq!(options.max_volume_component_count, Some(2));
+    assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
+    assert_eq!(options.min_coverage_sample_ratio, 1.0);
+}
+
+#[test]
+fn generated_production_mesh_validation_caps_body_coverage_samples() {
+    let spec = sample_linear_static_study_spec();
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "production".to_string();
+    mesh.nodes = (0..70)
+        .map(|index| {
+            let mut node = analysis_mesh_node(index + 1, [index as f64 * 1.0e-3, 0.0, 0.0]);
+            node.provenance.push(MeshEntityProvenance {
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_entity_kind: SourceEntityKind::Body,
+                source_entity_id: format!("seed_{index}"),
+                region_ids: Vec::new(),
+            });
+            node
+        })
+        .collect();
+
+    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
+
+    assert_eq!(options.coverage_sample_points_m.len(), 64);
+    assert_eq!(options.coverage_sample_points_m[0], [0.0, 0.0, 0.0]);
+    assert_eq!(options.coverage_sample_points_m[63], [0.063, 0.0, 0.0]);
 }
 
 #[test]

@@ -43,7 +43,8 @@ use runmat_meshing_core::{
     validate_analysis_mesh, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
     AnalysisMeshArtifact, AnalysisMeshValidationOptions, ElementFamilyHint, MeshConnectivityClass,
     MeshTargetSize, RefinementIndicatorAvailability, RefinementIndicatorSample,
-    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, VolumeMeshingOptions,
+    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, SourceEntityKind,
+    VolumeMeshingOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13632,8 +13633,25 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     }
     if mesh.backend.backend == "production" {
         validation.require_no_fan_fallback = true;
+        validation.coverage_sample_points_m = production_body_coverage_sample_points(mesh);
+        validation.min_coverage_sample_ratio = 1.0;
     }
     validation
+}
+
+fn production_body_coverage_sample_points(mesh: &AnalysisMeshArtifact) -> Vec<[f64; 3]> {
+    mesh.nodes
+        .iter()
+        .filter(|node| {
+            node.coordinates_m.iter().all(|value| value.is_finite())
+                && node
+                    .provenance
+                    .iter()
+                    .any(|provenance| provenance.source_entity_kind == SourceEntityKind::Body)
+        })
+        .map(|node| node.coordinates_m)
+        .take(64)
+        .collect()
 }
 
 fn geometry_surface_bounds_m(geometry: &GeometryAsset) -> Option<[[f64; 3]; 2]> {
