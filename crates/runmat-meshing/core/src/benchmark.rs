@@ -139,6 +139,18 @@ pub struct MeshBenchmarkSolveReadiness {
     pub solve_ready: bool,
     pub validation_error_code: Option<String>,
     pub validation_error_message: Option<String>,
+    #[serde(default)]
+    pub fan_fallback_component_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_total_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_general_cavity_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_boundary_adjacent_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_interior_seed_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_edge_star_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,6 +326,22 @@ pub fn build_mesh_benchmark_report(
             solve_ready: evidence.validation.solve_ready,
             validation_error_code: evidence.validation.validation_error_code,
             validation_error_message: evidence.validation.validation_error_message,
+            fan_fallback_component_count: evidence.validation.fan_fallback_component_count,
+            unrepaired_exact_quality_total_count: evidence
+                .validation
+                .unrepaired_exact_quality_total_count,
+            unrepaired_exact_quality_general_cavity_count: evidence
+                .validation
+                .unrepaired_exact_quality_general_cavity_count,
+            unrepaired_exact_quality_boundary_adjacent_count: evidence
+                .validation
+                .unrepaired_exact_quality_boundary_adjacent_count,
+            unrepaired_exact_quality_interior_seed_count: evidence
+                .validation
+                .unrepaired_exact_quality_interior_seed_count,
+            unrepaired_exact_quality_edge_star_count: evidence
+                .validation
+                .unrepaired_exact_quality_edge_star_count,
         },
     }
 }
@@ -1357,12 +1385,23 @@ mod tests {
         assert_eq!(report.quality.exact_scaled_jacobian_p50, Some(0.45));
         assert!(report.solve_readiness.solve_ready);
         assert_eq!(report.solve_readiness.validation_error_code, None);
+        assert_eq!(report.solve_readiness.fan_fallback_component_count, 0);
+        assert_eq!(
+            report.solve_readiness.unrepaired_exact_quality_total_count,
+            0
+        );
         assert_eq!(report.timing.total_ms, Some(3.0));
     }
 
     #[test]
     fn benchmark_report_preserves_validation_failure() {
-        let mesh = fixture_mesh();
+        let mut mesh = fixture_mesh();
+        mesh.backend.tet_fan_fallback_component_count = 1;
+        mesh.backend.tet_exact_quality_unrepaired_total_count = 3;
+        mesh.backend
+            .tet_exact_quality_unrepaired_general_cavity_count = 1;
+        mesh.backend
+            .tet_exact_quality_unrepaired_boundary_adjacent_count = 2;
         let validation = AnalysisMeshValidationOptions {
             expected_volume_m3: Some(1.0),
             min_volume_coverage_ratio: 0.95,
@@ -1381,6 +1420,23 @@ mod tests {
             Some("volume_coverage_failed")
         );
         assert_eq!(report.coverage.volume_coverage_ratio, Some(1.0 / 6.0));
+        assert_eq!(report.solve_readiness.fan_fallback_component_count, 1);
+        assert_eq!(
+            report.solve_readiness.unrepaired_exact_quality_total_count,
+            3
+        );
+        assert_eq!(
+            report
+                .solve_readiness
+                .unrepaired_exact_quality_general_cavity_count,
+            1
+        );
+        assert_eq!(
+            report
+                .solve_readiness
+                .unrepaired_exact_quality_boundary_adjacent_count,
+            2
+        );
     }
 
     #[test]
