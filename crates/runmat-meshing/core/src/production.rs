@@ -1020,6 +1020,22 @@ fn production_backend_summary(
         tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
+        tet_optimization_initial_max_aspect_ratio: preparation
+            .tet_candidates
+            .recovery
+            .optimization_initial_max_aspect_ratio,
+        tet_optimization_final_max_aspect_ratio: preparation
+            .tet_candidates
+            .recovery
+            .optimization_final_max_aspect_ratio,
+        tet_optimization_initial_min_exact_scaled_jacobian: preparation
+            .tet_candidates
+            .recovery
+            .optimization_initial_min_exact_scaled_jacobian,
+        tet_optimization_final_min_exact_scaled_jacobian: preparation
+            .tet_candidates
+            .recovery
+            .optimization_final_min_exact_scaled_jacobian,
         tet_exact_quality_repair_pass_count: preparation
             .tet_candidates
             .recovery
@@ -1488,6 +1504,30 @@ mod tests {
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
+        );
+        assert!(mesh
+            .backend
+            .tet_optimization_initial_max_aspect_ratio
+            .is_finite());
+        assert!(mesh
+            .backend
+            .tet_optimization_final_max_aspect_ratio
+            .is_finite());
+        assert!(
+            mesh.backend.tet_optimization_final_max_aspect_ratio
+                <= mesh.backend.tet_optimization_initial_max_aspect_ratio + 1.0e-12
+        );
+        assert!(mesh
+            .backend
+            .tet_optimization_initial_min_exact_scaled_jacobian
+            .is_finite());
+        assert!(
+            mesh.backend
+                .tet_optimization_final_min_exact_scaled_jacobian
+                + 1.0e-12
+                >= mesh
+                    .backend
+                    .tet_optimization_initial_min_exact_scaled_jacobian
         );
         assert!(mesh.quality.min_exact_scaled_jacobian.is_finite());
         assert!(mesh

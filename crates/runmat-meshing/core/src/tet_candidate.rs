@@ -127,6 +127,14 @@ pub struct TetRecoveryReport {
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
     #[serde(default)]
+    pub optimization_initial_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub optimization_final_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub optimization_initial_min_exact_scaled_jacobian: f64,
+    #[serde(default)]
+    pub optimization_final_min_exact_scaled_jacobian: f64,
+    #[serde(default)]
     pub exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub exact_quality_reconnected_cavity_count: usize,
@@ -225,6 +233,7 @@ pub fn form_tet_candidates(
     let mut optimization_pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
     let mut sliver_candidate_count = 0_usize;
+    let mut optimization_quality = OptimizationQualityAggregate::default();
     for component in &volume_candidates.components {
         let tolerance =
             MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
@@ -275,6 +284,7 @@ pub fn form_tet_candidates(
         optimization_pass_count += optimization.pass_count;
         smoothed_point_count += optimization.smoothed_point_count;
         sliver_candidate_count += optimization.sliver_candidate_count;
+        optimization_quality.record(optimization);
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -417,6 +427,12 @@ pub fn form_tet_candidates(
             optimization_pass_count,
             smoothed_point_count,
             sliver_candidate_count,
+            optimization_initial_max_aspect_ratio: optimization_quality.initial_max_aspect_ratio(),
+            optimization_final_max_aspect_ratio: optimization_quality.final_max_aspect_ratio(),
+            optimization_initial_min_exact_scaled_jacobian: optimization_quality
+                .initial_min_exact_scaled_jacobian(),
+            optimization_final_min_exact_scaled_jacobian: optimization_quality
+                .final_min_exact_scaled_jacobian(),
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
             exact_quality_split_cavity_count: repair.split_cavity_count,
@@ -1922,11 +1938,100 @@ fn candidate_tet_points(
     ])
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SmoothingSummary {
     pass_count: usize,
     smoothed_point_count: usize,
     sliver_candidate_count: usize,
+    quality_sample_count: usize,
+    initial_max_aspect_ratio: f64,
+    final_max_aspect_ratio: f64,
+    initial_min_exact_scaled_jacobian: f64,
+    final_min_exact_scaled_jacobian: f64,
+}
+
+impl SmoothingSummary {
+    fn empty() -> Self {
+        Self {
+            pass_count: 0,
+            smoothed_point_count: 0,
+            sliver_candidate_count: 0,
+            quality_sample_count: 0,
+            initial_max_aspect_ratio: 0.0,
+            final_max_aspect_ratio: 0.0,
+            initial_min_exact_scaled_jacobian: 0.0,
+            final_min_exact_scaled_jacobian: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct OptimizationQualityAggregate {
+    quality_sample_count: usize,
+    initial_max_aspect_ratio: f64,
+    final_max_aspect_ratio: f64,
+    initial_min_exact_scaled_jacobian: f64,
+    final_min_exact_scaled_jacobian: f64,
+}
+
+impl OptimizationQualityAggregate {
+    fn record(&mut self, summary: SmoothingSummary) {
+        if summary.quality_sample_count == 0 {
+            return;
+        }
+        if self.quality_sample_count == 0 {
+            self.initial_max_aspect_ratio = summary.initial_max_aspect_ratio;
+            self.final_max_aspect_ratio = summary.final_max_aspect_ratio;
+            self.initial_min_exact_scaled_jacobian = summary.initial_min_exact_scaled_jacobian;
+            self.final_min_exact_scaled_jacobian = summary.final_min_exact_scaled_jacobian;
+        } else {
+            self.initial_max_aspect_ratio = self
+                .initial_max_aspect_ratio
+                .max(summary.initial_max_aspect_ratio);
+            self.final_max_aspect_ratio = self
+                .final_max_aspect_ratio
+                .max(summary.final_max_aspect_ratio);
+            self.initial_min_exact_scaled_jacobian = self
+                .initial_min_exact_scaled_jacobian
+                .min(summary.initial_min_exact_scaled_jacobian);
+            self.final_min_exact_scaled_jacobian = self
+                .final_min_exact_scaled_jacobian
+                .min(summary.final_min_exact_scaled_jacobian);
+        }
+        self.quality_sample_count += summary.quality_sample_count;
+    }
+
+    fn initial_max_aspect_ratio(self) -> f64 {
+        if self.quality_sample_count == 0 {
+            0.0
+        } else {
+            self.initial_max_aspect_ratio
+        }
+    }
+
+    fn final_max_aspect_ratio(self) -> f64 {
+        if self.quality_sample_count == 0 {
+            0.0
+        } else {
+            self.final_max_aspect_ratio
+        }
+    }
+
+    fn initial_min_exact_scaled_jacobian(self) -> f64 {
+        if self.quality_sample_count == 0 {
+            0.0
+        } else {
+            self.initial_min_exact_scaled_jacobian
+        }
+    }
+
+    fn final_min_exact_scaled_jacobian(self) -> f64 {
+        if self.quality_sample_count == 0 {
+            0.0
+        } else {
+            self.final_min_exact_scaled_jacobian
+        }
+    }
 }
 
 fn smooth_component_seed_points(
@@ -1940,11 +2045,7 @@ fn smooth_component_seed_points(
     first_seed_node_id: u32,
 ) -> Result<SmoothingSummary, TetCandidateError> {
     if options.max_optimization_passes == 0 || seed_points.is_empty() {
-        return Ok(SmoothingSummary {
-            pass_count: 0,
-            smoothed_point_count: 0,
-            sliver_candidate_count: 0,
-        });
+        return Ok(SmoothingSummary::empty());
     }
 
     let classifier =
@@ -1952,6 +2053,8 @@ fn smooth_component_seed_points(
     let mut pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
     let mut sliver_candidate_count = 0_usize;
+    let mut initial_quality = None::<CandidateQualitySnapshot>;
+    let mut final_quality = None::<CandidateQualitySnapshot>;
 
     for _ in 0..options.max_optimization_passes {
         let seed_node_ids = seed_node_ids(first_seed_node_id, seed_points.len());
@@ -1969,6 +2072,8 @@ fn smooth_component_seed_points(
             break;
         }
         let current_quality = CandidateQualitySnapshot::from_tets(&current_tets, options);
+        initial_quality.get_or_insert(current_quality);
+        final_quality = Some(current_quality);
         sliver_candidate_count += current_quality.sliver_count;
         let proposed = smoothed_seed_points(
             seed_points,
@@ -2005,6 +2110,7 @@ fn smooth_component_seed_points(
                 break;
             }
             *seed_points = proposed;
+            final_quality = Some(proposed_quality);
             pass_count += 1;
             smoothed_point_count += moved_count;
             continue;
@@ -2028,15 +2134,23 @@ fn smooth_component_seed_points(
             break;
         };
         *seed_points = locally_smoothed;
+        final_quality = Some(local_quality);
         pass_count += 1;
         smoothed_point_count += 1;
         sliver_candidate_count += local_quality.sliver_count;
     }
 
+    let initial_quality = initial_quality.unwrap_or_else(CandidateQualitySnapshot::empty);
+    let final_quality = final_quality.unwrap_or(initial_quality);
     Ok(SmoothingSummary {
         pass_count,
         smoothed_point_count,
         sliver_candidate_count,
+        quality_sample_count: usize::from(initial_quality.has_samples()),
+        initial_max_aspect_ratio: initial_quality.max_aspect_ratio,
+        final_max_aspect_ratio: final_quality.max_aspect_ratio,
+        initial_min_exact_scaled_jacobian: initial_quality.min_exact_scaled_jacobian,
+        final_min_exact_scaled_jacobian: final_quality.min_exact_scaled_jacobian,
     })
 }
 
@@ -2127,7 +2241,27 @@ struct CandidateQualitySnapshot {
 }
 
 impl CandidateQualitySnapshot {
+    fn empty() -> Self {
+        Self {
+            max_aspect_ratio: 0.0,
+            max_radius_edge_ratio: 0.0,
+            volume_ratio_error: 0.0,
+            sliver_count: 0,
+            exact_quality_violation_count: 0,
+            min_exact_scaled_jacobian: 0.0,
+        }
+    }
+
+    fn has_samples(self) -> bool {
+        self.max_aspect_ratio.is_finite()
+            && self.max_aspect_ratio > 0.0
+            && self.min_exact_scaled_jacobian.is_finite()
+    }
+
     fn from_tets(tets: &[TetCandidate], options: TetCandidateOptions) -> Self {
+        if tets.is_empty() {
+            return Self::empty();
+        }
         let max_aspect_ratio = tets
             .iter()
             .map(|tet| tet.aspect_ratio)
@@ -4896,6 +5030,31 @@ mod tests {
         );
         assert!(
             candidates.recovery.smoothed_point_count <= candidates.interior_seed_points.len() * 2
+        );
+        assert!(candidates
+            .recovery
+            .optimization_initial_max_aspect_ratio
+            .is_finite());
+        assert!(candidates
+            .recovery
+            .optimization_final_max_aspect_ratio
+            .is_finite());
+        assert!(
+            candidates.recovery.optimization_final_max_aspect_ratio
+                <= candidates.recovery.optimization_initial_max_aspect_ratio + 1.0e-12
+        );
+        assert!(candidates
+            .recovery
+            .optimization_initial_min_exact_scaled_jacobian
+            .is_finite());
+        assert!(
+            candidates
+                .recovery
+                .optimization_final_min_exact_scaled_jacobian
+                + 1.0e-12
+                >= candidates
+                    .recovery
+                    .optimization_initial_min_exact_scaled_jacobian
         );
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }

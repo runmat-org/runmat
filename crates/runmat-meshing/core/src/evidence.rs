@@ -196,6 +196,14 @@ pub struct MeshTetRecoveryEvidence {
     pub optimization_pass_count: usize,
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
+    #[serde(default)]
+    pub optimization_initial_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub optimization_final_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub optimization_initial_min_exact_scaled_jacobian: f64,
+    #[serde(default)]
+    pub optimization_final_min_exact_scaled_jacobian: f64,
     pub exact_quality_repair_pass_count: usize,
     pub exact_quality_reconnected_cavity_count: usize,
     pub exact_quality_split_cavity_count: usize,
@@ -583,6 +591,16 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         optimization_pass_count: mesh.backend.tet_optimization_pass_count,
         smoothed_point_count: mesh.backend.tet_smoothed_point_count,
         sliver_candidate_count: mesh.backend.tet_sliver_candidate_count,
+        optimization_initial_max_aspect_ratio: mesh
+            .backend
+            .tet_optimization_initial_max_aspect_ratio,
+        optimization_final_max_aspect_ratio: mesh.backend.tet_optimization_final_max_aspect_ratio,
+        optimization_initial_min_exact_scaled_jacobian: mesh
+            .backend
+            .tet_optimization_initial_min_exact_scaled_jacobian,
+        optimization_final_min_exact_scaled_jacobian: mesh
+            .backend
+            .tet_optimization_final_min_exact_scaled_jacobian,
         exact_quality_repair_pass_count: mesh.backend.tet_exact_quality_repair_pass_count,
         exact_quality_reconnected_cavity_count: mesh
             .backend
@@ -1000,6 +1018,10 @@ mod tests {
                 tet_optimization_pass_count: 1,
                 tet_smoothed_point_count: 2,
                 tet_sliver_candidate_count: 1,
+                tet_optimization_initial_max_aspect_ratio: 6.0,
+                tet_optimization_final_max_aspect_ratio: 4.0,
+                tet_optimization_initial_min_exact_scaled_jacobian: 0.32,
+                tet_optimization_final_min_exact_scaled_jacobian: 0.40,
                 tet_exact_quality_repair_pass_count: 1,
                 tet_exact_quality_reconnected_cavity_count: 2,
                 tet_exact_quality_split_cavity_count: 3,
@@ -1140,6 +1162,26 @@ mod tests {
         assert_eq!(evidence.tet_recovery.optimization_pass_count, 1);
         assert_eq!(evidence.tet_recovery.smoothed_point_count, 2);
         assert_eq!(evidence.tet_recovery.sliver_candidate_count, 1);
+        assert_eq!(
+            evidence.tet_recovery.optimization_initial_max_aspect_ratio,
+            6.0
+        );
+        assert_eq!(
+            evidence.tet_recovery.optimization_final_max_aspect_ratio,
+            4.0
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .optimization_initial_min_exact_scaled_jacobian,
+            0.32
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .optimization_final_min_exact_scaled_jacobian,
+            0.40
+        );
         assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
         assert_eq!(
             evidence.tet_recovery.exact_quality_reconnected_cavity_count,

@@ -168,6 +168,14 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_sliver_candidate_count: usize,
     #[serde(default)]
+    pub tet_optimization_initial_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub tet_optimization_final_max_aspect_ratio: f64,
+    #[serde(default)]
+    pub tet_optimization_initial_min_exact_scaled_jacobian: f64,
+    #[serde(default)]
+    pub tet_optimization_final_min_exact_scaled_jacobian: f64,
+    #[serde(default)]
     pub tet_exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub tet_exact_quality_reconnected_cavity_count: usize,
@@ -248,6 +256,10 @@ impl Default for MeshBackendSummary {
             tet_optimization_pass_count: 0,
             tet_smoothed_point_count: 0,
             tet_sliver_candidate_count: 0,
+            tet_optimization_initial_max_aspect_ratio: 0.0,
+            tet_optimization_final_max_aspect_ratio: 0.0,
+            tet_optimization_initial_min_exact_scaled_jacobian: 0.0,
+            tet_optimization_final_min_exact_scaled_jacobian: 0.0,
             tet_exact_quality_repair_pass_count: 0,
             tet_exact_quality_reconnected_cavity_count: 0,
             tet_exact_quality_split_cavity_count: 0,
