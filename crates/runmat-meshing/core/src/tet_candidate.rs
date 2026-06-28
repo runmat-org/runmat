@@ -120,6 +120,14 @@ pub struct TetRecoveryReport {
     pub optimization_pass_count: usize,
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
+    #[serde(default)]
+    pub exact_quality_repair_pass_count: usize,
+    #[serde(default)]
+    pub exact_quality_reconnected_cavity_count: usize,
+    #[serde(default)]
+    pub exact_quality_split_cavity_count: usize,
+    #[serde(default)]
+    pub exact_quality_seed_star_collapse_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,7 +317,7 @@ pub fn form_tet_candidates(
     if tets.is_empty() {
         return Err(TetCandidateError::EmptyCandidateSet);
     }
-    repair_exact_quality_tets(
+    let repair = repair_exact_quality_tets(
         &mut nodes,
         &mut tets,
         &mut interior_seed_points,
@@ -360,6 +368,10 @@ pub fn form_tet_candidates(
             optimization_pass_count,
             smoothed_point_count,
             sliver_candidate_count,
+            exact_quality_repair_pass_count: repair.pass_count,
+            exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
+            exact_quality_split_cavity_count: repair.split_cavity_count,
+            exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
         },
         total_volume_m3,
     })
@@ -1905,13 +1917,30 @@ fn candidate_quality_is_better(
             && proposed.sliver_count < current.sliver_count)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TetQualityRepairSummary {
+    pass_count: usize,
+    reconnected_cavity_count: usize,
+    split_cavity_count: usize,
+    seed_star_collapse_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TetQualityRepairPassSummary {
+    changed: bool,
+    reconnected_cavity_count: usize,
+    split_cavity_count: usize,
+    seed_star_collapse_count: usize,
+}
+
 fn repair_exact_quality_tets(
     nodes: &mut Vec<TetCandidateNode>,
     tets: &mut Vec<TetCandidate>,
     interior_seed_points: &mut Vec<[f64; 3]>,
     next_node_id: &mut u32,
     options: TetCandidateOptions,
-) -> Result<(), TetCandidateError> {
+) -> Result<TetQualityRepairSummary, TetCandidateError> {
+    let mut summary = TetQualityRepairSummary::default();
     let pass_limit = options.max_refinement_passes.max(1);
     for _ in 0..pass_limit {
         if !tets
@@ -1920,18 +1949,22 @@ fn repair_exact_quality_tets(
         {
             break;
         }
-        let changed = repair_exact_quality_tets_once(
+        let pass = repair_exact_quality_tets_once(
             nodes,
             tets,
             interior_seed_points,
             next_node_id,
             options,
         )?;
-        if !changed {
+        if !pass.changed {
             break;
         }
+        summary.pass_count += 1;
+        summary.reconnected_cavity_count += pass.reconnected_cavity_count;
+        summary.split_cavity_count += pass.split_cavity_count;
+        summary.seed_star_collapse_count += pass.seed_star_collapse_count;
     }
-    Ok(())
+    Ok(summary)
 }
 
 fn repair_exact_quality_tets_once(
@@ -1940,7 +1973,7 @@ fn repair_exact_quality_tets_once(
     interior_seed_points: &mut Vec<[f64; 3]>,
     next_node_id: &mut u32,
     options: TetCandidateOptions,
-) -> Result<bool, TetCandidateError> {
+) -> Result<TetQualityRepairPassSummary, TetCandidateError> {
     let mut node_points = nodes
         .iter()
         .map(|node| (node.node_id, node.coordinates_m))
@@ -1956,7 +1989,7 @@ fn repair_exact_quality_tets_once(
         })
         .collect::<BTreeSet<_>>();
     let mut consumed = vec![false; tets.len()];
-    let mut changed = false;
+    let mut summary = TetQualityRepairPassSummary::default();
     for (tet_index, tet) in tets.iter().enumerate() {
         if consumed[tet_index] {
             continue;
@@ -1980,7 +2013,8 @@ fn repair_exact_quality_tets_once(
             for index in neighbor_indices {
                 consumed[index] = true;
             }
-            changed = true;
+            summary.changed = true;
+            summary.seed_star_collapse_count += 1;
             repaired.extend(candidates);
             continue;
         }
@@ -1998,7 +2032,8 @@ fn repair_exact_quality_tets_once(
             for index in neighbor_indices {
                 consumed[index] = true;
             }
-            changed = true;
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
             repaired.extend(candidates);
             continue;
         }
@@ -2016,7 +2051,8 @@ fn repair_exact_quality_tets_once(
             for index in neighbor_indices {
                 consumed[index] = true;
             }
-            changed = true;
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
             repaired.extend(candidates);
             continue;
         }
@@ -2029,7 +2065,8 @@ fn repair_exact_quality_tets_once(
             }
             consumed[tet_index] = true;
             consumed[neighbor_index] = true;
-            changed = true;
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
             repaired.extend(candidates);
             continue;
         }
@@ -2062,7 +2099,8 @@ fn repair_exact_quality_tets_once(
                 source: TetCandidateNodeSource::InteriorSeed,
             });
             repaired.extend(candidates);
-            changed = true;
+            summary.changed = true;
+            summary.split_cavity_count += 1;
         } else {
             repaired.push(tet.clone());
         }
@@ -2079,7 +2117,7 @@ fn repair_exact_quality_tets_once(
             || matches!(node.source, TetCandidateNodeSource::Surface)
     });
     *tets = repaired;
-    Ok(changed)
+    Ok(summary)
 }
 
 fn tet_face_adjacency(tets: &[TetCandidate]) -> BTreeMap<[u32; 3], Vec<usize>> {
@@ -4157,7 +4195,7 @@ mod tests {
         let mut interior_seed_points = vec![split_point];
         let mut next_node_id = 5;
 
-        let changed = repair_exact_quality_tets_once(
+        let repair = repair_exact_quality_tets_once(
             &mut nodes,
             &mut split_tets,
             &mut interior_seed_points,
@@ -4166,7 +4204,10 @@ mod tests {
         )
         .expect("repair should evaluate");
 
-        assert!(changed);
+        assert!(repair.changed);
+        assert_eq!(repair.seed_star_collapse_count, 1);
+        assert_eq!(repair.reconnected_cavity_count, 0);
+        assert_eq!(repair.split_cavity_count, 0);
         assert_eq!(split_tets.len(), 1);
         assert!(
             split_tets[0].exact_scaled_jacobian >= options.min_scaled_jacobian,

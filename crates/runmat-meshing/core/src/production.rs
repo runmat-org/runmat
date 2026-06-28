@@ -680,6 +680,22 @@ fn production_backend_summary(
         tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
+        tet_exact_quality_repair_pass_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_repair_pass_count,
+        tet_exact_quality_reconnected_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_reconnected_cavity_count,
+        tet_exact_quality_split_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_split_cavity_count,
+        tet_exact_quality_seed_star_collapse_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_seed_star_collapse_count,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }
