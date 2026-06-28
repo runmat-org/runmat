@@ -1052,6 +1052,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_quality_reconnection_quality_gain_count,
+        tet_exact_quality_face_neighbor_reconnected_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_face_neighbor_reconnected_cavity_count,
         tet_exact_quality_split_cavity_count: preparation
             .tet_candidates
             .recovery

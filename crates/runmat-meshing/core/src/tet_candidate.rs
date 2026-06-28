@@ -143,6 +143,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_reconnection_quality_gain_count: usize,
     #[serde(default)]
+    pub exact_quality_face_neighbor_reconnected_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_split_cavity_count: usize,
     #[serde(default)]
     pub exact_quality_seed_star_collapse_count: usize,
@@ -447,6 +449,8 @@ pub fn form_tet_candidates(
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
             exact_quality_reconnection_quality_gain_count: repair.reconnection_quality_gain_count,
+            exact_quality_face_neighbor_reconnected_cavity_count: repair
+                .face_neighbor_reconnected_cavity_count,
             exact_quality_split_cavity_count: repair.split_cavity_count,
             exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
             exact_quality_seed_star_relocation_count: repair.seed_star_relocation_count,
@@ -2404,6 +2408,7 @@ struct TetQualityRepairSummary {
     pass_count: usize,
     reconnected_cavity_count: usize,
     reconnection_quality_gain_count: usize,
+    face_neighbor_reconnected_cavity_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2414,6 +2419,7 @@ struct TetQualityRepairPassSummary {
     changed: bool,
     reconnected_cavity_count: usize,
     reconnection_quality_gain_count: usize,
+    face_neighbor_reconnected_cavity_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2448,6 +2454,8 @@ fn repair_exact_quality_tets(
         summary.pass_count += 1;
         summary.reconnected_cavity_count += pass.reconnected_cavity_count;
         summary.reconnection_quality_gain_count += pass.reconnection_quality_gain_count;
+        summary.face_neighbor_reconnected_cavity_count +=
+            pass.face_neighbor_reconnected_cavity_count;
         summary.split_cavity_count += pass.split_cavity_count;
         summary.seed_star_collapse_count += pass.seed_star_collapse_count;
         summary.seed_star_relocation_count += pass.seed_star_relocation_count;
@@ -2698,6 +2706,7 @@ fn repair_exact_quality_tets_once(
             }
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
+            summary.face_neighbor_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
@@ -6099,6 +6108,52 @@ mod tests {
         assert!((candidate_volume - original_volume).abs() < 1.0e-12);
         assert_eq!(candidates.len(), 1);
         assert!((candidates[0].volume_m3 - outer_tet.volume_m3).abs() < 1.0e-12);
+
+        let mut nodes = vec![
+            TetCandidateNode {
+                node_id: 0,
+                coordinates_m: points[0],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 1,
+                coordinates_m: points[1],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 2,
+                coordinates_m: points[2],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 3,
+                coordinates_m: points[3],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 4,
+                coordinates_m: split_point,
+                source: TetCandidateNodeSource::Surface,
+            },
+        ];
+        let mut repair_tets = split_tets.clone();
+        let mut interior_seed_points = Vec::new();
+        let mut next_node_id = 5;
+        let repair = repair_exact_quality_tets_once(
+            &mut nodes,
+            &mut repair_tets,
+            &mut interior_seed_points,
+            &mut next_node_id,
+            options,
+        )
+        .expect("repair should evaluate");
+
+        assert!(repair.changed);
+        assert_eq!(repair.reconnected_cavity_count, 1);
+        assert_eq!(repair.face_neighbor_reconnected_cavity_count, 1);
+        assert_eq!(repair.reconnection_quality_gain_count, 0);
+        assert_eq!(repair.split_cavity_count, 0);
+        assert_eq!(repair_tets.len(), 1);
     }
 
     #[test]
