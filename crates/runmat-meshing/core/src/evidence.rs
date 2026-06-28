@@ -272,6 +272,18 @@ pub struct MeshValidationEvidence {
     pub require_no_fan_fallback: bool,
     #[serde(default)]
     pub require_no_unrepaired_exact_quality: bool,
+    #[serde(default)]
+    pub fan_fallback_component_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_total_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_general_cavity_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_boundary_adjacent_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_interior_seed_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_edge_star_count: usize,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
     pub boundary_recovery: MeshBoundaryRecoveryEvidence,
@@ -723,6 +735,20 @@ fn validation_evidence(
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
         require_no_fan_fallback: validation.require_no_fan_fallback,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
+        fan_fallback_component_count: mesh.backend.tet_fan_fallback_component_count,
+        unrepaired_exact_quality_total_count: mesh.backend.tet_exact_quality_unrepaired_total_count,
+        unrepaired_exact_quality_general_cavity_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_general_cavity_count,
+        unrepaired_exact_quality_boundary_adjacent_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_boundary_adjacent_count,
+        unrepaired_exact_quality_interior_seed_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_interior_seed_count,
+        unrepaired_exact_quality_edge_star_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_edge_star_count,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
         boundary_recovery: boundary_recovery_evidence(mesh),
@@ -1104,6 +1130,30 @@ mod tests {
         );
         assert!(evidence.validation.require_no_fan_fallback);
         assert!(!evidence.validation.require_no_unrepaired_exact_quality);
+        assert_eq!(evidence.validation.fan_fallback_component_count, 0);
+        assert_eq!(evidence.validation.unrepaired_exact_quality_total_count, 9);
+        assert_eq!(
+            evidence
+                .validation
+                .unrepaired_exact_quality_general_cavity_count,
+            1
+        );
+        assert_eq!(
+            evidence
+                .validation
+                .unrepaired_exact_quality_boundary_adjacent_count,
+            6
+        );
+        assert_eq!(
+            evidence
+                .validation
+                .unrepaired_exact_quality_interior_seed_count,
+            7
+        );
+        assert_eq!(
+            evidence.validation.unrepaired_exact_quality_edge_star_count,
+            8
+        );
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);
         assert_eq!(
