@@ -73,6 +73,8 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub growth_rate: Option<f64>,
     pub sample_count: usize,
+    #[serde(default)]
+    pub generated_cad_sample_count: usize,
     pub applied_sample_count: usize,
     pub rejected_sample_count: usize,
     pub inserted_breakpoint_count: usize,
@@ -84,6 +86,8 @@ pub struct MeshSizingEvidence {
     pub accepted_requested_tet_refinement_surrogate_point_count: usize,
     #[serde(default)]
     pub requested_tet_refinement_acceptance_ratio: Option<f64>,
+    #[serde(default)]
+    pub generated_cad_by_reason: BTreeMap<String, usize>,
     pub applied_by_reason: BTreeMap<String, usize>,
     pub rejected_by_status: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<String, usize>,
@@ -277,6 +281,19 @@ fn topology_evidence(mesh: &AnalysisMeshArtifact) -> MeshTopologyEvidence {
 }
 
 fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
+    let mut generated_cad_by_reason = BTreeMap::<String, usize>::new();
+    for sample in &mesh.sizing.samples {
+        if let Some(reason) = sample
+            .reason
+            .as_deref()
+            .filter(|reason| reason.starts_with("cad."))
+        {
+            *generated_cad_by_reason
+                .entry(reason.to_string())
+                .or_default() += 1;
+        }
+    }
+
     let mut applied_by_reason = BTreeMap::<String, usize>::new();
     let mut inserted_breakpoint_count = 0_usize;
     for application in &mesh.sizing.applied_samples {
@@ -307,6 +324,7 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         max_size_m: mesh.sizing.max_size_m,
         growth_rate: mesh.sizing.growth_rate,
         sample_count: mesh.sizing.samples.len(),
+        generated_cad_sample_count: generated_cad_by_reason.values().sum(),
         applied_sample_count: mesh.sizing.applied_samples.len(),
         rejected_sample_count: mesh.sizing.rejected_samples.len(),
         inserted_breakpoint_count,
@@ -329,6 +347,7 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         } else {
             None
         },
+        generated_cad_by_reason,
         applied_by_reason,
         rejected_by_status,
         rejected_by_reason,
@@ -630,7 +649,7 @@ mod tests {
         },
         provenance::AnalysisMeshProvenance,
         quality::{AnalysisMeshQualityReport, ElementQuality},
-        sizing::{MeshSizingField, SizingSampleApplication, SizingSampleRejection},
+        sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
         topology::{BoundaryElementKind, VolumeElementKind},
     };
 
@@ -683,6 +702,23 @@ mod tests {
             },
             sizing: MeshSizingField {
                 growth_rate: Some(1.4),
+                samples: vec![
+                    SizingSample {
+                        position_m: [0.0, 0.0, 0.0],
+                        target_size_m: 0.25,
+                        reason: Some("load_region".to_string()),
+                    },
+                    SizingSample {
+                        position_m: [0.5, 0.0, 0.0],
+                        target_size_m: 0.2,
+                        reason: Some("cad.curvature".to_string()),
+                    },
+                    SizingSample {
+                        position_m: [0.0, 0.5, 0.0],
+                        target_size_m: 0.15,
+                        reason: Some("cad.interface".to_string()),
+                    },
+                ],
                 applied_samples: vec![SizingSampleApplication {
                     position_m: [0.0, 0.0, 0.0],
                     target_size_m: 0.25,
@@ -795,6 +831,16 @@ mod tests {
         assert_eq!(
             evidence.sizing.requested_tet_refinement_acceptance_ratio,
             Some(0.75)
+        );
+        assert_eq!(evidence.sizing.sample_count, 3);
+        assert_eq!(evidence.sizing.generated_cad_sample_count, 2);
+        assert_eq!(
+            evidence.sizing.generated_cad_by_reason.get("cad.curvature"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence.sizing.generated_cad_by_reason.get("cad.interface"),
+            Some(&1)
         );
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),

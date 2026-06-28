@@ -1426,6 +1426,33 @@ mod tests {
                     .as_deref()
                     .is_some_and(|detail| detail.starts_with("production_requested_tet_seed_"))
         }));
+        let evidence = crate::evidence::build_mesh_evidence_artifact(
+            &mesh,
+            &AnalysisMeshValidationOptions::default(),
+        );
+        assert!(evidence.sizing.generated_cad_sample_count > 0);
+        assert_eq!(
+            evidence.sizing.generated_cad_by_reason.get("cad.curvature"),
+            Some(
+                &mesh
+                    .sizing
+                    .samples
+                    .iter()
+                    .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
+                    .count()
+            )
+        );
+        assert_eq!(
+            evidence.sizing.applied_by_reason.get("cad.curvature"),
+            Some(
+                &mesh
+                    .sizing
+                    .applied_samples
+                    .iter()
+                    .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
+                    .count()
+            )
+        );
         assert!(mesh.backend.tet_requested_refinement_point_count > 0);
     }
 
