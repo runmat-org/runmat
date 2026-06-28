@@ -1243,6 +1243,14 @@ fn production_validation_options(
             .validation
             .max_volume_component_count
             .or(Some(preparation.volume_candidates.components.len())),
+        coverage_sample_points_m: preparation
+            .tet_candidates
+            .interior_seed_points
+            .iter()
+            .copied()
+            .take(64)
+            .collect(),
+        min_coverage_sample_ratio: 1.0,
         expected_bounds_m: Some([
             preparation.topology.bounds_min_m,
             preparation.topology.bounds_max_m,
@@ -1382,6 +1390,9 @@ mod tests {
 
     #[test]
     fn production_mesh_generates_analysis_mesh_artifact_from_candidates() {
+        let preparation =
+            prepare_production_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
+                .expect("production preparation should generate");
         let mesh =
             generate_production_analysis_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
                 .expect("production mesh should generate from candidates");
@@ -1428,6 +1439,14 @@ mod tests {
         assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);
         assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
         assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
+        let validation_options =
+            production_validation_options(&preparation, &VolumeMeshingOptions::default());
+        assert!(!validation_options.coverage_sample_points_m.is_empty());
+        assert_eq!(validation_options.min_coverage_sample_ratio, 1.0);
+        assert!(validation_options
+            .coverage_sample_points_m
+            .iter()
+            .all(|point| point.iter().all(|value| value.is_finite())));
         assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
         assert!(mesh.backend.tet_min_exact_scaled_jacobian.is_finite());
         assert!(

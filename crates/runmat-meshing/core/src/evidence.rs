@@ -5,8 +5,8 @@ use crate::{
     artifact::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
     validation::{
-        analysis_mesh_validation_error_code, validate_analysis_mesh_with_options,
-        volume_component_count, AnalysisMeshValidationOptions,
+        analysis_mesh_validation_error_code, mesh_contains_point,
+        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationOptions,
     },
 };
 
@@ -230,6 +230,16 @@ pub struct MeshValidationEvidence {
     pub volume_component_count: usize,
     #[serde(default)]
     pub max_volume_component_count: Option<usize>,
+    #[serde(default)]
+    pub coverage_sample_count: usize,
+    #[serde(default)]
+    pub covered_coverage_sample_count: usize,
+    #[serde(default)]
+    pub coverage_sample_ratio: Option<f64>,
+    #[serde(default = "default_min_coverage_sample_ratio")]
+    pub min_coverage_sample_ratio: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coverage_sample_points_m: Vec<[f64; 3]>,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -317,6 +327,8 @@ fn validation_options_from_evidence(
         quality: validation.quality,
         max_volume_element_count: validation.max_volume_element_count,
         max_volume_component_count: validation.max_volume_component_count,
+        coverage_sample_points_m: validation.coverage_sample_points_m.clone(),
+        min_coverage_sample_ratio: validation.min_coverage_sample_ratio,
         expected_bounds_m: validation.expected_bounds_m,
         min_bounds_coverage_ratio: validation.min_bounds_coverage_ratio,
         expected_volume_m3: validation.expected_volume_m3,
@@ -648,6 +660,14 @@ fn validation_evidence(
         max_volume_element_count: validation.max_volume_element_count,
         volume_component_count: volume_component_count(mesh),
         max_volume_component_count: validation.max_volume_component_count,
+        coverage_sample_count: finite_coverage_sample_count(&validation.coverage_sample_points_m),
+        covered_coverage_sample_count: covered_coverage_sample_count(
+            mesh,
+            &validation.coverage_sample_points_m,
+        ),
+        coverage_sample_ratio: coverage_sample_ratio(mesh, &validation.coverage_sample_points_m),
+        min_coverage_sample_ratio: validation.min_coverage_sample_ratio,
+        coverage_sample_points_m: validation.coverage_sample_points_m.clone(),
         expected_bounds_m: validation.expected_bounds_m,
         min_bounds_coverage_ratio: validation.min_bounds_coverage_ratio,
         expected_volume_m3: validation.expected_volume_m3,
@@ -665,6 +685,33 @@ fn validation_evidence(
 
 fn default_solve_ready() -> bool {
     true
+}
+
+fn default_min_coverage_sample_ratio() -> f64 {
+    1.0
+}
+
+fn finite_coverage_sample_count(points: &[[f64; 3]]) -> usize {
+    points
+        .iter()
+        .filter(|point| point.iter().all(|value| value.is_finite()))
+        .count()
+}
+
+fn covered_coverage_sample_count(mesh: &AnalysisMeshArtifact, points: &[[f64; 3]]) -> usize {
+    points
+        .iter()
+        .filter(|point| point.iter().all(|value| value.is_finite()))
+        .filter(|point| mesh_contains_point(mesh, **point))
+        .count()
+}
+
+fn coverage_sample_ratio(mesh: &AnalysisMeshArtifact, points: &[[f64; 3]]) -> Option<f64> {
+    let finite_count = finite_coverage_sample_count(points);
+    if finite_count == 0 {
+        return None;
+    }
+    Some(covered_coverage_sample_count(mesh, points) as f64 / finite_count as f64)
 }
 
 fn boundary_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshBoundaryRecoveryEvidence {
@@ -961,6 +1008,8 @@ mod tests {
         let validation = AnalysisMeshValidationOptions {
             max_volume_element_count: Some(7),
             max_volume_component_count: Some(1),
+            coverage_sample_points_m: vec![[0.1, 0.1, 0.1]],
+            min_coverage_sample_ratio: 1.0,
             require_no_fan_fallback: true,
             ..AnalysisMeshValidationOptions::default()
         };
@@ -987,6 +1036,14 @@ mod tests {
         assert_eq!(evidence.validation.max_volume_element_count, Some(7));
         assert_eq!(evidence.validation.volume_component_count, 1);
         assert_eq!(evidence.validation.max_volume_component_count, Some(1));
+        assert_eq!(evidence.validation.coverage_sample_count, 1);
+        assert_eq!(evidence.validation.covered_coverage_sample_count, 1);
+        assert_eq!(evidence.validation.coverage_sample_ratio, Some(1.0));
+        assert_eq!(evidence.validation.min_coverage_sample_ratio, 1.0);
+        assert_eq!(
+            evidence.validation.coverage_sample_points_m,
+            vec![[0.1, 0.1, 0.1]]
+        );
         assert!(evidence.validation.require_no_fan_fallback);
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);

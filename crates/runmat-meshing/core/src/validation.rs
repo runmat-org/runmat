@@ -11,6 +11,8 @@ pub struct AnalysisMeshValidationOptions {
     pub quality: QualityThresholds,
     pub max_volume_element_count: Option<usize>,
     pub max_volume_component_count: Option<usize>,
+    pub coverage_sample_points_m: Vec<[f64; 3]>,
+    pub min_coverage_sample_ratio: f64,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -30,6 +32,8 @@ impl Default for AnalysisMeshValidationOptions {
             quality: QualityThresholds::default(),
             max_volume_element_count: None,
             max_volume_component_count: None,
+            coverage_sample_points_m: Vec::new(),
+            min_coverage_sample_ratio: 1.0,
             expected_bounds_m: None,
             min_bounds_coverage_ratio: 0.90,
             expected_volume_m3: None,
@@ -131,6 +135,10 @@ pub enum AnalysisMeshValidationError {
         component_count: usize,
         max_component_count: usize,
     },
+    CoverageSampleFailed {
+        coverage_ratio: String,
+        required_ratio: String,
+    },
     BoundsCoverageFailed {
         axis: usize,
         coverage_ratio: String,
@@ -214,6 +222,7 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::VolumeComponentCountExceeded { .. } => {
             "volume_component_count_exceeded"
         }
+        AnalysisMeshValidationError::CoverageSampleFailed { .. } => "coverage_sample_failed",
         AnalysisMeshValidationError::BoundsCoverageFailed { .. } => "bounds_coverage_failed",
         AnalysisMeshValidationError::VolumeCoverageFailed { .. } => "volume_coverage_failed",
         AnalysisMeshValidationError::BoundaryAreaCoverageFailed { .. } => {
@@ -429,6 +438,11 @@ pub fn validate_analysis_mesh_with_options(
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
     validate_no_fan_fallback(mesh, options.require_no_fan_fallback)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
+    validate_coverage_samples(
+        mesh,
+        &options.coverage_sample_points_m,
+        options.min_coverage_sample_ratio,
+    )?;
     validate_bounds_coverage(
         mesh,
         options.expected_bounds_m,
@@ -477,6 +491,39 @@ fn validate_volume_component_count(
         return Err(AnalysisMeshValidationError::VolumeComponentCountExceeded {
             component_count,
             max_component_count,
+        });
+    }
+    Ok(())
+}
+
+fn validate_coverage_samples(
+    mesh: &AnalysisMeshArtifact,
+    coverage_sample_points_m: &[[f64; 3]],
+    min_coverage_sample_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    if coverage_sample_points_m.is_empty()
+        || !min_coverage_sample_ratio.is_finite()
+        || min_coverage_sample_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let finite_samples = coverage_sample_points_m
+        .iter()
+        .copied()
+        .filter(|point| point.iter().all(|value| value.is_finite()))
+        .collect::<Vec<_>>();
+    if finite_samples.is_empty() {
+        return Ok(());
+    }
+    let covered_count = finite_samples
+        .iter()
+        .filter(|point| mesh_contains_point(mesh, **point))
+        .count();
+    let coverage_ratio = covered_count as f64 / finite_samples.len() as f64;
+    if coverage_ratio + 1.0e-9 < min_coverage_sample_ratio {
+        return Err(AnalysisMeshValidationError::CoverageSampleFailed {
+            coverage_ratio: format!("{coverage_ratio:.6}"),
+            required_ratio: format!("{min_coverage_sample_ratio:.6}"),
         });
     }
     Ok(())
@@ -843,6 +890,34 @@ fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
         .iter()
         .find(|node| node.node_id == node_id)
         .map(|node| node.coordinates_m)
+}
+
+pub fn mesh_contains_point(mesh: &AnalysisMeshArtifact, point: [f64; 3]) -> bool {
+    mesh.volume_elements
+        .iter()
+        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
+        .filter_map(|element| {
+            Some([
+                mesh_node(mesh, element.node_ids[0])?,
+                mesh_node(mesh, element.node_ids[1])?,
+                mesh_node(mesh, element.node_ids[2])?,
+                mesh_node(mesh, element.node_ids[3])?,
+            ])
+        })
+        .any(|tet| point_in_tet(point, tet))
+}
+
+fn point_in_tet(point: [f64; 3], tet: [[f64; 3]; 4]) -> bool {
+    let total = tet_volume_m3(tet);
+    if !total.is_finite() || total <= f64::EPSILON {
+        return false;
+    }
+    let subvolume_sum = tet_volume_m3([point, tet[1], tet[2], tet[3]])
+        + tet_volume_m3([tet[0], point, tet[2], tet[3]])
+        + tet_volume_m3([tet[0], tet[1], point, tet[3]])
+        + tet_volume_m3([tet[0], tet[1], tet[2], point]);
+    let tolerance = total * 1.0e-8 + f64::EPSILON;
+    (subvolume_sum - total).abs() <= tolerance
 }
 
 fn tet_volume_m3(points: [[f64; 3]; 4]) -> f64 {
@@ -1308,6 +1383,67 @@ mod tests {
             AnalysisMeshValidationError::VolumeCoverageFailed {
                 coverage_ratio: "0.166667".to_string(),
                 required_ratio: "0.900000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_uncovered_interior_coverage_samples() {
+        let mesh = valid_tet_mesh();
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                coverage_sample_points_m: vec![[0.1, 0.1, 0.1], [2.0, 2.0, 2.0]],
+                min_coverage_sample_ratio: 1.0,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("uncovered interior coverage sample should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::CoverageSampleFailed {
+                coverage_ratio: "0.500000".to_string(),
+                required_ratio: "1.000000".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn accepts_covered_interior_coverage_samples() {
+        let mesh = valid_tet_mesh();
+        validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                coverage_sample_points_m: vec![[0.1, 0.1, 0.1]],
+                min_coverage_sample_ratio: 1.0,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect("covered interior coverage sample should pass");
+    }
+
+    #[test]
+    fn rejects_nearby_uncovered_samples_for_small_tets() {
+        let mut mesh = valid_tet_mesh();
+        for node in &mut mesh.nodes {
+            for coordinate in &mut node.coordinates_m {
+                *coordinate *= 1.0e-3;
+            }
+        }
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                coverage_sample_points_m: vec![[1.01e-3, 1.0e-6, 1.0e-6]],
+                min_coverage_sample_ratio: 1.0,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("sample outside a small tet should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::CoverageSampleFailed {
+                coverage_ratio: "0.000000".to_string(),
+                required_ratio: "1.000000".to_string(),
             }
         );
     }
