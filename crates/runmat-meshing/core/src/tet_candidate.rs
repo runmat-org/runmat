@@ -1426,6 +1426,7 @@ fn refine_component_seed_points(
     let mut requested_point_count = 0_usize;
     let mut accepted_requested_point_count = 0_usize;
     let mut accepted_requested_points = Vec::<AcceptedRequestedRefinementPoint>::new();
+    let mut accepted_requested_ids = BTreeSet::<usize>::new();
     let mut sizing_violation_count = 0_usize;
     for _ in 0..options.max_refinement_passes {
         if seed_points.len() >= options.max_interior_seed_points {
@@ -1470,6 +1471,12 @@ fn refine_component_seed_points(
             if seed_points.len() >= options.max_interior_seed_points {
                 break;
             }
+            if candidate
+                .requested_id
+                .is_some_and(|requested_id| accepted_requested_ids.contains(&requested_id))
+            {
+                continue;
+            }
             if contains_point(seed_points, point, tolerance) {
                 continue;
             }
@@ -1491,7 +1498,7 @@ fn refine_component_seed_points(
                 continue;
             }
             let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
-            let quality_is_acceptable = if candidate.requested {
+            let quality_is_acceptable = if candidate.requested_id.is_some() {
                 candidate_quality_preserves_thresholds(trial_quality, current_quality)
             } else {
                 candidate_quality_is_no_worse(trial_quality, current_quality)
@@ -1504,7 +1511,8 @@ fn refine_component_seed_points(
             current_status = trial_status;
             current_tets = trial_tets;
             inserted_point_count += 1;
-            if candidate.requested {
+            if let Some(requested_id) = candidate.requested_id {
+                accepted_requested_ids.insert(requested_id);
                 accepted_requested_point_count += 1;
                 accepted_requested_points.push(AcceptedRequestedRefinementPoint {
                     seed_index,
@@ -1532,7 +1540,7 @@ fn refine_component_seed_points(
 #[derive(Debug, Clone, PartialEq)]
 struct RefinementPointCandidate {
     point: [f64; 3],
-    requested: bool,
+    requested_id: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1561,16 +1569,33 @@ fn refinement_points_for_tets(
         });
     };
     let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
-    let mut ranked = Vec::<([f64; 3], f64, bool)>::new();
+    let mut ranked = Vec::<RankedRefinementPoint>::new();
     let mut requested_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
-    for point in options
+    for (requested_id, point) in options
         .requested_refinement_points
         .iter()
         .take(options.requested_refinement_point_count)
+        .enumerate()
     {
         if classifier.contains_point(*point) && !contains_point(seed_points, *point, tolerance) {
-            ranked.push((*point, f64::INFINITY, true));
+            for (candidate_index, candidate_point) in requested_refinement_candidate_points(
+                *point,
+                seed_points,
+                classifier,
+                target_size_m,
+                tolerance,
+            )
+            .into_iter()
+            .enumerate()
+            {
+                ranked.push(RankedRefinementPoint {
+                    point: candidate_point,
+                    score: requested_refinement_score(candidate_index),
+                    requested_id: Some(requested_id),
+                    quality_driven: false,
+                });
+            }
             requested_point_count += 1;
         }
     }
@@ -1611,39 +1636,96 @@ fn refinement_points_for_tets(
         } else {
             0.0
         };
-        ranked.push((
+        ranked.push(RankedRefinementPoint {
             point,
-            radius_edge_ratio
+            score: radius_edge_ratio
                 .max(max_edge_m / target_size_m)
                 .max(exact_quality_error),
-            sizing_violation || exact_quality_violation,
-        ));
+            requested_id: None,
+            quality_driven: sizing_violation || exact_quality_violation,
+        });
     }
     ranked.sort_by(|left, right| {
         right
-            .1
-            .total_cmp(&left.1)
-            .then_with(|| right.2.cmp(&left.2))
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| right.quality_driven.cmp(&left.quality_driven))
     });
     let mut points = Vec::<RefinementPointCandidate>::new();
-    for (point, _, requested) in ranked {
-        if points.len() >= point_budget {
+    let mut unrequested_point_count = 0_usize;
+    for ranked_point in ranked {
+        if ranked_point.requested_id.is_none() && unrequested_point_count >= point_budget {
             break;
         }
-        if contains_point(seed_points, point, tolerance)
-            || points
-                .iter()
-                .any(|candidate| tolerance.point_nearly_equal(candidate.point, point, 1.0))
+        if contains_point(seed_points, ranked_point.point, tolerance)
+            || points.iter().any(|candidate| {
+                tolerance.point_nearly_equal(candidate.point, ranked_point.point, 1.0)
+            })
         {
             continue;
         }
-        points.push(RefinementPointCandidate { point, requested });
+        points.push(RefinementPointCandidate {
+            point: ranked_point.point,
+            requested_id: ranked_point.requested_id,
+        });
+        if ranked_point.requested_id.is_none() {
+            unrequested_point_count += 1;
+        }
     }
     Ok(RefinementPointSet {
         points,
         requested_point_count,
         sizing_violation_count,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RankedRefinementPoint {
+    point: [f64; 3],
+    score: f64,
+    requested_id: Option<usize>,
+    quality_driven: bool,
+}
+
+fn requested_refinement_score(candidate_index: usize) -> f64 {
+    f64::MAX / (candidate_index as f64 + 2.0)
+}
+
+fn requested_refinement_candidate_points(
+    requested_point: [f64; 3],
+    seed_points: &[[f64; 3]],
+    classifier: &ComponentSurfaceClassifier,
+    target_size_m: f64,
+    tolerance: MeshingTolerance,
+) -> Vec<[f64; 3]> {
+    let mut candidates = vec![requested_point];
+    let clearance = classifier.nearest_surface_distance(requested_point);
+    let safe_clearance = target_size_m.min(1.0) * 0.01;
+    if clearance <= safe_clearance.max(tolerance.absolute_m * 10.0) || seed_points.is_empty() {
+        return candidates;
+    }
+    let anchor = seed_points
+        .iter()
+        .copied()
+        .min_by(|left, right| {
+            distance_squared(*left, requested_point)
+                .total_cmp(&distance_squared(*right, requested_point))
+        })
+        .unwrap_or(requested_point);
+    for fraction in [0.25, 0.5, 0.75] {
+        let candidate = [
+            requested_point[0] * (1.0 - fraction) + anchor[0] * fraction,
+            requested_point[1] * (1.0 - fraction) + anchor[1] * fraction,
+            requested_point[2] * (1.0 - fraction) + anchor[2] * fraction,
+        ];
+        if classifier.contains_point(candidate)
+            && !contains_point(&candidates, candidate, tolerance)
+            && !contains_point(seed_points, candidate, tolerance)
+        {
+            candidates.push(candidate);
+        }
+    }
+    candidates
 }
 
 fn seed_node_ids(first_seed_node_id: u32, seed_count: usize) -> Vec<u32> {
@@ -4071,6 +4153,13 @@ impl ComponentSurfaceClassifier {
         })
     }
 
+    fn nearest_surface_distance(&self, point: [f64; 3]) -> f64 {
+        self.triangles_by_element_id
+            .values()
+            .map(|triangle| point_triangle_distance(point, *triangle))
+            .fold(f64::INFINITY, f64::min)
+    }
+
     fn ray_has_odd_surface_intersections(&self, origin: [f64; 3], direction: [f64; 3]) -> bool {
         let mut intersections = Vec::<f64>::new();
         for entry in self.grid_index.query_ray(origin, direction) {
@@ -4347,6 +4436,61 @@ mod tests {
         );
         assert_eq!(candidates.recovery.refinement_pass_count, 0);
         assert_eq!(candidates.recovery.refinement_point_count, 0);
+        assert_eq!(
+            candidates
+                .tets
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < 0.15)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn requested_refinement_uses_nearby_quality_safe_point_when_exact_point_regresses() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let mut requested_refinement_points = [[0.0; 3]; 16];
+        requested_refinement_points[0] = [0.05, 0.05, 0.05];
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(2.0),
+                requested_refinement_points,
+                requested_refinement_point_count: 1,
+                max_interior_seed_points: 2,
+                max_refinement_passes: 1,
+                max_radius_edge_ratio: 10.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("Tet candidates should form with requested refinement fallback");
+
+        assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_point_count,
+            1
+        );
+        assert_eq!(candidates.recovery.refinement_pass_count, 1);
+        assert_eq!(candidates.recovery.refinement_point_count, 1);
+        assert_eq!(candidates.accepted_requested_refinement_points.len(), 1);
+        assert!(
+            distance_squared(
+                candidates.accepted_requested_refinement_points[0],
+                requested_refinement_points[0]
+            ) > 1.0e-12,
+            "accepted point should be a quality-safe surrogate rather than the exact requested point"
+        );
+        assert!(candidates
+            .interior_seed_points
+            .iter()
+            .any(|point| distance_squared(
+                *point,
+                candidates.accepted_requested_refinement_points[0]
+            ) <= 1.0e-24));
         assert_eq!(
             candidates
                 .tets
