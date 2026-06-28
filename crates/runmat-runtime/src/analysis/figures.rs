@@ -1,5 +1,9 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_analysis_fea::contracts::{
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+};
 use runmat_geometry_core::UnitSystem;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
@@ -19,6 +23,7 @@ use crate::operations::OperationContext;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisGeneratedFigureKind {
     MeshResult,
+    Summary,
     Convergence,
     Modal,
     Electromagnetic,
@@ -152,6 +157,7 @@ fn generate_run_figures(
 ) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
     figures.extend(mesh_result_figures(geometry, run, options));
+    figures.extend(summary_figures(run));
     figures.extend(convergence_figures(run));
     figures
 }
@@ -332,6 +338,62 @@ fn mesh_result_figures(
     }
 
     figures
+}
+
+fn summary_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
+    let fields = collect_analysis_result_fields(run);
+    let Some(figure) = structural_result_summary_figure(&fields) else {
+        return Vec::new();
+    };
+    vec![figure]
+}
+
+fn structural_result_summary_figure(fields: &[AnalysisField]) -> Option<AnalysisGeneratedFigure> {
+    let mut labels = Vec::new();
+    let mut values = Vec::new();
+    let mut field_ids = Vec::new();
+
+    if let Some(value) = vector_field_total_magnitude(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE) {
+        labels.push("Reaction force norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_REACTION_FORCE.to_string());
+    }
+    if let Some(value) = vector_field_total_magnitude(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT)
+    {
+        labels.push("Reaction moment norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_REACTION_MOMENT.to_string());
+    }
+    if let Some(value) = scalar_field_value(fields, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY) {
+        labels.push("Total strain energy".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY.to_string());
+    }
+    if let Some(value) = scalar_field_value(fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM) {
+        labels.push("Residual norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM.to_string());
+    }
+
+    if labels.is_empty() {
+        return None;
+    }
+    let mut chart = BarChart::new(labels, values).ok()?;
+    chart.label = Some("Structural summary".to_string());
+    chart.color = Vec4::new(0.30, 0.64, 0.58, 1.0);
+    let mut figure = Figure::new()
+        .with_title("FEA structural result summary")
+        .with_labels("Metric", "Value")
+        .with_grid(true);
+    figure.add_bar_chart(chart);
+    Some(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::Summary,
+        title: "FEA structural result summary".to_string(),
+        field_ids,
+        topology_ids: Vec::new(),
+        warnings: Vec::new(),
+        figure,
+    })
 }
 
 fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
@@ -1456,6 +1518,35 @@ fn host_values(field: &AnalysisField) -> Option<&[f64]> {
     }
 }
 
+fn field_by_id<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a AnalysisField> {
+    fields.iter().find(|field| field.field_id == field_id)
+}
+
+fn scalar_field_value(fields: &[AnalysisField], field_id: &str) -> Option<f64> {
+    let field = field_by_id(fields, field_id)?;
+    let values = host_values(field)?;
+    if values.len() != 1 {
+        return None;
+    }
+    values.first().copied().filter(|value| value.is_finite())
+}
+
+fn vector_field_total_magnitude(fields: &[AnalysisField], field_id: &str) -> Option<f64> {
+    let field = field_by_id(fields, field_id)?;
+    let values = host_values(field)?;
+    if values.is_empty() || !values.len().is_multiple_of(3) {
+        return None;
+    }
+    let mut total = [0.0_f64; 3];
+    for chunk in values.chunks_exact(3) {
+        total[0] += chunk[0];
+        total[1] += chunk[1];
+        total[2] += chunk[2];
+    }
+    let magnitude = (total[0] * total[0] + total[1] * total[1] + total[2] * total[2]).sqrt();
+    magnitude.is_finite().then_some(magnitude)
+}
+
 fn vectors_for_count(field: &AnalysisField, count: usize) -> Option<Vec<Vec3>> {
     if count == 0 {
         return None;
@@ -1954,6 +2045,46 @@ mod tests {
 
         assert_eq!(overlay.location, MeshFieldLocation::Triangle);
         assert_eq!(overlay.chunks, vec![vec![10.0, 42.0, 42.0]]);
+    }
+
+    #[test]
+    fn structural_summary_figure_reports_reactions_and_metrics() {
+        let fields = vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+                vec![2, 3],
+                vec![3.0, 4.0, 0.0, 0.0, 0.0, 12.0],
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                vec![1, 3],
+                vec![0.0, 0.0, 2.0],
+            ),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, vec![1], vec![7.5]),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![1], vec![0.001]),
+        ];
+
+        assert_eq!(
+            vector_field_total_magnitude(&fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE),
+            Some(13.0)
+        );
+        let figure = structural_result_summary_figure(&fields)
+            .expect("structural summary should be generated");
+
+        assert_eq!(figure.kind, AnalysisGeneratedFigureKind::Summary);
+        assert_eq!(figure.title, "FEA structural result summary");
+        assert!(figure
+            .field_ids
+            .iter()
+            .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_REACTION_FORCE));
+        assert!(figure
+            .field_ids
+            .iter()
+            .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY));
+        assert!(figure
+            .figure
+            .plots()
+            .any(|plot| matches!(plot, PlotElement::Bar(_))));
     }
 
     #[test]
