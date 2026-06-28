@@ -68,6 +68,12 @@ pub struct MeshSizingEvidence {
     pub applied_sample_count: usize,
     pub rejected_sample_count: usize,
     pub inserted_breakpoint_count: usize,
+    #[serde(default)]
+    pub requested_tet_refinement_point_count: usize,
+    #[serde(default)]
+    pub accepted_requested_tet_refinement_point_count: usize,
+    #[serde(default)]
+    pub requested_tet_refinement_acceptance_ratio: Option<f64>,
     pub applied_by_reason: BTreeMap<String, usize>,
     pub rejected_by_status: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<String, usize>,
@@ -268,6 +274,22 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         applied_sample_count: mesh.sizing.applied_samples.len(),
         rejected_sample_count: mesh.sizing.rejected_samples.len(),
         inserted_breakpoint_count,
+        requested_tet_refinement_point_count: mesh.backend.tet_requested_refinement_point_count,
+        accepted_requested_tet_refinement_point_count: mesh
+            .backend
+            .tet_accepted_requested_refinement_point_count,
+        requested_tet_refinement_acceptance_ratio: if mesh
+            .backend
+            .tet_requested_refinement_point_count
+            > 0
+        {
+            Some(
+                mesh.backend.tet_accepted_requested_refinement_point_count as f64
+                    / mesh.backend.tet_requested_refinement_point_count as f64,
+            )
+        } else {
+            None
+        },
         applied_by_reason,
         rejected_by_status,
         rejected_by_reason,
@@ -630,6 +652,8 @@ mod tests {
                 cad_max_normal_deviation: 1.0e-5,
                 surface_cad_face_count: 3,
                 surface_max_cad_projection_error_m: 3.0e-6,
+                tet_requested_refinement_point_count: 4,
+                tet_accepted_requested_refinement_point_count: 3,
                 ..MeshBackendSummary::default()
             },
             adaptive_iterations: Vec::new(),
@@ -665,6 +689,17 @@ mod tests {
         assert_eq!(evidence.validation.volume_component_count, 1);
         assert_eq!(evidence.validation.max_volume_component_count, Some(1));
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
+        assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);
+        assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_point_count,
+            3
+        );
+        assert_eq!(
+            evidence.sizing.requested_tet_refinement_acceptance_ratio,
+            Some(0.75)
+        );
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),
             Some(&1)
