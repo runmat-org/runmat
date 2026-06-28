@@ -103,6 +103,8 @@ pub struct MeshBenchmarkReport {
     pub backend: String,
     pub algorithm: String,
     pub timing: MeshBenchmarkTiming,
+    #[serde(default)]
+    pub budget: MeshBenchmarkBudgetMetrics,
     pub topology: MeshBenchmarkTopologyMetrics,
     pub cad: MeshCadEvidence,
     pub sizing: MeshSizingEvidence,
@@ -120,6 +122,13 @@ pub struct MeshBenchmarkTopologyMetrics {
     pub boundary_face_count: usize,
     pub boundary_edge_count: usize,
     pub volume_component_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MeshBenchmarkBudgetMetrics {
+    pub max_volume_element_count: Option<usize>,
+    pub volume_element_budget_used_ratio: Option<f64>,
+    pub volume_element_budget_exceeded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -167,9 +176,13 @@ pub struct MeshBenchmarkSuiteSummary {
     pub report_count: usize,
     pub solve_ready_count: usize,
     pub failed_count: usize,
+    #[serde(default)]
+    pub budget_exceeded_count: usize,
     pub worst_min_scaled_jacobian: Option<f64>,
     pub worst_min_exact_scaled_jacobian: Option<f64>,
     pub worst_max_aspect_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_volume_element_budget_used_ratio: Option<f64>,
     pub worst_boundary_projection_error_m: Option<f64>,
     pub worst_volume_coverage_error: Option<f64>,
     pub worst_boundary_area_error: Option<f64>,
@@ -184,8 +197,12 @@ pub struct MeshBenchmarkTierSummary {
     pub report_count: usize,
     pub solve_ready_count: usize,
     pub failed_count: usize,
+    #[serde(default)]
+    pub budget_exceeded_count: usize,
     pub worst_min_exact_scaled_jacobian: Option<f64>,
     pub worst_max_aspect_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_volume_element_budget_used_ratio: Option<f64>,
     pub worst_volume_coverage_error: Option<f64>,
     pub worst_boundary_area_error: Option<f64>,
     pub total_ms: Option<f64>,
@@ -291,6 +308,7 @@ pub fn build_mesh_benchmark_report(
         backend: mesh.backend.backend.clone(),
         algorithm: mesh.backend.algorithm.clone(),
         timing: input.timing,
+        budget: benchmark_budget_metrics(mesh, validation),
         topology: MeshBenchmarkTopologyMetrics {
             node_count: mesh.nodes.len(),
             volume_element_count: mesh.volume_elements.len(),
@@ -425,6 +443,23 @@ fn generate_mesh_for_benchmark_case(
             .map_err(|err| err.to_string())
     } else {
         generate_analysis_mesh(&case.geometry, case.options.clone()).map_err(|err| err.to_string())
+    }
+}
+
+fn benchmark_budget_metrics(
+    mesh: &AnalysisMeshArtifact,
+    validation: &AnalysisMeshValidationOptions,
+) -> MeshBenchmarkBudgetMetrics {
+    let Some(max_volume_element_count) = validation.max_volume_element_count else {
+        return MeshBenchmarkBudgetMetrics::default();
+    };
+    let volume_element_count = mesh.volume_elements.len();
+    MeshBenchmarkBudgetMetrics {
+        max_volume_element_count: Some(max_volume_element_count),
+        volume_element_budget_used_ratio: Some(
+            volume_element_count as f64 / max_volume_element_count.max(1) as f64,
+        ),
+        volume_element_budget_exceeded: volume_element_count > max_volume_element_count,
     }
 }
 
@@ -707,6 +742,10 @@ fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmar
         report_count: reports.len(),
         solve_ready_count,
         failed_count: reports.len().saturating_sub(solve_ready_count),
+        budget_exceeded_count: reports
+            .iter()
+            .filter(|report| report.budget.volume_element_budget_exceeded)
+            .count(),
         worst_min_scaled_jacobian: finite_min(
             reports
                 .iter()
@@ -719,6 +758,11 @@ fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmar
         ),
         worst_max_aspect_ratio: finite_max(
             reports.iter().map(|report| report.quality.max_aspect_ratio),
+        ),
+        worst_volume_element_budget_used_ratio: finite_max(
+            reports
+                .iter()
+                .filter_map(|report| report.budget.volume_element_budget_used_ratio),
         ),
         worst_boundary_projection_error_m: finite_max(
             reports
@@ -778,6 +822,10 @@ fn mesh_benchmark_tier_summaries(
                     report_count: reports.len(),
                     solve_ready_count,
                     failed_count: reports.len().saturating_sub(solve_ready_count),
+                    budget_exceeded_count: reports
+                        .iter()
+                        .filter(|report| report.budget.volume_element_budget_exceeded)
+                        .count(),
                     worst_min_exact_scaled_jacobian: finite_min(
                         reports
                             .iter()
@@ -785,6 +833,11 @@ fn mesh_benchmark_tier_summaries(
                     ),
                     worst_max_aspect_ratio: finite_max(
                         reports.iter().map(|report| report.quality.max_aspect_ratio),
+                    ),
+                    worst_volume_element_budget_used_ratio: finite_max(
+                        reports
+                            .iter()
+                            .filter_map(|report| report.budget.volume_element_budget_used_ratio),
                     ),
                     worst_volume_coverage_error: finite_max(reports.iter().filter_map(|report| {
                         report
@@ -1375,6 +1428,7 @@ mod tests {
         let validation = AnalysisMeshValidationOptions {
             expected_volume_m3: Some(1.0 / 6.0),
             expected_boundary_area_m2: Some(0.5),
+            max_volume_element_count: Some(4),
             min_boundary_face_recovery_ratio: 1.0,
             min_boundary_edge_recovery_ratio: 1.0,
             coverage_sample_points_m: vec![[0.1, 0.1, 0.1]],
@@ -1399,6 +1453,9 @@ mod tests {
         assert_eq!(report.topology.node_count, 4);
         assert_eq!(report.topology.volume_element_count, 1);
         assert_eq!(report.topology.volume_component_count, 1);
+        assert_eq!(report.budget.max_volume_element_count, Some(4));
+        assert_eq!(report.budget.volume_element_budget_used_ratio, Some(0.25));
+        assert!(!report.budget.volume_element_budget_exceeded);
         assert_eq!(report.coverage.volume_coverage_ratio, Some(1.0));
         assert_eq!(report.coverage.boundary_area_ratio, Some(1.0));
         assert_eq!(report.coverage.coverage_sample_ratio, Some(1.0));
@@ -1504,6 +1561,7 @@ mod tests {
         assert_eq!(suite.summary.report_count, 2);
         assert_eq!(suite.summary.solve_ready_count, 1);
         assert_eq!(suite.summary.failed_count, 1);
+        assert_eq!(suite.summary.budget_exceeded_count, 0);
         assert_eq!(
             suite
                 .summary
@@ -1513,6 +1571,7 @@ mod tests {
         );
         assert_eq!(suite.summary.worst_min_exact_scaled_jacobian, Some(0.45));
         assert_eq!(suite.summary.worst_max_aspect_ratio, Some(2.0));
+        assert_eq!(suite.summary.worst_volume_element_budget_used_ratio, None);
         assert_eq!(
             suite.summary.worst_volume_coverage_error,
             Some(1.0 - 1.0 / 6.0)
@@ -1526,6 +1585,7 @@ mod tests {
         assert_eq!(solid.report_count, 1);
         assert_eq!(solid.solve_ready_count, 1);
         assert_eq!(solid.failed_count, 0);
+        assert_eq!(solid.budget_exceeded_count, 0);
         assert_eq!(solid.total_ms, Some(4.0));
         let hole = suite
             .summary
@@ -1535,11 +1595,50 @@ mod tests {
         assert_eq!(hole.report_count, 1);
         assert_eq!(hole.solve_ready_count, 0);
         assert_eq!(hole.failed_count, 1);
+        assert_eq!(hole.budget_exceeded_count, 0);
         assert_eq!(hole.total_ms, Some(6.0));
         assert_eq!(
             hole.failure_counts_by_code.get("volume_coverage_failed"),
             Some(&1)
         );
+    }
+
+    #[test]
+    fn suite_report_aggregates_element_budget_usage() {
+        let mesh = fixture_mesh();
+        let mut within_budget = build_mesh_benchmark_report(
+            &mesh,
+            &AnalysisMeshValidationOptions {
+                max_volume_element_count: Some(4),
+                ..AnalysisMeshValidationOptions::default()
+            },
+            MeshBenchmarkInput::new("within_budget", MeshBenchmarkTier::Solid3d),
+        );
+        within_budget.timing.total_ms = Some(1.0);
+        let mut over_budget = build_mesh_benchmark_report(
+            &mesh,
+            &AnalysisMeshValidationOptions {
+                max_volume_element_count: Some(0),
+                ..AnalysisMeshValidationOptions::default()
+            },
+            MeshBenchmarkInput::new("over_budget", MeshBenchmarkTier::Solid3d),
+        );
+        over_budget.timing.total_ms = Some(2.0);
+
+        let suite = build_mesh_benchmark_suite_report("budget", vec![within_budget, over_budget]);
+
+        assert_eq!(suite.summary.budget_exceeded_count, 1);
+        assert_eq!(
+            suite.summary.worst_volume_element_budget_used_ratio,
+            Some(1.0)
+        );
+        let solid = suite
+            .summary
+            .summary_by_tier
+            .get("solid3d")
+            .expect("solid tier summary should be present");
+        assert_eq!(solid.budget_exceeded_count, 1);
+        assert_eq!(solid.worst_volume_element_budget_used_ratio, Some(1.0));
     }
 
     #[test]
