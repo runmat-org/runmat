@@ -296,7 +296,8 @@ fn face_frame(
     if edge_length <= f64::EPSILON || normal_length <= f64::EPSILON {
         return Err(CadEvaluationError::DegenerateFace { source_face_id });
     }
-    let unit_normal = scale(unit_normal, 1.0 / normal_length);
+    let unit_normal =
+        orient_unit_normal_to_source_triangle(scale(unit_normal, 1.0 / normal_length), points);
     let u_axis = scale(edge, 1.0 / edge_length);
     let v_axis = crate::predicate::cross(unit_normal, u_axis);
     let v_length = norm(v_axis);
@@ -336,6 +337,21 @@ fn evaluation_source(
         CadEvaluationSource::ImportedEvaluatorSamples
     } else {
         CadEvaluationSource::PlanarFacetApproximation
+    }
+}
+
+fn orient_unit_normal_to_source_triangle(unit_normal: Point3, points: Triangle3) -> Point3 {
+    let source_normal =
+        crate::predicate::cross(sub(points[1], points[0]), sub(points[2], points[0]));
+    let source_normal_length = norm(source_normal);
+    if source_normal_length <= f64::EPSILON {
+        return unit_normal;
+    }
+    let source_unit_normal = scale(source_normal, 1.0 / source_normal_length);
+    if dot(unit_normal, source_unit_normal) < 0.0 {
+        scale(unit_normal, -1.0)
+    } else {
+        unit_normal
     }
 }
 
@@ -638,6 +654,32 @@ mod tests {
         assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
         assert!((norm(frame.v_axis) - 1.0).abs() <= 1.0e-12);
         assert!((projection.distance_m - 0.25).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn cad_face_frames_orient_backend_normals_to_source_face() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.5, 1.0],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, -1.0]),
+                projection_error_m: Some(0.0),
+            }];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+
+        assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
+        assert_eq!(frame.v_axis, [0.0, 1.0, 0.0]);
     }
 
     #[test]
