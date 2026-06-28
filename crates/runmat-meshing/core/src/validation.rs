@@ -363,6 +363,21 @@ fn validate_quality(
             reason: "min_scaled_jacobian".to_string(),
         });
     }
+    if !mesh.quality.min_exact_scaled_jacobian.is_finite()
+        || mesh.quality.min_exact_scaled_jacobian < thresholds.min_scaled_jacobian
+    {
+        return Err(AnalysisMeshValidationError::QualityThresholdFailed {
+            reason: "min_exact_scaled_jacobian".to_string(),
+        });
+    }
+    if mesh.quality.elements.iter().any(|element| {
+        !element.exact_scaled_jacobian.is_finite()
+            || element.exact_scaled_jacobian < thresholds.min_scaled_jacobian
+    }) {
+        return Err(AnalysisMeshValidationError::QualityThresholdFailed {
+            reason: "element_exact_scaled_jacobian".to_string(),
+        });
+    }
     if !mesh.quality.max_aspect_ratio.is_finite()
         || mesh.quality.max_aspect_ratio > thresholds.max_aspect_ratio
     {
@@ -684,7 +699,7 @@ mod tests {
             AnalysisVolumeElement, ANALYSIS_MESH_SCHEMA_VERSION,
         },
         provenance::AnalysisMeshProvenance,
-        quality::AnalysisMeshQualityReport,
+        quality::{AnalysisMeshQualityReport, ElementQuality},
         sizing::MeshSizingField,
         topology::{BoundaryElementKind, VolumeElementKind},
     };
@@ -875,6 +890,40 @@ mod tests {
             err,
             AnalysisMeshValidationError::QualityThresholdFailed {
                 reason: "min_scaled_jacobian".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_exact_quality_threshold_failures() {
+        let mut mesh = valid_tet_mesh();
+        mesh.quality.min_exact_scaled_jacobian = 0.01;
+        let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect_err("low exact jacobian should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::QualityThresholdFailed {
+                reason: "min_exact_scaled_jacobian".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_element_exact_quality_threshold_failures() {
+        let mut mesh = valid_tet_mesh();
+        mesh.quality.elements.push(ElementQuality {
+            element_id: "e1".to_string(),
+            scaled_jacobian: 0.8,
+            exact_scaled_jacobian: 0.01,
+            aspect_ratio: 1.0,
+            volume_m3: 1.0 / 6.0,
+        });
+        let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect_err("low element exact jacobian should fail");
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::QualityThresholdFailed {
+                reason: "element_exact_scaled_jacobian".to_string()
             }
         );
     }

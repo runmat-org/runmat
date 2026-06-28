@@ -212,6 +212,16 @@ pub fn form_tet_candidates(
         refinement_pass_count += refinement.pass_count;
         refinement_point_count += refinement.inserted_point_count;
         sizing_violation_count += refinement.sizing_violation_count;
+        if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
+            add_dense_recovery_layer_points(
+                component,
+                &mut component_seed_points,
+                &surface_nodes,
+                &surface_elements,
+                options,
+                tolerance,
+            )?;
+        }
         let optimization = smooth_component_seed_points(
             component,
             &mut component_seed_points,
@@ -225,16 +235,6 @@ pub fn form_tet_candidates(
         optimization_pass_count += optimization.pass_count;
         smoothed_point_count += optimization.smoothed_point_count;
         sliver_candidate_count += optimization.sliver_candidate_count;
-        if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
-            add_dense_recovery_layer_points(
-                component,
-                &mut component_seed_points,
-                &surface_nodes,
-                &surface_elements,
-                options,
-                tolerance,
-            )?;
-        }
 
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
@@ -1568,10 +1568,7 @@ fn smooth_component_seed_points(
     tolerance: MeshingTolerance,
     first_seed_node_id: u32,
 ) -> Result<SmoothingSummary, TetCandidateError> {
-    if options.max_optimization_passes == 0
-        || seed_points.is_empty()
-        || dense_component_for_global_insertion(component, seed_points.len(), options)
-    {
+    if options.max_optimization_passes == 0 || seed_points.is_empty() {
         return Ok(SmoothingSummary {
             pass_count: 0,
             smoothed_point_count: 0,
@@ -1627,20 +1624,42 @@ fn smooth_component_seed_points(
             break;
         }
         let proposed_quality = CandidateQualitySnapshot::from_tets(&proposed_tets, options);
-        if !candidate_quality_is_no_worse(proposed_quality, current_quality) {
-            break;
+        if candidate_quality_is_no_worse(proposed_quality, current_quality) {
+            let moved_count = seed_points
+                .iter()
+                .zip(proposed.iter())
+                .filter(|(left, right)| !tolerance.point_nearly_equal(**left, **right, 1.0))
+                .count();
+            if moved_count == 0 {
+                break;
+            }
+            *seed_points = proposed;
+            pass_count += 1;
+            smoothed_point_count += moved_count;
+            continue;
         }
-        let moved_count = seed_points
-            .iter()
-            .zip(proposed.iter())
-            .filter(|(left, right)| !tolerance.point_nearly_equal(**left, **right, 1.0))
-            .count();
-        if moved_count == 0 {
+
+        let Some((locally_smoothed, local_quality)) = best_local_seed_smoothing(
+            component,
+            seed_points,
+            &proposed,
+            &seed_node_ids,
+            &current_tets,
+            surface_nodes,
+            surface_elements,
+            surface,
+            options,
+            tolerance,
+            current_status.accepted,
+            current_quality,
+        )?
+        else {
             break;
-        }
-        *seed_points = proposed;
+        };
+        *seed_points = locally_smoothed;
         pass_count += 1;
-        smoothed_point_count += moved_count;
+        smoothed_point_count += 1;
+        sliver_candidate_count += local_quality.sliver_count;
     }
 
     Ok(SmoothingSummary {
@@ -1648,6 +1667,82 @@ fn smooth_component_seed_points(
         smoothed_point_count,
         sliver_candidate_count,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn best_local_seed_smoothing(
+    component: &VolumeCandidateComponent,
+    seed_points: &[[f64; 3]],
+    proposed_points: &[[f64; 3]],
+    seed_node_ids: &[u32],
+    current_tets: &[TetCandidate],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    surface: &SurfaceDiscretization,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+    current_status_accepted: bool,
+    current_quality: CandidateQualitySnapshot,
+) -> Result<Option<(Vec<[f64; 3]>, CandidateQualitySnapshot)>, TetCandidateError> {
+    let seed_indices = exact_quality_violation_seed_indices(current_tets, seed_node_ids, options);
+    let mut best = None::<(Vec<[f64; 3]>, CandidateQualitySnapshot)>;
+    for index in seed_indices {
+        let proposed_point = proposed_points[index];
+        if tolerance.point_nearly_equal(seed_points[index], proposed_point, 1.0) {
+            continue;
+        }
+        let mut trial = seed_points.to_vec();
+        trial[index] = proposed_point;
+        let (trial_status, trial_tets) = component_insertion_tet_drafts(
+            component,
+            seed_node_ids,
+            &trial,
+            surface_nodes,
+            surface_elements,
+            surface,
+            options,
+            tolerance,
+        )?;
+        if !trial_status.accepted && current_status_accepted {
+            continue;
+        }
+        let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
+        if !candidate_quality_is_no_worse(trial_quality, current_quality)
+            || !candidate_quality_is_better(trial_quality, current_quality)
+        {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(_, best_quality)| {
+            candidate_quality_is_better(trial_quality, *best_quality)
+        }) {
+            best = Some((trial, trial_quality));
+        }
+    }
+    Ok(best)
+}
+
+fn exact_quality_violation_seed_indices(
+    tets: &[TetCandidate],
+    seed_node_ids: &[u32],
+    options: TetCandidateOptions,
+) -> Vec<usize> {
+    let seed_index = seed_node_ids
+        .iter()
+        .enumerate()
+        .map(|(index, node_id)| (*node_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut indices = BTreeSet::<usize>::new();
+    for tet in tets {
+        if tet.exact_scaled_jacobian >= options.min_scaled_jacobian {
+            continue;
+        }
+        for node_id in tet.node_ids {
+            if let Some(index) = seed_index.get(&node_id) {
+                indices.insert(*index);
+            }
+        }
+    }
+    indices.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1699,6 +1794,19 @@ fn candidate_quality_is_no_worse(
         && proposed.max_aspect_ratio <= current.max_aspect_ratio * (1.0 + 1.0e-9)
 }
 
+fn candidate_quality_is_better(
+    proposed: CandidateQualitySnapshot,
+    current: CandidateQualitySnapshot,
+) -> bool {
+    proposed.exact_quality_violation_count < current.exact_quality_violation_count
+        || (proposed.exact_quality_violation_count == current.exact_quality_violation_count
+            && proposed.min_exact_scaled_jacobian > current.min_exact_scaled_jacobian + 1.0e-12)
+        || (proposed.exact_quality_violation_count == current.exact_quality_violation_count
+            && (proposed.min_exact_scaled_jacobian - current.min_exact_scaled_jacobian).abs()
+                <= 1.0e-12
+            && proposed.sliver_count < current.sliver_count)
+}
+
 fn repair_exact_quality_tets(
     nodes: &mut Vec<TetCandidateNode>,
     tets: &mut Vec<TetCandidate>,
@@ -1706,6 +1814,35 @@ fn repair_exact_quality_tets(
     next_node_id: &mut u32,
     options: TetCandidateOptions,
 ) -> Result<(), TetCandidateError> {
+    let pass_limit = options.max_refinement_passes.max(1);
+    for _ in 0..pass_limit {
+        if !tets
+            .iter()
+            .any(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+        {
+            break;
+        }
+        let changed = repair_exact_quality_tets_once(
+            nodes,
+            tets,
+            interior_seed_points,
+            next_node_id,
+            options,
+        )?;
+        if !changed {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn repair_exact_quality_tets_once(
+    nodes: &mut Vec<TetCandidateNode>,
+    tets: &mut Vec<TetCandidate>,
+    interior_seed_points: &mut Vec<[f64; 3]>,
+    next_node_id: &mut u32,
+    options: TetCandidateOptions,
+) -> Result<bool, TetCandidateError> {
     let mut node_points = nodes
         .iter()
         .map(|node| (node.node_id, node.coordinates_m))
@@ -1713,6 +1850,7 @@ fn repair_exact_quality_tets(
     let mut repaired = Vec::<TetCandidate>::with_capacity(tets.len());
     let face_adjacency = tet_face_adjacency(tets);
     let mut consumed = vec![false; tets.len()];
+    let mut changed = false;
     for (tet_index, tet) in tets.iter().enumerate() {
         if consumed[tet_index] {
             continue;
@@ -1726,6 +1864,7 @@ fn repair_exact_quality_tets(
         {
             consumed[tet_index] = true;
             consumed[neighbor_index] = true;
+            changed = true;
             repaired.extend(candidates);
             continue;
         }
@@ -1740,7 +1879,14 @@ fn repair_exact_quality_tets(
             .iter()
             .filter(|candidate| candidate.exact_scaled_jacobian < options.min_scaled_jacobian)
             .count();
-        if candidates.len() == 4 && candidate_below_threshold == 0 {
+        let candidate_min_exact = candidates
+            .iter()
+            .map(|candidate| candidate.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        let split_improves_exact_quality = candidate_below_threshold == 0
+            || (candidate_below_threshold <= 1
+                && candidate_min_exact > tet.exact_scaled_jacobian + 1.0e-12);
+        if candidates.len() == 4 && split_improves_exact_quality {
             let split_node_id = *next_node_id;
             *next_node_id = next_node_id.saturating_add(1);
             node_points.insert(split_node_id, split_point);
@@ -1751,6 +1897,7 @@ fn repair_exact_quality_tets(
                 source: TetCandidateNodeSource::InteriorSeed,
             });
             repaired.extend(candidates);
+            changed = true;
         } else {
             repaired.push(tet.clone());
         }
@@ -1759,7 +1906,7 @@ fn repair_exact_quality_tets(
         tet.tet_id = index as u32;
     }
     *tets = repaired;
-    Ok(())
+    Ok(changed)
 }
 
 fn tet_face_adjacency(tets: &[TetCandidate]) -> BTreeMap<[u32; 3], Vec<usize>> {

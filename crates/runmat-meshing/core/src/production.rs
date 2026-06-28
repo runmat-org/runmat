@@ -843,7 +843,10 @@ mod tests {
                     < QualityThresholds::default().min_scaled_jacobian)
                 .count()
         );
-        assert!(mesh.backend.tet_exact_scaled_jacobian_below_threshold_count < 24);
+        assert_eq!(
+            mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
+            0
+        );
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
