@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     predicate::{
-        distance, distance_squared, point_in_closed_triangle_surface, tet_centroid,
-        tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
-        tet_signed_volume, triangle_centroid, PointInClosedSurface,
+        add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
+        tet_centroid, tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
+        tet_signed_volume, triangle_centroid, PointInClosedSurface, Triangle3,
     },
     spatial_index::{Aabb3, LinearSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
@@ -539,20 +539,14 @@ fn component_insertion_tet_drafts(
         });
     }
 
-    let surface_triangle_index =
-        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    let classifier =
+        ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
     let candidate_tets = tetrahedralize_points(&points);
     let mut accepted_tets = Vec::<TetCandidate>::new();
     for candidate in candidate_tets {
         let tet_points = candidate.vertices.map(|index| points[index].coordinates_m);
         let centroid = tet_centroid(tet_points);
-        if !point_is_inside_component(
-            centroid,
-            surface,
-            surface_elements,
-            tolerance,
-            &surface_triangle_index,
-        )? {
+        if !classifier.contains_point(centroid) {
             continue;
         }
         let mut node_ids = candidate.vertices.map(|index| points[index].node_id);
@@ -569,12 +563,8 @@ fn component_insertion_tet_drafts(
         if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
             continue;
         }
-        let source_surface_element_id = nearest_surface_element_id(
-            centroid,
-            surface,
-            surface_elements,
-            &surface_triangle_index,
-        )?;
+        let source_surface_element_id =
+            nearest_surface_element_id(centroid, surface, surface_elements, classifier.index())?;
         let region_ids = surface_elements
             .get(&source_surface_element_id)
             .map(|element| element.region_ids.clone())
@@ -624,8 +614,8 @@ fn refine_component_seed_points(
         });
     }
 
-    let surface_triangle_index =
-        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    let classifier =
+        ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
     let mut pass_count = 0_usize;
     let mut inserted_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
@@ -654,10 +644,8 @@ fn refine_component_seed_points(
             surface_nodes,
             &seed_node_ids,
             seed_points,
-            surface,
-            surface_elements,
             tolerance,
-            &surface_triangle_index,
+            &classifier,
             options,
             point_budget,
         )?;
@@ -699,10 +687,8 @@ fn refinement_points_for_tets(
     surface_nodes: &BTreeMap<u32, [f64; 3]>,
     seed_node_ids: &[u32],
     seed_points: &[[f64; 3]],
-    surface: &SurfaceDiscretization,
-    surface_elements: &BTreeMap<u32, &SurfaceElement>,
     tolerance: MeshingTolerance,
-    surface_triangle_index: &LinearSpatialIndex<u32>,
+    classifier: &ComponentSurfaceClassifier,
     options: TetCandidateOptions,
     point_budget: usize,
 ) -> Result<RefinementPointSet, TetCandidateError> {
@@ -730,24 +716,12 @@ fn refinement_points_for_tets(
         let point = tet_circumsphere(points, tolerance)
             .map(|(center, _)| center)
             .unwrap_or_else(|| tet_centroid(points));
-        let point = if point_is_inside_component(
-            point,
-            surface,
-            surface_elements,
-            tolerance,
-            surface_triangle_index,
-        )? {
+        let point = if classifier.contains_point(point) {
             point
         } else {
             tet_centroid(points)
         };
-        if !point_is_inside_component(
-            point,
-            surface,
-            surface_elements,
-            tolerance,
-            surface_triangle_index,
-        )? {
+        if !classifier.contains_point(point) {
             continue;
         }
         ranked.push((
@@ -854,8 +828,8 @@ fn smooth_component_seed_points(
         });
     }
 
-    let surface_triangle_index =
-        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
+    let classifier =
+        ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
     let mut pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
     let mut sliver_candidate_count = 0_usize;
@@ -882,11 +856,8 @@ fn smooth_component_seed_points(
             &seed_node_ids,
             &current_tets,
             surface_nodes,
-            &surface_triangle_index,
-            surface,
-            surface_elements,
+            &classifier,
             options,
-            tolerance,
         )?;
         if proposed == *seed_points {
             break;
@@ -969,11 +940,8 @@ fn smoothed_seed_points(
     seed_node_ids: &[u32],
     tets: &[TetCandidate],
     surface_nodes: &BTreeMap<u32, [f64; 3]>,
-    surface_triangle_index: &LinearSpatialIndex<u32>,
-    surface: &SurfaceDiscretization,
-    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    classifier: &ComponentSurfaceClassifier,
     options: TetCandidateOptions,
-    tolerance: MeshingTolerance,
 ) -> Result<Vec<[f64; 3]>, TetCandidateError> {
     let seed_index = seed_node_ids
         .iter()
@@ -1015,13 +983,7 @@ fn smoothed_seed_points(
             point[2] * (1.0 - options.smoothing_relaxation)
                 + average[2] * options.smoothing_relaxation,
         ];
-        if point_is_inside_component(
-            candidate,
-            surface,
-            surface_elements,
-            tolerance,
-            surface_triangle_index,
-        )? {
+        if classifier.contains_point(candidate) {
             proposed[index] = candidate;
         }
     }
@@ -1404,15 +1366,9 @@ fn sample_component_interior_points(
 ) -> Result<Vec<[f64; 3]>, TetCandidateError> {
     let mut points = Vec::<[f64; 3]>::new();
     let center = component_interior_point(component);
-    let triangle_index =
-        component_surface_triangle_index(component, surface, surface_elements, tolerance)?;
-    if point_is_inside_component(
-        center,
-        surface,
-        surface_elements,
-        tolerance,
-        &triangle_index,
-    )? {
+    let classifier =
+        ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
+    if classifier.contains_point(center) {
         points.push(center);
     }
 
@@ -1437,13 +1393,7 @@ fn sample_component_interior_points(
                     if contains_point(&points, point, tolerance) {
                         continue;
                     }
-                    if point_is_inside_component(
-                        point,
-                        surface,
-                        surface_elements,
-                        tolerance,
-                        &triangle_index,
-                    )? {
+                    if classifier.contains_point(point) {
                         points.push(point);
                     }
                 }
@@ -1480,52 +1430,130 @@ fn contains_point(points: &[[f64; 3]], candidate: [f64; 3], tolerance: MeshingTo
         .any(|point| tolerance.point_nearly_equal(*point, candidate, 1.0))
 }
 
-fn point_is_inside_component(
-    point: [f64; 3],
-    surface: &SurfaceDiscretization,
-    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+#[derive(Debug, Clone)]
+struct ComponentSurfaceClassifier {
+    triangles_by_element_id: BTreeMap<u32, Triangle3>,
+    triangle_index: LinearSpatialIndex<u32>,
     tolerance: MeshingTolerance,
-    triangle_index: &LinearSpatialIndex<u32>,
-) -> Result<bool, TetCandidateError> {
-    let triangles = triangle_index
-        .entries()
-        .iter()
-        .map(|entry| {
-            surface_elements
-                .get(&entry.payload)
-                .ok_or(TetCandidateError::MissingSurfaceElement {
-                    element_id: entry.payload,
-                })
-                .and_then(|element| surface_element_points(surface, element))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(matches!(
-        point_in_closed_triangle_surface(point, &triangles, tolerance),
-        PointInClosedSurface::Inside | PointInClosedSurface::OnBoundary
-    ))
 }
 
-fn component_surface_triangle_index(
-    component: &VolumeCandidateComponent,
-    surface: &SurfaceDiscretization,
-    surface_elements: &BTreeMap<u32, &SurfaceElement>,
-    tolerance: MeshingTolerance,
-) -> Result<LinearSpatialIndex<u32>, TetCandidateError> {
-    let mut index = LinearSpatialIndex::<u32>::new();
-    for element_id in &component.surface_element_ids {
-        let element =
-            surface_elements
-                .get(element_id)
-                .ok_or(TetCandidateError::MissingSurfaceElement {
+impl ComponentSurfaceClassifier {
+    fn new(
+        component: &VolumeCandidateComponent,
+        surface: &SurfaceDiscretization,
+        surface_elements: &BTreeMap<u32, &SurfaceElement>,
+        tolerance: MeshingTolerance,
+    ) -> Result<Self, TetCandidateError> {
+        let mut triangles_by_element_id = BTreeMap::<u32, Triangle3>::new();
+        let mut triangle_index = LinearSpatialIndex::<u32>::new();
+        for element_id in &component.surface_element_ids {
+            let element = surface_elements.get(element_id).ok_or(
+                TetCandidateError::MissingSurfaceElement {
                     element_id: *element_id,
-                })?;
-        let triangle = surface_element_points(surface, element)?;
-        index.insert(
-            Aabb3::from_triangle(triangle).expanded(tolerance),
-            *element_id,
-        );
+                },
+            )?;
+            let triangle = surface_element_points(surface, element)?;
+            triangles_by_element_id.insert(*element_id, triangle);
+            triangle_index.insert(
+                Aabb3::from_triangle(triangle).expanded(tolerance),
+                *element_id,
+            );
+        }
+        Ok(Self {
+            triangles_by_element_id,
+            triangle_index,
+            tolerance,
+        })
     }
-    Ok(index)
+
+    fn index(&self) -> &LinearSpatialIndex<u32> {
+        &self.triangle_index
+    }
+
+    fn contains_point(&self, point: [f64; 3]) -> bool {
+        if self.point_is_on_boundary(point) {
+            return true;
+        }
+        let epsilon = self.tolerance.absolute_m;
+        let probes = [
+            ([1.0, 0.0, 0.0], [-0.37, 0.19, 0.11]),
+            ([0.0, 1.0, 0.0], [0.13, -0.41, 0.23]),
+            ([0.0, 0.0, 1.0], [0.17, 0.29, -0.43]),
+        ];
+        let inside_votes = probes
+            .into_iter()
+            .filter(|(direction, jitter)| {
+                self.ray_has_odd_surface_intersections(
+                    add(point, scale(*jitter, epsilon)),
+                    *direction,
+                )
+            })
+            .count();
+        matches!(
+            if inside_votes >= 2 {
+                PointInClosedSurface::Inside
+            } else {
+                PointInClosedSurface::Outside
+            },
+            PointInClosedSurface::Inside | PointInClosedSurface::OnBoundary
+        )
+    }
+
+    fn point_is_on_boundary(&self, point: [f64; 3]) -> bool {
+        self.triangle_index.query_point(point).any(|entry| {
+            self.triangles_by_element_id
+                .get(&entry.payload)
+                .is_some_and(|triangle| {
+                    point_triangle_distance(point, *triangle) <= self.tolerance.absolute_m
+                })
+        })
+    }
+
+    fn ray_has_odd_surface_intersections(&self, origin: [f64; 3], direction: [f64; 3]) -> bool {
+        let mut intersections = Vec::<f64>::new();
+        for entry in self.triangle_index.entries() {
+            if !ray_can_intersect_bounds(origin, direction, entry.bounds, self.tolerance) {
+                continue;
+            }
+            let Some(triangle) = self.triangles_by_element_id.get(&entry.payload).copied() else {
+                continue;
+            };
+            let Some(hit) = ray_triangle_intersection(origin, direction, triangle, self.tolerance)
+            else {
+                continue;
+            };
+            if hit.distance > self.tolerance.absolute_m {
+                intersections.push(hit.distance);
+            }
+        }
+        intersections.sort_by(f64::total_cmp);
+        intersections.dedup_by(|left, right| (*left - *right).abs() <= self.tolerance.absolute_m);
+        intersections.len() % 2 == 1
+    }
+}
+
+fn ray_can_intersect_bounds(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    bounds: Aabb3,
+    tolerance: MeshingTolerance,
+) -> bool {
+    for axis in 0..3 {
+        if direction[axis].abs() <= f64::EPSILON {
+            if origin[axis] < bounds.min_m[axis] - tolerance.absolute_m
+                || origin[axis] > bounds.max_m[axis] + tolerance.absolute_m
+            {
+                return false;
+            }
+        } else if direction[axis] > 0.0 {
+            if bounds.max_m[axis] < origin[axis] - tolerance.absolute_m {
+                return false;
+            }
+        } else if bounds.min_m[axis] > origin[axis] + tolerance.absolute_m {
+            return false;
+        }
+    }
+    true
 }
 
 fn surface_element_points(
