@@ -6734,9 +6734,13 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         },
     ];
     mesh.backend.tet_requested_refinement_point_count = 4;
+    mesh.backend
+        .tet_accepted_requested_refinement_candidate_count = 4;
     mesh.backend.tet_accepted_requested_refinement_point_count = 3;
     mesh.backend
         .tet_accepted_requested_refinement_surrogate_point_count = 2;
+    mesh.backend.tet_rejected_requested_refinement_point_count = 1;
+    mesh.backend.tet_dropped_requested_refinement_point_count = 1;
     mesh.sizing.anisotropic_samples = vec![
         runmat_meshing_core::AnisotropicSizingSample {
             position_m: [0.2, 0.2, 0.2],
@@ -6778,6 +6782,10 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(3)
     );
     assert_eq!(
+        summary["requested_tet_refinement"]["accepted_candidate_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
         summary["requested_tet_refinement"]["accepted_exact_count"].as_u64(),
         Some(1)
     );
@@ -6786,8 +6794,24 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(2)
     );
     assert_eq!(
+        summary["requested_tet_refinement"]["rejected_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["dropped_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
         summary["requested_tet_refinement"]["acceptance_ratio"].as_f64(),
         Some(0.75)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["rejection_ratio"].as_f64(),
+        Some(0.25)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["drop_ratio"].as_f64(),
+        Some(0.25)
     );
     assert_eq!(
         summary["requested_tet_refinement"]["surrogate_ratio"].as_f64(),

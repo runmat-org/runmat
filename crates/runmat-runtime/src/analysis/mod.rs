@@ -15300,9 +15300,14 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
         inserted_breakpoint_count += application.inserted_breakpoint_count;
     }
     let accepted_requested = mesh.backend.tet_accepted_requested_refinement_point_count;
+    let accepted_candidate = mesh
+        .backend
+        .tet_accepted_requested_refinement_candidate_count;
     let accepted_surrogate = mesh
         .backend
         .tet_accepted_requested_refinement_surrogate_point_count;
+    let rejected_requested = mesh.backend.tet_rejected_requested_refinement_point_count;
+    let dropped_requested = mesh.backend.tet_dropped_requested_refinement_point_count;
     let mut anisotropic_by_reason = BTreeMap::<String, usize>::new();
     let mut invalid_anisotropic_by_reason = BTreeMap::<String, usize>::new();
     for sample in &mesh.sizing.anisotropic_samples {
@@ -15331,11 +15336,24 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
         },
         "requested_tet_refinement": {
             "requested_count": mesh.backend.tet_requested_refinement_point_count,
+            "accepted_candidate_count": accepted_candidate,
             "accepted_count": accepted_requested,
             "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
             "accepted_surrogate_count": accepted_surrogate,
+            "rejected_count": rejected_requested,
+            "dropped_count": dropped_requested,
             "acceptance_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
                 Some(accepted_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "rejection_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
+                Some(rejected_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "drop_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
+                Some(dropped_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
             } else {
                 None
             },
