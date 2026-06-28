@@ -57,6 +57,10 @@ pub struct SurfaceElement {
 pub struct SurfaceDiscretization {
     pub nodes: Vec<SurfaceNode>,
     pub elements: Vec<SurfaceElement>,
+    #[serde(default)]
+    pub exact_cad_sample_node_count: usize,
+    #[serde(default)]
+    pub rejected_exact_cad_sample_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,7 +132,12 @@ pub fn discretize_topology_surfaces(
         });
     }
 
-    Ok(SurfaceDiscretization { nodes, elements })
+    Ok(SurfaceDiscretization {
+        nodes,
+        elements,
+        exact_cad_sample_node_count: 0,
+        rejected_exact_cad_sample_count: 0,
+    })
 }
 
 pub fn discretize_cad_surfaces(
@@ -213,7 +222,12 @@ pub fn discretize_cad_surfaces(
         }
     }
 
-    Ok(SurfaceDiscretization { nodes, elements })
+    Ok(SurfaceDiscretization {
+        nodes,
+        elements,
+        exact_cad_sample_node_count: 0,
+        rejected_exact_cad_sample_count: 0,
+    })
 }
 
 pub fn discretize_cad_surfaces_with_curves(
@@ -245,6 +259,8 @@ pub fn discretize_cad_surfaces_with_curves(
     let mut curve_node_to_surface_node = BTreeMap::<u32, u32>::new();
 
     let mut elements = Vec::<SurfaceElement>::new();
+    let mut exact_cad_sample_node_count = 0_usize;
+    let mut rejected_exact_cad_sample_count = 0_usize;
     for face in &topology.faces {
         validate_face_vertices(topology, face)?;
         let frame = frames_by_source_face.get(&face.face_id).ok_or(
@@ -260,10 +276,18 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut nodes,
             &mut curve_node_to_surface_node,
         )?;
-        append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
+        let sample_report =
+            append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
+        exact_cad_sample_node_count += sample_report.accepted_count;
+        rejected_exact_cad_sample_count += sample_report.rejected_count;
     }
 
-    Ok(SurfaceDiscretization { nodes, elements })
+    Ok(SurfaceDiscretization {
+        nodes,
+        elements,
+        exact_cad_sample_node_count,
+        rejected_exact_cad_sample_count,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -446,10 +470,10 @@ fn append_curve_driven_face_elements(
     segments: &[FaceCurveSegment],
     nodes: &mut Vec<SurfaceNode>,
     elements: &mut Vec<SurfaceElement>,
-) {
+) -> ExactCadSampleSurfaceReport {
     if segments.len() <= 3 && !has_exact_face_domain_samples(frame) {
         append_curve_fan_face_elements(face, frame, segments, nodes, elements);
-        return;
+        return ExactCadSampleSurfaceReport::default();
     }
 
     let mut boundary_edge_ids = BTreeMap::<[u32; 2], u32>::new();
@@ -461,12 +485,12 @@ fn append_curve_driven_face_elements(
     }
 
     let mut points = boundary_triangulation_points(frame, segments, nodes);
-    append_exact_face_domain_sample_points(face, frame, nodes, &mut points);
+    let sample_report = append_exact_face_domain_sample_points(face, frame, nodes, &mut points);
     append_face_lattice_points(face, frame, segments, nodes, &mut points);
     let triangles = triangulate_face_points(&points);
     if triangles.is_empty() {
         append_curve_fan_face_elements(face, frame, segments, nodes, elements);
-        return;
+        return sample_report;
     }
 
     for triangle in triangles {
@@ -524,6 +548,7 @@ fn append_curve_driven_face_elements(
             unit_normal: frame.unit_normal,
         });
     }
+    sample_report
 }
 
 fn append_curve_fan_face_elements(
@@ -597,17 +622,25 @@ fn boundary_triangulation_points(
     points
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ExactCadSampleSurfaceReport {
+    accepted_count: usize,
+    rejected_count: usize,
+}
+
 fn append_exact_face_domain_sample_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
-) {
+) -> ExactCadSampleSurfaceReport {
+    let mut report = ExactCadSampleSurfaceReport::default();
     let face_points = face
         .node_ids
         .map(|node_id| nodes[node_id as usize].coordinates_m);
     for sample in &frame.evaluator_samples {
         if !is_usable_exact_face_domain_sample(sample) {
+            report.rejected_count += 1;
             continue;
         }
         let coordinates = sample
@@ -616,12 +649,14 @@ fn append_exact_face_domain_sample_points(
             .unwrap_or(sample.point_m);
         let projection = project_to_face(frame, coordinates);
         if !point_in_triangle_3d(projection.point_m, face_points) {
+            report.rejected_count += 1;
             continue;
         }
         if points
             .iter()
             .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
         {
+            report.rejected_count += 1;
             continue;
         }
         let node_id = nodes.len() as u32;
@@ -634,7 +669,9 @@ fn append_exact_face_domain_sample_points(
             node_id,
             uv: projection.uv,
         });
+        report.accepted_count += 1;
     }
+    report
 }
 
 fn has_exact_face_domain_samples(frame: &crate::CadFaceEvaluationFrame) -> bool {
@@ -1248,6 +1285,8 @@ mod tests {
 
         assert_eq!(surface.nodes.len(), topology.vertices.len() + 1);
         assert!(surface.elements.len() >= 2);
+        assert_eq!(surface.exact_cad_sample_node_count, 1);
+        assert_eq!(surface.rejected_exact_cad_sample_count, 1);
         assert!(surface
             .nodes
             .iter()
@@ -1406,14 +1445,24 @@ mod tests {
                 supports_curvature: true,
                 reference_point_m: Some([0.25, 0.25, 0.0]),
                 reference_unit_normal: Some([0.0, 0.0, 1.0]),
-                evaluation_samples: vec![CadFaceEvaluationSample {
-                    source: CadFaceEvaluationSampleSource::BackendQuery,
-                    point_m: [0.25, 0.25, 0.03],
-                    uv: Some([0.25, 0.25]),
-                    projected_point_m: Some([0.25, 0.25, 0.0]),
-                    unit_normal: Some([0.0, 0.0, 1.0]),
-                    projection_error_m: Some(0.03),
-                }],
+                evaluation_samples: vec![
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [0.25, 0.25, 0.03],
+                        uv: Some([0.25, 0.25]),
+                        projected_point_m: Some([0.25, 0.25, 0.0]),
+                        unit_normal: Some([0.0, 0.0, 1.0]),
+                        projection_error_m: Some(0.03),
+                    },
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [1.25, 0.25, 0.0],
+                        uv: Some([1.25, 0.25]),
+                        projected_point_m: Some([1.25, 0.25, 0.0]),
+                        unit_normal: Some([0.0, 0.0, 1.0]),
+                        projection_error_m: Some(0.0),
+                    },
+                ],
             }],
             curves: Vec::new(),
         }];
