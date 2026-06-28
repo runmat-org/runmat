@@ -93,6 +93,8 @@ pub struct TetCandidateSet {
     pub nodes: Vec<TetCandidateNode>,
     pub tets: Vec<TetCandidate>,
     pub interior_seed_points: Vec<[f64; 3]>,
+    #[serde(default)]
+    pub accepted_requested_refinement_points: Vec<[f64; 3]>,
     pub recovery: TetRecoveryReport,
     pub total_volume_m3: f64,
 }
@@ -199,6 +201,7 @@ pub fn form_tet_candidates(
         .saturating_add(1);
 
     let mut interior_seed_points = Vec::<[f64; 3]>::new();
+    let mut accepted_requested_refinement_seed_points = Vec::<(u32, [f64; 3])>::new();
     let mut insertion_component_count = 0_usize;
     let mut fan_fallback_component_count = 0_usize;
     let mut refinement_pass_count = 0_usize;
@@ -269,6 +272,13 @@ pub fn form_tet_candidates(
                 source: TetCandidateNodeSource::InteriorSeed,
             });
         }
+        for accepted in &refinement.accepted_requested_points {
+            let index = accepted.seed_index;
+            if index < component_seed_node_ids.len() {
+                accepted_requested_refinement_seed_points
+                    .push((component_seed_node_ids[index], accepted.requested_point));
+            }
+        }
         interior_seed_points.extend(component_seed_points.iter().copied());
 
         let insertion_status = append_component_insertion_tets(
@@ -327,6 +337,15 @@ pub fn form_tet_candidates(
     if tets.is_empty() {
         return Err(TetCandidateError::EmptyCandidateSet);
     }
+    let retained_node_ids = nodes
+        .iter()
+        .map(|node| node.node_id)
+        .collect::<BTreeSet<_>>();
+    let accepted_requested_refinement_points = accepted_requested_refinement_seed_points
+        .into_iter()
+        .filter_map(|(node_id, point)| retained_node_ids.contains(&node_id).then_some(point))
+        .collect::<Vec<_>>();
+    accepted_requested_refinement_point_count = accepted_requested_refinement_points.len();
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
     let expected_volume_m3 = volume_candidates.total_volume_m3;
     let total_candidate_volume_ratio = if expected_volume_m3 > f64::EPSILON {
@@ -344,6 +363,7 @@ pub fn form_tet_candidates(
         nodes,
         tets,
         interior_seed_points,
+        accepted_requested_refinement_points,
         recovery: TetRecoveryReport {
             component_count,
             insertion_component_count,
@@ -1355,13 +1375,20 @@ fn component_insertion_tet_drafts(
     ))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct SeedRefinementSummary {
     pass_count: usize,
     inserted_point_count: usize,
     requested_point_count: usize,
     accepted_requested_point_count: usize,
+    accepted_requested_points: Vec<AcceptedRequestedRefinementPoint>,
     sizing_violation_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AcceptedRequestedRefinementPoint {
+    seed_index: usize,
+    requested_point: [f64; 3],
 }
 
 fn refine_component_seed_points(
@@ -1384,6 +1411,7 @@ fn refine_component_seed_points(
             inserted_point_count: 0,
             requested_point_count: 0,
             accepted_requested_point_count: 0,
+            accepted_requested_points: Vec::new(),
             sizing_violation_count: 0,
         });
     }
@@ -1394,6 +1422,7 @@ fn refine_component_seed_points(
     let mut inserted_point_count = 0_usize;
     let mut requested_point_count = 0_usize;
     let mut accepted_requested_point_count = 0_usize;
+    let mut accepted_requested_points = Vec::<AcceptedRequestedRefinementPoint>::new();
     let mut sizing_violation_count = 0_usize;
     for _ in 0..options.max_refinement_passes {
         if seed_points.len() >= options.max_interior_seed_points {
@@ -1467,12 +1496,17 @@ fn refine_component_seed_points(
             if !quality_is_acceptable {
                 continue;
             }
+            let seed_index = seed_points.len();
             seed_points.push(point);
             current_status = trial_status;
             current_tets = trial_tets;
             inserted_point_count += 1;
             if candidate.requested {
                 accepted_requested_point_count += 1;
+                accepted_requested_points.push(AcceptedRequestedRefinementPoint {
+                    seed_index,
+                    requested_point: point,
+                });
             }
             accepted_this_pass += 1;
         }
@@ -1487,6 +1521,7 @@ fn refine_component_seed_points(
         inserted_point_count,
         requested_point_count,
         accepted_requested_point_count,
+        accepted_requested_points,
         sizing_violation_count,
     })
 }
@@ -3897,6 +3932,10 @@ mod tests {
             .interior_seed_points
             .iter()
             .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
+        assert_eq!(
+            candidates.accepted_requested_refinement_points,
+            vec![requested_refinement_points[0]]
+        );
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
         assert_eq!(
             candidates
@@ -3942,6 +3981,7 @@ mod tests {
             .interior_seed_points
             .iter()
             .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
+        assert!(candidates.accepted_requested_refinement_points.is_empty());
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
         assert_eq!(
             candidates

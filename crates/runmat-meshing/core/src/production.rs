@@ -562,7 +562,7 @@ fn production_mesh_sizing(
             let inserted_breakpoint_count = usize::from(
                 preparation
                     .tet_candidates
-                    .interior_seed_points
+                    .accepted_requested_refinement_points
                     .iter()
                     .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24),
             );
