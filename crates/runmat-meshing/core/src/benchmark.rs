@@ -216,11 +216,29 @@ pub struct MeshBenchmarkComparisonSummary {
     pub candidate_new_failure_count: usize,
     pub regression_count: usize,
     pub has_regression: bool,
+    #[serde(default)]
+    pub summary_by_tier: BTreeMap<String, MeshBenchmarkTierComparisonSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBenchmarkTierComparisonSummary {
+    pub case_count: usize,
+    pub compared_case_count: usize,
+    pub missing_baseline_case_count: usize,
+    pub missing_candidate_case_count: usize,
+    pub publishability_regression_count: usize,
+    pub quality_regression_count: usize,
+    pub coverage_regression_count: usize,
+    pub runtime_regression_count: usize,
+    pub candidate_new_failure_count: usize,
+    pub regression_count: usize,
+    pub has_regression: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBenchmarkCaseComparison {
     pub benchmark_id: String,
+    pub tier: MeshBenchmarkTier,
     pub baseline_present: bool,
     pub candidate_present: bool,
     pub baseline_solve_ready: Option<bool>,
@@ -427,6 +445,10 @@ fn compare_mesh_benchmark_case(
     candidate: Option<&MeshBenchmarkReport>,
     thresholds: MeshBenchmarkComparisonThresholds,
 ) -> MeshBenchmarkCaseComparison {
+    let tier = baseline
+        .map(|report| report.tier)
+        .or_else(|| candidate.map(|report| report.tier))
+        .unwrap_or(MeshBenchmarkTier::Solid3d);
     let min_exact_scaled_jacobian_delta = finite_delta(
         baseline.map(|report| report.quality.min_exact_scaled_jacobian),
         candidate.map(|report| report.quality.min_exact_scaled_jacobian),
@@ -492,6 +514,7 @@ fn compare_mesh_benchmark_case(
 
     MeshBenchmarkCaseComparison {
         benchmark_id: benchmark_id.to_string(),
+        tier,
         baseline_present: baseline.is_some(),
         candidate_present: candidate.is_some(),
         baseline_solve_ready: baseline.map(|report| report.solve_readiness.solve_ready),
@@ -530,14 +553,7 @@ fn mesh_benchmark_comparison_summary(
         .count();
     let regression_count = cases
         .iter()
-        .filter(|case| {
-            case.publishability_regressed
-                || case.quality_regressed
-                || case.coverage_regressed
-                || case.runtime_regressed
-                || case.candidate_new_failure
-                || !case.candidate_present
-        })
+        .filter(|case| comparison_case_has_regression(case))
         .count();
     MeshBenchmarkComparisonSummary {
         compared_case_count: cases
@@ -553,7 +569,77 @@ fn mesh_benchmark_comparison_summary(
         candidate_new_failure_count,
         regression_count,
         has_regression: regression_count > 0,
+        summary_by_tier: mesh_benchmark_comparison_tier_summaries(cases),
     }
+}
+
+fn mesh_benchmark_comparison_tier_summaries(
+    cases: &[MeshBenchmarkCaseComparison],
+) -> BTreeMap<String, MeshBenchmarkTierComparisonSummary> {
+    let mut cases_by_tier = BTreeMap::<String, Vec<&MeshBenchmarkCaseComparison>>::new();
+    for case in cases {
+        cases_by_tier
+            .entry(mesh_benchmark_tier_key(case.tier).to_string())
+            .or_default()
+            .push(case);
+    }
+    cases_by_tier
+        .into_iter()
+        .map(|(tier, cases)| {
+            let publishability_regression_count = cases
+                .iter()
+                .filter(|case| case.publishability_regressed)
+                .count();
+            let quality_regression_count =
+                cases.iter().filter(|case| case.quality_regressed).count();
+            let coverage_regression_count =
+                cases.iter().filter(|case| case.coverage_regressed).count();
+            let runtime_regression_count =
+                cases.iter().filter(|case| case.runtime_regressed).count();
+            let candidate_new_failure_count = cases
+                .iter()
+                .filter(|case| case.candidate_new_failure)
+                .count();
+            let regression_count = cases
+                .iter()
+                .filter(|case| comparison_case_has_regression(case))
+                .count();
+            (
+                tier,
+                MeshBenchmarkTierComparisonSummary {
+                    case_count: cases.len(),
+                    compared_case_count: cases
+                        .iter()
+                        .filter(|case| case.baseline_present && case.candidate_present)
+                        .count(),
+                    missing_baseline_case_count: cases
+                        .iter()
+                        .filter(|case| !case.baseline_present)
+                        .count(),
+                    missing_candidate_case_count: cases
+                        .iter()
+                        .filter(|case| !case.candidate_present)
+                        .count(),
+                    publishability_regression_count,
+                    quality_regression_count,
+                    coverage_regression_count,
+                    runtime_regression_count,
+                    candidate_new_failure_count,
+                    regression_count,
+                    has_regression: regression_count > 0,
+                },
+            )
+        })
+        .collect()
+}
+
+fn comparison_case_has_regression(case: &MeshBenchmarkCaseComparison) -> bool {
+    case.publishability_regressed
+        || case.quality_regressed
+        || case.coverage_regressed
+        || case.runtime_regressed
+        || case.candidate_new_failure
+        || !case.candidate_present
 }
 
 fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmarkSuiteSummary {
@@ -1407,9 +1493,23 @@ mod tests {
         assert_eq!(comparison.summary.candidate_new_failure_count, 1);
         assert_eq!(comparison.summary.regression_count, 1);
         assert!(comparison.summary.has_regression);
+        let tier = comparison
+            .summary
+            .summary_by_tier
+            .get("solid3d")
+            .expect("solid tier comparison summary should be present");
+        assert_eq!(tier.case_count, 1);
+        assert_eq!(tier.compared_case_count, 1);
+        assert_eq!(tier.publishability_regression_count, 1);
+        assert_eq!(tier.quality_regression_count, 1);
+        assert_eq!(tier.coverage_regression_count, 1);
+        assert_eq!(tier.runtime_regression_count, 1);
+        assert_eq!(tier.candidate_new_failure_count, 1);
+        assert!(tier.has_regression);
 
         let case = &comparison.cases[0];
         assert_eq!(case.benchmark_id, "case_a");
+        assert_eq!(case.tier, MeshBenchmarkTier::Solid3d);
         assert_close(case.min_exact_scaled_jacobian_delta, -0.15);
         assert_eq!(case.max_aspect_ratio_delta, Some(0.5));
         assert_close(case.volume_coverage_error_delta, 0.02);
@@ -1441,7 +1541,17 @@ mod tests {
         assert_eq!(comparison.summary.missing_candidate_case_count, 1);
         assert_eq!(comparison.summary.regression_count, 1);
         assert!(comparison.summary.has_regression);
+        let tier = comparison
+            .summary
+            .summary_by_tier
+            .get("solid3d")
+            .expect("missing candidate should retain baseline tier");
+        assert_eq!(tier.case_count, 1);
+        assert_eq!(tier.missing_candidate_case_count, 1);
+        assert_eq!(tier.regression_count, 1);
+        assert!(tier.has_regression);
         assert_eq!(comparison.cases[0].benchmark_id, "case_a");
+        assert_eq!(comparison.cases[0].tier, MeshBenchmarkTier::Solid3d);
         assert!(comparison.cases[0].baseline_present);
         assert!(!comparison.cases[0].candidate_present);
     }
