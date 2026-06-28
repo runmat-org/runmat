@@ -1020,6 +1020,7 @@ fn production_backend_summary(
         tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
+        tet_sliver_removed_count: preparation.tet_candidates.recovery.sliver_removed_count,
         tet_optimization_rejected_edit_count: preparation
             .tet_candidates
             .recovery

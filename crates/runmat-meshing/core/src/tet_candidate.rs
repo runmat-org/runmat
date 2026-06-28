@@ -127,6 +127,8 @@ pub struct TetRecoveryReport {
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
     #[serde(default)]
+    pub sliver_removed_count: usize,
+    #[serde(default)]
     pub optimization_rejected_edit_count: usize,
     #[serde(default)]
     pub optimization_initial_max_aspect_ratio: f64,
@@ -439,6 +441,7 @@ pub fn form_tet_candidates(
             optimization_pass_count,
             smoothed_point_count,
             sliver_candidate_count,
+            sliver_removed_count: optimization_quality.sliver_removed_count(),
             optimization_rejected_edit_count,
             optimization_initial_max_aspect_ratio: optimization_quality.initial_max_aspect_ratio(),
             optimization_final_max_aspect_ratio: optimization_quality.final_max_aspect_ratio(),
@@ -2013,6 +2016,7 @@ struct SmoothingSummary {
     pass_count: usize,
     smoothed_point_count: usize,
     sliver_candidate_count: usize,
+    sliver_removed_count: usize,
     rejected_edit_count: usize,
     quality_sample_count: usize,
     initial_max_aspect_ratio: f64,
@@ -2027,6 +2031,7 @@ impl SmoothingSummary {
             pass_count: 0,
             smoothed_point_count: 0,
             sliver_candidate_count: 0,
+            sliver_removed_count: 0,
             rejected_edit_count: 0,
             quality_sample_count: 0,
             initial_max_aspect_ratio: 0.0,
@@ -2040,6 +2045,7 @@ impl SmoothingSummary {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct OptimizationQualityAggregate {
     quality_sample_count: usize,
+    sliver_removed_count: usize,
     rejected_edit_count: usize,
     initial_max_aspect_ratio: f64,
     final_max_aspect_ratio: f64,
@@ -2049,6 +2055,7 @@ struct OptimizationQualityAggregate {
 
 impl OptimizationQualityAggregate {
     fn record(&mut self, summary: SmoothingSummary) {
+        self.sliver_removed_count += summary.sliver_removed_count;
         self.rejected_edit_count += summary.rejected_edit_count;
         if summary.quality_sample_count == 0 {
             return;
@@ -2106,6 +2113,10 @@ impl OptimizationQualityAggregate {
             self.final_min_exact_scaled_jacobian
         }
     }
+
+    fn sliver_removed_count(self) -> usize {
+        self.sliver_removed_count
+    }
 }
 
 fn smooth_component_seed_points(
@@ -2127,6 +2138,7 @@ fn smooth_component_seed_points(
     let mut pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
     let mut sliver_candidate_count = 0_usize;
+    let mut sliver_removed_count = 0_usize;
     let mut rejected_edit_count = 0_usize;
     let mut initial_quality = None::<CandidateQualitySnapshot>;
     let mut final_quality = None::<CandidateQualitySnapshot>;
@@ -2189,6 +2201,9 @@ fn smooth_component_seed_points(
             final_quality = Some(proposed_quality);
             pass_count += 1;
             smoothed_point_count += moved_count;
+            sliver_removed_count += current_quality
+                .sliver_count
+                .saturating_sub(proposed_quality.sliver_count);
             continue;
         }
 
@@ -2215,6 +2230,9 @@ fn smooth_component_seed_points(
         pass_count += 1;
         smoothed_point_count += 1;
         sliver_candidate_count += local_quality.sliver_count;
+        sliver_removed_count += current_quality
+            .sliver_count
+            .saturating_sub(local_quality.sliver_count);
     }
 
     let initial_quality = initial_quality.unwrap_or_else(CandidateQualitySnapshot::empty);
@@ -2223,6 +2241,7 @@ fn smooth_component_seed_points(
         pass_count,
         smoothed_point_count,
         sliver_candidate_count,
+        sliver_removed_count,
         rejected_edit_count,
         quality_sample_count: usize::from(initial_quality.has_samples()),
         initial_max_aspect_ratio: initial_quality.max_aspect_ratio,
@@ -5412,6 +5431,7 @@ mod tests {
             pass_count: 1,
             smoothed_point_count: 2,
             sliver_candidate_count: 3,
+            sliver_removed_count: 2,
             rejected_edit_count: 4,
             quality_sample_count: 1,
             initial_max_aspect_ratio: 9.0,
@@ -5423,6 +5443,7 @@ mod tests {
             pass_count: 0,
             smoothed_point_count: 0,
             sliver_candidate_count: 1,
+            sliver_removed_count: 1,
             rejected_edit_count: 2,
             quality_sample_count: 1,
             initial_max_aspect_ratio: 8.0,
@@ -5432,6 +5453,7 @@ mod tests {
         });
 
         assert_eq!(aggregate.rejected_edit_count, 6);
+        assert_eq!(aggregate.sliver_removed_count(), 3);
         assert_eq!(aggregate.initial_max_aspect_ratio(), 9.0);
         assert_eq!(aggregate.final_max_aspect_ratio(), 7.0);
         assert_eq!(aggregate.initial_min_exact_scaled_jacobian(), 0.30);
