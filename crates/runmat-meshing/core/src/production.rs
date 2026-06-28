@@ -636,8 +636,14 @@ fn production_backend_summary(
             .exact_query_face_count,
         cad_evaluation_sample_count: preparation.cad_evaluation_report.evaluator_sample_count,
         cad_projection_query_count: preparation.cad_evaluation_report.projection_query_count,
+        cad_derivative_query_count: preparation.cad_evaluation_report.derivative_query_count,
+        cad_curvature_query_count: preparation.cad_evaluation_report.curvature_query_count,
         cad_max_projection_error_m: preparation.cad_evaluation_report.max_projection_error_m,
         cad_max_normal_deviation: preparation.cad_evaluation_report.max_normal_deviation,
+        cad_max_curvature_estimate_1_per_m: preparation
+            .cad_evaluation_report
+            .max_curvature_estimate_1_per_m
+            .unwrap_or(0.0),
         curve_element_count: preparation.curves.elements.len(),
         surface_element_count: preparation.surface.elements.len(),
         surface_source_edge_loop_count: preparation.surface_validation.source_edge_loop_count,

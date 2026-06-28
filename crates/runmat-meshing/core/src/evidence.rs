@@ -42,8 +42,14 @@ pub struct MeshCadEvidence {
     pub exact_query_face_count: usize,
     pub evaluator_sample_count: usize,
     pub projection_query_count: usize,
+    #[serde(default)]
+    pub derivative_query_count: usize,
+    #[serde(default)]
+    pub curvature_query_count: usize,
     pub max_projection_error_m: f64,
     pub max_normal_deviation: f64,
+    #[serde(default)]
+    pub max_curvature_estimate_1_per_m: f64,
     pub surface_cad_face_count: usize,
     pub surface_max_projection_error_m: f64,
 }
@@ -245,8 +251,11 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
         exact_query_face_count: mesh.backend.cad_evaluation_exact_query_face_count,
         evaluator_sample_count: mesh.backend.cad_evaluation_sample_count,
         projection_query_count: mesh.backend.cad_projection_query_count,
+        derivative_query_count: mesh.backend.cad_derivative_query_count,
+        curvature_query_count: mesh.backend.cad_curvature_query_count,
         max_projection_error_m: mesh.backend.cad_max_projection_error_m,
         max_normal_deviation: mesh.backend.cad_max_normal_deviation,
+        max_curvature_estimate_1_per_m: mesh.backend.cad_max_curvature_estimate_1_per_m,
         surface_cad_face_count: mesh.backend.surface_cad_face_count,
         surface_max_projection_error_m: mesh.backend.surface_max_cad_projection_error_m,
     }
@@ -699,8 +708,11 @@ mod tests {
                 cad_evaluation_exact_query_face_count: 1,
                 cad_evaluation_sample_count: 8,
                 cad_projection_query_count: 12,
+                cad_derivative_query_count: 6,
+                cad_curvature_query_count: 5,
                 cad_max_projection_error_m: 2.0e-6,
                 cad_max_normal_deviation: 1.0e-5,
+                cad_max_curvature_estimate_1_per_m: 0.125,
                 surface_cad_face_count: 3,
                 surface_max_cad_projection_error_m: 3.0e-6,
                 tet_candidate_count: 12,
@@ -747,7 +759,12 @@ mod tests {
         assert_eq!(evidence.cad.imported_face_count, 3);
         assert_eq!(evidence.cad.exact_query_face_count, 1);
         assert_eq!(evidence.cad.evaluator_sample_count, 8);
+        assert_eq!(evidence.cad.projection_query_count, 12);
+        assert_eq!(evidence.cad.derivative_query_count, 6);
+        assert_eq!(evidence.cad.curvature_query_count, 5);
         assert_eq!(evidence.cad.max_projection_error_m, 2.0e-6);
+        assert_eq!(evidence.cad.max_normal_deviation, 1.0e-5);
+        assert_eq!(evidence.cad.max_curvature_estimate_1_per_m, 0.125);
         assert_eq!(evidence.cad.surface_max_projection_error_m, 3.0e-6);
         assert_eq!(evidence.topology.node_count, 4);
         assert_eq!(evidence.validation.volume_element_count, 1);
