@@ -3070,6 +3070,30 @@ fn repair_exact_quality_tets_once(
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_node_adjacent_cavity_reconnection(
+                tet_index,
+                tets,
+                &face_adjacency,
+                &node_adjacency,
+                &node_points,
+                options,
+            )?
+        {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
+            summary.connected_reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
+            repaired.extend(candidates);
+            continue;
+        }
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
             best_expanded_connected_bad_cavity_reconnection(
                 tet_index,
                 tets,
@@ -4589,6 +4613,99 @@ fn best_boundary_adjacent_cavity_reconnection(
     Ok(Some((adjacent, candidates, quality_gain_only)))
 }
 
+fn best_node_adjacent_cavity_reconnection(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+    let adjacent = connected_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    if adjacent.len() < 4 || adjacent.len() > 24 {
+        return Ok(None);
+    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    if adjacent.len() <= face_closure.len() {
+        return Ok(None);
+    }
+
+    let base = face_closure.into_iter().collect::<BTreeSet<_>>();
+    let extra = adjacent
+        .iter()
+        .copied()
+        .filter(|index| !base.contains(index))
+        .collect::<Vec<_>>();
+    let mut candidate_groups = vec![adjacent.clone()];
+    for extra_index in &extra {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        candidate_groups.push(group.into_iter().collect());
+    }
+    for left in 0..extra.len() {
+        for right in (left + 1)..extra.len() {
+            let mut group = base.clone();
+            group.insert(extra[left]);
+            group.insert(extra[right]);
+            candidate_groups.push(group.into_iter().collect());
+        }
+    }
+
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
+    for group in candidate_groups {
+        if group.len() < 4 || group.len() > 24 {
+            continue;
+        }
+        let original_below_count = count_exact_quality_violations(
+            group.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if !cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            continue;
+        }
+        let quality_gain_only = candidate_below_count == original_below_count;
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_below_count, best_min_exact, _)| {
+                candidate_below_count < *best_below_count
+                    || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                group,
+                candidates,
+                candidate_below_count,
+                min_exact,
+                quality_gain_only,
+            ));
+        }
+    }
+    Ok(best.map(|(indices, candidates, _, _, quality_gain_only)| {
+        (indices, candidates, quality_gain_only)
+    }))
+}
+
 fn connected_bad_tet_cavity(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -4656,6 +4773,37 @@ fn connected_bad_tet_cavity_with_face_closure_layers(
         }
         if !changed {
             break;
+        }
+    }
+    adjacent.into_iter().collect()
+}
+
+fn connected_bad_tet_cavity_with_node_closure(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    options: TetCandidateOptions,
+) -> Vec<usize> {
+    let mut adjacent =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+    if adjacent.is_empty() {
+        return Vec::new();
+    }
+    let component_id = tets[tet_index].component_id;
+    let cavity_nodes = adjacent
+        .iter()
+        .flat_map(|index| tets[*index].node_ids)
+        .collect::<BTreeSet<_>>();
+    for node_id in cavity_nodes {
+        if let Some(node_neighbors) = node_adjacency.get(&node_id) {
+            for neighbor in node_neighbors {
+                if tets[*neighbor].component_id == component_id {
+                    adjacent.insert(*neighbor);
+                }
+            }
         }
     }
     adjacent.into_iter().collect()
@@ -7791,6 +7939,49 @@ mod tests {
         assert_eq!(repair.boundary_adjacent_reconnected_cavity_count, 1);
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
+    }
+
+    #[test]
+    fn node_adjacent_cavity_closure_expands_non_face_connected_cavity_bounded() {
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [
+            ([0, 1, 2, 3], 0.1),
+            ([0, 1, 2, 4], 0.8),
+            ([0, 5, 6, 7], 0.2),
+            ([8, 9, 10, 11], 0.2),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(tet_id, (node_ids, exact_scaled_jacobian))| TetCandidate {
+            tet_id: tet_id as u32,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+        let face_adjacency = tet_face_adjacency(&tets);
+        let node_adjacency = tet_node_adjacency(&tets);
+
+        let face_closure =
+            connected_bad_tet_cavity_with_face_closure(0, &tets, &face_adjacency, options);
+        let node_closure = connected_bad_tet_cavity_with_node_closure(
+            0,
+            &tets,
+            &face_adjacency,
+            &node_adjacency,
+            options,
+        );
+
+        assert_eq!(face_closure, vec![0, 1]);
+        assert_eq!(node_closure, vec![0, 1, 2]);
+        assert!(!node_closure.contains(&3));
     }
 
     #[test]
