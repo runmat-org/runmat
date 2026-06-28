@@ -178,7 +178,8 @@ pub fn generate_production_analysis_mesh_with_sizing(
 ) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
     let base_target_size_m = target_size_for_mesh(&topology, options);
-    let effective_target_size_m = production_sizing_target_size(base_target_size_m, sizing);
+    let effective_target_size_m =
+        production_sizing_target_size(base_target_size_m, sizing, options);
     let mut effective_options = options.clone();
     if effective_target_size_m < base_target_size_m {
         effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
@@ -267,24 +268,37 @@ fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingO
     clamp_mesh_target_size(target_size_m, options)
 }
 
-fn production_sizing_target_size(base_target_size_m: f64, sizing: &MeshSizingField) -> f64 {
+fn production_sizing_target_size(
+    base_target_size_m: f64,
+    sizing: &MeshSizingField,
+    options: &VolumeMeshingOptions,
+) -> f64 {
     let mut target_size_m = base_target_size_m;
+    let mut global_target_size_m = base_target_size_m;
     if let Some(candidate) = sizing.global_target_size_m {
         if candidate.is_finite() && candidate > 0.0 {
             target_size_m = candidate;
+            global_target_size_m = candidate;
         }
     }
     for sample in &sizing.samples {
         if sample.target_size_m.is_finite() && sample.target_size_m > 0.0 {
-            target_size_m = target_size_m.min(sample.target_size_m);
+            let sample_target_size_m = production_sample_target_size(
+                sample.target_size_m,
+                Some(global_target_size_m),
+                sizing.growth_rate.or(options.growth_rate),
+                sizing.min_size_m.or(options.min_size_m),
+                sizing.max_size_m.or(options.max_size_m),
+            );
+            target_size_m = target_size_m.min(sample_target_size_m);
         }
     }
-    if let Some(min_size_m) = sizing.min_size_m {
+    if let Some(min_size_m) = sizing.min_size_m.or(options.min_size_m) {
         if min_size_m.is_finite() && min_size_m > 0.0 {
             target_size_m = target_size_m.max(min_size_m);
         }
     }
-    if let Some(max_size_m) = sizing.max_size_m {
+    if let Some(max_size_m) = sizing.max_size_m.or(options.max_size_m) {
         if max_size_m.is_finite() && max_size_m > 0.0 {
             target_size_m = target_size_m.min(max_size_m);
         }
@@ -496,6 +510,9 @@ fn production_mesh_sizing(
     if mesh_sizing.max_size_m.is_none() {
         mesh_sizing.max_size_m = options.max_size_m;
     }
+    if mesh_sizing.growth_rate.is_none() {
+        mesh_sizing.growth_rate = options.growth_rate;
+    }
     if let Some(sizing) = sizing {
         let mut seen_positions = Vec::<[f64; 3]>::new();
         mesh_sizing.applied_samples.clear();
@@ -513,6 +530,13 @@ fn production_mesh_sizing(
                 });
                 continue;
             }
+            let target_size_m = production_sample_target_size(
+                sample.target_size_m,
+                mesh_sizing.global_target_size_m,
+                mesh_sizing.growth_rate,
+                mesh_sizing.min_size_m,
+                mesh_sizing.max_size_m,
+            );
             if seen_positions
                 .iter()
                 .any(|position| distance_squared(*position, sample.position_m) <= 1.0e-24)
@@ -529,7 +553,7 @@ fn production_mesh_sizing(
             seen_positions.push(sample.position_m);
             mesh_sizing.applied_samples.push(SizingSampleApplication {
                 position_m: sample.position_m,
-                target_size_m: sample.target_size_m,
+                target_size_m,
                 inserted_breakpoint_count: 1,
                 reason: sample.reason.clone(),
                 detail: Some("production_global_target_refinement".to_string()),
@@ -537,6 +561,28 @@ fn production_mesh_sizing(
         }
     }
     mesh_sizing
+}
+
+fn production_sample_target_size(
+    mut target_size_m: f64,
+    global_target_size_m: Option<f64>,
+    growth_rate: Option<f64>,
+    min_size_m: Option<f64>,
+    max_size_m: Option<f64>,
+) -> f64 {
+    if let (Some(global_target_size_m), Some(growth_rate)) = (
+        global_target_size_m.filter(|value| value.is_finite() && *value > 0.0),
+        growth_rate.filter(|value| value.is_finite() && *value >= 1.0),
+    ) {
+        target_size_m = target_size_m.max(global_target_size_m / growth_rate);
+    }
+    if let Some(min_size_m) = min_size_m.filter(|value| value.is_finite() && *value > 0.0) {
+        target_size_m = target_size_m.max(min_size_m);
+    }
+    if let Some(max_size_m) = max_size_m.filter(|value| value.is_finite() && *value > 0.0) {
+        target_size_m = target_size_m.min(max_size_m);
+    }
+    target_size_m
 }
 
 fn production_backend_summary(

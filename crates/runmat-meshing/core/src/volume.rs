@@ -197,6 +197,15 @@ impl StructuredTetMesher {
             original_quality,
         );
         mesh_sizing.global_target_size_m = target_size_m(input, options, &grid);
+        if mesh_sizing.min_size_m.is_none() {
+            mesh_sizing.min_size_m = options.min_size_m;
+        }
+        if mesh_sizing.max_size_m.is_none() {
+            mesh_sizing.max_size_m = options.max_size_m;
+        }
+        if mesh_sizing.growth_rate.is_none() {
+            mesh_sizing.growth_rate = options.growth_rate;
+        }
 
         let mesh = AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -595,6 +604,16 @@ fn clamped_sample_target_size(target_size_m: f64, sizing: &MeshSizingField) -> O
         return None;
     }
     let mut target_size_m = target_size_m;
+    if let (Some(global_target_size_m), Some(growth_rate)) = (
+        sizing
+            .global_target_size_m
+            .filter(|value| value.is_finite() && *value > 0.0),
+        sizing
+            .growth_rate
+            .filter(|value| value.is_finite() && *value >= 1.0),
+    ) {
+        target_size_m = target_size_m.max(global_target_size_m / growth_rate);
+    }
     if let Some(min_size_m) = sizing
         .min_size_m
         .filter(|value| value.is_finite() && *value > 0.0)
@@ -2052,6 +2071,8 @@ mod tests {
         options.refinement.focus.curvature = false;
         options.refinement.focus.small_features = false;
         let sizing = MeshSizingField {
+            global_target_size_m: Some(1.0),
+            growth_rate: Some(2.0),
             samples: vec![SizingSample {
                 position_m: [0.4, 0.4, 0.4],
                 target_size_m: 0.25,
@@ -2069,6 +2090,8 @@ mod tests {
             mesh.sizing.applied_samples[0].reason.as_deref(),
             Some("structural.load_regions")
         );
+        assert_eq!(mesh.sizing.growth_rate, Some(2.0));
+        assert_eq!(mesh.sizing.applied_samples[0].target_size_m, 0.5);
         assert!(mesh.sizing.applied_samples[0].inserted_breakpoint_count > 0);
         let x = unique_axis_coordinates(&mesh, 0);
         assert!(x.iter().any(|value| (*value - 0.4).abs() <= 1.0e-12));
@@ -2077,9 +2100,7 @@ mod tests {
             .map(|pair| pair[1] - pair[0])
             .collect::<Vec<_>>();
         let min_spacing = spacings.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_spacing = spacings.iter().copied().fold(0.0_f64, f64::max);
-        assert!(min_spacing <= 0.25 + 1.0e-12);
-        assert!(max_spacing > min_spacing * 1.5);
+        assert!(min_spacing <= 0.5 + 1.0e-12);
     }
 
     #[test]
@@ -2407,12 +2428,19 @@ mod tests {
         assert!(refined.volume_elements.len() > coarse.volume_elements.len());
         assert_eq!(
             refined.sizing.global_target_size_m,
-            Some(0.5),
-            "external sizing should lower the production target size"
+            Some(0.6),
+            "external sizing should lower the production target size within the growth envelope"
         );
         assert_eq!(refined.sizing.min_size_m, Some(0.4));
         assert_eq!(refined.sizing.max_size_m, Some(0.75));
+        assert_eq!(refined.sizing.growth_rate, Some(1.25));
         assert_eq!(refined.sizing.applied_samples.len(), 1);
+        assert_eq!(refined.sizing.applied_samples[0].target_size_m, 0.5);
+        assert!(
+            refined.sizing.applied_samples[0].target_size_m
+                >= refined.sizing.global_target_size_m.unwrap()
+                    / refined.sizing.growth_rate.unwrap()
+        );
         assert_eq!(
             refined.sizing.applied_samples[0].reason.as_deref(),
             Some("structural.stress_gradient")

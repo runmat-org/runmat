@@ -37,6 +37,8 @@ pub struct MeshSizingEvidence {
     pub global_target_size_m: Option<f64>,
     pub min_size_m: Option<f64>,
     pub max_size_m: Option<f64>,
+    #[serde(default)]
+    pub growth_rate: Option<f64>,
     pub sample_count: usize,
     pub applied_sample_count: usize,
     pub rejected_sample_count: usize,
@@ -164,6 +166,7 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         global_target_size_m: mesh.sizing.global_target_size_m,
         min_size_m: mesh.sizing.min_size_m,
         max_size_m: mesh.sizing.max_size_m,
+        growth_rate: mesh.sizing.growth_rate,
         sample_count: mesh.sizing.samples.len(),
         applied_sample_count: mesh.sizing.applied_samples.len(),
         rejected_sample_count: mesh.sizing.rejected_samples.len(),
@@ -442,6 +445,7 @@ mod tests {
                 }],
             },
             sizing: MeshSizingField {
+                growth_rate: Some(1.4),
                 applied_samples: vec![SizingSampleApplication {
                     position_m: [0.0, 0.0, 0.0],
                     target_size_m: 0.25,
@@ -481,6 +485,7 @@ mod tests {
             evidence.sizing.applied_by_reason.get("load_region"),
             Some(&1)
         );
+        assert_eq!(evidence.sizing.growth_rate, Some(1.4));
         assert_eq!(
             evidence.sizing.rejected_by_status.get("outside_bounds"),
             Some(&1)

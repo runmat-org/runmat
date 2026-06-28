@@ -39,6 +39,8 @@ pub struct MeshSizingField {
     #[serde(default)]
     pub max_size_m: Option<f64>,
     #[serde(default)]
+    pub growth_rate: Option<f64>,
+    #[serde(default)]
     pub samples: Vec<SizingSample>,
     #[serde(default)]
     pub applied_samples: Vec<SizingSampleApplication>,
