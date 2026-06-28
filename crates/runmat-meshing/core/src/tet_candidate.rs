@@ -20,6 +20,7 @@ pub struct TetCandidateOptions {
     pub max_aspect_ratio: f64,
     pub interior_target_size_m: Option<f64>,
     pub max_interior_seed_points: usize,
+    pub max_global_insertion_points: usize,
     pub allow_fan_fallback: bool,
     pub max_refinement_passes: usize,
     pub max_radius_edge_ratio: f64,
@@ -36,6 +37,7 @@ impl Default for TetCandidateOptions {
             max_aspect_ratio: 1.0e6,
             interior_target_size_m: None,
             max_interior_seed_points: 1,
+            max_global_insertion_points: 512,
             allow_fan_fallback: true,
             max_refinement_passes: 0,
             max_radius_edge_ratio: 3.0,
@@ -317,6 +319,7 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || !options.max_aspect_ratio.is_finite()
         || options.max_aspect_ratio <= 0.0
         || options.max_interior_seed_points == 0
+        || options.max_global_insertion_points < 4
         || !options.max_radius_edge_ratio.is_finite()
         || options.max_radius_edge_ratio <= 0.0
         || !options.sizing_compliance_tolerance.is_finite()
@@ -394,6 +397,31 @@ fn append_component_insertion_tets(
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
+    if dense_component_for_global_insertion(component, seed_node_ids.len(), options) {
+        if let Some(star_tets) = quality_recovery_star_tets(
+            component,
+            seed_node_ids,
+            seed_points,
+            surface_nodes,
+            surface_elements,
+            options,
+        )? {
+            for mut tet in star_tets {
+                tet.tet_id = tets.len() as u32;
+                tets.push(tet);
+            }
+            return Ok(InsertionStatus {
+                accepted: true,
+                volume_ratio: 1.0,
+                max_aspect_ratio: tets
+                    .iter()
+                    .filter(|tet| tet.component_id == component.component_id)
+                    .map(|tet| tet.aspect_ratio)
+                    .fold(0.0_f64, f64::max),
+            });
+        }
+    }
+
     let (_draft_status, accepted_tets) = component_insertion_tet_drafts(
         component,
         seed_node_ids,
@@ -587,6 +615,7 @@ fn refine_component_seed_points(
     if options.max_refinement_passes == 0
         || seed_points.len() >= options.max_interior_seed_points
         || options.interior_target_size_m.is_none()
+        || dense_component_for_global_insertion(component, seed_points.len(), options)
     {
         return Ok(SeedRefinementSummary {
             pass_count: 0,
@@ -814,7 +843,10 @@ fn smooth_component_seed_points(
     tolerance: MeshingTolerance,
     first_seed_node_id: u32,
 ) -> Result<SmoothingSummary, TetCandidateError> {
-    if options.max_optimization_passes == 0 || seed_points.is_empty() {
+    if options.max_optimization_passes == 0
+        || seed_points.is_empty()
+        || dense_component_for_global_insertion(component, seed_points.len(), options)
+    {
         return Ok(SmoothingSummary {
             pass_count: 0,
             smoothed_point_count: 0,
@@ -1076,6 +1108,14 @@ fn insertion_tet_status(
         volume_ratio,
         max_aspect_ratio,
     }
+}
+
+fn dense_component_for_global_insertion(
+    component: &VolumeCandidateComponent,
+    seed_count: usize,
+    options: TetCandidateOptions,
+) -> bool {
+    component.node_ids.len().saturating_add(seed_count) > options.max_global_insertion_points
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1669,6 +1709,27 @@ mod tests {
         assert!(
             candidates.recovery.smoothed_point_count <= candidates.interior_seed_points.len() * 2
         );
+        assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn dense_components_use_quality_recovery_without_global_insertion() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                max_global_insertion_points: 4,
+                allow_fan_fallback: false,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("dense component should use bounded quality recovery");
+
+        assert_eq!(candidates.recovery.insertion_component_count, 1);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }
 

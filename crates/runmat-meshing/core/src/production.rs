@@ -182,6 +182,7 @@ fn tet_candidate_options_for_mesh(
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
         max_interior_seed_points: options.max_elements.max(1).min(128),
+        max_global_insertion_points: options.max_elements.max(1).min(4096),
         allow_fan_fallback: false,
         max_refinement_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
