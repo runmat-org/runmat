@@ -1801,6 +1801,35 @@ fn requested_refinement_candidate_points(
             }
         }
     }
+    let diagonal_scale = 1.0 / 3.0_f64.sqrt();
+    let diagonal_directions = [
+        [diagonal_scale, diagonal_scale, diagonal_scale],
+        [diagonal_scale, diagonal_scale, -diagonal_scale],
+        [diagonal_scale, -diagonal_scale, diagonal_scale],
+        [diagonal_scale, -diagonal_scale, -diagonal_scale],
+        [-diagonal_scale, diagonal_scale, diagonal_scale],
+        [-diagonal_scale, diagonal_scale, -diagonal_scale],
+        [-diagonal_scale, -diagonal_scale, diagonal_scale],
+        [-diagonal_scale, -diagonal_scale, -diagonal_scale],
+    ];
+    for radius in local_radii {
+        if !radius.is_finite() || radius <= tolerance.absolute_m {
+            continue;
+        }
+        for direction in diagonal_directions {
+            let candidate = [
+                requested_point[0] + direction[0] * radius,
+                requested_point[1] + direction[1] * radius,
+                requested_point[2] + direction[2] * radius,
+            ];
+            if classifier.contains_point(candidate)
+                && !contains_point(&candidates, candidate, tolerance)
+                && !contains_point(seed_points, candidate, tolerance)
+            {
+                candidates.push(candidate);
+            }
+        }
+    }
     candidates
 }
 
@@ -4668,8 +4697,8 @@ mod tests {
             tolerance,
         );
 
-        assert!(candidates.len() > 4);
-        assert!(candidates.len() <= 16);
+        assert!(candidates.len() > 16);
+        assert!(candidates.len() <= 32);
         assert_eq!(candidates[0], requested_point);
         assert!(candidates
             .iter()
@@ -4678,6 +4707,11 @@ mod tests {
             candidate[0] > requested_point[0]
                 && (candidate[1] - requested_point[1]).abs() <= f64::EPSILON
                 && (candidate[2] - requested_point[2]).abs() <= f64::EPSILON
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate[0] > requested_point[0]
+                && candidate[1] > requested_point[1]
+                && candidate[2] > requested_point[2]
         }));
         for (left_index, left) in candidates.iter().enumerate() {
             for right in candidates.iter().skip(left_index + 1) {
