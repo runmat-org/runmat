@@ -208,6 +208,8 @@ pub struct MeshTetRecoveryEvidence {
     pub optimization_final_min_exact_scaled_jacobian: f64,
     pub exact_quality_repair_pass_count: usize,
     pub exact_quality_reconnected_cavity_count: usize,
+    #[serde(default)]
+    pub exact_quality_reconnection_quality_gain_count: usize,
     pub exact_quality_split_cavity_count: usize,
     pub exact_quality_seed_star_collapse_count: usize,
     #[serde(default)]
@@ -608,6 +610,9 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         exact_quality_reconnected_cavity_count: mesh
             .backend
             .tet_exact_quality_reconnected_cavity_count,
+        exact_quality_reconnection_quality_gain_count: mesh
+            .backend
+            .tet_exact_quality_reconnection_quality_gain_count,
         exact_quality_split_cavity_count: mesh.backend.tet_exact_quality_split_cavity_count,
         exact_quality_seed_star_collapse_count: mesh
             .backend
@@ -1028,6 +1033,7 @@ mod tests {
                 tet_optimization_final_min_exact_scaled_jacobian: 0.40,
                 tet_exact_quality_repair_pass_count: 1,
                 tet_exact_quality_reconnected_cavity_count: 2,
+                tet_exact_quality_reconnection_quality_gain_count: 1,
                 tet_exact_quality_split_cavity_count: 3,
                 tet_exact_quality_seed_star_collapse_count: 4,
                 tet_exact_quality_seed_star_relocation_count: 5,
@@ -1191,6 +1197,12 @@ mod tests {
         assert_eq!(
             evidence.tet_recovery.exact_quality_reconnected_cavity_count,
             2
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_reconnection_quality_gain_count,
+            1
         );
         assert_eq!(evidence.tet_recovery.exact_quality_split_cavity_count, 3);
         assert_eq!(

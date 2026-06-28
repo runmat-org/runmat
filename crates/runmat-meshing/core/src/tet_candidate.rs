@@ -141,6 +141,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_reconnected_cavity_count: usize,
     #[serde(default)]
+    pub exact_quality_reconnection_quality_gain_count: usize,
+    #[serde(default)]
     pub exact_quality_split_cavity_count: usize,
     #[serde(default)]
     pub exact_quality_seed_star_collapse_count: usize,
@@ -440,6 +442,7 @@ pub fn form_tet_candidates(
                 .final_min_exact_scaled_jacobian(),
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
+            exact_quality_reconnection_quality_gain_count: repair.reconnection_quality_gain_count,
             exact_quality_split_cavity_count: repair.split_cavity_count,
             exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
             exact_quality_seed_star_relocation_count: repair.seed_star_relocation_count,
@@ -2394,6 +2397,7 @@ fn candidate_quality_is_better(
 struct TetQualityRepairSummary {
     pass_count: usize,
     reconnected_cavity_count: usize,
+    reconnection_quality_gain_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2403,6 +2407,7 @@ struct TetQualityRepairSummary {
 struct TetQualityRepairPassSummary {
     changed: bool,
     reconnected_cavity_count: usize,
+    reconnection_quality_gain_count: usize,
     split_cavity_count: usize,
     seed_star_collapse_count: usize,
     seed_star_relocation_count: usize,
@@ -2436,6 +2441,7 @@ fn repair_exact_quality_tets(
         }
         summary.pass_count += 1;
         summary.reconnected_cavity_count += pass.reconnected_cavity_count;
+        summary.reconnection_quality_gain_count += pass.reconnection_quality_gain_count;
         summary.split_cavity_count += pass.split_cavity_count;
         summary.seed_star_collapse_count += pass.seed_star_collapse_count;
         summary.seed_star_relocation_count += pass.seed_star_relocation_count;
@@ -2599,13 +2605,15 @@ fn repair_exact_quality_tets_once(
             repaired.extend(candidates);
             continue;
         }
-        if let Some((neighbor_indices, candidates)) = best_multi_tet_edge_reconnection(
-            tet_index,
-            tets,
-            &edge_adjacency,
-            &node_points,
-            options,
-        )? {
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_multi_tet_edge_reconnection(
+                tet_index,
+                tets,
+                &edge_adjacency,
+                &node_points,
+                options,
+            )?
+        {
             if neighbor_indices.iter().any(|index| consumed[*index]) {
                 repaired.push(tet.clone());
                 continue;
@@ -2615,16 +2623,19 @@ fn repair_exact_quality_tets_once(
             }
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
         }
-        if let Some((neighbor_indices, candidates)) = best_three_tet_edge_reconnection(
-            tet_index,
-            tets,
-            &edge_adjacency,
-            &node_points,
-            options,
-        )? {
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_three_tet_edge_reconnection(
+                tet_index,
+                tets,
+                &edge_adjacency,
+                &node_points,
+                options,
+            )?
+        {
             if neighbor_indices.iter().any(|index| consumed[*index]) {
                 repaired.push(tet.clone());
                 continue;
@@ -2634,10 +2645,11 @@ fn repair_exact_quality_tets_once(
             }
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
         }
-        if let Some((neighbor_index, candidates)) =
+        if let Some((neighbor_index, candidates, quality_gain_only)) =
             best_two_tet_reconnection(tet_index, tets, &face_adjacency, &node_points, options)?
         {
             if consumed[neighbor_index] {
@@ -2648,6 +2660,7 @@ fn repair_exact_quality_tets_once(
             consumed[neighbor_index] = true;
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
         }
@@ -3237,9 +3250,9 @@ fn best_three_tet_edge_reconnection(
     edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
     let tet = &tets[tet_index];
-    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
     for edge in tet_node_edges(tet.node_ids) {
         let Some(adjacent) = edge_adjacency.get(&edge) else {
             continue;
@@ -3269,9 +3282,10 @@ fn best_three_tet_edge_reconnection(
         ) {
             continue;
         }
+        let quality_gain_only = candidate_below_count == original_below_count;
         if best
             .as_ref()
-            .is_none_or(|(_, _, best_below_count, best_min_exact)| {
+            .is_none_or(|(_, _, best_below_count, best_min_exact, _)| {
                 candidate_below_count < *best_below_count
                     || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
             })
@@ -3281,10 +3295,13 @@ fn best_three_tet_edge_reconnection(
                 candidates,
                 candidate_below_count,
                 min_exact,
+                quality_gain_only,
             ));
         }
     }
-    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+    Ok(best.map(|(indices, candidates, _, _, quality_gain_only)| {
+        (indices, candidates, quality_gain_only)
+    }))
 }
 
 fn best_multi_tet_edge_reconnection(
@@ -3293,9 +3310,9 @@ fn best_multi_tet_edge_reconnection(
     edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
     let tet = &tets[tet_index];
-    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
     for edge in tet_node_edges(tet.node_ids) {
         let Some(adjacent) = edge_adjacency.get(&edge) else {
             continue;
@@ -3325,9 +3342,10 @@ fn best_multi_tet_edge_reconnection(
         ) {
             continue;
         }
+        let quality_gain_only = candidate_below_count == original_below_count;
         if best
             .as_ref()
-            .is_none_or(|(_, _, best_below_count, best_min_exact)| {
+            .is_none_or(|(_, _, best_below_count, best_min_exact, _)| {
                 candidate_below_count < *best_below_count
                     || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
             })
@@ -3337,10 +3355,13 @@ fn best_multi_tet_edge_reconnection(
                 candidates,
                 candidate_below_count,
                 min_exact,
+                quality_gain_only,
             ));
         }
     }
-    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+    Ok(best.map(|(indices, candidates, _, _, quality_gain_only)| {
+        (indices, candidates, quality_gain_only)
+    }))
 }
 
 fn multi_tet_edge_reconnection_candidates(
@@ -3588,9 +3609,9 @@ fn best_two_tet_reconnection(
     face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(usize, Vec<TetCandidate>)>, TetCandidateError> {
+) -> Result<Option<(usize, Vec<TetCandidate>, bool)>, TetCandidateError> {
     let tet = &tets[tet_index];
-    let mut best = None::<(usize, Vec<TetCandidate>, usize, f64)>;
+    let mut best = None::<(usize, Vec<TetCandidate>, usize, f64, bool)>;
     for shared_face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
         let Some(adjacent) = face_adjacency.get(&shared_face) else {
             continue;
@@ -3628,17 +3649,28 @@ fn best_two_tet_reconnection(
         ) {
             continue;
         }
+        let quality_gain_only = candidate_below_count == original_below_count;
         if best
             .as_ref()
-            .is_none_or(|(_, _, best_below_count, best_min_exact)| {
+            .is_none_or(|(_, _, best_below_count, best_min_exact, _)| {
                 candidate_below_count < *best_below_count
                     || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
             })
         {
-            best = Some((neighbor_index, candidates, candidate_below_count, min_exact));
+            best = Some((
+                neighbor_index,
+                candidates,
+                candidate_below_count,
+                min_exact,
+                quality_gain_only,
+            ));
         }
     }
-    Ok(best.map(|(neighbor_index, candidates, _, _)| (neighbor_index, candidates)))
+    Ok(
+        best.map(|(neighbor_index, candidates, _, _, quality_gain_only)| {
+            (neighbor_index, candidates, quality_gain_only)
+        }),
+    )
 }
 
 fn count_exact_quality_violations<'a>(
@@ -5329,12 +5361,13 @@ mod tests {
         );
 
         let edge_adjacency = tet_edge_adjacency(&tets);
-        let (reconnected_indices, candidates) =
+        let (reconnected_indices, candidates, quality_gain_only) =
             best_three_tet_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
                 .expect("reconnection should evaluate")
                 .expect("three-tet edge reconnection should be available");
 
         assert_eq!(reconnected_indices, vec![0, 1, 2]);
+        assert!(!quality_gain_only);
         assert_eq!(candidates.len(), 2);
         assert_eq!(
             candidates
@@ -5378,12 +5411,13 @@ mod tests {
         );
 
         let edge_adjacency = tet_edge_adjacency(&tets);
-        let (reconnected_indices, candidates) =
+        let (reconnected_indices, candidates, quality_gain_only) =
             best_multi_tet_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
                 .expect("reconnection should evaluate")
                 .expect("multi-tet edge reconnection should be available");
 
         assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
+        assert!(!quality_gain_only);
         assert_eq!(candidates.len(), 4);
         assert_eq!(
             candidates
