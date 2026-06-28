@@ -5244,6 +5244,10 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     evidence.solve_ready = false;
     evidence.validation_error_code = Some("coverage_sample_failed".to_string());
     evidence.validation_error_message = Some("coverage sample was outside the solid".to_string());
+    evidence.fan_fallback_component_count = 1;
+    evidence.unrepaired_exact_quality_total_count = 3;
+    evidence.unrepaired_exact_quality_general_cavity_count = 1;
+    evidence.unrepaired_exact_quality_boundary_adjacent_count = 2;
 
     let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
         evidence.clone(),
@@ -5260,6 +5264,16 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     assert!(reasons[0]
         .detail
         .contains("coverage sample was outside the solid"));
+    assert!(reasons[0].detail.contains("fan_fallback_component_count=1"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_total_count=3"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_general_cavity_count=1"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_boundary_adjacent_count=2"));
 
     evidence.solve_ready = true;
     assert!(

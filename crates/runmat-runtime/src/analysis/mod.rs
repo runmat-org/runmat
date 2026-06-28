@@ -9600,12 +9600,57 @@ fn mesh_validation_evidence_quality_reasons(
         .validation_error_message
         .as_deref()
         .unwrap_or("mesh evidence validation did not include a message");
+    let recovery_detail = mesh_validation_recovery_detail(validation);
     vec![QualityReason {
         code: QualityReasonCode::SolidMeshValidationEvidenceFailed,
         detail: format!(
-            "analysis mesh evidence is not solve-ready: validation_error_code={code}; {message}"
+            "analysis mesh evidence is not solve-ready: validation_error_code={code}; {message}{recovery_detail}"
         ),
     }]
+}
+
+fn mesh_validation_recovery_detail(
+    validation: &runmat_meshing_core::MeshValidationEvidence,
+) -> String {
+    let mut details = Vec::<String>::new();
+    if validation.fan_fallback_component_count > 0 {
+        details.push(format!(
+            "fan_fallback_component_count={}",
+            validation.fan_fallback_component_count
+        ));
+    }
+    if validation.unrepaired_exact_quality_total_count > 0
+        || validation.unrepaired_exact_quality_general_cavity_count > 0
+        || validation.unrepaired_exact_quality_boundary_adjacent_count > 0
+        || validation.unrepaired_exact_quality_interior_seed_count > 0
+        || validation.unrepaired_exact_quality_edge_star_count > 0
+    {
+        details.push(format!(
+            "unrepaired_exact_quality_total_count={}",
+            validation.unrepaired_exact_quality_total_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_general_cavity_count={}",
+            validation.unrepaired_exact_quality_general_cavity_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_boundary_adjacent_count={}",
+            validation.unrepaired_exact_quality_boundary_adjacent_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_interior_seed_count={}",
+            validation.unrepaired_exact_quality_interior_seed_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_edge_star_count={}",
+            validation.unrepaired_exact_quality_edge_star_count
+        ));
+    }
+    if details.is_empty() {
+        String::new()
+    } else {
+        format!("; {}", details.join("; "))
+    }
 }
 
 fn solid_mesh_quality_reasons(
