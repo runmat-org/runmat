@@ -162,6 +162,12 @@ pub struct MeshTetRecoveryEvidence {
     pub exact_quality_seed_star_collapse_count: usize,
     #[serde(default)]
     pub exact_quality_seed_star_relocation_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_boundary_adjacent_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_interior_seed_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_edge_star_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -501,6 +507,15 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         exact_quality_seed_star_relocation_count: mesh
             .backend
             .tet_exact_quality_seed_star_relocation_count,
+        exact_quality_unrepaired_boundary_adjacent_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_boundary_adjacent_count,
+        exact_quality_unrepaired_interior_seed_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_interior_seed_count,
+        exact_quality_unrepaired_edge_star_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_edge_star_count,
     }
 }
 
@@ -865,6 +880,9 @@ mod tests {
                 tet_exact_quality_split_cavity_count: 3,
                 tet_exact_quality_seed_star_collapse_count: 4,
                 tet_exact_quality_seed_star_relocation_count: 5,
+                tet_exact_quality_unrepaired_boundary_adjacent_count: 6,
+                tet_exact_quality_unrepaired_interior_seed_count: 7,
+                tet_exact_quality_unrepaired_edge_star_count: 8,
                 ..MeshBackendSummary::default()
             },
             adaptive_iterations: Vec::new(),
@@ -999,6 +1017,24 @@ mod tests {
                 .tet_recovery
                 .exact_quality_seed_star_relocation_count,
             5
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_unrepaired_boundary_adjacent_count,
+            6
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_unrepaired_interior_seed_count,
+            7
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_unrepaired_edge_star_count,
+            8
         );
         assert_eq!(evidence.sizing.growth_rate, Some(1.4));
         assert_eq!(

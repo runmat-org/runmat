@@ -136,6 +136,12 @@ pub struct TetRecoveryReport {
     pub exact_quality_seed_star_collapse_count: usize,
     #[serde(default)]
     pub exact_quality_seed_star_relocation_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_boundary_adjacent_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_interior_seed_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_edge_star_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +384,7 @@ pub fn form_tet_candidates(
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
     let quality_summary = tet_candidate_quality_summary(&nodes, &tets, options)?;
+    let unrepaired_quality = remaining_exact_quality_violation_counts(&nodes, &tets, options);
     let component_count = volume_candidates.components.len();
     Ok(TetCandidateSet {
         nodes,
@@ -415,6 +422,10 @@ pub fn form_tet_candidates(
             exact_quality_split_cavity_count: repair.split_cavity_count,
             exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
             exact_quality_seed_star_relocation_count: repair.seed_star_relocation_count,
+            exact_quality_unrepaired_boundary_adjacent_count: unrepaired_quality
+                .boundary_adjacent_count,
+            exact_quality_unrepaired_interior_seed_count: unrepaired_quality.interior_seed_count,
+            exact_quality_unrepaired_edge_star_count: unrepaired_quality.edge_star_count,
         },
         total_volume_m3,
     })
@@ -2225,6 +2236,55 @@ fn repair_exact_quality_tets(
         summary.seed_star_relocation_count += pass.seed_star_relocation_count;
     }
     Ok(summary)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RemainingExactQualityViolationCounts {
+    boundary_adjacent_count: usize,
+    interior_seed_count: usize,
+    edge_star_count: usize,
+}
+
+fn remaining_exact_quality_violation_counts(
+    nodes: &[TetCandidateNode],
+    tets: &[TetCandidate],
+    options: TetCandidateOptions,
+) -> RemainingExactQualityViolationCounts {
+    let face_adjacency = tet_face_adjacency(tets);
+    let edge_adjacency = tet_edge_adjacency(tets);
+    let interior_node_ids = nodes
+        .iter()
+        .filter_map(|node| {
+            matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
+        })
+        .collect::<BTreeSet<_>>();
+    let mut counts = RemainingExactQualityViolationCounts::default();
+    for tet in tets
+        .iter()
+        .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+    {
+        if tet_node_faces(tet.node_ids)
+            .map(sorted_node_face)
+            .into_iter()
+            .any(|face| face_adjacency.get(&face).map_or(0, Vec::len) == 1)
+        {
+            counts.boundary_adjacent_count += 1;
+        }
+        if tet
+            .node_ids
+            .into_iter()
+            .any(|node_id| interior_node_ids.contains(&node_id))
+        {
+            counts.interior_seed_count += 1;
+        }
+        if tet_node_edges(tet.node_ids)
+            .into_iter()
+            .any(|edge| edge_adjacency.get(&edge).map_or(0, Vec::len) >= 3)
+        {
+            counts.edge_star_count += 1;
+        }
+    }
+    counts
 }
 
 fn repair_exact_quality_tets_once(
@@ -4995,6 +5055,48 @@ mod tests {
         let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn remaining_exact_quality_violations_are_classified_by_local_topology() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.5,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 2]]
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let nodes = node_points
+            .iter()
+            .map(|(node_id, coordinates_m)| TetCandidateNode {
+                node_id: *node_id,
+                coordinates_m: *coordinates_m,
+                source: if *node_id == 0 {
+                    TetCandidateNodeSource::InteriorSeed
+                } else {
+                    TetCandidateNodeSource::Surface
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let counts = remaining_exact_quality_violation_counts(&nodes, &tets, options);
+
+        assert_eq!(counts.boundary_adjacent_count, 4);
+        assert_eq!(counts.interior_seed_count, 4);
+        assert_eq!(counts.edge_star_count, 4);
     }
 
     #[test]
