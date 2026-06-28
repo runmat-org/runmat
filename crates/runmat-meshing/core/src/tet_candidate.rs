@@ -2116,6 +2116,19 @@ fn repair_exact_quality_tets_once(
         referenced_node_ids.contains(&node.node_id)
             || matches!(node.source, TetCandidateNodeSource::Surface)
     });
+    let retained_interior_points = nodes
+        .iter()
+        .filter_map(|node| {
+            matches!(node.source, TetCandidateNodeSource::InteriorSeed)
+                .then_some(node.coordinates_m)
+        })
+        .collect::<Vec<_>>();
+    let tolerance = MeshingTolerance::default();
+    interior_seed_points.retain(|point| {
+        retained_interior_points
+            .iter()
+            .any(|retained| tolerance.point_nearly_equal(*point, *retained, 1.0))
+    });
     *tets = repaired;
     Ok(summary)
 }
@@ -4215,6 +4228,7 @@ mod tests {
         );
         assert!((split_tets[0].volume_m3 - outer_tet.volume_m3).abs() < 1.0e-12);
         assert!(!nodes.iter().any(|node| node.node_id == 4));
+        assert!(interior_seed_points.is_empty());
     }
 
     #[test]
