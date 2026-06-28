@@ -365,7 +365,7 @@ fn compare_exact_backend_samples(
 }
 
 fn sample_projection_error(sample: &CadFaceEvaluationSample) -> f64 {
-    sample.projection_error_m.unwrap_or(0.0)
+    sample.projection_error_m.unwrap_or(f64::INFINITY)
 }
 
 fn exact_backend_sample_point(sample: &CadFaceEvaluationSample) -> Point3 {
@@ -675,6 +675,42 @@ mod tests {
         assert_eq!(frame.origin_m, [0.3, 0.5, 1.0]);
         assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
         assert_eq!(frame.evaluator_max_projection_error_m, 0.01);
+        assert_eq!(frame.evaluator_samples.len(), 2);
+    }
+
+    #[test]
+    fn exact_backend_query_prefers_measured_projection_error_over_unknown() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.2, 0.5, 1.0],
+                uv: Some([0.2, 0.5]),
+                projected_point_m: Some([0.2, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: None,
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.8, 0.5, 1.002],
+                uv: Some([0.8, 0.5]),
+                projected_point_m: Some([0.8, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.002),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+
+        assert_eq!(frame.origin_m, [0.8, 0.5, 1.0]);
+        assert_eq!(frame.evaluator_max_projection_error_m, 0.002);
         assert_eq!(frame.evaluator_samples.len(), 2);
     }
 
