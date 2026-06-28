@@ -129,6 +129,10 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub sliver_removed_count: usize,
     #[serde(default)]
+    pub optimization_target_seed_count: usize,
+    #[serde(default)]
+    pub optimization_skipped_target_seed_count: usize,
+    #[serde(default)]
     pub optimization_rejected_edit_count: usize,
     #[serde(default)]
     pub optimization_initial_max_aspect_ratio: f64,
@@ -442,6 +446,9 @@ pub fn form_tet_candidates(
             smoothed_point_count,
             sliver_candidate_count,
             sliver_removed_count: optimization_quality.sliver_removed_count(),
+            optimization_target_seed_count: optimization_quality.target_seed_count(),
+            optimization_skipped_target_seed_count: optimization_quality
+                .skipped_target_seed_count(),
             optimization_rejected_edit_count,
             optimization_initial_max_aspect_ratio: optimization_quality.initial_max_aspect_ratio(),
             optimization_final_max_aspect_ratio: optimization_quality.final_max_aspect_ratio(),
@@ -2017,6 +2024,8 @@ struct SmoothingSummary {
     smoothed_point_count: usize,
     sliver_candidate_count: usize,
     sliver_removed_count: usize,
+    target_seed_count: usize,
+    skipped_target_seed_count: usize,
     rejected_edit_count: usize,
     quality_sample_count: usize,
     initial_max_aspect_ratio: f64,
@@ -2032,6 +2041,8 @@ impl SmoothingSummary {
             smoothed_point_count: 0,
             sliver_candidate_count: 0,
             sliver_removed_count: 0,
+            target_seed_count: 0,
+            skipped_target_seed_count: 0,
             rejected_edit_count: 0,
             quality_sample_count: 0,
             initial_max_aspect_ratio: 0.0,
@@ -2046,6 +2057,8 @@ impl SmoothingSummary {
 struct OptimizationQualityAggregate {
     quality_sample_count: usize,
     sliver_removed_count: usize,
+    target_seed_count: usize,
+    skipped_target_seed_count: usize,
     rejected_edit_count: usize,
     initial_max_aspect_ratio: f64,
     final_max_aspect_ratio: f64,
@@ -2056,6 +2069,8 @@ struct OptimizationQualityAggregate {
 impl OptimizationQualityAggregate {
     fn record(&mut self, summary: SmoothingSummary) {
         self.sliver_removed_count += summary.sliver_removed_count;
+        self.target_seed_count += summary.target_seed_count;
+        self.skipped_target_seed_count += summary.skipped_target_seed_count;
         self.rejected_edit_count += summary.rejected_edit_count;
         if summary.quality_sample_count == 0 {
             return;
@@ -2117,6 +2132,14 @@ impl OptimizationQualityAggregate {
     fn sliver_removed_count(self) -> usize {
         self.sliver_removed_count
     }
+
+    fn target_seed_count(self) -> usize {
+        self.target_seed_count
+    }
+
+    fn skipped_target_seed_count(self) -> usize {
+        self.skipped_target_seed_count
+    }
 }
 
 fn smooth_component_seed_points(
@@ -2139,6 +2162,8 @@ fn smooth_component_seed_points(
     let mut smoothed_point_count = 0_usize;
     let mut sliver_candidate_count = 0_usize;
     let mut sliver_removed_count = 0_usize;
+    let mut target_seed_count = 0_usize;
+    let mut skipped_target_seed_count = 0_usize;
     let mut rejected_edit_count = 0_usize;
     let mut initial_quality = None::<CandidateQualitySnapshot>;
     let mut final_quality = None::<CandidateQualitySnapshot>;
@@ -2207,7 +2232,7 @@ fn smooth_component_seed_points(
             }
         }
 
-        let Some((locally_smoothed, local_quality)) = best_local_seed_smoothing(
+        let Some(local_choice) = best_local_seed_smoothing(
             component,
             seed_points,
             &proposed,
@@ -2225,14 +2250,16 @@ fn smooth_component_seed_points(
         else {
             break;
         };
-        *seed_points = locally_smoothed;
-        final_quality = Some(local_quality);
+        target_seed_count += local_choice.target_seed_count;
+        skipped_target_seed_count += local_choice.skipped_target_seed_count;
+        *seed_points = local_choice.seed_points;
+        final_quality = Some(local_choice.quality);
         pass_count += 1;
         smoothed_point_count += 1;
-        sliver_candidate_count += local_quality.sliver_count;
+        sliver_candidate_count += local_choice.quality.sliver_count;
         sliver_removed_count += current_quality
             .sliver_count
-            .saturating_sub(local_quality.sliver_count);
+            .saturating_sub(local_choice.quality.sliver_count);
     }
 
     let initial_quality = initial_quality.unwrap_or_else(CandidateQualitySnapshot::empty);
@@ -2242,6 +2269,8 @@ fn smooth_component_seed_points(
         smoothed_point_count,
         sliver_candidate_count,
         sliver_removed_count,
+        target_seed_count,
+        skipped_target_seed_count,
         rejected_edit_count,
         quality_sample_count: usize::from(initial_quality.has_samples()),
         initial_max_aspect_ratio: initial_quality.max_aspect_ratio,
@@ -2266,18 +2295,18 @@ fn best_local_seed_smoothing(
     tolerance: MeshingTolerance,
     current_status_accepted: bool,
     current_quality: CandidateQualitySnapshot,
-) -> Result<Option<(Vec<[f64; 3]>, CandidateQualitySnapshot)>, TetCandidateError> {
-    let seed_indices = optimization_target_seed_indices(current_tets, seed_node_ids, options);
+) -> Result<Option<LocalSmoothingChoice>, TetCandidateError> {
+    let target_summary = optimization_target_seed_indices(current_tets, seed_node_ids, options);
     let mut best = None::<(Vec<[f64; 3]>, CandidateQualitySnapshot)>;
-    for index in seed_indices {
+    for index in &target_summary.indices {
         for proposed_point in local_seed_smoothing_candidate_points(
-            seed_points[index],
-            proposed_points[index],
+            seed_points[*index],
+            proposed_points[*index],
             classifier,
             tolerance,
         ) {
             let mut trial = seed_points.to_vec();
-            trial[index] = proposed_point;
+            trial[*index] = proposed_point;
             let (trial_status, trial_tets) = component_insertion_tet_drafts(
                 component,
                 seed_node_ids,
@@ -2304,7 +2333,27 @@ fn best_local_seed_smoothing(
             }
         }
     }
-    Ok(best)
+    Ok(best.map(|(seed_points, quality)| LocalSmoothingChoice {
+        seed_points,
+        quality,
+        target_seed_count: target_summary.total_count,
+        skipped_target_seed_count: target_summary.skipped_count,
+    }))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LocalSmoothingChoice {
+    seed_points: Vec<[f64; 3]>,
+    quality: CandidateQualitySnapshot,
+    target_seed_count: usize,
+    skipped_target_seed_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OptimizationTargetSeedSummary {
+    indices: Vec<usize>,
+    total_count: usize,
+    skipped_count: usize,
 }
 
 fn local_seed_smoothing_candidate_points(
@@ -2469,7 +2518,7 @@ fn optimization_target_seed_indices(
     tets: &[TetCandidate],
     seed_node_ids: &[u32],
     options: TetCandidateOptions,
-) -> Vec<usize> {
+) -> OptimizationTargetSeedSummary {
     let seed_index = seed_node_ids
         .iter()
         .enumerate()
@@ -2498,8 +2547,13 @@ fn optimization_target_seed_indices(
             .then_with(|| right_score.1.cmp(&left_score.1))
             .then_with(|| left_index.cmp(right_index))
     });
+    let total_count = indices.len();
     indices.truncate(options.max_quality_recovery_seed_candidates);
-    indices.into_iter().map(|(index, _)| index).collect()
+    OptimizationTargetSeedSummary {
+        indices: indices.into_iter().map(|(index, _)| index).collect(),
+        total_count,
+        skipped_count: total_count.saturating_sub(options.max_quality_recovery_seed_candidates),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -5607,6 +5661,8 @@ mod tests {
             smoothed_point_count: 2,
             sliver_candidate_count: 3,
             sliver_removed_count: 2,
+            target_seed_count: 5,
+            skipped_target_seed_count: 2,
             rejected_edit_count: 4,
             quality_sample_count: 1,
             initial_max_aspect_ratio: 9.0,
@@ -5619,6 +5675,8 @@ mod tests {
             smoothed_point_count: 0,
             sliver_candidate_count: 1,
             sliver_removed_count: 1,
+            target_seed_count: 3,
+            skipped_target_seed_count: 1,
             rejected_edit_count: 2,
             quality_sample_count: 1,
             initial_max_aspect_ratio: 8.0,
@@ -5629,6 +5687,8 @@ mod tests {
 
         assert_eq!(aggregate.rejected_edit_count, 6);
         assert_eq!(aggregate.sliver_removed_count(), 3);
+        assert_eq!(aggregate.target_seed_count(), 8);
+        assert_eq!(aggregate.skipped_target_seed_count(), 3);
         assert_eq!(aggregate.initial_max_aspect_ratio(), 9.0);
         assert_eq!(aggregate.final_max_aspect_ratio(), 7.0);
         assert_eq!(aggregate.initial_min_exact_scaled_jacobian(), 0.30);
@@ -5660,9 +5720,11 @@ mod tests {
         assert!(tet.exact_scaled_jacobian >= options.min_scaled_jacobian);
         assert!(tet.aspect_ratio > options.sliver_aspect_ratio);
 
-        let seed_indices = optimization_target_seed_indices(&[tet], &[1, 3], options);
+        let seed_summary = optimization_target_seed_indices(&[tet], &[1, 3], options);
 
-        assert_eq!(seed_indices, vec![0, 1]);
+        assert_eq!(seed_summary.indices, vec![0, 1]);
+        assert_eq!(seed_summary.total_count, 2);
+        assert_eq!(seed_summary.skipped_count, 0);
     }
 
     #[test]
@@ -5706,9 +5768,11 @@ mod tests {
             },
         ];
 
-        let seed_indices = optimization_target_seed_indices(&tets, &[10, 11, 12, 13, 14], options);
+        let seed_summary = optimization_target_seed_indices(&tets, &[10, 11, 12, 13, 14], options);
 
-        assert_eq!(seed_indices, vec![0, 1, 2]);
+        assert_eq!(seed_summary.indices, vec![0, 1, 2]);
+        assert_eq!(seed_summary.total_count, 5);
+        assert_eq!(seed_summary.skipped_count, 2);
     }
 
     #[test]

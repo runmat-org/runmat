@@ -199,6 +199,10 @@ pub struct MeshTetRecoveryEvidence {
     #[serde(default)]
     pub sliver_removed_count: usize,
     #[serde(default)]
+    pub optimization_target_seed_count: usize,
+    #[serde(default)]
+    pub optimization_skipped_target_seed_count: usize,
+    #[serde(default)]
     pub optimization_rejected_edit_count: usize,
     #[serde(default)]
     pub optimization_initial_max_aspect_ratio: f64,
@@ -616,6 +620,10 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         smoothed_point_count: mesh.backend.tet_smoothed_point_count,
         sliver_candidate_count: mesh.backend.tet_sliver_candidate_count,
         sliver_removed_count: mesh.backend.tet_sliver_removed_count,
+        optimization_target_seed_count: mesh.backend.tet_optimization_target_seed_count,
+        optimization_skipped_target_seed_count: mesh
+            .backend
+            .tet_optimization_skipped_target_seed_count,
         optimization_rejected_edit_count: mesh.backend.tet_optimization_rejected_edit_count,
         optimization_initial_max_aspect_ratio: mesh
             .backend
@@ -1069,6 +1077,8 @@ mod tests {
                 tet_smoothed_point_count: 2,
                 tet_sliver_candidate_count: 1,
                 tet_sliver_removed_count: 2,
+                tet_optimization_target_seed_count: 7,
+                tet_optimization_skipped_target_seed_count: 4,
                 tet_optimization_rejected_edit_count: 3,
                 tet_optimization_initial_max_aspect_ratio: 6.0,
                 tet_optimization_final_max_aspect_ratio: 4.0,
@@ -1243,6 +1253,11 @@ mod tests {
         assert_eq!(evidence.tet_recovery.smoothed_point_count, 2);
         assert_eq!(evidence.tet_recovery.sliver_candidate_count, 1);
         assert_eq!(evidence.tet_recovery.sliver_removed_count, 2);
+        assert_eq!(evidence.tet_recovery.optimization_target_seed_count, 7);
+        assert_eq!(
+            evidence.tet_recovery.optimization_skipped_target_seed_count,
+            4
+        );
         assert_eq!(evidence.tet_recovery.optimization_rejected_edit_count, 3);
         assert_eq!(
             evidence.tet_recovery.optimization_initial_max_aspect_ratio,

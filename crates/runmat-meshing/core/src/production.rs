@@ -1021,6 +1021,14 @@ fn production_backend_summary(
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
         tet_sliver_removed_count: preparation.tet_candidates.recovery.sliver_removed_count,
+        tet_optimization_target_seed_count: preparation
+            .tet_candidates
+            .recovery
+            .optimization_target_seed_count,
+        tet_optimization_skipped_target_seed_count: preparation
+            .tet_candidates
+            .recovery
+            .optimization_skipped_target_seed_count,
         tet_optimization_rejected_edit_count: preparation
             .tet_candidates
             .recovery

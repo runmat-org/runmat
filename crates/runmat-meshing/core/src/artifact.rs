@@ -170,6 +170,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_sliver_removed_count: usize,
     #[serde(default)]
+    pub tet_optimization_target_seed_count: usize,
+    #[serde(default)]
+    pub tet_optimization_skipped_target_seed_count: usize,
+    #[serde(default)]
     pub tet_optimization_rejected_edit_count: usize,
     #[serde(default)]
     pub tet_optimization_initial_max_aspect_ratio: f64,
@@ -269,6 +273,8 @@ impl Default for MeshBackendSummary {
             tet_smoothed_point_count: 0,
             tet_sliver_candidate_count: 0,
             tet_sliver_removed_count: 0,
+            tet_optimization_target_seed_count: 0,
+            tet_optimization_skipped_target_seed_count: 0,
             tet_optimization_rejected_edit_count: 0,
             tet_optimization_initial_max_aspect_ratio: 0.0,
             tet_optimization_final_max_aspect_ratio: 0.0,
