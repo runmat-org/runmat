@@ -477,7 +477,14 @@ fn analysis_mesh_from_preparation(
         volume_elements,
         boundary_faces,
         boundary_edges,
-        quality: quality_report(quality_elements),
+        quality: quality_report(
+            quality_elements,
+            preparation
+                .surface
+                .elements
+                .iter()
+                .map(|element| element.max_projection_error_m),
+        ),
         sizing: production_mesh_sizing(options, sizing),
         backend,
         adaptive_iterations: Vec::new(),
@@ -874,10 +881,29 @@ fn production_validation_options(
     }
 }
 
-fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
+fn quality_report(
+    elements: Vec<ElementQuality>,
+    boundary_projection_errors_m: impl IntoIterator<Item = f64>,
+) -> AnalysisMeshQualityReport {
     if elements.is_empty() {
         return AnalysisMeshQualityReport::default();
     }
+    let mut boundary_projection_error_count = 0_usize;
+    let mut boundary_projection_error_sum_m = 0.0_f64;
+    let mut max_boundary_projection_error_m = 0.0_f64;
+    for error_m in boundary_projection_errors_m {
+        if !error_m.is_finite() {
+            continue;
+        }
+        boundary_projection_error_count += 1;
+        boundary_projection_error_sum_m += error_m;
+        max_boundary_projection_error_m = max_boundary_projection_error_m.max(error_m);
+    }
+    let mean_boundary_projection_error_m = if boundary_projection_error_count == 0 {
+        0.0
+    } else {
+        boundary_projection_error_sum_m / boundary_projection_error_count as f64
+    };
     let min_scaled_jacobian = elements
         .iter()
         .map(|element| element.scaled_jacobian)
@@ -901,8 +927,8 @@ fn quality_report(elements: Vec<ElementQuality>) -> AnalysisMeshQualityReport {
         mean_aspect_ratio,
         max_aspect_ratio,
         inverted_element_count: 0,
-        mean_boundary_projection_error_m: 0.0,
-        max_boundary_projection_error_m: 0.0,
+        mean_boundary_projection_error_m,
+        max_boundary_projection_error_m,
         elements,
     }
 }
@@ -1053,12 +1079,53 @@ mod tests {
             .elements
             .iter()
             .all(|element| element.exact_scaled_jacobian.is_finite()));
+        assert_eq!(
+            mesh.quality.max_boundary_projection_error_m,
+            mesh.backend.surface_max_cad_projection_error_m
+        );
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(
             mesh.provenance.algorithm,
             "production_topology_tet_candidate/v1"
         );
+    }
+
+    #[test]
+    fn quality_report_summarizes_boundary_projection_error() {
+        let quality = quality_report(
+            vec![ElementQuality {
+                element_id: "tet_1".to_string(),
+                scaled_jacobian: 0.5,
+                exact_scaled_jacobian: 0.45,
+                aspect_ratio: 2.0,
+                volume_m3: 1.0,
+            }],
+            [2.0e-6, f64::NAN, 4.0e-6],
+        );
+
+        assert_eq!(quality.mean_boundary_projection_error_m, 3.0e-6);
+        assert_eq!(quality.max_boundary_projection_error_m, 4.0e-6);
+    }
+
+    #[test]
+    fn production_validation_rejects_surface_projection_error() {
+        let mut preparation =
+            prepare_production_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
+                .expect("production preparation should run");
+        preparation.surface.elements[0].max_projection_error_m = 2.0e-6;
+
+        let mut options = VolumeMeshingOptions::default();
+        options.validation.quality.max_boundary_projection_error_m = 1.0e-6;
+        let err = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect_err("projection error should fail production validation");
+
+        assert!(matches!(
+            err,
+            ProductionMeshError::Validation(
+                crate::AnalysisMeshValidationError::QualityThresholdFailed { reason }
+            ) if reason == "max_boundary_projection_error_m"
+        ));
     }
 
     fn cube_geometry() -> GeometryAsset {
