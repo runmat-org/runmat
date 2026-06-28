@@ -1781,7 +1781,7 @@ fn best_centroid_split_tets(
 }
 
 fn centroid_repair_points(centroid: [f64; 3], points: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
-    let mut candidates = Vec::with_capacity(9);
+    let mut candidates = Vec::with_capacity(93);
     candidates.push(centroid);
     for point in points {
         candidates.push([
@@ -1794,6 +1794,37 @@ fn centroid_repair_points(centroid: [f64; 3], points: [[f64; 3]; 4]) -> Vec<[f64
             centroid[1] * 0.50 + point[1] * 0.50,
             centroid[2] * 0.50 + point[2] * 0.50,
         ]);
+    }
+    let denominator = 10_usize;
+    for a in 1..denominator {
+        for b in 1..(denominator - a) {
+            for c in 1..(denominator - a - b) {
+                let d = denominator - a - b - c;
+                if d == 0 {
+                    continue;
+                }
+                let weights = [
+                    a as f64 / denominator as f64,
+                    b as f64 / denominator as f64,
+                    c as f64 / denominator as f64,
+                    d as f64 / denominator as f64,
+                ];
+                candidates.push([
+                    points[0][0] * weights[0]
+                        + points[1][0] * weights[1]
+                        + points[2][0] * weights[2]
+                        + points[3][0] * weights[3],
+                    points[0][1] * weights[0]
+                        + points[1][1] * weights[1]
+                        + points[2][1] * weights[2]
+                        + points[3][1] * weights[3],
+                    points[0][2] * weights[0]
+                        + points[1][2] * weights[1]
+                        + points[2][2] * weights[2]
+                        + points[3][2] * weights[3],
+                ]);
+            }
+        }
     }
     candidates
 }
