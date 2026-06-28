@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -146,6 +148,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_exact_scaled_jacobian_below_threshold_count: usize,
     #[serde(default)]
+    pub tet_exact_scaled_jacobian_bins: BTreeMap<String, usize>,
+    #[serde(default)]
     pub tet_optimization_pass_count: usize,
     #[serde(default)]
     pub tet_smoothed_point_count: usize,
@@ -206,6 +210,7 @@ impl Default for MeshBackendSummary {
             tet_sizing_violation_count: 0,
             tet_min_exact_scaled_jacobian: 1.0,
             tet_exact_scaled_jacobian_below_threshold_count: 0,
+            tet_exact_scaled_jacobian_bins: BTreeMap::new(),
             tet_optimization_pass_count: 0,
             tet_smoothed_point_count: 0,
             tet_sliver_candidate_count: 0,

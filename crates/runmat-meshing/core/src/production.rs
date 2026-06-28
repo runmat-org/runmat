@@ -672,6 +672,11 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_scaled_jacobian_below_threshold_count,
+        tet_exact_scaled_jacobian_bins: preparation
+            .tet_candidates
+            .recovery
+            .exact_scaled_jacobian_bins
+            .clone(),
         tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
@@ -1073,6 +1078,14 @@ mod tests {
             mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
             0
         );
+        assert_eq!(
+            mesh.backend
+                .tet_exact_scaled_jacobian_bins
+                .values()
+                .sum::<usize>(),
+            mesh.backend.tet_candidate_count
+        );
+        assert!(!mesh.backend.tet_exact_scaled_jacobian_bins.is_empty());
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2

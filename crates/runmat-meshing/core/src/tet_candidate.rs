@@ -115,6 +115,8 @@ pub struct TetRecoveryReport {
     pub sizing_violation_count: usize,
     pub min_exact_scaled_jacobian: f64,
     pub exact_scaled_jacobian_below_threshold_count: usize,
+    #[serde(default)]
+    pub exact_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub optimization_pass_count: usize,
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
@@ -354,6 +356,7 @@ pub fn form_tet_candidates(
             min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
             exact_scaled_jacobian_below_threshold_count: quality_summary
                 .exact_scaled_jacobian_below_threshold_count,
+            exact_scaled_jacobian_bins: quality_summary.exact_scaled_jacobian_bins,
             optimization_pass_count,
             smoothed_point_count,
             sliver_candidate_count,
@@ -2789,11 +2792,12 @@ fn smoothed_seed_points(
     Ok(proposed)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct TetCandidateQualitySummary {
     max_radius_edge_ratio: f64,
     min_exact_scaled_jacobian: f64,
     exact_scaled_jacobian_below_threshold_count: usize,
+    exact_scaled_jacobian_bins: BTreeMap<String, usize>,
 }
 
 fn tet_candidate_quality_summary(
@@ -2808,6 +2812,7 @@ fn tet_candidate_quality_summary(
     let mut max_radius_edge_ratio = 0.0_f64;
     let mut min_exact_scaled_jacobian = f64::INFINITY;
     let mut exact_scaled_jacobian_below_threshold_count = 0_usize;
+    let mut exact_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     for tet in tets {
         let points = candidate_tet_points(tet, &nodes)?;
         let radius_edge_ratio = tet_radius_edge_ratio(points, MeshingTolerance::default());
@@ -2816,6 +2821,9 @@ fn tet_candidate_quality_summary(
         }
         let exact_scaled_jacobian = tet.exact_scaled_jacobian;
         min_exact_scaled_jacobian = min_exact_scaled_jacobian.min(exact_scaled_jacobian);
+        *exact_scaled_jacobian_bins
+            .entry(exact_scaled_jacobian_bin(exact_scaled_jacobian))
+            .or_default() += 1;
         if exact_scaled_jacobian < options.min_scaled_jacobian {
             exact_scaled_jacobian_below_threshold_count += 1;
         }
@@ -2824,7 +2832,22 @@ fn tet_candidate_quality_summary(
         max_radius_edge_ratio,
         min_exact_scaled_jacobian,
         exact_scaled_jacobian_below_threshold_count,
+        exact_scaled_jacobian_bins,
     })
+}
+
+fn exact_scaled_jacobian_bin(value: f64) -> String {
+    if value < 0.0 {
+        "lt_0".to_string()
+    } else if value < 0.15 {
+        "0_to_0_15".to_string()
+    } else if value < 0.35 {
+        "0_15_to_0_35".to_string()
+    } else if value < 0.65 {
+        "0_35_to_0_65".to_string()
+    } else {
+        "gte_0_65".to_string()
+    }
 }
 
 fn tet_radius_edge_ratio(points: [[f64; 3]; 4], tolerance: MeshingTolerance) -> f64 {
@@ -3528,6 +3551,15 @@ mod tests {
             .iter()
             .all(|tet| tet.volume_m3 > 0.0 && tet.aspect_ratio.is_finite()));
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+        assert_eq!(
+            candidates
+                .recovery
+                .exact_scaled_jacobian_bins
+                .values()
+                .sum::<usize>(),
+            candidates.tets.len()
+        );
+        assert!(!candidates.recovery.exact_scaled_jacobian_bins.is_empty());
         assert!(candidates
             .nodes
             .iter()
