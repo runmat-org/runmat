@@ -106,6 +106,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_curvature_query_count: usize,
     #[serde(default)]
+    pub cad_uv_domain_face_count: usize,
+    #[serde(default)]
+    pub cad_uv_projection_out_of_bounds_count: usize,
+    #[serde(default)]
     pub cad_max_projection_error_m: f64,
     #[serde(default)]
     pub cad_max_normal_deviation: f64,
@@ -259,6 +263,8 @@ impl Default for MeshBackendSummary {
             cad_projection_query_count: 0,
             cad_derivative_query_count: 0,
             cad_curvature_query_count: 0,
+            cad_uv_domain_face_count: 0,
+            cad_uv_projection_out_of_bounds_count: 0,
             cad_max_projection_error_m: 0.0,
             cad_max_normal_deviation: 0.0,
             cad_max_curvature_estimate_1_per_m: 0.0,

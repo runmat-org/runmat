@@ -86,6 +86,10 @@ pub struct MeshCadEvidence {
     pub derivative_query_count: usize,
     #[serde(default)]
     pub curvature_query_count: usize,
+    #[serde(default)]
+    pub uv_domain_face_count: usize,
+    #[serde(default)]
+    pub uv_projection_out_of_bounds_count: usize,
     pub max_projection_error_m: f64,
     pub max_normal_deviation: f64,
     #[serde(default)]
@@ -429,6 +433,8 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
         projection_query_count: mesh.backend.cad_projection_query_count,
         derivative_query_count: mesh.backend.cad_derivative_query_count,
         curvature_query_count: mesh.backend.cad_curvature_query_count,
+        uv_domain_face_count: mesh.backend.cad_uv_domain_face_count,
+        uv_projection_out_of_bounds_count: mesh.backend.cad_uv_projection_out_of_bounds_count,
         max_projection_error_m: mesh.backend.cad_max_projection_error_m,
         max_normal_deviation: mesh.backend.cad_max_normal_deviation,
         max_curvature_estimate_1_per_m: mesh.backend.cad_max_curvature_estimate_1_per_m,
@@ -1172,6 +1178,8 @@ mod tests {
                 cad_projection_query_count: 12,
                 cad_derivative_query_count: 6,
                 cad_curvature_query_count: 5,
+                cad_uv_domain_face_count: 10,
+                cad_uv_projection_out_of_bounds_count: 2,
                 cad_max_projection_error_m: 2.0e-6,
                 cad_max_normal_deviation: 1.0e-5,
                 cad_max_curvature_estimate_1_per_m: 0.125,
@@ -1252,6 +1260,8 @@ mod tests {
         assert_eq!(evidence.cad.projection_query_count, 12);
         assert_eq!(evidence.cad.derivative_query_count, 6);
         assert_eq!(evidence.cad.curvature_query_count, 5);
+        assert_eq!(evidence.cad.uv_domain_face_count, 10);
+        assert_eq!(evidence.cad.uv_projection_out_of_bounds_count, 2);
         assert_eq!(evidence.cad.max_projection_error_m, 2.0e-6);
         assert_eq!(evidence.cad.max_normal_deviation, 1.0e-5);
         assert_eq!(evidence.cad.max_curvature_estimate_1_per_m, 0.125);

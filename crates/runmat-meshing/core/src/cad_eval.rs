@@ -44,6 +44,12 @@ pub struct CadFaceEvaluationFrame {
     pub v_derivative_m_per_uv: Option<Point3>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_curvature_estimate_1_per_m: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uv_bounds: Option<[[f64; 2]; 2]>,
+    #[serde(default)]
+    pub uv_bounds_sample_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uv_domain_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -52,6 +58,8 @@ pub struct CadFaceProjection {
     pub uv: [f64; 2],
     pub distance_m: f64,
     pub unit_normal: Point3,
+    #[serde(default)]
+    pub uv_in_bounds: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +81,10 @@ pub struct CadEvaluationReport {
     pub curvature_query_count: usize,
     pub max_projection_error_m: f64,
     pub max_normal_deviation: f64,
+    #[serde(default)]
+    pub uv_domain_face_count: usize,
+    #[serde(default)]
+    pub uv_projection_out_of_bounds_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_curvature_estimate_1_per_m: Option<f64>,
 }
@@ -247,6 +259,10 @@ pub fn build_cad_evaluation_model_with_provider(
         .iter()
         .filter(|frame| frame.max_curvature_estimate_1_per_m.is_some())
         .count();
+    let uv_domain_face_count = frames
+        .iter()
+        .filter(|frame| frame.uv_bounds.is_some())
+        .count();
     let max_curvature_estimate_1_per_m = max_optional_curvature(
         frames
             .iter()
@@ -270,6 +286,8 @@ pub fn build_cad_evaluation_model_with_provider(
         curvature_query_count,
         max_projection_error_m: max_evaluator_projection_error_m,
         max_normal_deviation: 0.0,
+        uv_domain_face_count,
+        uv_projection_out_of_bounds_count: 0,
         max_curvature_estimate_1_per_m,
     };
     Ok(CadEvaluationModel {
@@ -298,7 +316,28 @@ pub fn project_to_face(frame: &CadFaceEvaluationFrame, point: Point3) -> CadFace
         ],
         distance_m: normal_distance.abs(),
         unit_normal: frame.unit_normal,
+        uv_in_bounds: face_uv_contains(
+            frame,
+            [
+                dot(projected_relative, frame.u_axis),
+                dot(projected_relative, frame.v_axis),
+            ],
+        ),
     }
+}
+
+pub fn face_uv_contains(frame: &CadFaceEvaluationFrame, uv: [f64; 2]) -> bool {
+    let Some(bounds) = frame.uv_bounds else {
+        return true;
+    };
+    if !uv.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    let tolerance = 1.0e-9;
+    uv[0] + tolerance >= bounds[0][0]
+        && uv[0] <= bounds[1][0] + tolerance
+        && uv[1] + tolerance >= bounds[0][1]
+        && uv[1] <= bounds[1][1] + tolerance
 }
 
 fn sample_backed_projection(
@@ -340,6 +379,7 @@ fn projection_from_matching_sample(
         uv,
         distance_m: point_to_projected_m,
         unit_normal,
+        uv_in_bounds: face_uv_contains(frame, uv),
     })
 }
 
@@ -350,6 +390,8 @@ pub fn summarize_cad_evaluation(
     let mut projection_query_count = 0_usize;
     let mut max_projection_error_m = 0.0_f64;
     let mut max_normal_deviation = 0.0_f64;
+    let mut uv_domain_face_count = 0_usize;
+    let mut uv_projection_out_of_bounds_count = 0_usize;
     let source_faces = topology
         .faces
         .iter()
@@ -370,6 +412,12 @@ pub fn summarize_cad_evaluation(
             let projection = project_to_face(frame, point);
             projection_query_count += 1;
             max_projection_error_m = max_projection_error_m.max(projection.distance_m);
+            if !projection.uv_in_bounds {
+                uv_projection_out_of_bounds_count += 1;
+            }
+        }
+        if frame.uv_bounds.is_some() {
+            uv_domain_face_count += 1;
         }
         max_projection_error_m = max_projection_error_m.max(frame.evaluator_max_projection_error_m);
         max_normal_deviation =
@@ -388,6 +436,8 @@ pub fn summarize_cad_evaluation(
         curvature_query_count: model.report.curvature_query_count,
         max_projection_error_m,
         max_normal_deviation,
+        uv_domain_face_count,
+        uv_projection_out_of_bounds_count,
         max_curvature_estimate_1_per_m: model.report.max_curvature_estimate_1_per_m,
     })
 }
@@ -423,6 +473,13 @@ fn face_frame(
     let (u_derivative_m_per_uv, v_derivative_m_per_uv) =
         estimate_uv_derivatives(&evaluator_samples);
     let max_curvature_estimate_1_per_m = estimate_max_curvature(&evaluator_samples, unit_normal);
+    let (uv_bounds, uv_bounds_sample_count, uv_domain_source) = cad_uv_domain_summary(
+        &evaluator_samples,
+        points,
+        evaluator_reference_point_m,
+        u_axis,
+        scale(v_axis, 1.0 / v_length),
+    );
     Ok(CadFaceEvaluationFrame {
         face_id,
         source_face_id,
@@ -440,6 +497,9 @@ fn face_frame(
         u_derivative_m_per_uv,
         v_derivative_m_per_uv,
         max_curvature_estimate_1_per_m,
+        uv_bounds,
+        uv_bounds_sample_count,
+        uv_domain_source,
     })
 }
 
@@ -456,6 +516,59 @@ fn evaluation_source(
     } else {
         CadEvaluationSource::PlanarFacetApproximation
     }
+}
+
+fn cad_uv_domain_summary(
+    evaluator_samples: &[CadFaceEvaluationSample],
+    source_points: Triangle3,
+    evaluator_reference_point_m: Option<Point3>,
+    u_axis: Point3,
+    v_axis: Point3,
+) -> (Option<[[f64; 2]; 2]>, usize, Option<String>) {
+    let exact_sample_uvs = evaluator_samples
+        .iter()
+        .filter(|sample| sample.source == CadFaceEvaluationSampleSource::BackendQuery)
+        .filter_map(|sample| sample.uv)
+        .filter(|uv| uv.iter().all(|value| value.is_finite()))
+        .collect::<Vec<_>>();
+    if exact_sample_uvs.len() >= 3 {
+        return (
+            uv_bounds_from_points(exact_sample_uvs.as_slice()),
+            exact_sample_uvs.len(),
+            Some("exact_samples".to_string()),
+        );
+    }
+
+    let origin = evaluator_reference_point_m.unwrap_or_else(|| triangle_centroid(source_points));
+    let fallback_uvs = source_points
+        .iter()
+        .map(|point| {
+            let relative = sub(*point, origin);
+            [dot(relative, u_axis), dot(relative, v_axis)]
+        })
+        .collect::<Vec<_>>();
+    (
+        uv_bounds_from_points(fallback_uvs.as_slice()),
+        fallback_uvs.len(),
+        Some("source_face_projection".to_string()),
+    )
+}
+
+fn uv_bounds_from_points(points: &[[f64; 2]]) -> Option<[[f64; 2]; 2]> {
+    let mut finite_points = points
+        .iter()
+        .copied()
+        .filter(|uv| uv.iter().all(|value| value.is_finite()));
+    let first = finite_points.next()?;
+    let mut min = first;
+    let mut max = first;
+    for uv in finite_points {
+        min[0] = min[0].min(uv[0]);
+        min[1] = min[1].min(uv[1]);
+        max[0] = max[0].max(uv[0]);
+        max[1] = max[1].max(uv[1]);
+    }
+    Some([min, max])
 }
 
 fn orient_unit_normal_to_source_triangle(unit_normal: Point3, points: Triangle3) -> Point3 {
@@ -761,9 +874,16 @@ mod tests {
         let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
 
         let projection = project_to_face(&model.face_frames[0], [0.25, 0.25, 0.5]);
+        let outside_projection = project_to_face(&model.face_frames[0], [10.0, 10.0, 0.5]);
 
         assert!(projection.distance_m > 0.0);
+        assert!(projection.uv_in_bounds);
+        assert!(!outside_projection.uv_in_bounds);
         assert!(dot(projection.unit_normal, model.face_frames[0].unit_normal) > 0.999);
+        assert_eq!(
+            model.face_frames[0].uv_domain_source.as_deref(),
+            Some("source_face_projection")
+        );
     }
 
     #[test]
@@ -890,6 +1010,58 @@ mod tests {
         assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
         assert_eq!(frame.evaluator_samples.len(), 1);
         assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
+        assert!(frame.uv_bounds.is_some());
+        assert!(face_uv_contains(frame, [0.5, 0.5]));
+    }
+
+    #[test]
+    fn exact_backend_samples_define_uv_domain_when_sufficient() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 0.0, 1.0],
+                uv: Some([2.0, 4.0]),
+                projected_point_m: Some([0.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [1.0, 0.0, 1.0],
+                uv: Some([5.0, 4.0]),
+                projected_point_m: Some([1.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 1.0, 1.0],
+                uv: Some([2.0, 7.0]),
+                projected_point_m: Some([0.0, 1.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let report = summarize_cad_evaluation(&model, &topology).expect("summary");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.evaluator_samples.len() == 3)
+            .expect("sample-backed frame");
+
+        assert_eq!(frame.uv_bounds, Some([[2.0, 4.0], [5.0, 7.0]]));
+        assert_eq!(frame.uv_bounds_sample_count, 3);
+        assert_eq!(frame.uv_domain_source.as_deref(), Some("exact_samples"));
+        assert!(face_uv_contains(frame, [3.0, 6.0]));
+        assert!(!face_uv_contains(frame, [6.0, 6.0]));
+        assert!(model.report.uv_domain_face_count > 0);
+        assert!(report.uv_domain_face_count > 0);
+        assert!(report.uv_projection_out_of_bounds_count > 0);
     }
 
     #[test]

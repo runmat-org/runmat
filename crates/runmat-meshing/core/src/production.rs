@@ -1011,6 +1011,10 @@ fn production_backend_summary(
         cad_projection_query_count: preparation.cad_evaluation_report.projection_query_count,
         cad_derivative_query_count: preparation.cad_evaluation_report.derivative_query_count,
         cad_curvature_query_count: preparation.cad_evaluation_report.curvature_query_count,
+        cad_uv_domain_face_count: preparation.cad_evaluation_report.uv_domain_face_count,
+        cad_uv_projection_out_of_bounds_count: preparation
+            .cad_evaluation_report
+            .uv_projection_out_of_bounds_count,
         cad_max_projection_error_m: preparation.cad_evaluation_report.max_projection_error_m,
         cad_max_normal_deviation: preparation.cad_evaluation_report.max_normal_deviation,
         cad_max_curvature_estimate_1_per_m: preparation
@@ -1934,6 +1938,7 @@ mod tests {
         );
         assert!(preparation.cad_evaluation_report.derivative_query_count > 0);
         assert!(preparation.cad_evaluation_report.curvature_query_count > 0);
+        assert!(preparation.cad_evaluation_report.uv_domain_face_count > 0);
         assert!(preparation
             .surface
             .elements
@@ -1947,6 +1952,16 @@ mod tests {
         assert_eq!(
             mesh.backend.cad_evaluation_live_query_face_count,
             preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            mesh.backend.cad_uv_domain_face_count,
+            preparation.cad_evaluation_report.uv_domain_face_count
+        );
+        assert_eq!(
+            mesh.backend.cad_uv_projection_out_of_bounds_count,
+            preparation
+                .cad_evaluation_report
+                .uv_projection_out_of_bounds_count
         );
         assert_eq!(
             mesh.backend.surface_cad_face_count,
