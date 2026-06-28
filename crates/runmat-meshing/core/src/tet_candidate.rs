@@ -408,11 +408,23 @@ fn append_component_tets(
 fn append_candidate_tet(
     component: &VolumeCandidateComponent,
     element: &SurfaceElement,
-    mut node_ids: [u32; 4],
+    node_ids: [u32; 4],
     points: [[f64; 3]; 4],
     options: TetCandidateOptions,
     tets: &mut Vec<TetCandidate>,
 ) {
+    if let Some(tet) = candidate_tet(component, element, node_ids, points, options) {
+        tets.push(tet);
+    }
+}
+
+fn candidate_tet(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    mut node_ids: [u32; 4],
+    points: [[f64; 3]; 4],
+    options: TetCandidateOptions,
+) -> Option<TetCandidate> {
     let mut signed_volume_m3 = tet_signed_volume(points);
     if signed_volume_m3 < 0.0 {
         node_ids.swap(1, 2);
@@ -420,21 +432,21 @@ fn append_candidate_tet(
     }
     let volume_m3 = signed_volume_m3.abs();
     if volume_m3 < options.min_volume_m3 {
-        return;
+        return None;
     }
     let aspect_ratio = tet_edge_aspect_ratio(points);
     if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
-        return;
+        return None;
     }
-    tets.push(TetCandidate {
-        tet_id: tets.len() as u32,
+    Some(TetCandidate {
+        tet_id: 0,
         component_id: component.component_id,
         node_ids,
         source_surface_element_id: element.element_id,
         region_ids: element.region_ids.clone(),
         volume_m3,
         aspect_ratio,
-    });
+    })
 }
 
 fn add_dense_recovery_layer_points(
@@ -864,42 +876,13 @@ fn append_layered_surface_tets(
         let inner_ids = layer_node_ids[layer + 1];
         let outer_points = layer_points[layer];
         let inner_points = layer_points[layer + 1];
-        append_candidate_tet(
+        append_best_layered_frustum_tets(
             component,
             element,
-            [outer_ids[0], outer_ids[1], outer_ids[2], inner_ids[0]],
-            [
-                outer_points[0],
-                outer_points[1],
-                outer_points[2],
-                inner_points[0],
-            ],
-            options,
-            tets,
-        );
-        append_candidate_tet(
-            component,
-            element,
-            [outer_ids[1], inner_ids[1], outer_ids[2], inner_ids[0]],
-            [
-                outer_points[1],
-                inner_points[1],
-                outer_points[2],
-                inner_points[0],
-            ],
-            options,
-            tets,
-        );
-        append_candidate_tet(
-            component,
-            element,
-            [inner_ids[1], inner_ids[2], outer_ids[2], inner_ids[0]],
-            [
-                inner_points[1],
-                inner_points[2],
-                outer_points[2],
-                inner_points[0],
-            ],
+            outer_ids,
+            inner_ids,
+            outer_points,
+            inner_points,
             options,
             tets,
         );
@@ -924,6 +907,97 @@ fn append_layered_surface_tets(
         tets,
     );
     Ok(())
+}
+
+fn append_best_layered_frustum_tets(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    outer_ids: [u32; 3],
+    inner_ids: [u32; 3],
+    outer_points: [[f64; 3]; 3],
+    inner_points: [[f64; 3]; 3],
+    options: TetCandidateOptions,
+    tets: &mut Vec<TetCandidate>,
+) {
+    let mut best = None::<Vec<TetCandidate>>;
+    for diagonal_index in 0..3 {
+        let split = layered_frustum_split(
+            component,
+            element,
+            outer_ids,
+            inner_ids,
+            outer_points,
+            inner_points,
+            diagonal_index,
+            options,
+        );
+        let Some(split) = split else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|current| {
+            max_candidate_aspect_ratio(&split) < max_candidate_aspect_ratio(current)
+        }) {
+            best = Some(split);
+        }
+    }
+    if let Some(split) = best {
+        tets.extend(split);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layered_frustum_split(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    outer_ids: [u32; 3],
+    inner_ids: [u32; 3],
+    outer_points: [[f64; 3]; 3],
+    inner_points: [[f64; 3]; 3],
+    diagonal_index: usize,
+    options: TetCandidateOptions,
+) -> Option<Vec<TetCandidate>> {
+    let a = diagonal_index % 3;
+    let b = (diagonal_index + 1) % 3;
+    let c = (diagonal_index + 2) % 3;
+    let candidates = [
+        (
+            [outer_ids[a], outer_ids[b], outer_ids[c], inner_ids[a]],
+            [
+                outer_points[a],
+                outer_points[b],
+                outer_points[c],
+                inner_points[a],
+            ],
+        ),
+        (
+            [outer_ids[b], inner_ids[b], outer_ids[c], inner_ids[a]],
+            [
+                outer_points[b],
+                inner_points[b],
+                outer_points[c],
+                inner_points[a],
+            ],
+        ),
+        (
+            [inner_ids[b], inner_ids[c], outer_ids[c], inner_ids[a]],
+            [
+                inner_points[b],
+                inner_points[c],
+                outer_points[c],
+                inner_points[a],
+            ],
+        ),
+    ];
+    candidates
+        .into_iter()
+        .map(|(node_ids, points)| candidate_tet(component, element, node_ids, points, options))
+        .collect()
+}
+
+fn max_candidate_aspect_ratio(tets: &[TetCandidate]) -> f64 {
+    tets.iter()
+        .map(|tet| tet.aspect_ratio)
+        .fold(0.0_f64, f64::max)
 }
 
 fn component_insertion_tet_drafts(
@@ -2223,6 +2297,72 @@ mod tests {
                 [9.0, 0.0, 0.0]
             ]
         );
+    }
+
+    #[test]
+    fn layered_frustum_split_uses_lowest_aspect_decomposition() {
+        let component = VolumeCandidateComponent {
+            component_id: 7,
+            surface_element_ids: vec![3],
+            source_face_ids: vec![2],
+            node_ids: vec![0, 1, 2],
+            region_ids: vec!["region".to_string()],
+            bounds_min_m: [0.0, 0.0, 0.0],
+            bounds_max_m: [1.0, 1.0, 1.0],
+            surface_area_m2: 1.0,
+            signed_volume_m3: 1.0,
+            volume_m3: 1.0,
+        };
+        let element = SurfaceElement {
+            element_id: 3,
+            source_face_id: 2,
+            cad_face_id: None,
+            source_edge_ids: [0, 1, 2],
+            node_ids: [0, 1, 2],
+            parametric_node_uv: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            max_projection_error_m: 0.0,
+            region_ids: vec!["region".to_string()],
+            area_m2: 0.5,
+            unit_normal: [0.0, 0.0, 1.0],
+        };
+        let outer_ids = [0, 1, 2];
+        let inner_ids = [3, 4, 5];
+        let outer_points = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.2, 1.1, 0.0]];
+        let inner_points = [[0.1, 0.2, 0.3], [1.8, 0.1, 0.4], [0.4, 1.0, 0.7]];
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            ..TetCandidateOptions::default()
+        };
+        let expected = (0..3)
+            .filter_map(|diagonal_index| {
+                layered_frustum_split(
+                    &component,
+                    &element,
+                    outer_ids,
+                    inner_ids,
+                    outer_points,
+                    inner_points,
+                    diagonal_index,
+                    options,
+                )
+            })
+            .map(|split| max_candidate_aspect_ratio(&split))
+            .fold(f64::INFINITY, f64::min);
+
+        let mut tets = Vec::<TetCandidate>::new();
+        append_best_layered_frustum_tets(
+            &component,
+            &element,
+            outer_ids,
+            inner_ids,
+            outer_points,
+            inner_points,
+            options,
+            &mut tets,
+        );
+
+        assert_eq!(tets.len(), 3);
+        assert!((max_candidate_aspect_ratio(&tets) - expected).abs() < 1.0e-12);
     }
 
     #[test]
