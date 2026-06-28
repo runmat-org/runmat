@@ -24,6 +24,7 @@ use crate::{
 pub const MESH_BENCHMARK_SCHEMA_VERSION: &str = "mesh-benchmark/v1";
 pub const MESH_BENCHMARK_SUITE_SCHEMA_VERSION: &str = "mesh-benchmark-suite/v1";
 pub const MESH_BENCHMARK_COMPARISON_SCHEMA_VERSION: &str = "mesh-benchmark-comparison/v1";
+const GENERIC_BENCHMARK_MAX_ELEMENTS: usize = 50_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1111,16 +1112,19 @@ fn benchmark_case(
     max_volume_component_count: usize,
 ) -> MeshBenchmarkCase {
     let characteristic_size = expected_volume_m3.cbrt() / 2.0;
+    let options = VolumeMeshingOptions {
+        target_size: MeshTargetSize::LengthM(characteristic_size.max(0.02)),
+        max_elements: GENERIC_BENCHMARK_MAX_ELEMENTS,
+        ..VolumeMeshingOptions::default()
+    };
     MeshBenchmarkCase {
         benchmark_id: benchmark_id.to_string(),
         tier,
         geometry,
-        options: VolumeMeshingOptions {
-            target_size: MeshTargetSize::LengthM(characteristic_size.max(0.02)),
-            ..VolumeMeshingOptions::default()
-        },
+        options,
         sizing: None,
         validation: AnalysisMeshValidationOptions {
+            max_volume_element_count: Some(GENERIC_BENCHMARK_MAX_ELEMENTS),
             expected_volume_m3: Some(expected_volume_m3),
             expected_boundary_area_m2: Some(expected_boundary_area_m2),
             max_volume_component_count: Some(max_volume_component_count),
@@ -1585,6 +1589,11 @@ mod tests {
                 .validate()
                 .expect("generic benchmark geometry should validate");
             assert_eq!(case.options.backend, crate::MeshBackendKind::Auto);
+            assert_eq!(case.options.max_elements, GENERIC_BENCHMARK_MAX_ELEMENTS);
+            assert_eq!(
+                case.validation.max_volume_element_count,
+                Some(GENERIC_BENCHMARK_MAX_ELEMENTS)
+            );
             assert!(case.validation.expected_volume_m3.is_some());
             assert!(case.validation.expected_boundary_area_m2.is_some());
             assert_eq!(case.validation.min_boundary_face_recovery_ratio, 1.0);
