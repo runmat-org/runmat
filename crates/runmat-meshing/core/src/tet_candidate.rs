@@ -929,7 +929,7 @@ fn append_best_layered_frustum_tets(
     tets: &mut Vec<TetCandidate>,
 ) {
     let mut best = None::<LayeredFrustumSplit>;
-    for diagonal_index in 0..3 {
+    for split_index in 0..6 {
         let split = layered_frustum_split(
             component,
             element,
@@ -937,7 +937,7 @@ fn append_best_layered_frustum_tets(
             inner_ids,
             outer_points,
             inner_points,
-            diagonal_index,
+            split_index,
             options,
         );
         let Some(split) = split else {
@@ -978,41 +978,74 @@ fn layered_frustum_split(
     inner_ids: [u32; 3],
     outer_points: [[f64; 3]; 3],
     inner_points: [[f64; 3]; 3],
-    diagonal_index: usize,
+    split_index: usize,
     options: TetCandidateOptions,
 ) -> Option<LayeredFrustumSplit> {
-    let a = diagonal_index % 3;
+    let diagonal_index = split_index % 3;
+    let a = diagonal_index;
     let b = (diagonal_index + 1) % 3;
     let c = (diagonal_index + 2) % 3;
-    let candidates = [
-        (
-            [outer_ids[a], outer_ids[b], outer_ids[c], inner_ids[a]],
-            [
-                outer_points[a],
-                outer_points[b],
-                outer_points[c],
-                inner_points[a],
-            ],
-        ),
-        (
-            [outer_ids[b], inner_ids[b], outer_ids[c], inner_ids[a]],
-            [
-                outer_points[b],
-                inner_points[b],
-                outer_points[c],
-                inner_points[a],
-            ],
-        ),
-        (
-            [inner_ids[b], inner_ids[c], outer_ids[c], inner_ids[a]],
-            [
-                inner_points[b],
-                inner_points[c],
-                outer_points[c],
-                inner_points[a],
-            ],
-        ),
-    ];
+    let candidates = if split_index < 3 {
+        [
+            (
+                [outer_ids[a], outer_ids[b], outer_ids[c], inner_ids[a]],
+                [
+                    outer_points[a],
+                    outer_points[b],
+                    outer_points[c],
+                    inner_points[a],
+                ],
+            ),
+            (
+                [outer_ids[b], inner_ids[b], outer_ids[c], inner_ids[a]],
+                [
+                    outer_points[b],
+                    inner_points[b],
+                    outer_points[c],
+                    inner_points[a],
+                ],
+            ),
+            (
+                [inner_ids[b], inner_ids[c], outer_ids[c], inner_ids[a]],
+                [
+                    inner_points[b],
+                    inner_points[c],
+                    outer_points[c],
+                    inner_points[a],
+                ],
+            ),
+        ]
+    } else {
+        [
+            (
+                [outer_ids[a], outer_ids[b], outer_ids[c], inner_ids[c]],
+                [
+                    outer_points[a],
+                    outer_points[b],
+                    outer_points[c],
+                    inner_points[c],
+                ],
+            ),
+            (
+                [outer_ids[a], outer_ids[b], inner_ids[b], inner_ids[c]],
+                [
+                    outer_points[a],
+                    outer_points[b],
+                    inner_points[b],
+                    inner_points[c],
+                ],
+            ),
+            (
+                [outer_ids[a], inner_ids[a], inner_ids[b], inner_ids[c]],
+                [
+                    outer_points[a],
+                    inner_points[a],
+                    inner_points[b],
+                    inner_points[c],
+                ],
+            ),
+        ]
+    };
     let tets = candidates
         .iter()
         .map(|(node_ids, points)| candidate_tet(component, element, *node_ids, *points, options))
@@ -2394,8 +2427,8 @@ mod tests {
             max_aspect_ratio: 1.0e6,
             ..TetCandidateOptions::default()
         };
-        let expected = (0..3)
-            .filter_map(|diagonal_index| {
+        let expected = (0..6)
+            .filter_map(|split_index| {
                 layered_frustum_split(
                     &component,
                     &element,
@@ -2403,7 +2436,7 @@ mod tests {
                     inner_ids,
                     outer_points,
                     inner_points,
-                    diagonal_index,
+                    split_index,
                     options,
                 )
             })
