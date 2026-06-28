@@ -14,11 +14,33 @@ pub struct MeshEvidenceArtifact {
     pub schema_version: String,
     pub mesh_id: String,
     pub backend: MeshBackendSummary,
+    #[serde(default)]
+    pub cad: MeshCadEvidence,
     pub topology: MeshTopologyEvidence,
     pub sizing: MeshSizingEvidence,
     pub quality: MeshQualityEvidence,
     pub regions: MeshRegionEvidence,
     pub validation: MeshValidationEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MeshCadEvidence {
+    pub topology_source: String,
+    pub evaluation_source: String,
+    pub vertex_count: usize,
+    pub edge_count: usize,
+    pub face_count: usize,
+    pub shell_count: usize,
+    pub volume_count: usize,
+    pub imported_face_count: usize,
+    pub evaluator_face_count: usize,
+    pub exact_query_face_count: usize,
+    pub evaluator_sample_count: usize,
+    pub projection_query_count: usize,
+    pub max_projection_error_m: f64,
+    pub max_normal_deviation: f64,
+    pub surface_cad_face_count: usize,
+    pub surface_max_projection_error_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,11 +138,33 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         schema_version: MESH_EVIDENCE_SCHEMA_VERSION.to_string(),
         mesh_id: mesh.mesh_id.clone(),
         backend: mesh.backend.clone(),
+        cad: cad_evidence(mesh),
         topology: topology_evidence(mesh),
         sizing: sizing_evidence(mesh),
         quality: quality_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
+    }
+}
+
+fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
+    MeshCadEvidence {
+        topology_source: mesh.backend.cad_topology_source.clone(),
+        evaluation_source: mesh.backend.cad_evaluation_source.clone(),
+        vertex_count: mesh.backend.cad_vertex_count,
+        edge_count: mesh.backend.cad_edge_count,
+        face_count: mesh.backend.cad_face_count,
+        shell_count: mesh.backend.cad_shell_count,
+        volume_count: mesh.backend.cad_volume_count,
+        imported_face_count: mesh.backend.cad_imported_face_count,
+        evaluator_face_count: mesh.backend.cad_evaluation_evaluator_face_count,
+        exact_query_face_count: mesh.backend.cad_evaluation_exact_query_face_count,
+        evaluator_sample_count: mesh.backend.cad_evaluation_sample_count,
+        projection_query_count: mesh.backend.cad_projection_query_count,
+        max_projection_error_m: mesh.backend.cad_max_projection_error_m,
+        max_normal_deviation: mesh.backend.cad_max_normal_deviation,
+        surface_cad_face_count: mesh.backend.surface_cad_face_count,
+        surface_max_projection_error_m: mesh.backend.surface_max_cad_projection_error_m,
     }
 }
 
@@ -464,6 +508,22 @@ mod tests {
             },
             backend: MeshBackendSummary {
                 backend: "production".to_string(),
+                cad_topology_source: "semantic_cad".to_string(),
+                cad_evaluation_source: "imported_evaluator_samples".to_string(),
+                cad_vertex_count: 4,
+                cad_edge_count: 6,
+                cad_face_count: 4,
+                cad_shell_count: 1,
+                cad_volume_count: 1,
+                cad_imported_face_count: 3,
+                cad_evaluation_evaluator_face_count: 2,
+                cad_evaluation_exact_query_face_count: 1,
+                cad_evaluation_sample_count: 8,
+                cad_projection_query_count: 12,
+                cad_max_projection_error_m: 2.0e-6,
+                cad_max_normal_deviation: 1.0e-5,
+                surface_cad_face_count: 3,
+                surface_max_cad_projection_error_m: 3.0e-6,
                 ..MeshBackendSummary::default()
             },
             adaptive_iterations: Vec::new(),
@@ -479,6 +539,13 @@ mod tests {
             build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
 
         assert_eq!(evidence.schema_version, MESH_EVIDENCE_SCHEMA_VERSION);
+        assert_eq!(evidence.cad.topology_source, "semantic_cad");
+        assert_eq!(evidence.cad.evaluation_source, "imported_evaluator_samples");
+        assert_eq!(evidence.cad.imported_face_count, 3);
+        assert_eq!(evidence.cad.exact_query_face_count, 1);
+        assert_eq!(evidence.cad.evaluator_sample_count, 8);
+        assert_eq!(evidence.cad.max_projection_error_m, 2.0e-6);
+        assert_eq!(evidence.cad.surface_max_projection_error_m, 3.0e-6);
         assert_eq!(evidence.topology.node_count, 4);
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(
@@ -512,6 +579,10 @@ mod tests {
 
         let encoded = serde_json::to_value(&evidence).expect("serialize evidence");
         assert!(encoded.get("sizing").is_some());
+        assert_eq!(
+            encoded["cad"]["evaluation_source"],
+            serde_json::Value::String("imported_evaluator_samples".to_string())
+        );
         assert!(
             encoded
                 .to_string()
