@@ -1064,6 +1064,14 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_quality_seed_star_relocation_count,
+        tet_exact_quality_unrepaired_total_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_unrepaired_total_count,
+        tet_exact_quality_unrepaired_general_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_unrepaired_general_cavity_count,
         tet_exact_quality_unrepaired_boundary_adjacent_count: preparation
             .tet_candidates
             .recovery

@@ -215,6 +215,10 @@ pub struct MeshTetRecoveryEvidence {
     #[serde(default)]
     pub exact_quality_seed_star_relocation_count: usize,
     #[serde(default)]
+    pub exact_quality_unrepaired_total_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_general_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_unrepaired_boundary_adjacent_count: usize,
     #[serde(default)]
     pub exact_quality_unrepaired_interior_seed_count: usize,
@@ -620,6 +624,10 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         exact_quality_seed_star_relocation_count: mesh
             .backend
             .tet_exact_quality_seed_star_relocation_count,
+        exact_quality_unrepaired_total_count: mesh.backend.tet_exact_quality_unrepaired_total_count,
+        exact_quality_unrepaired_general_cavity_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_general_cavity_count,
         exact_quality_unrepaired_boundary_adjacent_count: mesh
             .backend
             .tet_exact_quality_unrepaired_boundary_adjacent_count,
@@ -1037,6 +1045,8 @@ mod tests {
                 tet_exact_quality_split_cavity_count: 3,
                 tet_exact_quality_seed_star_collapse_count: 4,
                 tet_exact_quality_seed_star_relocation_count: 5,
+                tet_exact_quality_unrepaired_total_count: 9,
+                tet_exact_quality_unrepaired_general_cavity_count: 1,
                 tet_exact_quality_unrepaired_boundary_adjacent_count: 6,
                 tet_exact_quality_unrepaired_interior_seed_count: 7,
                 tet_exact_quality_unrepaired_edge_star_count: 8,
@@ -1214,6 +1224,16 @@ mod tests {
                 .tet_recovery
                 .exact_quality_seed_star_relocation_count,
             5
+        );
+        assert_eq!(
+            evidence.tet_recovery.exact_quality_unrepaired_total_count,
+            9
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_unrepaired_general_cavity_count,
+            1
         );
         assert_eq!(
             evidence

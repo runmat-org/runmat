@@ -149,6 +149,10 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_seed_star_relocation_count: usize,
     #[serde(default)]
+    pub exact_quality_unrepaired_total_count: usize,
+    #[serde(default)]
+    pub exact_quality_unrepaired_general_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_unrepaired_boundary_adjacent_count: usize,
     #[serde(default)]
     pub exact_quality_unrepaired_interior_seed_count: usize,
@@ -446,6 +450,8 @@ pub fn form_tet_candidates(
             exact_quality_split_cavity_count: repair.split_cavity_count,
             exact_quality_seed_star_collapse_count: repair.seed_star_collapse_count,
             exact_quality_seed_star_relocation_count: repair.seed_star_relocation_count,
+            exact_quality_unrepaired_total_count: unrepaired_quality.total_count,
+            exact_quality_unrepaired_general_cavity_count: unrepaired_quality.general_cavity_count,
             exact_quality_unrepaired_boundary_adjacent_count: unrepaired_quality
                 .boundary_adjacent_count,
             exact_quality_unrepaired_interior_seed_count: unrepaired_quality.interior_seed_count,
@@ -2451,6 +2457,8 @@ fn repair_exact_quality_tets(
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct RemainingExactQualityViolationCounts {
+    total_count: usize,
+    general_cavity_count: usize,
     boundary_adjacent_count: usize,
     interior_seed_count: usize,
     edge_star_count: usize,
@@ -2474,12 +2482,15 @@ fn remaining_exact_quality_violation_counts(
         .iter()
         .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
     {
+        counts.total_count += 1;
+        let mut classified = false;
         if tet_node_faces(tet.node_ids)
             .map(sorted_node_face)
             .into_iter()
             .any(|face| face_adjacency.get(&face).map_or(0, Vec::len) == 1)
         {
             counts.boundary_adjacent_count += 1;
+            classified = true;
         }
         if tet
             .node_ids
@@ -2487,12 +2498,17 @@ fn remaining_exact_quality_violation_counts(
             .any(|node_id| interior_node_ids.contains(&node_id))
         {
             counts.interior_seed_count += 1;
+            classified = true;
         }
         if tet_node_edges(tet.node_ids)
             .into_iter()
             .any(|edge| edge_adjacency.get(&edge).map_or(0, Vec::len) >= 3)
         {
             counts.edge_star_count += 1;
+            classified = true;
+        }
+        if !classified {
+            counts.general_cavity_count += 1;
         }
     }
     counts
@@ -5468,6 +5484,8 @@ mod tests {
 
         let counts = remaining_exact_quality_violation_counts(&nodes, &tets, options);
 
+        assert_eq!(counts.total_count, 4);
+        assert_eq!(counts.general_cavity_count, 0);
         assert_eq!(counts.boundary_adjacent_count, 4);
         assert_eq!(counts.interior_seed_count, 4);
         assert_eq!(counts.edge_star_count, 4);

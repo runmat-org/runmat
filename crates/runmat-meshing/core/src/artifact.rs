@@ -190,6 +190,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_exact_quality_seed_star_relocation_count: usize,
     #[serde(default)]
+    pub tet_exact_quality_unrepaired_total_count: usize,
+    #[serde(default)]
+    pub tet_exact_quality_unrepaired_general_cavity_count: usize,
+    #[serde(default)]
     pub tet_exact_quality_unrepaired_boundary_adjacent_count: usize,
     #[serde(default)]
     pub tet_exact_quality_unrepaired_interior_seed_count: usize,
@@ -271,6 +275,8 @@ impl Default for MeshBackendSummary {
             tet_exact_quality_split_cavity_count: 0,
             tet_exact_quality_seed_star_collapse_count: 0,
             tet_exact_quality_seed_star_relocation_count: 0,
+            tet_exact_quality_unrepaired_total_count: 0,
+            tet_exact_quality_unrepaired_general_cavity_count: 0,
             tet_exact_quality_unrepaired_boundary_adjacent_count: 0,
             tet_exact_quality_unrepaired_interior_seed_count: 0,
             tet_exact_quality_unrepaired_edge_star_count: 0,
