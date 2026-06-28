@@ -13,11 +13,12 @@ use crate::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
         MeshTetRecoveryEvidence,
     },
-    generate_analysis_mesh,
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing,
     predicate::{tet_volume, triangle_area},
+    sizing::{MeshSizingField, SizingSample},
     topology::VolumeElementKind,
     validation::{volume_component_count, AnalysisMeshValidationOptions},
-    MeshTargetSize, VolumeMeshingOptions,
+    MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions,
 };
 
 pub const MESH_BENCHMARK_SCHEMA_VERSION: &str = "mesh-benchmark/v1";
@@ -62,6 +63,7 @@ pub struct MeshBenchmarkCase {
     pub tier: MeshBenchmarkTier,
     pub geometry: GeometryAsset,
     pub options: VolumeMeshingOptions,
+    pub sizing: Option<MeshSizingField>,
     pub validation: AnalysisMeshValidationOptions,
 }
 
@@ -348,6 +350,7 @@ pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {
         through_hole_block_benchmark_case(),
         faceted_cylinder_benchmark_case(),
         disconnected_boxes_benchmark_case(),
+        adaptive_refinement_benchmark_case(),
     ]
 }
 
@@ -360,9 +363,7 @@ pub fn run_mesh_benchmark_cases(
     suite_id: impl Into<String>,
     cases: Vec<MeshBenchmarkCase>,
 ) -> Result<MeshBenchmarkSuiteReport, MeshBenchmarkRunError> {
-    run_mesh_benchmark_cases_with(suite_id, cases, |case| {
-        generate_analysis_mesh(&case.geometry, case.options.clone()).map_err(|err| err.to_string())
-    })
+    run_mesh_benchmark_cases_with(suite_id, cases, generate_mesh_for_benchmark_case)
 }
 
 pub fn run_mesh_benchmark_cases_with(
@@ -382,6 +383,17 @@ pub fn run_mesh_benchmark_cases_with(
         reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
     }
     Ok(build_mesh_benchmark_suite_report(suite_id, reports))
+}
+
+fn generate_mesh_for_benchmark_case(
+    case: &MeshBenchmarkCase,
+) -> Result<AnalysisMeshArtifact, String> {
+    if let Some(sizing) = case.sizing.as_ref() {
+        generate_analysis_mesh_with_sizing(&case.geometry, case.options.clone(), sizing)
+            .map_err(|err| err.to_string())
+    } else {
+        generate_analysis_mesh(&case.geometry, case.options.clone()).map_err(|err| err.to_string())
+    }
 }
 
 pub fn compare_mesh_benchmark_suites(
@@ -1003,6 +1015,34 @@ fn faceted_cylinder_benchmark_case() -> MeshBenchmarkCase {
     )
 }
 
+fn adaptive_refinement_benchmark_case() -> MeshBenchmarkCase {
+    let mut case = benchmark_case(
+        "adaptive_refinement_marker",
+        MeshBenchmarkTier::AdaptiveRefinement,
+        box_geometry(
+            "adaptive_refinement_marker",
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+        ),
+        1.0,
+        6.0,
+        1,
+    );
+    case.options.target_size = MeshTargetSize::LengthM(2.0);
+    case.options.refinement.focus.curvature = false;
+    case.options.refinement.focus.small_features = false;
+    case.options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+    case.sizing = Some(MeshSizingField {
+        samples: vec![SizingSample {
+            position_m: [0.25, 0.25, 0.25],
+            target_size_m: 0.50,
+            reason: Some("structural.stress_gradient".to_string()),
+        }],
+        ..MeshSizingField::default()
+    });
+    case
+}
+
 fn benchmark_case(
     benchmark_id: &str,
     tier: MeshBenchmarkTier,
@@ -1020,6 +1060,7 @@ fn benchmark_case(
             target_size: MeshTargetSize::LengthM(characteristic_size.max(0.02)),
             ..VolumeMeshingOptions::default()
         },
+        sizing: None,
         validation: AnalysisMeshValidationOptions {
             expected_volume_m3: Some(expected_volume_m3),
             expected_boundary_area_m2: Some(expected_boundary_area_m2),
@@ -1387,7 +1428,7 @@ mod tests {
     fn generic_benchmark_cases_are_valid_closed_geometry() {
         let cases = generic_mesh_benchmark_cases();
 
-        assert_eq!(cases.len(), 5);
+        assert_eq!(cases.len(), 6);
         assert_eq!(cases[0].benchmark_id, "solid_cube");
         assert_eq!(cases[1].tier, MeshBenchmarkTier::ThinFeature);
         assert_eq!(cases[2].benchmark_id, "through_hole_block");
@@ -1395,6 +1436,17 @@ mod tests {
         assert_eq!(cases[3].benchmark_id, "faceted_cylinder");
         assert_eq!(cases[3].tier, MeshBenchmarkTier::CurvedSurface);
         assert_eq!(cases[4].tier, MeshBenchmarkTier::MultiBody);
+        assert_eq!(cases[5].benchmark_id, "adaptive_refinement_marker");
+        assert_eq!(cases[5].tier, MeshBenchmarkTier::AdaptiveRefinement);
+        let adaptive_sizing = cases[5]
+            .sizing
+            .as_ref()
+            .expect("adaptive benchmark should carry sizing markers");
+        assert_eq!(adaptive_sizing.samples.len(), 1);
+        assert_eq!(
+            adaptive_sizing.samples[0].reason.as_deref(),
+            Some("structural.stress_gradient")
+        );
         for case in cases {
             case.geometry
                 .validate()
