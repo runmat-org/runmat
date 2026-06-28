@@ -338,16 +338,34 @@ fn evaluation_source(
 }
 
 fn exact_backend_sample(face: &CadFace) -> Option<&CadFaceEvaluationSample> {
-    face.evaluator_samples.iter().find(|sample| {
-        sample.source == CadFaceEvaluationSampleSource::BackendQuery
-            && finite_point(sample.point_m)
-            && sample
-                .unit_normal
-                .is_some_and(|normal| finite_point(normal) && norm(normal) > 0.0)
-            && sample
-                .projection_error_m
-                .is_none_or(|error| error.is_finite() && error >= 0.0)
-    })
+    face.evaluator_samples
+        .iter()
+        .filter(|sample| exact_backend_sample_is_valid(sample))
+        .min_by(|left, right| compare_exact_backend_samples(left, right))
+}
+
+fn exact_backend_sample_is_valid(sample: &CadFaceEvaluationSample) -> bool {
+    sample.source == CadFaceEvaluationSampleSource::BackendQuery
+        && finite_point(sample.point_m)
+        && sample
+            .unit_normal
+            .is_some_and(|normal| finite_point(normal) && norm(normal) > 0.0)
+        && sample
+            .projection_error_m
+            .is_none_or(|error| error.is_finite() && error >= 0.0)
+}
+
+fn compare_exact_backend_samples(
+    left: &CadFaceEvaluationSample,
+    right: &CadFaceEvaluationSample,
+) -> std::cmp::Ordering {
+    sample_projection_error(left)
+        .total_cmp(&sample_projection_error(right))
+        .then_with(|| compare_points_lexicographically(left.point_m, right.point_m))
+}
+
+fn sample_projection_error(sample: &CadFaceEvaluationSample) -> f64 {
+    sample.projection_error_m.unwrap_or(0.0)
 }
 
 fn exact_backend_sample_point(sample: &CadFaceEvaluationSample) -> Point3 {
@@ -478,6 +496,13 @@ fn max_optional_curvature(values: impl Iterator<Item = f64>) -> Option<f64> {
 
 fn finite_point(point: Point3) -> bool {
     point.iter().all(|coordinate| coordinate.is_finite())
+}
+
+fn compare_points_lexicographically(left: Point3, right: Point3) -> std::cmp::Ordering {
+    left[0]
+        .total_cmp(&right[0])
+        .then_with(|| left[1].total_cmp(&right[1]))
+        .then_with(|| left[2].total_cmp(&right[2]))
 }
 
 fn topology_vertex(
@@ -614,6 +639,43 @@ mod tests {
             Some([0.5, 0.5, 1.0])
         );
         assert_eq!(frame.evaluator_max_projection_error_m, 0.02);
+    }
+
+    #[test]
+    fn exact_backend_query_prefers_lowest_projection_error_sample() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.7, 0.5, 1.01],
+                uv: Some([0.7, 0.5]),
+                projected_point_m: Some([0.7, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.01),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.3, 0.5, 1.001],
+                uv: Some([0.3, 0.5]),
+                projected_point_m: Some([0.3, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.001),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+
+        assert_eq!(frame.origin_m, [0.3, 0.5, 1.0]);
+        assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
+        assert_eq!(frame.evaluator_max_projection_error_m, 0.01);
+        assert_eq!(frame.evaluator_samples.len(), 2);
     }
 
     #[test]
