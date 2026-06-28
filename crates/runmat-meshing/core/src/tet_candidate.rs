@@ -151,6 +151,10 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub untangling_pass_count: usize,
     #[serde(default)]
+    pub untangling_initial_near_singular_count: usize,
+    #[serde(default)]
+    pub untangling_final_near_singular_count: usize,
+    #[serde(default)]
     pub untangling_relocated_seed_count: usize,
     #[serde(default)]
     pub untangling_reconnected_edge_star_count: usize,
@@ -493,6 +497,8 @@ pub fn form_tet_candidates(
             optimization_final_min_exact_scaled_jacobian: optimization_quality
                 .final_min_exact_scaled_jacobian(),
             untangling_pass_count: untangling.pass_count,
+            untangling_initial_near_singular_count: untangling.initial_near_singular_count,
+            untangling_final_near_singular_count: untangling.final_near_singular_count,
             untangling_relocated_seed_count: untangling.relocated_seed_count,
             untangling_reconnected_edge_star_count: untangling.reconnected_edge_star_count,
             exact_quality_repair_pass_count: repair.pass_count,
@@ -3242,6 +3248,8 @@ fn replace_interior_seed_point(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct UntanglingSummary {
     pass_count: usize,
+    initial_near_singular_count: usize,
+    final_near_singular_count: usize,
     relocated_seed_count: usize,
     reconnected_edge_star_count: usize,
 }
@@ -3257,6 +3265,7 @@ fn untangle_near_singular_tets(
     if threshold <= 0.0 || !threshold.is_finite() {
         return Ok(summary);
     }
+    summary.initial_near_singular_count = count_tets_below_exact_quality(tets.iter(), threshold);
     let pass_limit = options.max_refinement_passes.max(1);
     for _ in 0..pass_limit {
         if !tets.iter().any(|tet| tet.exact_scaled_jacobian < threshold) {
@@ -3326,6 +3335,7 @@ fn untangle_near_singular_tets(
             break;
         }
     }
+    summary.final_near_singular_count = count_tets_below_exact_quality(tets.iter(), threshold);
     Ok(summary)
 }
 
@@ -7025,7 +7035,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let threshold = untangling_exact_quality_threshold(options);
-        assert!(count_tets_below_exact_quality(tets.iter(), threshold) > 0);
+        let initial_near_singular_count = count_tets_below_exact_quality(tets.iter(), threshold);
+        assert!(initial_near_singular_count > 0);
         let mut interior_seed_points = Vec::new();
 
         let summary =
@@ -7033,6 +7044,11 @@ mod tests {
                 .expect("untangling should evaluate");
 
         assert_eq!(summary.pass_count, 1);
+        assert_eq!(
+            summary.initial_near_singular_count,
+            initial_near_singular_count
+        );
+        assert_eq!(summary.final_near_singular_count, 0);
         assert_eq!(summary.relocated_seed_count, 0);
         assert_eq!(summary.reconnected_edge_star_count, 1);
         assert_eq!(count_tets_below_exact_quality(tets.iter(), threshold), 0);
@@ -7439,8 +7455,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let threshold = untangling_exact_quality_threshold(options);
+        let initial_near_singular_count = count_tets_below_exact_quality(tets.iter(), threshold);
         assert!(
-            count_tets_below_exact_quality(tets.iter(), threshold) > 0,
+            initial_near_singular_count > 0,
             "fixture should contain a near-singular local star"
         );
         let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
@@ -7463,6 +7480,11 @@ mod tests {
                 .expect("untangling should evaluate");
 
         assert_eq!(summary.pass_count, 1);
+        assert_eq!(
+            summary.initial_near_singular_count,
+            initial_near_singular_count
+        );
+        assert_eq!(summary.final_near_singular_count, 0);
         assert_eq!(summary.relocated_seed_count, 1);
         assert_eq!(count_tets_below_exact_quality(tets.iter(), threshold), 0);
         assert!(

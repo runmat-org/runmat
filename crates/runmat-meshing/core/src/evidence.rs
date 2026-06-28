@@ -227,6 +227,10 @@ pub struct MeshTetRecoveryEvidence {
     #[serde(default)]
     pub untangling_pass_count: usize,
     #[serde(default)]
+    pub untangling_initial_near_singular_count: usize,
+    #[serde(default)]
+    pub untangling_final_near_singular_count: usize,
+    #[serde(default)]
     pub untangling_relocated_seed_count: usize,
     #[serde(default)]
     pub untangling_reconnected_edge_star_count: usize,
@@ -676,6 +680,10 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
             .backend
             .tet_optimization_final_min_exact_scaled_jacobian,
         untangling_pass_count: mesh.backend.tet_untangling_pass_count,
+        untangling_initial_near_singular_count: mesh
+            .backend
+            .tet_untangling_initial_near_singular_count,
+        untangling_final_near_singular_count: mesh.backend.tet_untangling_final_near_singular_count,
         untangling_relocated_seed_count: mesh.backend.tet_untangling_relocated_seed_count,
         untangling_reconnected_edge_star_count: mesh
             .backend
@@ -1210,6 +1218,8 @@ mod tests {
                 tet_optimization_initial_min_exact_scaled_jacobian: 0.32,
                 tet_optimization_final_min_exact_scaled_jacobian: 0.40,
                 tet_untangling_pass_count: 2,
+                tet_untangling_initial_near_singular_count: 6,
+                tet_untangling_final_near_singular_count: 1,
                 tet_untangling_relocated_seed_count: 3,
                 tet_untangling_reconnected_edge_star_count: 4,
                 tet_exact_quality_repair_pass_count: 1,
@@ -1424,6 +1434,14 @@ mod tests {
             0.40
         );
         assert_eq!(evidence.tet_recovery.untangling_pass_count, 2);
+        assert_eq!(
+            evidence.tet_recovery.untangling_initial_near_singular_count,
+            6
+        );
+        assert_eq!(
+            evidence.tet_recovery.untangling_final_near_singular_count,
+            1
+        );
         assert_eq!(evidence.tet_recovery.untangling_relocated_seed_count, 3);
         assert_eq!(
             evidence.tet_recovery.untangling_reconnected_edge_star_count,

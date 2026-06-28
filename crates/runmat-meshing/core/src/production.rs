@@ -1122,6 +1122,14 @@ fn production_backend_summary(
             .recovery
             .optimization_final_min_exact_scaled_jacobian,
         tet_untangling_pass_count: preparation.tet_candidates.recovery.untangling_pass_count,
+        tet_untangling_initial_near_singular_count: preparation
+            .tet_candidates
+            .recovery
+            .untangling_initial_near_singular_count,
+        tet_untangling_final_near_singular_count: preparation
+            .tet_candidates
+            .recovery
+            .untangling_final_near_singular_count,
         tet_untangling_relocated_seed_count: preparation
             .tet_candidates
             .recovery
