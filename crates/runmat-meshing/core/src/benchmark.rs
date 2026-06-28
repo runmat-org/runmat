@@ -30,6 +30,8 @@ pub enum MeshBenchmarkTier {
     Curve1d,
     Surface2d,
     Solid3d,
+    HoleFeature,
+    CurvedSurface,
     ThinFeature,
     MultiBody,
     SizingField,
@@ -310,6 +312,8 @@ pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {
             2.4,
             1,
         ),
+        through_hole_block_benchmark_case(),
+        faceted_cylinder_benchmark_case(),
         disconnected_boxes_benchmark_case(),
     ]
 }
@@ -766,6 +770,58 @@ fn disconnected_boxes_benchmark_case() -> MeshBenchmarkCase {
     )
 }
 
+fn through_hole_block_benchmark_case() -> MeshBenchmarkCase {
+    let outer = [1.0, 1.0, 1.0];
+    let hole_min = [0.35, 0.35];
+    let hole_max = [0.65, 0.65];
+    let (vertices, triangles) = through_hole_block_surface(outer, hole_min, hole_max);
+    let hole_width = hole_max[0] - hole_min[0];
+    let hole_depth = hole_max[1] - hole_min[1];
+    let expected_volume_m3 = outer[0] * outer[1] * outer[2] - hole_width * hole_depth * outer[2];
+    let expected_boundary_area_m2 = 2.0 * (outer[0] * outer[1] - hole_width * hole_depth)
+        + 2.0 * (outer[0] + outer[1]) * outer[2]
+        + 2.0 * (hole_width + hole_depth) * outer[2];
+    benchmark_case(
+        "through_hole_block",
+        MeshBenchmarkTier::HoleFeature,
+        geometry_from_surface(
+            "through_hole_block",
+            "generic_through_hole_block_surface",
+            vertices,
+            triangles,
+        ),
+        expected_volume_m3,
+        expected_boundary_area_m2,
+        1,
+    )
+}
+
+fn faceted_cylinder_benchmark_case() -> MeshBenchmarkCase {
+    let segment_count = 16_usize;
+    let radius_m = 0.5_f64;
+    let height_m = 1.0_f64;
+    let (vertices, triangles) = faceted_cylinder_surface(segment_count, radius_m, height_m);
+    let polygon_area = 0.5
+        * segment_count as f64
+        * radius_m.powi(2)
+        * (std::f64::consts::TAU / segment_count as f64).sin();
+    let polygon_perimeter =
+        2.0 * segment_count as f64 * radius_m * (std::f64::consts::PI / segment_count as f64).sin();
+    benchmark_case(
+        "faceted_cylinder",
+        MeshBenchmarkTier::CurvedSurface,
+        geometry_from_surface(
+            "faceted_cylinder",
+            "generic_faceted_cylinder_surface",
+            vertices,
+            triangles,
+        ),
+        polygon_area * height_m,
+        2.0 * polygon_area + polygon_perimeter * height_m,
+        1,
+    )
+}
+
 fn benchmark_case(
     benchmark_id: &str,
     tier: MeshBenchmarkTier,
@@ -914,6 +970,92 @@ fn box_surface(
     (vertices, triangles)
 }
 
+fn through_hole_block_surface(
+    outer: [f64; 3],
+    hole_min: [f64; 2],
+    hole_max: [f64; 2],
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let [sx, sy, sz] = outer;
+    let [hx0, hy0] = hole_min;
+    let [hx1, hy1] = hole_max;
+    let vertices = vec![
+        [0.0, 0.0, 0.0],
+        [sx, 0.0, 0.0],
+        [sx, sy, 0.0],
+        [0.0, sy, 0.0],
+        [hx0, hy0, 0.0],
+        [hx1, hy0, 0.0],
+        [hx1, hy1, 0.0],
+        [hx0, hy1, 0.0],
+        [0.0, 0.0, sz],
+        [sx, 0.0, sz],
+        [sx, sy, sz],
+        [0.0, sy, sz],
+        [hx0, hy0, sz],
+        [hx1, hy0, sz],
+        [hx1, hy1, sz],
+        [hx0, hy1, sz],
+    ];
+    let mut triangles = Vec::<[u32; 3]>::new();
+    for quad in [
+        [0, 1, 5, 4],
+        [1, 2, 6, 5],
+        [2, 3, 7, 6],
+        [3, 0, 4, 7],
+        [8, 12, 13, 9],
+        [9, 13, 14, 10],
+        [10, 14, 15, 11],
+        [11, 15, 12, 8],
+        [0, 8, 9, 1],
+        [1, 9, 10, 2],
+        [2, 10, 11, 3],
+        [3, 11, 8, 0],
+        [4, 5, 13, 12],
+        [5, 6, 14, 13],
+        [6, 7, 15, 14],
+        [7, 4, 12, 15],
+    ] {
+        push_quad(&mut triangles, quad);
+    }
+    (vertices, triangles)
+}
+
+fn faceted_cylinder_surface(
+    segment_count: usize,
+    radius_m: f64,
+    height_m: f64,
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let mut vertices = Vec::<[f64; 3]>::with_capacity(segment_count * 2 + 2);
+    for z in [0.0, height_m] {
+        for index in 0..segment_count {
+            let theta = std::f64::consts::TAU * index as f64 / segment_count as f64;
+            vertices.push([radius_m * theta.cos(), radius_m * theta.sin(), z]);
+        }
+    }
+    let bottom_center = vertices.len() as u32;
+    vertices.push([0.0, 0.0, 0.0]);
+    let top_center = vertices.len() as u32;
+    vertices.push([0.0, 0.0, height_m]);
+
+    let mut triangles = Vec::<[u32; 3]>::with_capacity(segment_count * 4);
+    let top_offset = segment_count as u32;
+    for index in 0..segment_count as u32 {
+        let next = (index + 1) % segment_count as u32;
+        push_quad(
+            &mut triangles,
+            [index, next, top_offset + next, top_offset + index],
+        );
+        triangles.push([bottom_center, next, index]);
+        triangles.push([top_center, top_offset + index, top_offset + next]);
+    }
+    (vertices, triangles)
+}
+
+fn push_quad(triangles: &mut Vec<[u32; 3]>, quad: [u32; 4]) {
+    triangles.push([quad[0], quad[1], quad[2]]);
+    triangles.push([quad[0], quad[2], quad[3]]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1042,10 +1184,14 @@ mod tests {
     fn generic_benchmark_cases_are_valid_closed_geometry() {
         let cases = generic_mesh_benchmark_cases();
 
-        assert_eq!(cases.len(), 3);
+        assert_eq!(cases.len(), 5);
         assert_eq!(cases[0].benchmark_id, "solid_cube");
         assert_eq!(cases[1].tier, MeshBenchmarkTier::ThinFeature);
-        assert_eq!(cases[2].tier, MeshBenchmarkTier::MultiBody);
+        assert_eq!(cases[2].benchmark_id, "through_hole_block");
+        assert_eq!(cases[2].tier, MeshBenchmarkTier::HoleFeature);
+        assert_eq!(cases[3].benchmark_id, "faceted_cylinder");
+        assert_eq!(cases[3].tier, MeshBenchmarkTier::CurvedSurface);
+        assert_eq!(cases[4].tier, MeshBenchmarkTier::MultiBody);
         for case in cases {
             case.geometry
                 .validate()
