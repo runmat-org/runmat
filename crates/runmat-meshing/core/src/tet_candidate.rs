@@ -2313,6 +2313,7 @@ fn local_seed_smoothing_candidate_points(
     classifier: &ComponentSurfaceClassifier,
     tolerance: MeshingTolerance,
 ) -> Vec<[f64; 3]> {
+    const LOCAL_SMOOTHING_CANDIDATE_LIMIT: usize = 18;
     let mut candidates = Vec::<[f64; 3]>::new();
     push_local_seed_smoothing_candidate(&mut candidates, current, proposed, classifier, tolerance);
     push_local_seed_smoothing_candidate(
@@ -2335,7 +2336,7 @@ fn local_seed_smoothing_candidate_points(
     if radius <= tolerance.absolute_m {
         return candidates;
     }
-    let directions = [
+    let axis_directions = [
         [1.0, 0.0, 0.0],
         [-1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -2344,7 +2345,96 @@ fn local_seed_smoothing_candidate_points(
         [0.0, 0.0, -1.0],
     ];
     for fraction in [0.5, 1.0] {
-        for direction in directions {
+        for direction in axis_directions {
+            if candidates.len() >= LOCAL_SMOOTHING_CANDIDATE_LIMIT {
+                return candidates;
+            }
+            push_local_seed_smoothing_candidate(
+                &mut candidates,
+                current,
+                add(current, scale(direction, radius * fraction)),
+                classifier,
+                tolerance,
+            );
+        }
+    }
+    let face_diagonal_scale = 1.0 / 2.0_f64.sqrt();
+    let face_diagonal_directions = [
+        [face_diagonal_scale, face_diagonal_scale, 0.0],
+        [face_diagonal_scale, -face_diagonal_scale, 0.0],
+        [-face_diagonal_scale, face_diagonal_scale, 0.0],
+        [-face_diagonal_scale, -face_diagonal_scale, 0.0],
+        [face_diagonal_scale, 0.0, face_diagonal_scale],
+        [face_diagonal_scale, 0.0, -face_diagonal_scale],
+        [-face_diagonal_scale, 0.0, face_diagonal_scale],
+        [-face_diagonal_scale, 0.0, -face_diagonal_scale],
+        [0.0, face_diagonal_scale, face_diagonal_scale],
+        [0.0, face_diagonal_scale, -face_diagonal_scale],
+        [0.0, -face_diagonal_scale, face_diagonal_scale],
+        [0.0, -face_diagonal_scale, -face_diagonal_scale],
+    ];
+    for fraction in [0.5, 1.0] {
+        for direction in face_diagonal_directions {
+            if candidates.len() >= LOCAL_SMOOTHING_CANDIDATE_LIMIT {
+                return candidates;
+            }
+            push_local_seed_smoothing_candidate(
+                &mut candidates,
+                current,
+                add(current, scale(direction, radius * fraction)),
+                classifier,
+                tolerance,
+            );
+        }
+    }
+    let body_diagonal_scale = 1.0 / 3.0_f64.sqrt();
+    let body_diagonal_directions = [
+        [
+            body_diagonal_scale,
+            body_diagonal_scale,
+            body_diagonal_scale,
+        ],
+        [
+            body_diagonal_scale,
+            body_diagonal_scale,
+            -body_diagonal_scale,
+        ],
+        [
+            body_diagonal_scale,
+            -body_diagonal_scale,
+            body_diagonal_scale,
+        ],
+        [
+            body_diagonal_scale,
+            -body_diagonal_scale,
+            -body_diagonal_scale,
+        ],
+        [
+            -body_diagonal_scale,
+            body_diagonal_scale,
+            body_diagonal_scale,
+        ],
+        [
+            -body_diagonal_scale,
+            body_diagonal_scale,
+            -body_diagonal_scale,
+        ],
+        [
+            -body_diagonal_scale,
+            -body_diagonal_scale,
+            body_diagonal_scale,
+        ],
+        [
+            -body_diagonal_scale,
+            -body_diagonal_scale,
+            -body_diagonal_scale,
+        ],
+    ];
+    for fraction in [0.5, 1.0] {
+        for direction in body_diagonal_directions {
+            if candidates.len() >= LOCAL_SMOOTHING_CANDIDATE_LIMIT {
+                return candidates;
+            }
             push_local_seed_smoothing_candidate(
                 &mut candidates,
                 current,
@@ -5590,6 +5680,14 @@ mod tests {
         assert!(candidates
             .iter()
             .all(|candidate| !tolerance.point_nearly_equal(*candidate, current, 1.0)));
+        assert!(candidates.iter().any(|candidate| {
+            let changed_axes = candidate
+                .iter()
+                .zip(current.iter())
+                .filter(|(left, right)| (*left - *right).abs() > tolerance.absolute_m)
+                .count();
+            changed_axes >= 2
+        }));
     }
 
     #[test]
