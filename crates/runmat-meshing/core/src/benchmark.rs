@@ -159,6 +159,21 @@ pub struct MeshBenchmarkSuiteSummary {
     pub worst_boundary_area_error: Option<f64>,
     pub total_ms: Option<f64>,
     pub failure_counts_by_code: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub summary_by_tier: BTreeMap<String, MeshBenchmarkTierSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBenchmarkTierSummary {
+    pub report_count: usize,
+    pub solve_ready_count: usize,
+    pub failed_count: usize,
+    pub worst_min_exact_scaled_jacobian: Option<f64>,
+    pub worst_max_aspect_ratio: Option<f64>,
+    pub worst_volume_coverage_error: Option<f64>,
+    pub worst_boundary_area_error: Option<f64>,
+    pub total_ms: Option<f64>,
+    pub failure_counts_by_code: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -594,6 +609,86 @@ fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmar
         })),
         total_ms: finite_sum(reports.iter().filter_map(|report| report.timing.total_ms)),
         failure_counts_by_code,
+        summary_by_tier: mesh_benchmark_tier_summaries(reports),
+    }
+}
+
+fn mesh_benchmark_tier_summaries(
+    reports: &[MeshBenchmarkReport],
+) -> BTreeMap<String, MeshBenchmarkTierSummary> {
+    let mut reports_by_tier = BTreeMap::<String, Vec<&MeshBenchmarkReport>>::new();
+    for report in reports {
+        reports_by_tier
+            .entry(mesh_benchmark_tier_key(report.tier).to_string())
+            .or_default()
+            .push(report);
+    }
+    reports_by_tier
+        .into_iter()
+        .map(|(tier, reports)| {
+            let solve_ready_count = reports
+                .iter()
+                .filter(|report| report.solve_readiness.solve_ready)
+                .count();
+            let mut failure_counts_by_code = BTreeMap::<String, usize>::new();
+            for report in &reports {
+                if report.solve_readiness.solve_ready {
+                    continue;
+                }
+                let code = report
+                    .solve_readiness
+                    .validation_error_code
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                *failure_counts_by_code.entry(code).or_default() += 1;
+            }
+            (
+                tier,
+                MeshBenchmarkTierSummary {
+                    report_count: reports.len(),
+                    solve_ready_count,
+                    failed_count: reports.len().saturating_sub(solve_ready_count),
+                    worst_min_exact_scaled_jacobian: finite_min(
+                        reports
+                            .iter()
+                            .map(|report| report.quality.min_exact_scaled_jacobian),
+                    ),
+                    worst_max_aspect_ratio: finite_max(
+                        reports.iter().map(|report| report.quality.max_aspect_ratio),
+                    ),
+                    worst_volume_coverage_error: finite_max(reports.iter().filter_map(|report| {
+                        report
+                            .coverage
+                            .volume_coverage_ratio
+                            .map(coverage_ratio_error)
+                    })),
+                    worst_boundary_area_error: finite_max(reports.iter().filter_map(|report| {
+                        report
+                            .coverage
+                            .boundary_area_ratio
+                            .map(coverage_ratio_error)
+                    })),
+                    total_ms: finite_sum(
+                        reports.iter().filter_map(|report| report.timing.total_ms),
+                    ),
+                    failure_counts_by_code,
+                },
+            )
+        })
+        .collect()
+}
+
+fn mesh_benchmark_tier_key(tier: MeshBenchmarkTier) -> &'static str {
+    match tier {
+        MeshBenchmarkTier::Curve1d => "curve1d",
+        MeshBenchmarkTier::Surface2d => "surface2d",
+        MeshBenchmarkTier::Solid3d => "solid3d",
+        MeshBenchmarkTier::HoleFeature => "hole_feature",
+        MeshBenchmarkTier::CurvedSurface => "curved_surface",
+        MeshBenchmarkTier::ThinFeature => "thin_feature",
+        MeshBenchmarkTier::MultiBody => "multi_body",
+        MeshBenchmarkTier::SizingField => "sizing_field",
+        MeshBenchmarkTier::AdaptiveRefinement => "adaptive_refinement",
     }
 }
 
@@ -1154,7 +1249,7 @@ mod tests {
         let mut failed = build_mesh_benchmark_report(
             &mesh,
             &failed_validation,
-            MeshBenchmarkInput::new("failed", MeshBenchmarkTier::Solid3d),
+            MeshBenchmarkInput::new("failed", MeshBenchmarkTier::HoleFeature),
         );
         failed.timing.total_ms = Some(6.0);
 
@@ -1178,6 +1273,28 @@ mod tests {
             Some(1.0 - 1.0 / 6.0)
         );
         assert_eq!(suite.summary.total_ms, Some(10.0));
+        let solid = suite
+            .summary
+            .summary_by_tier
+            .get("solid3d")
+            .expect("solid tier summary should be present");
+        assert_eq!(solid.report_count, 1);
+        assert_eq!(solid.solve_ready_count, 1);
+        assert_eq!(solid.failed_count, 0);
+        assert_eq!(solid.total_ms, Some(4.0));
+        let hole = suite
+            .summary
+            .summary_by_tier
+            .get("hole_feature")
+            .expect("hole-feature tier summary should be present");
+        assert_eq!(hole.report_count, 1);
+        assert_eq!(hole.solve_ready_count, 0);
+        assert_eq!(hole.failed_count, 1);
+        assert_eq!(hole.total_ms, Some(6.0));
+        assert_eq!(
+            hole.failure_counts_by_code.get("volume_coverage_failed"),
+            Some(&1)
+        );
     }
 
     #[test]
