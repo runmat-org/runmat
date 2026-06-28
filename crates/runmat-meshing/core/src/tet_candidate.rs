@@ -1826,12 +1826,13 @@ fn requested_refinement_candidate_points(
             requested_point[1] * (1.0 - *fraction) + anchor[1] * *fraction,
             requested_point[2] * (1.0 - *fraction) + anchor[2] * *fraction,
         ];
-        if classifier.contains_point(candidate)
-            && !contains_point(&candidates, candidate, tolerance)
-            && !contains_point(seed_points, candidate, tolerance)
-        {
-            candidates.push(candidate);
-        }
+        push_requested_refinement_candidate(
+            &mut candidates,
+            candidate,
+            seed_points,
+            classifier,
+            tolerance,
+        );
     }
     let anchor_distance = distance(requested_point, anchor);
     let base_radius = target_size_m
@@ -1857,12 +1858,47 @@ fn requested_refinement_candidate_points(
                 requested_point[1] + direction[1] * radius,
                 requested_point[2] + direction[2] * radius,
             ];
-            if classifier.contains_point(candidate)
-                && !contains_point(&candidates, candidate, tolerance)
-                && !contains_point(seed_points, candidate, tolerance)
-            {
-                candidates.push(candidate);
-            }
+            push_requested_refinement_candidate(
+                &mut candidates,
+                candidate,
+                seed_points,
+                classifier,
+                tolerance,
+            );
+        }
+    }
+    let face_diagonal_scale = 1.0 / 2.0_f64.sqrt();
+    let face_diagonal_directions = [
+        [face_diagonal_scale, face_diagonal_scale, 0.0],
+        [face_diagonal_scale, -face_diagonal_scale, 0.0],
+        [-face_diagonal_scale, face_diagonal_scale, 0.0],
+        [-face_diagonal_scale, -face_diagonal_scale, 0.0],
+        [face_diagonal_scale, 0.0, face_diagonal_scale],
+        [face_diagonal_scale, 0.0, -face_diagonal_scale],
+        [-face_diagonal_scale, 0.0, face_diagonal_scale],
+        [-face_diagonal_scale, 0.0, -face_diagonal_scale],
+        [0.0, face_diagonal_scale, face_diagonal_scale],
+        [0.0, face_diagonal_scale, -face_diagonal_scale],
+        [0.0, -face_diagonal_scale, face_diagonal_scale],
+        [0.0, -face_diagonal_scale, -face_diagonal_scale],
+    ];
+    for radius in local_radii {
+        if !radius.is_finite() || radius <= tolerance.absolute_m {
+            continue;
+        }
+        for direction in face_diagonal_directions {
+            let candidate = [
+                requested_point[0] + direction[0] * radius,
+                requested_point[1] + direction[1] * radius,
+                requested_point[2] + direction[2] * radius,
+            ];
+            push_requested_refinement_candidate(
+                &mut candidates,
+                candidate,
+                seed_points,
+                classifier,
+                tolerance,
+            );
         }
     }
     let diagonal_scale = 1.0 / 3.0_f64.sqrt();
@@ -1886,15 +1922,31 @@ fn requested_refinement_candidate_points(
                 requested_point[1] + direction[1] * radius,
                 requested_point[2] + direction[2] * radius,
             ];
-            if classifier.contains_point(candidate)
-                && !contains_point(&candidates, candidate, tolerance)
-                && !contains_point(seed_points, candidate, tolerance)
-            {
-                candidates.push(candidate);
-            }
+            push_requested_refinement_candidate(
+                &mut candidates,
+                candidate,
+                seed_points,
+                classifier,
+                tolerance,
+            );
         }
     }
     candidates
+}
+
+fn push_requested_refinement_candidate(
+    candidates: &mut Vec<[f64; 3]>,
+    candidate: [f64; 3],
+    seed_points: &[[f64; 3]],
+    classifier: &ComponentSurfaceClassifier,
+    tolerance: MeshingTolerance,
+) {
+    if classifier.contains_point(candidate)
+        && !contains_point(candidates, candidate, tolerance)
+        && !contains_point(seed_points, candidate, tolerance)
+    {
+        candidates.push(candidate);
+    }
 }
 
 fn seed_node_ids(first_seed_node_id: u32, seed_count: usize) -> Vec<u32> {
@@ -4942,8 +4994,8 @@ mod tests {
             tolerance,
         );
 
-        assert!(candidates.len() > 16);
-        assert!(candidates.len() <= 32);
+        assert!(candidates.len() > 32);
+        assert!(candidates.len() <= 56);
         assert_eq!(candidates[0], requested_point);
         assert!(candidates
             .iter()
@@ -4957,6 +5009,11 @@ mod tests {
             candidate[0] > requested_point[0]
                 && candidate[1] > requested_point[1]
                 && candidate[2] > requested_point[2]
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate[0] > requested_point[0]
+                && candidate[1] > requested_point[1]
+                && (candidate[2] - requested_point[2]).abs() <= f64::EPSILON
         }));
         for (left_index, left) in candidates.iter().enumerate() {
             for right in candidates.iter().skip(left_index + 1) {
