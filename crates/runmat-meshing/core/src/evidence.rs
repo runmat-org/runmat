@@ -89,7 +89,11 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub accepted_requested_tet_refinement_surrogate_point_count: usize,
     #[serde(default)]
+    pub accepted_requested_tet_refinement_exact_point_count: usize,
+    #[serde(default)]
     pub requested_tet_refinement_acceptance_ratio: Option<f64>,
+    #[serde(default)]
+    pub requested_tet_refinement_surrogate_ratio: Option<f64>,
     #[serde(default)]
     pub generated_cad_by_reason: BTreeMap<String, usize>,
     pub applied_by_reason: BTreeMap<String, usize>,
@@ -330,6 +334,12 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         *rejected_by_reason.entry(reason).or_default() += 1;
     }
 
+    let accepted_requested_tet_refinement_point_count =
+        mesh.backend.tet_accepted_requested_refinement_point_count;
+    let accepted_requested_tet_refinement_surrogate_point_count = mesh
+        .backend
+        .tet_accepted_requested_refinement_surrogate_point_count;
+
     MeshSizingEvidence {
         global_target_size_m: mesh.sizing.global_target_size_m,
         min_size_m: mesh.sizing.min_size_m,
@@ -343,12 +353,11 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         inserted_breakpoint_by_reason,
         uninserted_sample_by_reason,
         requested_tet_refinement_point_count: mesh.backend.tet_requested_refinement_point_count,
-        accepted_requested_tet_refinement_point_count: mesh
-            .backend
-            .tet_accepted_requested_refinement_point_count,
-        accepted_requested_tet_refinement_surrogate_point_count: mesh
-            .backend
-            .tet_accepted_requested_refinement_surrogate_point_count,
+        accepted_requested_tet_refinement_point_count,
+        accepted_requested_tet_refinement_surrogate_point_count,
+        accepted_requested_tet_refinement_exact_point_count:
+            accepted_requested_tet_refinement_point_count
+                .saturating_sub(accepted_requested_tet_refinement_surrogate_point_count),
         requested_tet_refinement_acceptance_ratio: if mesh
             .backend
             .tet_requested_refinement_point_count
@@ -357,6 +366,16 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
             Some(
                 mesh.backend.tet_accepted_requested_refinement_point_count as f64
                     / mesh.backend.tet_requested_refinement_point_count as f64,
+            )
+        } else {
+            None
+        },
+        requested_tet_refinement_surrogate_ratio: if accepted_requested_tet_refinement_point_count
+            > 0
+        {
+            Some(
+                accepted_requested_tet_refinement_surrogate_point_count as f64
+                    / accepted_requested_tet_refinement_point_count as f64,
             )
         } else {
             None
@@ -852,8 +871,18 @@ mod tests {
             2
         );
         assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_exact_point_count,
+            1
+        );
+        assert_eq!(
             evidence.sizing.requested_tet_refinement_acceptance_ratio,
             Some(0.75)
+        );
+        assert_eq!(
+            evidence.sizing.requested_tet_refinement_surrogate_ratio,
+            Some(2.0 / 3.0)
         );
         assert_eq!(evidence.sizing.sample_count, 3);
         assert_eq!(evidence.sizing.generated_cad_sample_count, 2);

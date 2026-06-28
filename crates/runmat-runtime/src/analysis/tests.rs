@@ -6429,16 +6429,20 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         runmat_meshing_core::SizingSampleApplication {
             position_m: [0.5, 0.2, 0.3],
             target_size_m: 0.01,
-            inserted_breakpoint_count: 1,
+            inserted_breakpoint_count: 0,
             reason: None,
             detail: None,
         },
     ];
+    mesh.backend.tet_requested_refinement_point_count = 4;
+    mesh.backend.tet_accepted_requested_refinement_point_count = 3;
+    mesh.backend
+        .tet_accepted_requested_refinement_surrogate_point_count = 2;
 
     let summary = sizing_application_summary(&mesh);
 
     assert_eq!(summary["total"].as_u64(), Some(3));
-    assert_eq!(summary["inserted_breakpoint_count"].as_u64(), Some(6));
+    assert_eq!(summary["inserted_breakpoint_count"].as_u64(), Some(5));
     assert_eq!(
         summary["by_reason"]["structural.stress_gradient"].as_u64(),
         Some(2)
@@ -6449,8 +6453,32 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(5)
     );
     assert_eq!(
-        summary["inserted_breakpoints_by_reason"]["unspecified"].as_u64(),
+        summary["uninserted_by_reason"]["unspecified"].as_u64(),
         Some(1)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["requested_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["accepted_count"].as_u64(),
+        Some(3)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["accepted_exact_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["accepted_surrogate_count"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["acceptance_ratio"].as_f64(),
+        Some(0.75)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["surrogate_ratio"].as_f64(),
+        Some(2.0 / 3.0)
     );
 }
 

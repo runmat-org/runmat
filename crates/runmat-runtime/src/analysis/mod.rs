@@ -14933,6 +14933,7 @@ fn merge_sizing_update(target: &mut SizingFieldUpdate, update: SizingFieldUpdate
 fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
     let mut by_reason = BTreeMap::<String, usize>::new();
     let mut inserted_breakpoints_by_reason = BTreeMap::<String, usize>::new();
+    let mut uninserted_by_reason = BTreeMap::<String, usize>::new();
     let mut inserted_breakpoint_count = 0_usize;
     for application in &mesh.sizing.applied_samples {
         let reason = application
@@ -14940,15 +14941,40 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
             .clone()
             .unwrap_or_else(|| "unspecified".to_string());
         *by_reason.entry(reason.clone()).or_default() += 1;
-        *inserted_breakpoints_by_reason.entry(reason).or_default() +=
-            application.inserted_breakpoint_count;
+        if application.inserted_breakpoint_count > 0 {
+            *inserted_breakpoints_by_reason.entry(reason).or_default() +=
+                application.inserted_breakpoint_count;
+        } else {
+            *uninserted_by_reason.entry(reason).or_default() += 1;
+        }
         inserted_breakpoint_count += application.inserted_breakpoint_count;
     }
+    let accepted_requested = mesh.backend.tet_accepted_requested_refinement_point_count;
+    let accepted_surrogate = mesh
+        .backend
+        .tet_accepted_requested_refinement_surrogate_point_count;
     serde_json::json!({
         "total": mesh.sizing.applied_samples.len(),
         "inserted_breakpoint_count": inserted_breakpoint_count,
         "by_reason": by_reason,
         "inserted_breakpoints_by_reason": inserted_breakpoints_by_reason,
+        "uninserted_by_reason": uninserted_by_reason,
+        "requested_tet_refinement": {
+            "requested_count": mesh.backend.tet_requested_refinement_point_count,
+            "accepted_count": accepted_requested,
+            "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
+            "accepted_surrogate_count": accepted_surrogate,
+            "acceptance_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
+                Some(accepted_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "surrogate_ratio": if accepted_requested > 0 {
+                Some(accepted_surrogate as f64 / accepted_requested as f64)
+            } else {
+                None
+            },
+        },
     })
 }
 
