@@ -2401,6 +2401,21 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
         options.expected_bounds_m,
         Some([[0.0, 0.0, 0.0], [0.001, 0.001, 0.001]])
     );
+    assert!(
+        (options.expected_volume_m3.expect("expected volume") - 1.0e-9).abs() < 1.0e-18,
+        "unexpected expected volume: {:?}",
+        options.expected_volume_m3
+    );
+    assert!(
+        (options
+            .expected_boundary_area_m2
+            .expect("expected boundary area")
+            - 6.0e-6)
+            .abs()
+            < 1.0e-15,
+        "unexpected expected boundary area: {:?}",
+        options.expected_boundary_area_m2
+    );
     assert_eq!(
         options.required_boundary_region_ids,
         vec!["root".to_string(), "tip".to_string()]

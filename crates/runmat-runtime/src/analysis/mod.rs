@@ -13761,6 +13761,8 @@ fn analysis_mesh_validation_options_for_study(
         max_volume_element_count: Some(options.max_elements),
         max_volume_component_count: options.validation.max_volume_component_count,
         expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
+        expected_volume_m3: geometry_enclosed_volume_m3(&spec.geometry),
+        expected_boundary_area_m2: geometry_surface_area_m2(&spec.geometry),
         min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
         min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
         min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
@@ -13867,6 +13869,42 @@ fn geometry_surface_bounds_m(geometry: &GeometryAsset) -> Option<[[f64; 3]; 2]> 
         }
     }
     bounds
+}
+
+fn geometry_surface_area_m2(geometry: &GeometryAsset) -> Option<f64> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut total_area = 0.0_f64;
+    for surface in &geometry.surface_meshes {
+        for triangle in &surface.triangles {
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let area = triangle_area(scale_triangle_vertices(vertices, scale));
+            if area.is_finite() && area > 0.0 {
+                total_area += area;
+            }
+        }
+    }
+    (total_area.is_finite() && total_area > 0.0).then_some(total_area)
+}
+
+fn geometry_enclosed_volume_m3(geometry: &GeometryAsset) -> Option<f64> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut signed_volume = 0.0_f64;
+    for surface in &geometry.surface_meshes {
+        for triangle in &surface.triangles {
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let contribution =
+                signed_triangle_volume_from_origin(scale_triangle_vertices(vertices, scale));
+            if contribution.is_finite() {
+                signed_volume += contribution;
+            }
+        }
+    }
+    let volume = signed_volume.abs();
+    (volume.is_finite() && volume > f64::EPSILON).then_some(volume)
 }
 
 fn required_boundary_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<String> {
@@ -14019,6 +14057,26 @@ fn surface_triangle_vertices(
     ])
 }
 
+fn scale_triangle_vertices(vertices: [[f64; 3]; 3], scale: f64) -> [[f64; 3]; 3] {
+    [
+        [
+            vertices[0][0] * scale,
+            vertices[0][1] * scale,
+            vertices[0][2] * scale,
+        ],
+        [
+            vertices[1][0] * scale,
+            vertices[1][1] * scale,
+            vertices[1][2] * scale,
+        ],
+        [
+            vertices[2][0] * scale,
+            vertices[2][1] * scale,
+            vertices[2][2] * scale,
+        ],
+    ]
+}
+
 fn triangle_centroid(vertices: [[f64; 3]; 3]) -> [f64; 3] {
     [
         (vertices[0][0] + vertices[1][0] + vertices[2][0]) / 3.0,
@@ -14044,6 +14102,15 @@ fn triangle_area(vertices: [[f64; 3]; 3]) -> f64 {
         ab[0] * ac[1] - ab[1] * ac[0],
     ];
     0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+}
+
+fn signed_triangle_volume_from_origin(vertices: [[f64; 3]; 3]) -> f64 {
+    let cross = [
+        vertices[1][1] * vertices[2][2] - vertices[1][2] * vertices[2][1],
+        vertices[1][2] * vertices[2][0] - vertices[1][0] * vertices[2][2],
+        vertices[1][0] * vertices[2][1] - vertices[1][1] * vertices[2][0],
+    ];
+    (vertices[0][0] * cross[0] + vertices[0][1] * cross[1] + vertices[0][2] * cross[2]) / 6.0
 }
 
 fn nearest_analysis_boundary_face_index(
