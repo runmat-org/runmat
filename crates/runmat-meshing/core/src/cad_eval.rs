@@ -306,7 +306,7 @@ fn face_frame(
     }
     let (u_derivative_m_per_uv, v_derivative_m_per_uv) =
         estimate_uv_derivatives(&evaluator_samples);
-    let max_curvature_estimate_1_per_m = estimate_max_curvature(&evaluator_samples);
+    let max_curvature_estimate_1_per_m = estimate_max_curvature(&evaluator_samples, unit_normal);
     Ok(CadFaceEvaluationFrame {
         face_id,
         source_face_id,
@@ -472,13 +472,24 @@ fn estimate_uv_derivatives(
     (None, None)
 }
 
-fn estimate_max_curvature(samples: &[CadFaceEvaluationSample]) -> Option<f64> {
+fn estimate_max_curvature(
+    samples: &[CadFaceEvaluationSample],
+    frame_unit_normal: Point3,
+) -> Option<f64> {
     let samples = samples
         .iter()
         .filter_map(|sample| {
             let normal = sample.unit_normal?;
-            (finite_point(sample.point_m) && finite_point(normal) && norm(normal) > 0.0)
-                .then_some((sample.point_m, scale(normal, 1.0 / norm(normal))))
+            let normal_length = norm(normal);
+            if finite_point(sample.point_m) && finite_point(normal) && normal_length > 0.0 {
+                let mut unit_normal = scale(normal, 1.0 / normal_length);
+                if dot(unit_normal, frame_unit_normal) < 0.0 {
+                    unit_normal = scale(unit_normal, -1.0);
+                }
+                Some((sample.point_m, unit_normal))
+            } else {
+                None
+            }
         })
         .collect::<Vec<_>>();
     let mut max_curvature = None::<f64>;
@@ -837,6 +848,41 @@ mod tests {
             report.max_curvature_estimate_1_per_m,
             model.report.max_curvature_estimate_1_per_m
         );
+    }
+
+    #[test]
+    fn cad_curvature_estimates_orient_backend_normals_to_face_frame() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.0, 0.0, 1.0],
+                uv: Some([0.0, 0.0]),
+                projected_point_m: Some([0.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [1.0, 0.0, 1.0],
+                uv: Some([1.0, 0.0]),
+                projected_point_m: Some([1.0, 0.0, 1.0]),
+                unit_normal: Some([0.0, 0.0, -1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.evaluator_samples.len() == 2)
+            .expect("sample-backed frame");
+
+        assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
+        assert_eq!(frame.max_curvature_estimate_1_per_m, Some(0.0));
     }
 
     fn cube_topology() -> SourceTopologyModel {
