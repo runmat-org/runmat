@@ -57,6 +57,8 @@ pub use evidence::{
     MeshBoundaryRecoveryEvidence, MeshEvidenceArtifact, MeshQualityEvidence, MeshRegionEvidence,
     MeshSizingEvidence, MeshTopologyEvidence, MeshValidationEvidence, MESH_EVIDENCE_SCHEMA_VERSION,
 };
+#[cfg(feature = "dev-evidence")]
+pub use evidence::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,

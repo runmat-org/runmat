@@ -17,6 +17,9 @@ pub struct MeshEvidenceArtifact {
     pub schema_version: String,
     pub mesh_id: String,
     pub backend: MeshBackendSummary,
+    #[cfg(feature = "dev-evidence")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<MeshDebugEvidence>,
     #[serde(default)]
     pub cad: MeshCadEvidence,
     pub topology: MeshTopologyEvidence,
@@ -26,6 +29,39 @@ pub struct MeshEvidenceArtifact {
     pub tet_recovery: MeshTetRecoveryEvidence,
     pub regions: MeshRegionEvidence,
     pub validation: MeshValidationEvidence,
+}
+
+#[cfg(feature = "dev-evidence")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshDebugEvidence {
+    pub event_cap: usize,
+    pub event_count: usize,
+    pub emitted_event_count: usize,
+    pub truncated_event_count: usize,
+    pub events: Vec<MeshDebugEvent>,
+}
+
+#[cfg(feature = "dev-evidence")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshDebugEvent {
+    pub stage: String,
+    pub severity: String,
+    pub message: String,
+}
+
+#[cfg(feature = "dev-evidence")]
+impl MeshDebugEvent {
+    pub fn new(
+        stage: impl Into<String>,
+        severity: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            stage: stage.into(),
+            severity: severity.into(),
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -227,6 +263,18 @@ pub fn build_mesh_evidence_artifact(
     )
 }
 
+#[cfg(feature = "dev-evidence")]
+pub fn build_mesh_evidence_artifact_with_debug(
+    mesh: &AnalysisMeshArtifact,
+    validation: &AnalysisMeshValidationOptions,
+    debug_events: Vec<MeshDebugEvent>,
+    event_cap: usize,
+) -> MeshEvidenceArtifact {
+    let mut artifact = build_mesh_evidence_artifact(mesh, validation);
+    artifact.debug = Some(debug_evidence(debug_events, event_cap));
+    artifact
+}
+
 pub fn build_mesh_evidence_artifact_with_validation_evidence(
     mesh: &AnalysisMeshArtifact,
     validation: MeshValidationEvidence,
@@ -236,6 +284,8 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         schema_version: MESH_EVIDENCE_SCHEMA_VERSION.to_string(),
         mesh_id: mesh.mesh_id.clone(),
         backend: mesh.backend.clone(),
+        #[cfg(feature = "dev-evidence")]
+        debug: None,
         cad: cad_evidence(mesh),
         topology: topology_evidence(mesh),
         sizing: sizing_evidence(mesh),
@@ -243,6 +293,20 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         tet_recovery: tet_recovery_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
+    }
+}
+
+#[cfg(feature = "dev-evidence")]
+fn debug_evidence(mut events: Vec<MeshDebugEvent>, event_cap: usize) -> MeshDebugEvidence {
+    let event_count = events.len();
+    let cap = event_cap.min(event_count);
+    events.truncate(cap);
+    MeshDebugEvidence {
+        event_cap,
+        event_count,
+        emitted_event_count: events.len(),
+        truncated_event_count: event_count.saturating_sub(events.len()),
+        events,
     }
 }
 
@@ -1071,6 +1135,7 @@ mod tests {
 
         let encoded = serde_json::to_value(&evidence).expect("serialize evidence");
         assert!(encoded.get("sizing").is_some());
+        assert!(encoded.get("debug").is_none());
         assert_eq!(
             encoded["cad"]["evaluation_source"],
             serde_json::Value::String("imported_evaluator_samples".to_string())
@@ -1122,6 +1187,60 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "dev-evidence")]
+    #[test]
+    fn dev_mesh_evidence_caps_debug_events() {
+        let mesh = AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "debug_mesh".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![volume_element("tet_1", [1, 2, 3, 4])],
+            boundary_faces: vec![boundary_face("face_1", [1, 2, 3])],
+            boundary_edges: vec![
+                boundary_edge("edge_1", [1, 2]),
+                boundary_edge("edge_2", [2, 3]),
+                boundary_edge("edge_3", [1, 3]),
+            ],
+            sizing: MeshSizingField::default(),
+            quality: quality_report(),
+            backend: MeshBackendSummary::default(),
+            adaptive_iterations: Vec::new(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
+        };
+
+        let evidence = build_mesh_evidence_artifact_with_debug(
+            &mesh,
+            &AnalysisMeshValidationOptions::default(),
+            vec![
+                MeshDebugEvent::new("surface", "info", "surface recovery accepted"),
+                MeshDebugEvent::new("volume", "warning", "candidate quality improved"),
+                MeshDebugEvent::new("validation", "info", "solve readiness checked"),
+            ],
+            2,
+        );
+
+        let debug = evidence.debug.expect("dev evidence should include debug");
+        assert_eq!(debug.event_cap, 2);
+        assert_eq!(debug.event_count, 3);
+        assert_eq!(debug.emitted_event_count, 2);
+        assert_eq!(debug.truncated_event_count, 1);
+        assert_eq!(debug.events[0].stage, "surface");
+        assert_eq!(debug.events[1].stage, "volume");
+
+        let encoded = serde_json::to_value(&debug).expect("serialize debug evidence");
+        assert_eq!(encoded["events"].as_array().map(Vec::len), Some(2));
+    }
+
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
         AnalysisMeshNode {
             node_id,
@@ -1137,6 +1256,49 @@ mod tests {
             adjacent_boundary_face_ids: vec!["face_1".to_string()],
             region_ids: vec!["fixed".to_string()],
             provenance: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "dev-evidence")]
+    fn boundary_face(face_id: &str, node_ids: [u32; 3]) -> AnalysisBoundaryFace {
+        AnalysisBoundaryFace {
+            face_id: face_id.to_string(),
+            kind: BoundaryElementKind::Tri3,
+            node_ids: node_ids.into(),
+            adjacent_volume_element_ids: vec!["tet_1".to_string()],
+            region_ids: vec!["fixed".to_string()],
+            provenance: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "dev-evidence")]
+    fn volume_element(element_id: &str, node_ids: [u32; 4]) -> AnalysisVolumeElement {
+        AnalysisVolumeElement {
+            element_id: element_id.to_string(),
+            kind: VolumeElementKind::Tet4,
+            node_ids: node_ids.into(),
+            material_region_id: "solid".to_string(),
+            provenance: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "dev-evidence")]
+    fn quality_report() -> AnalysisMeshQualityReport {
+        AnalysisMeshQualityReport {
+            min_scaled_jacobian: 0.5,
+            min_exact_scaled_jacobian: 0.45,
+            mean_aspect_ratio: 2.0,
+            max_aspect_ratio: 2.0,
+            inverted_element_count: 0,
+            mean_boundary_projection_error_m: 0.0,
+            max_boundary_projection_error_m: 0.0,
+            elements: vec![ElementQuality {
+                element_id: "tet_1".to_string(),
+                scaled_jacobian: 0.5,
+                exact_scaled_jacobian: 0.45,
+                aspect_ratio: 2.0,
+                volume_m3: 1.0 / 6.0,
+            }],
         }
     }
 }
