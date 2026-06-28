@@ -380,6 +380,7 @@ pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {
         through_hole_block_benchmark_case(),
         faceted_cylinder_benchmark_case(),
         disconnected_boxes_benchmark_case(),
+        boundary_load_patch_benchmark_case(),
         adaptive_refinement_benchmark_case(),
     ]
 }
@@ -1073,6 +1074,34 @@ fn adaptive_refinement_benchmark_case() -> MeshBenchmarkCase {
     case
 }
 
+fn boundary_load_patch_benchmark_case() -> MeshBenchmarkCase {
+    let mut case = benchmark_case(
+        "boundary_load_patch",
+        MeshBenchmarkTier::SizingField,
+        box_geometry("boundary_load_patch", [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]),
+        1.0,
+        6.0,
+        1,
+    );
+    case.options.target_size = MeshTargetSize::LengthM(1.0);
+    case.options.refinement.focus.curvature = false;
+    case.options.refinement.focus.small_features = false;
+    case.options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+    case.validation.required_boundary_region_ids =
+        vec!["benchmark_root".to_string(), "benchmark_tip".to_string()];
+    case.validation.required_material_region_ids =
+        vec!["benchmark_root".to_string(), "benchmark_tip".to_string()];
+    case.sizing = Some(MeshSizingField {
+        samples: vec![SizingSample {
+            position_m: [0.75, 0.75, 0.75],
+            target_size_m: 0.25,
+            reason: Some("load_region".to_string()),
+        }],
+        ..MeshSizingField::default()
+    });
+    case
+}
+
 fn benchmark_case(
     benchmark_id: &str,
     tier: MeshBenchmarkTier,
@@ -1513,7 +1542,7 @@ mod tests {
     fn generic_benchmark_cases_are_valid_closed_geometry() {
         let cases = generic_mesh_benchmark_cases();
 
-        assert_eq!(cases.len(), 6);
+        assert_eq!(cases.len(), 7);
         assert_eq!(cases[0].benchmark_id, "solid_cube");
         assert_eq!(cases[1].tier, MeshBenchmarkTier::ThinFeature);
         assert_eq!(cases[2].benchmark_id, "through_hole_block");
@@ -1521,9 +1550,28 @@ mod tests {
         assert_eq!(cases[3].benchmark_id, "faceted_cylinder");
         assert_eq!(cases[3].tier, MeshBenchmarkTier::CurvedSurface);
         assert_eq!(cases[4].tier, MeshBenchmarkTier::MultiBody);
-        assert_eq!(cases[5].benchmark_id, "adaptive_refinement_marker");
-        assert_eq!(cases[5].tier, MeshBenchmarkTier::AdaptiveRefinement);
-        let adaptive_sizing = cases[5]
+        assert_eq!(cases[5].benchmark_id, "boundary_load_patch");
+        assert_eq!(cases[5].tier, MeshBenchmarkTier::SizingField);
+        assert_eq!(
+            cases[5].validation.required_boundary_region_ids,
+            vec!["benchmark_root".to_string(), "benchmark_tip".to_string()]
+        );
+        assert_eq!(
+            cases[5].validation.required_material_region_ids,
+            vec!["benchmark_root".to_string(), "benchmark_tip".to_string()]
+        );
+        let load_patch_sizing = cases[5]
+            .sizing
+            .as_ref()
+            .expect("load patch benchmark should carry sizing markers");
+        assert_eq!(load_patch_sizing.samples.len(), 1);
+        assert_eq!(
+            load_patch_sizing.samples[0].reason.as_deref(),
+            Some("load_region")
+        );
+        assert_eq!(cases[6].benchmark_id, "adaptive_refinement_marker");
+        assert_eq!(cases[6].tier, MeshBenchmarkTier::AdaptiveRefinement);
+        let adaptive_sizing = cases[6]
             .sizing
             .as_ref()
             .expect("adaptive benchmark should carry sizing markers");
@@ -1570,6 +1618,59 @@ mod tests {
         assert!(suite.summary.total_ms.is_some());
         assert_eq!(suite.reports[0].benchmark_id, "solid_cube");
         assert_eq!(suite.reports[1].benchmark_id, "thin_slab");
+    }
+
+    #[test]
+    fn boundary_load_patch_benchmark_runs_with_region_sizing_evidence() {
+        let case = boundary_load_patch_benchmark_case();
+        let mesh = generate_mesh_for_benchmark_case(&case)
+            .expect("boundary load patch benchmark should generate");
+        let report = build_mesh_benchmark_report(
+            &mesh,
+            &case.validation,
+            MeshBenchmarkInput::new(case.benchmark_id.clone(), case.tier),
+        );
+
+        assert_eq!(report.benchmark_id, "boundary_load_patch");
+        assert_eq!(report.tier, MeshBenchmarkTier::SizingField);
+        assert!(report.solve_readiness.solve_ready);
+        assert_eq!(report.sizing.applied_by_reason.get("load_region"), Some(&1));
+        assert!(
+            report
+                .regions
+                .boundary_region_face_counts
+                .get("benchmark_root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            report
+                .regions
+                .boundary_region_face_counts
+                .get("benchmark_tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            report
+                .regions
+                .material_region_element_counts
+                .get("benchmark_root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            report
+                .regions
+                .material_region_element_counts
+                .get("benchmark_tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
     }
 
     #[test]
