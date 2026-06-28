@@ -58,6 +58,8 @@ pub struct MeshQualityEvidence {
     pub max_boundary_projection_error_m: f64,
     pub element_quality_sample_count: usize,
     pub scaled_jacobian_bins: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub exact_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub aspect_ratio_bins: BTreeMap<String, usize>,
     pub volume_bins: BTreeMap<String, usize>,
 }
@@ -174,11 +176,15 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
 
 fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
     let mut scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut exact_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut aspect_ratio_bins = BTreeMap::<String, usize>::new();
     let mut volume_bins = BTreeMap::<String, usize>::new();
     for element in &mesh.quality.elements {
         *scaled_jacobian_bins
             .entry(scaled_jacobian_bin(element.scaled_jacobian))
+            .or_default() += 1;
+        *exact_scaled_jacobian_bins
+            .entry(scaled_jacobian_bin(element.exact_scaled_jacobian))
             .or_default() += 1;
         *aspect_ratio_bins
             .entry(aspect_ratio_bin(element.aspect_ratio))
@@ -198,6 +204,7 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
         max_boundary_projection_error_m: mesh.quality.max_boundary_projection_error_m,
         element_quality_sample_count: mesh.quality.elements.len(),
         scaled_jacobian_bins,
+        exact_scaled_jacobian_bins,
         aspect_ratio_bins,
         volume_bins,
     }
@@ -480,6 +487,11 @@ mod tests {
         );
         assert_eq!(
             evidence.regions.boundary_region_face_counts.get("fixed"),
+            Some(&1)
+        );
+        assert_eq!(evidence.quality.min_exact_scaled_jacobian, 0.45);
+        assert_eq!(
+            evidence.quality.exact_scaled_jacobian_bins.get("0_35_to_0_65"),
             Some(&1)
         );
         assert_eq!(
