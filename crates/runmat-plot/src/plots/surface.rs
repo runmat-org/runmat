@@ -4,7 +4,7 @@
 
 use crate::context::shared_wgpu_context;
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    BoundingBox, DrawCall, GpuVertexBuffer, ImageData, Material, PipelineType, RenderData, Vertex,
 };
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
@@ -740,6 +740,10 @@ impl SurfacePlot {
             self.y_len
         );
 
+        if self.image_mode && self.z_data.is_some() && self.gpu_vertices.is_none() {
+            return self.image_render_data();
+        }
+
         let using_gpu = self.gpu_vertices.is_some();
         let bounds = self.bounds();
         let vertices = if using_gpu {
@@ -796,6 +800,110 @@ impl SurfacePlot {
             material,
             draw_calls: vec![draw_call],
             image: None,
+        }
+    }
+
+    fn image_render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
+        let x_min = bounds.min.x;
+        let x_max = bounds.max.x;
+        let y_min = bounds.min.y;
+        let y_max = bounds.max.y;
+        let z_rows = self
+            .z_data
+            .as_ref()
+            .expect("image-mode surfaces require host color data");
+        let width = self.x_len.max(1);
+        let height = self.y_len.max(1);
+        let color_limits = self.color_limits.or_else(|| {
+            let mut min_z = f64::INFINITY;
+            let mut max_z = f64::NEG_INFINITY;
+            for row in z_rows {
+                for &z in row {
+                    if z.is_finite() {
+                        min_z = min_z.min(z);
+                        max_z = max_z.max(z);
+                    }
+                }
+            }
+            if min_z.is_finite() && max_z.is_finite() {
+                Some((min_z, max_z))
+            } else {
+                None
+            }
+        });
+        let (min_z, max_z) = color_limits.unwrap_or((0.0, 1.0));
+        let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
+        let mut data = Vec::with_capacity(width * height * 4);
+
+        for row in 0..height {
+            let y_idx = height - 1 - row;
+            for x_idx in 0..width {
+                let color = if let Some(grid) = &self.color_grid {
+                    grid[x_idx][y_idx]
+                } else {
+                    let z = z_rows[x_idx][y_idx];
+                    let t = ((z - min_z) / z_range) as f32;
+                    let rgb = self.colormap.map_value(t.clamp(0.0, 1.0));
+                    Vec4::new(rgb.x, rgb.y, rgb.z, self.alpha)
+                };
+                data.push((color.x.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.y.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.z.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.w.clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+        }
+
+        let vertices = vec![
+            Vertex {
+                position: [x_min, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [x_min, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3];
+
+        RenderData {
+            pipeline_type: PipelineType::Textured,
+            vertices,
+            indices: Some(indices.clone()),
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material: Material {
+                albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: 4,
+                index_offset: Some(0),
+                index_count: Some(indices.len()),
+                instance_count: 1,
+            }],
+            image: Some(ImageData::Rgba8 {
+                width: width as u32,
+                height: height as u32,
+                data,
+            }),
         }
     }
 }
@@ -1147,6 +1255,45 @@ mod tests {
         assert!(surface.wireframe);
         assert_eq!(surface.alpha, 0.8);
         assert_eq!(surface.label, Some("Test Surface".to_string()));
+    }
+
+    #[test]
+    fn image_mode_surface_uses_textured_render_data() {
+        let x = vec![0.0, 1.0];
+        let y = vec![10.0, 20.0];
+        let z = vec![vec![0.0, 0.25], vec![0.75, 1.0]];
+
+        let mut surface = SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_image_mode(true)
+            .with_colormap(ColorMap::Gray)
+            .with_color_limits(Some((0.0, 1.0)));
+        let render_data = surface.render_data();
+
+        assert_eq!(render_data.pipeline_type, PipelineType::Textured);
+        assert_eq!(render_data.vertices.len(), 4);
+        assert_eq!(
+            render_data.indices.as_deref(),
+            Some(&[0, 1, 2, 0, 2, 3][..])
+        );
+
+        let Some(ImageData::Rgba8 {
+            width,
+            height,
+            data,
+        }) = render_data.image
+        else {
+            panic!("image-mode surfaces should carry an RGBA texture payload");
+        };
+        assert_eq!((width, height), (2, 2));
+        assert_eq!(data.len(), 16);
+
+        // Image data is row-major, top-to-bottom. The top image row corresponds to
+        // the highest Y data row.
+        assert_eq!(&data[0..4], &[64, 64, 64, 255]);
+        assert_eq!(&data[4..8], &[255, 255, 255, 255]);
+        assert_eq!(&data[8..12], &[0, 0, 0, 255]);
+        assert_eq!(&data[12..16], &[191, 191, 191, 255]);
     }
 
     #[test]

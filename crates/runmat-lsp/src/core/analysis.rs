@@ -5374,6 +5374,24 @@ end
     }
 
     #[test]
+    fn semantic_tokens_include_comments() {
+        let text = "% Grid\nx = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
+        let tokens = semantic_tokens_full(text, &analysis).expect("semantic tokens");
+        let legend = semantic_tokens_legend();
+        let decoded = decode_semantic_tokens(text, &tokens);
+        let comment_offset = text.find('%').expect("comment offset");
+
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            comment_offset,
+            lsp_types::SemanticTokenType::COMMENT,
+        );
+    }
+
+    #[test]
     fn source_context_symbol_discovery_reads_manifest_project_symbols() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
