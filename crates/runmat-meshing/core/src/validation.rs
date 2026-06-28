@@ -166,6 +166,8 @@ pub enum AnalysisMeshValidationError {
         component_count: usize,
     },
     UnrepairedExactQualityPresent {
+        total_count: usize,
+        general_cavity_count: usize,
         boundary_adjacent_count: usize,
         interior_seed_count: usize,
         edge_star_count: usize,
@@ -500,12 +502,25 @@ fn validate_no_unrepaired_exact_quality(
     let boundary_adjacent_count = mesh
         .backend
         .tet_exact_quality_unrepaired_boundary_adjacent_count;
+    let general_cavity_count = mesh
+        .backend
+        .tet_exact_quality_unrepaired_general_cavity_count;
     let interior_seed_count = mesh
         .backend
         .tet_exact_quality_unrepaired_interior_seed_count;
     let edge_star_count = mesh.backend.tet_exact_quality_unrepaired_edge_star_count;
-    if boundary_adjacent_count > 0 || interior_seed_count > 0 || edge_star_count > 0 {
+    let categorized_count = boundary_adjacent_count
+        .saturating_add(interior_seed_count)
+        .saturating_add(edge_star_count)
+        .saturating_add(general_cavity_count);
+    let total_count = mesh
+        .backend
+        .tet_exact_quality_unrepaired_total_count
+        .max(categorized_count);
+    if total_count > 0 {
         return Err(AnalysisMeshValidationError::UnrepairedExactQualityPresent {
+            total_count,
+            general_cavity_count,
             boundary_adjacent_count,
             interior_seed_count,
             edge_star_count,
@@ -1150,6 +1165,8 @@ mod tests {
         assert_eq!(
             err,
             AnalysisMeshValidationError::UnrepairedExactQualityPresent {
+                total_count: 10,
+                general_cavity_count: 0,
                 boundary_adjacent_count: 2,
                 interior_seed_count: 3,
                 edge_star_count: 5,
@@ -1158,6 +1175,34 @@ mod tests {
         assert_eq!(
             analysis_mesh_validation_error_code(&err),
             "unrepaired_exact_quality_present"
+        );
+    }
+
+    #[test]
+    fn rejects_unrepaired_general_cavity_exact_quality_when_policy_requires_strict_recovery() {
+        let mut mesh = valid_tet_mesh();
+        mesh.backend.tet_exact_quality_unrepaired_total_count = 1;
+        mesh.backend
+            .tet_exact_quality_unrepaired_general_cavity_count = 1;
+
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                require_no_unrepaired_exact_quality: true,
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("strict recovery policy should reject unclassified cavity evidence");
+
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::UnrepairedExactQualityPresent {
+                total_count: 1,
+                general_cavity_count: 1,
+                boundary_adjacent_count: 0,
+                interior_seed_count: 0,
+                edge_star_count: 0,
+            }
         );
     }
 
