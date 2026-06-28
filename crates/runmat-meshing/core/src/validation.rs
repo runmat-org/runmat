@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     artifact::{AnalysisMeshArtifact, ANALYSIS_MESH_SCHEMA_VERSION},
@@ -10,6 +10,7 @@ use crate::{
 pub struct AnalysisMeshValidationOptions {
     pub quality: QualityThresholds,
     pub max_volume_element_count: Option<usize>,
+    pub max_volume_component_count: Option<usize>,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -27,6 +28,7 @@ impl Default for AnalysisMeshValidationOptions {
         Self {
             quality: QualityThresholds::default(),
             max_volume_element_count: None,
+            max_volume_component_count: None,
             expected_bounds_m: None,
             min_bounds_coverage_ratio: 0.90,
             expected_volume_m3: None,
@@ -122,6 +124,10 @@ pub enum AnalysisMeshValidationError {
     ElementBudgetExceeded {
         element_count: usize,
         max_element_count: usize,
+    },
+    VolumeComponentCountExceeded {
+        component_count: usize,
+        max_component_count: usize,
     },
     BoundsCoverageFailed {
         axis: usize,
@@ -342,6 +348,7 @@ pub fn validate_analysis_mesh_with_options(
 
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
+    validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_bounds_coverage(
         mesh,
         options.expected_bounds_m,
@@ -364,6 +371,23 @@ pub fn validate_analysis_mesh_with_options(
         options.min_boundary_edge_recovery_ratio,
     )?;
     validate_quality(mesh, options.quality)
+}
+
+fn validate_volume_component_count(
+    mesh: &AnalysisMeshArtifact,
+    max_component_count: Option<usize>,
+) -> Result<(), AnalysisMeshValidationError> {
+    let Some(max_component_count) = max_component_count else {
+        return Ok(());
+    };
+    let component_count = volume_component_count(mesh);
+    if component_count > max_component_count {
+        return Err(AnalysisMeshValidationError::VolumeComponentCountExceeded {
+            component_count,
+            max_component_count,
+        });
+    }
+    Ok(())
 }
 
 fn validate_quality(
@@ -634,6 +658,65 @@ fn boundary_face_edges(mesh: &AnalysisMeshArtifact) -> BTreeSet<[u32; 2]> {
     edges
 }
 
+pub fn volume_component_count(mesh: &AnalysisMeshArtifact) -> usize {
+    if mesh.volume_elements.is_empty() {
+        return 0;
+    }
+    let mut face_to_elements = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for (element_index, element) in mesh.volume_elements.iter().enumerate() {
+        if element.kind != VolumeElementKind::Tet4 || element.node_ids.len() != 4 {
+            continue;
+        }
+        for face in tet_element_faces(element.node_ids.as_slice()) {
+            face_to_elements
+                .entry(face)
+                .or_default()
+                .push(element_index);
+        }
+    }
+    let mut adjacency = vec![Vec::<usize>::new(); mesh.volume_elements.len()];
+    for element_indices in face_to_elements.values() {
+        for left_position in 0..element_indices.len() {
+            for right_position in (left_position + 1)..element_indices.len() {
+                let left = element_indices[left_position];
+                let right = element_indices[right_position];
+                adjacency[left].push(right);
+                adjacency[right].push(left);
+            }
+        }
+    }
+
+    let mut visited = vec![false; mesh.volume_elements.len()];
+    let mut component_count = 0_usize;
+    for start in 0..mesh.volume_elements.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        component_count += 1;
+        let mut stack = vec![start];
+        while let Some(current) = stack.pop() {
+            for neighbor in &adjacency[current] {
+                if visited[*neighbor] {
+                    continue;
+                }
+                visited[*neighbor] = true;
+                stack.push(*neighbor);
+            }
+        }
+    }
+    component_count
+}
+
+fn tet_element_faces(node_ids: &[u32]) -> [[u32; 3]; 4] {
+    [
+        sorted_node_face([node_ids[0], node_ids[1], node_ids[2]]),
+        sorted_node_face([node_ids[0], node_ids[1], node_ids[3]]),
+        sorted_node_face([node_ids[0], node_ids[2], node_ids[3]]),
+        sorted_node_face([node_ids[1], node_ids[2], node_ids[3]]),
+    ]
+}
+
 fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
     mesh.volume_elements
         .iter()
@@ -709,6 +792,11 @@ fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
     } else {
         [right, left]
     }
+}
+
+fn sorted_node_face(mut node_ids: [u32; 3]) -> [u32; 3] {
+    node_ids.sort_unstable();
+    node_ids
 }
 
 #[cfg(test)]
@@ -811,6 +899,84 @@ mod tests {
             AnalysisMeshValidationError::ElementBudgetExceeded {
                 element_count: 1,
                 max_element_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn accepts_face_connected_volume_components_within_budget() {
+        let mut mesh = valid_tet_mesh();
+        mesh.nodes.push(AnalysisMeshNode {
+            node_id: 5,
+            coordinates_m: [0.0, 0.0, -1.0],
+            provenance: Vec::new(),
+        });
+        mesh.volume_elements.push(AnalysisVolumeElement {
+            element_id: "e2".to_string(),
+            kind: VolumeElementKind::Tet4,
+            node_ids: vec![1, 3, 2, 5],
+            material_region_id: "mat_region".to_string(),
+            provenance: Vec::new(),
+        });
+
+        assert_eq!(volume_component_count(&mesh), 1);
+        validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                max_volume_component_count: Some(1),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect("face-connected tets should remain one volume component");
+    }
+
+    #[test]
+    fn rejects_unintended_isolated_volume_components() {
+        let mut mesh = valid_tet_mesh();
+        mesh.nodes.extend([
+            AnalysisMeshNode {
+                node_id: 5,
+                coordinates_m: [10.0, 0.0, 0.0],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 6,
+                coordinates_m: [11.0, 0.0, 0.0],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 7,
+                coordinates_m: [10.0, 1.0, 0.0],
+                provenance: Vec::new(),
+            },
+            AnalysisMeshNode {
+                node_id: 8,
+                coordinates_m: [10.0, 0.0, 1.0],
+                provenance: Vec::new(),
+            },
+        ]);
+        mesh.volume_elements.push(AnalysisVolumeElement {
+            element_id: "e2".to_string(),
+            kind: VolumeElementKind::Tet4,
+            node_ids: vec![5, 6, 7, 8],
+            material_region_id: "mat_region".to_string(),
+            provenance: Vec::new(),
+        });
+
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                max_volume_component_count: Some(1),
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("isolated volume component should fail");
+
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::VolumeComponentCountExceeded {
+                component_count: 2,
+                max_component_count: 1,
             }
         );
     }

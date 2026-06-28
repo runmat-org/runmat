@@ -101,8 +101,8 @@ pub use tet_candidate::{
 pub use tolerance::MeshingTolerance;
 pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
-    validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationError,
-    AnalysisMeshValidationOptions,
+    validate_analysis_mesh, validate_analysis_mesh_with_options, volume_component_count,
+    AnalysisMeshValidationError, AnalysisMeshValidationOptions,
 };
 pub use volume::{
     generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,

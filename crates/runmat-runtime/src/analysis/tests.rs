@@ -2303,12 +2303,24 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
         payload["mesh"]["backend"]["tet_recovered_component_ratio"].as_f64(),
         Some(1.0)
     );
+    assert_eq!(
+        payload["mesh"]["backend"]["volume_candidate_count"].as_u64(),
+        Some(1)
+    );
     let evidence_payload: serde_json::Value =
         serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
             .expect("parse mesh evidence artifact");
     assert_eq!(
         evidence_payload["mesh_evidence"]["backend"]["backend"].as_str(),
         Some("production")
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["volume_component_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["max_volume_component_count"].as_u64(),
+        Some(1)
     );
     assert_eq!(
         evidence_payload["mesh_evidence"]["validation"]["boundary_recovery"]
@@ -2354,6 +2366,7 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     );
     assert_eq!(options.min_bounds_coverage_ratio, 0.95);
     assert_eq!(options.max_volume_element_count, Some(42_000));
+    assert_eq!(options.max_volume_component_count, None);
     assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
     assert_eq!(
         options.quality,

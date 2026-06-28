@@ -13618,6 +13618,8 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     let mut validation = analysis_mesh_validation_options_for_study(spec, options);
     if mesh.backend.backend != "production" {
         validation.min_boundary_edge_recovery_ratio = 0.0;
+    } else if mesh.backend.volume_candidate_count > 0 {
+        validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
     }
     validation
 }

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     artifact::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
-    validation::AnalysisMeshValidationOptions,
+    validation::{volume_component_count, AnalysisMeshValidationOptions},
 };
 
 pub const MESH_EVIDENCE_SCHEMA_VERSION: &str = "mesh-evidence/v1";
@@ -102,6 +102,10 @@ pub struct MeshValidationEvidence {
     pub volume_element_count: usize,
     #[serde(default)]
     pub max_volume_element_count: Option<usize>,
+    #[serde(default)]
+    pub volume_component_count: usize,
+    #[serde(default)]
+    pub max_volume_component_count: Option<usize>,
     pub expected_bounds_m: Option<[[f64; 3]; 2]>,
     pub min_bounds_coverage_ratio: f64,
     pub expected_volume_m3: Option<f64>,
@@ -302,6 +306,8 @@ fn validation_evidence(
         quality: validation.quality,
         volume_element_count: mesh.volume_elements.len(),
         max_volume_element_count: validation.max_volume_element_count,
+        volume_component_count: volume_component_count(mesh),
+        max_volume_component_count: validation.max_volume_component_count,
         expected_bounds_m: validation.expected_bounds_m,
         min_bounds_coverage_ratio: validation.min_bounds_coverage_ratio,
         expected_volume_m3: validation.expected_volume_m3,
@@ -543,6 +549,7 @@ mod tests {
 
         let validation = AnalysisMeshValidationOptions {
             max_volume_element_count: Some(7),
+            max_volume_component_count: Some(1),
             ..AnalysisMeshValidationOptions::default()
         };
         let evidence = build_mesh_evidence_artifact(&mesh, &validation);
@@ -558,6 +565,8 @@ mod tests {
         assert_eq!(evidence.topology.node_count, 4);
         assert_eq!(evidence.validation.volume_element_count, 1);
         assert_eq!(evidence.validation.max_volume_element_count, Some(7));
+        assert_eq!(evidence.validation.volume_component_count, 1);
+        assert_eq!(evidence.validation.max_volume_component_count, Some(1));
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),
