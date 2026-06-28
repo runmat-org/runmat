@@ -491,7 +491,10 @@ mod tests {
         );
         assert_eq!(evidence.quality.min_exact_scaled_jacobian, 0.45);
         assert_eq!(
-            evidence.quality.exact_scaled_jacobian_bins.get("0_35_to_0_65"),
+            evidence
+                .quality
+                .exact_scaled_jacobian_bins
+                .get("0_35_to_0_65"),
             Some(&1)
         );
         assert_eq!(

@@ -19,7 +19,7 @@ use crate::{
     options::{MeshTargetSize, VolumeMeshingOptions},
     predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
-    quality::{AnalysisMeshQualityReport, ElementQuality},
+    quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::MeshSizingField,
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
@@ -179,6 +179,7 @@ fn tet_candidate_options_for_mesh(
     topology: &SourceTopologyModel,
     options: &VolumeMeshingOptions,
 ) -> TetCandidateOptions {
+    let quality = QualityThresholds::default();
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
         max_interior_seed_points: options.max_elements.max(1).min(128),
@@ -192,12 +193,13 @@ fn tet_candidate_options_for_mesh(
         },
         max_radius_edge_ratio: 2.5,
         sizing_compliance_tolerance: 0.35,
+        min_scaled_jacobian: quality.min_scaled_jacobian,
         max_optimization_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
             _ => 2,
         },
         smoothing_relaxation: 0.30,
-        sliver_aspect_ratio: 40.0,
+        sliver_aspect_ratio: 1.0 / quality.min_scaled_jacobian,
         ..TetCandidateOptions::default()
     }
 }
@@ -461,6 +463,14 @@ fn production_backend_summary(
         tet_refinement_point_count: preparation.tet_candidates.recovery.refinement_point_count,
         tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
         tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
+        tet_min_exact_scaled_jacobian: preparation
+            .tet_candidates
+            .recovery
+            .min_exact_scaled_jacobian,
+        tet_exact_scaled_jacobian_below_threshold_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_scaled_jacobian_below_threshold_count,
         tet_optimization_pass_count: preparation.tet_candidates.recovery.optimization_pass_count,
         tet_smoothed_point_count: preparation.tet_candidates.recovery.smoothed_point_count,
         tet_sliver_candidate_count: preparation.tet_candidates.recovery.sliver_candidate_count,
@@ -818,17 +828,30 @@ mod tests {
         assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
         assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
         assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
+        assert!(mesh.backend.tet_min_exact_scaled_jacobian.is_finite());
+        assert_eq!(
+            mesh.backend.tet_min_exact_scaled_jacobian,
+            mesh.quality.min_exact_scaled_jacobian
+        );
+        assert_eq!(
+            mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
+            mesh.quality
+                .elements
+                .iter()
+                .filter(|element| element.exact_scaled_jacobian
+                    < QualityThresholds::default().min_scaled_jacobian)
+                .count()
+        );
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
         );
         assert!(mesh.quality.min_exact_scaled_jacobian.is_finite());
-        assert!(
-            mesh.quality
-                .elements
-                .iter()
-                .all(|element| element.exact_scaled_jacobian.is_finite())
-        );
+        assert!(mesh
+            .quality
+            .elements
+            .iter()
+            .all(|element| element.exact_scaled_jacobian.is_finite()));
         assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
         assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
         assert_eq!(

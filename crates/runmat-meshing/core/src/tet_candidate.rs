@@ -27,6 +27,7 @@ pub struct TetCandidateOptions {
     pub max_refinement_passes: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_compliance_tolerance: f64,
+    pub min_scaled_jacobian: f64,
     pub max_quality_recovery_seed_candidates: usize,
     pub max_optimization_passes: usize,
     pub smoothing_relaxation: f64,
@@ -47,6 +48,7 @@ impl Default for TetCandidateOptions {
             max_refinement_passes: 0,
             max_radius_edge_ratio: 3.0,
             sizing_compliance_tolerance: 0.25,
+            min_scaled_jacobian: 0.15,
             max_quality_recovery_seed_candidates: 16,
             max_optimization_passes: 0,
             smoothing_relaxation: 0.35,
@@ -101,6 +103,8 @@ pub struct TetRecoveryReport {
     pub refinement_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
+    pub min_exact_scaled_jacobian: f64,
+    pub exact_scaled_jacobian_below_threshold_count: usize,
     pub optimization_pass_count: usize,
     pub smoothed_point_count: usize,
     pub sliver_candidate_count: usize,
@@ -300,7 +304,7 @@ pub fn form_tet_candidates(
         .iter()
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
-    let max_radius_edge_ratio = max_tet_radius_edge_ratio(&nodes, &tets);
+    let quality_summary = tet_candidate_quality_summary(&nodes, &tets, options)?;
     let component_count = volume_candidates.components.len();
     Ok(TetCandidateSet {
         nodes,
@@ -319,8 +323,11 @@ pub fn form_tet_candidates(
             max_aspect_ratio,
             refinement_pass_count,
             refinement_point_count,
-            max_radius_edge_ratio,
+            max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
+            min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
+            exact_scaled_jacobian_below_threshold_count: quality_summary
+                .exact_scaled_jacobian_below_threshold_count,
             optimization_pass_count,
             smoothed_point_count,
             sliver_candidate_count,
@@ -343,6 +350,8 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options.max_radius_edge_ratio <= 0.0
         || !options.sizing_compliance_tolerance.is_finite()
         || options.sizing_compliance_tolerance < 0.0
+        || !options.min_scaled_jacobian.is_finite()
+        || options.min_scaled_jacobian < 0.0
         || !options.smoothing_relaxation.is_finite()
         || !(0.0..=1.0).contains(&options.smoothing_relaxation)
         || !options.sliver_aspect_ratio.is_finite()
@@ -1510,16 +1519,42 @@ fn smoothed_seed_points(
     Ok(proposed)
 }
 
-fn max_tet_radius_edge_ratio(nodes: &[TetCandidateNode], tets: &[TetCandidate]) -> f64 {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TetCandidateQualitySummary {
+    max_radius_edge_ratio: f64,
+    min_exact_scaled_jacobian: f64,
+    exact_scaled_jacobian_below_threshold_count: usize,
+}
+
+fn tet_candidate_quality_summary(
+    nodes: &[TetCandidateNode],
+    tets: &[TetCandidate],
+    options: TetCandidateOptions,
+) -> Result<TetCandidateQualitySummary, TetCandidateError> {
     let nodes = nodes
         .iter()
         .map(|node| (node.node_id, node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    tets.iter()
-        .filter_map(|tet| candidate_tet_points(tet, &nodes).ok())
-        .map(|points| tet_radius_edge_ratio(points, MeshingTolerance::default()))
-        .filter(|ratio| ratio.is_finite())
-        .fold(0.0_f64, f64::max)
+    let mut max_radius_edge_ratio = 0.0_f64;
+    let mut min_exact_scaled_jacobian = f64::INFINITY;
+    let mut exact_scaled_jacobian_below_threshold_count = 0_usize;
+    for tet in tets {
+        let points = candidate_tet_points(tet, &nodes)?;
+        let radius_edge_ratio = tet_radius_edge_ratio(points, MeshingTolerance::default());
+        if radius_edge_ratio.is_finite() {
+            max_radius_edge_ratio = max_radius_edge_ratio.max(radius_edge_ratio);
+        }
+        let exact_scaled_jacobian = tet_scaled_jacobian(points);
+        min_exact_scaled_jacobian = min_exact_scaled_jacobian.min(exact_scaled_jacobian);
+        if exact_scaled_jacobian < options.min_scaled_jacobian {
+            exact_scaled_jacobian_below_threshold_count += 1;
+        }
+    }
+    Ok(TetCandidateQualitySummary {
+        max_radius_edge_ratio,
+        min_exact_scaled_jacobian,
+        exact_scaled_jacobian_below_threshold_count,
+    })
 }
 
 fn tet_radius_edge_ratio(points: [[f64; 3]; 4], tolerance: MeshingTolerance) -> f64 {
