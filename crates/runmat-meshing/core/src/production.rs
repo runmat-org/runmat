@@ -835,6 +835,12 @@ fn production_mesh_sizing(
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        let dropped_requested_sample_indices = preparation
+            .tet_candidates
+            .dropped_requested_refinement_sample_indices
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
         mesh_sizing.applied_samples.clear();
         mesh_sizing.rejected_samples.clear();
         for (sample_index, sample) in sizing.samples.iter().enumerate() {
@@ -881,6 +887,8 @@ fn production_mesh_sizing(
             );
             let detail = if inserted_breakpoint_count > 0 {
                 "production_requested_tet_seed_accepted"
+            } else if dropped_requested_sample_indices.contains(&sample_index) {
+                "production_requested_tet_seed_removed_by_repair"
             } else {
                 "production_requested_tet_seed_rejected_by_recovery"
             };
@@ -994,6 +1002,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .requested_refinement_point_count,
+        tet_accepted_requested_refinement_candidate_count: preparation
+            .tet_candidates
+            .recovery
+            .accepted_requested_refinement_candidate_count,
         tet_accepted_requested_refinement_point_count: preparation
             .tet_candidates
             .recovery
@@ -1002,6 +1014,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .accepted_requested_refinement_surrogate_point_count,
+        tet_dropped_requested_refinement_point_count: preparation
+            .tet_candidates
+            .recovery
+            .dropped_requested_refinement_point_count,
         tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
         tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
         tet_min_exact_scaled_jacobian: preparation

@@ -131,11 +131,15 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub requested_tet_refinement_point_count: usize,
     #[serde(default)]
+    pub accepted_requested_tet_refinement_candidate_count: usize,
+    #[serde(default)]
     pub accepted_requested_tet_refinement_point_count: usize,
     #[serde(default)]
     pub accepted_requested_tet_refinement_surrogate_point_count: usize,
     #[serde(default)]
     pub accepted_requested_tet_refinement_exact_point_count: usize,
+    #[serde(default)]
+    pub dropped_requested_tet_refinement_point_count: usize,
     #[serde(default)]
     pub requested_tet_refinement_acceptance_ratio: Option<f64>,
     #[serde(default)]
@@ -495,6 +499,9 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
 
     let accepted_requested_tet_refinement_point_count =
         mesh.backend.tet_accepted_requested_refinement_point_count;
+    let accepted_requested_tet_refinement_candidate_count = mesh
+        .backend
+        .tet_accepted_requested_refinement_candidate_count;
     let accepted_requested_tet_refinement_surrogate_point_count = mesh
         .backend
         .tet_accepted_requested_refinement_surrogate_point_count;
@@ -519,11 +526,15 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         inserted_breakpoint_by_reason,
         uninserted_sample_by_reason,
         requested_tet_refinement_point_count: mesh.backend.tet_requested_refinement_point_count,
+        accepted_requested_tet_refinement_candidate_count,
         accepted_requested_tet_refinement_point_count,
         accepted_requested_tet_refinement_surrogate_point_count,
         accepted_requested_tet_refinement_exact_point_count:
             accepted_requested_tet_refinement_point_count
                 .saturating_sub(accepted_requested_tet_refinement_surrogate_point_count),
+        dropped_requested_tet_refinement_point_count: mesh
+            .backend
+            .tet_dropped_requested_refinement_point_count,
         requested_tet_refinement_acceptance_ratio: if mesh
             .backend
             .tet_requested_refinement_point_count
@@ -1081,9 +1092,11 @@ mod tests {
                 tet_candidate_volume_ratio: 0.99,
                 tet_refinement_pass_count: 2,
                 tet_refinement_point_count: 5,
-                tet_requested_refinement_point_count: 4,
+                tet_requested_refinement_point_count: 5,
+                tet_accepted_requested_refinement_candidate_count: 5,
                 tet_accepted_requested_refinement_point_count: 3,
                 tet_accepted_requested_refinement_surrogate_point_count: 2,
+                tet_dropped_requested_refinement_point_count: 2,
                 tet_optimization_pass_count: 1,
                 tet_smoothed_point_count: 2,
                 tet_sliver_candidate_count: 1,
@@ -1189,12 +1202,22 @@ mod tests {
             8
         );
         assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
-        assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 4);
+        assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 5);
+        assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_candidate_count,
+            5
+        );
         assert_eq!(
             evidence
                 .sizing
                 .accepted_requested_tet_refinement_point_count,
             3
+        );
+        assert_eq!(
+            evidence.sizing.dropped_requested_tet_refinement_point_count,
+            2
         );
         assert_eq!(
             evidence
@@ -1210,7 +1233,7 @@ mod tests {
         );
         assert_eq!(
             evidence.sizing.requested_tet_refinement_acceptance_ratio,
-            Some(0.75)
+            Some(0.6)
         );
         assert_eq!(
             evidence.sizing.requested_tet_refinement_surrogate_ratio,

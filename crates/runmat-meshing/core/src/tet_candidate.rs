@@ -97,6 +97,8 @@ pub struct TetCandidateSet {
     pub accepted_requested_refinement_points: Vec<[f64; 3]>,
     #[serde(default)]
     pub accepted_requested_refinement_sample_indices: Vec<usize>,
+    #[serde(default)]
+    pub dropped_requested_refinement_sample_indices: Vec<usize>,
     pub recovery: TetRecoveryReport,
     pub total_volume_m3: f64,
 }
@@ -114,9 +116,13 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub requested_refinement_point_count: usize,
     #[serde(default)]
+    pub accepted_requested_refinement_candidate_count: usize,
+    #[serde(default)]
     pub accepted_requested_refinement_point_count: usize,
     #[serde(default)]
     pub accepted_requested_refinement_surrogate_point_count: usize,
+    #[serde(default)]
+    pub dropped_requested_refinement_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
     pub min_exact_scaled_jacobian: f64,
@@ -206,6 +212,13 @@ impl std::fmt::Display for TetCandidateError {
 }
 
 impl std::error::Error for TetCandidateError {}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RetainedRequestedRefinement {
+    points: Vec<[f64; 3]>,
+    sample_indices: Vec<usize>,
+    dropped_sample_indices: Vec<usize>,
+}
 
 pub fn form_tet_candidates(
     surface: &SurfaceDiscretization,
@@ -395,19 +408,25 @@ pub fn form_tet_candidates(
         .iter()
         .map(|node| node.node_id)
         .collect::<BTreeSet<_>>();
-    let retained_requested_refinement = accepted_requested_refinement_seed_points
-        .into_iter()
-        .filter(|(node_id, _, _)| retained_node_ids.contains(node_id))
-        .collect::<Vec<_>>();
-    let accepted_requested_refinement_points = retained_requested_refinement
-        .iter()
-        .map(|(_, point, _)| *point)
-        .collect::<Vec<_>>();
-    let accepted_requested_refinement_sample_indices = retained_requested_refinement
-        .iter()
-        .map(|(_, _, requested_id)| *requested_id)
-        .collect::<Vec<_>>();
+    let accepted_requested_refinement_candidate_count =
+        accepted_requested_refinement_seed_points.len();
+    let retained_requested_refinement = retained_requested_refinement_points(
+        accepted_requested_refinement_seed_points,
+        &retained_node_ids,
+    );
+    let accepted_requested_refinement_points = retained_requested_refinement.points;
+    let accepted_requested_refinement_sample_indices = retained_requested_refinement.sample_indices;
+    let dropped_requested_refinement_sample_indices =
+        retained_requested_refinement.dropped_sample_indices;
     accepted_requested_refinement_point_count = accepted_requested_refinement_points.len();
+    accepted_requested_refinement_surrogate_point_count =
+        retained_requested_refinement_surrogate_count(
+            &accepted_requested_refinement_points,
+            &accepted_requested_refinement_sample_indices,
+            options,
+        );
+    let dropped_requested_refinement_point_count =
+        dropped_requested_refinement_sample_indices.len();
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
     let expected_volume_m3 = volume_candidates.total_volume_m3;
     let total_candidate_volume_ratio = if expected_volume_m3 > f64::EPSILON {
@@ -428,6 +447,7 @@ pub fn form_tet_candidates(
         interior_seed_points,
         accepted_requested_refinement_points,
         accepted_requested_refinement_sample_indices,
+        dropped_requested_refinement_sample_indices,
         recovery: TetRecoveryReport {
             component_count,
             insertion_component_count,
@@ -442,8 +462,10 @@ pub fn form_tet_candidates(
             refinement_pass_count,
             refinement_point_count,
             requested_refinement_point_count,
+            accepted_requested_refinement_candidate_count,
             accepted_requested_refinement_point_count,
             accepted_requested_refinement_surrogate_point_count,
+            dropped_requested_refinement_point_count,
             max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
             min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
@@ -485,6 +507,52 @@ pub fn form_tet_candidates(
         },
         total_volume_m3,
     })
+}
+
+fn retained_requested_refinement_points(
+    accepted_seed_points: Vec<(u32, [f64; 3], usize)>,
+    retained_node_ids: &BTreeSet<u32>,
+) -> RetainedRequestedRefinement {
+    let accepted_sample_ids = accepted_seed_points
+        .iter()
+        .map(|(_, _, requested_id)| *requested_id)
+        .collect::<BTreeSet<_>>();
+    let retained = accepted_seed_points
+        .into_iter()
+        .filter(|(node_id, _, _)| retained_node_ids.contains(node_id))
+        .collect::<Vec<_>>();
+    let retained_sample_ids = retained
+        .iter()
+        .map(|(_, _, requested_id)| *requested_id)
+        .collect::<BTreeSet<_>>();
+    let dropped_sample_indices = accepted_sample_ids
+        .into_iter()
+        .filter(|requested_id| !retained_sample_ids.contains(requested_id))
+        .collect::<Vec<_>>();
+    RetainedRequestedRefinement {
+        points: retained.iter().map(|(_, point, _)| *point).collect(),
+        sample_indices: retained
+            .iter()
+            .map(|(_, _, requested_id)| *requested_id)
+            .collect(),
+        dropped_sample_indices,
+    }
+}
+
+fn retained_requested_refinement_surrogate_count(
+    accepted_points: &[[f64; 3]],
+    accepted_sample_indices: &[usize],
+    options: TetCandidateOptions,
+) -> usize {
+    accepted_points
+        .iter()
+        .zip(accepted_sample_indices)
+        .filter(|(point, requested_id)| {
+            **requested_id < options.requested_refinement_point_count
+                && distance_squared(**point, options.requested_refinement_points[**requested_id])
+                    > 1.0e-24
+        })
+        .count()
 }
 
 fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateError> {
@@ -5648,7 +5716,16 @@ mod tests {
             candidates.accepted_requested_refinement_sample_indices,
             vec![0]
         );
+        assert!(candidates
+            .dropped_requested_refinement_sample_indices
+            .is_empty());
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_candidate_count,
+            1
+        );
         assert_eq!(
             candidates
                 .recovery
@@ -5704,6 +5781,9 @@ mod tests {
             candidates.accepted_requested_refinement_sample_indices,
             vec![0]
         );
+        assert!(candidates
+            .dropped_requested_refinement_sample_indices
+            .is_empty());
         assert!(
             distance_squared(
                 candidates.accepted_requested_refinement_points[0],
@@ -5719,6 +5799,12 @@ mod tests {
                 candidates.accepted_requested_refinement_points[0]
             ) <= 1.0e-24));
         assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_candidate_count,
+            1
+        );
         assert_eq!(
             candidates
                 .recovery
@@ -5768,6 +5854,12 @@ mod tests {
         assert_eq!(
             candidates
                 .recovery
+                .accepted_requested_refinement_candidate_count,
+            1
+        );
+        assert_eq!(
+            candidates
+                .recovery
                 .accepted_requested_refinement_point_count,
             1
         );
@@ -5784,6 +5876,9 @@ mod tests {
             candidates.accepted_requested_refinement_sample_indices,
             vec![0]
         );
+        assert!(candidates
+            .dropped_requested_refinement_sample_indices
+            .is_empty());
         assert!(
             distance_squared(
                 candidates.accepted_requested_refinement_points[0],
@@ -5806,6 +5901,22 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn retained_requested_refinement_tracks_markers_removed_by_repair() {
+        let retained = retained_requested_refinement_points(
+            vec![
+                (10, [0.1, 0.1, 0.1], 0),
+                (11, [0.2, 0.2, 0.2], 1),
+                (12, [0.3, 0.3, 0.3], 2),
+            ],
+            &BTreeSet::from([10, 12]),
+        );
+
+        assert_eq!(retained.points, vec![[0.1, 0.1, 0.1], [0.3, 0.3, 0.3]]);
+        assert_eq!(retained.sample_indices, vec![0, 2]);
+        assert_eq!(retained.dropped_sample_indices, vec![1]);
     }
 
     #[test]
@@ -6215,6 +6326,12 @@ mod tests {
         assert_eq!(
             candidates
                 .recovery
+                .accepted_requested_refinement_candidate_count,
+            1
+        );
+        assert_eq!(
+            candidates
+                .recovery
                 .accepted_requested_refinement_point_count,
             1
         );
@@ -6222,6 +6339,9 @@ mod tests {
             candidates.accepted_requested_refinement_sample_indices,
             vec![0]
         );
+        assert!(candidates
+            .dropped_requested_refinement_sample_indices
+            .is_empty());
         assert!(candidates
             .interior_seed_points
             .iter()
