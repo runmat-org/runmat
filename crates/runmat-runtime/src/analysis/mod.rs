@@ -13607,6 +13607,7 @@ fn analysis_mesh_validation_options_for_study(
         min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
         required_boundary_region_ids: required_boundary_region_ids_for_study(spec),
+        required_material_region_ids: required_material_region_ids_for_study(spec),
         ..AnalysisMeshValidationOptions::default()
     }
 }
@@ -13667,6 +13668,20 @@ fn required_boundary_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<Strin
                 .iter()
                 .map(|condition| condition.region_id.clone()),
         )
+        .collect::<Vec<_>>();
+    region_ids.sort();
+    region_ids.dedup();
+    region_ids
+}
+
+fn required_material_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<String> {
+    let Some(model) = spec.model.as_ref() else {
+        return Vec::new();
+    };
+    let mut region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.clone())
         .collect::<Vec<_>>();
     region_ids.sort();
     region_ids.dedup();

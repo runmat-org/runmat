@@ -2341,7 +2341,22 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
     spec.geometry.units = UnitSystem::Millimeter;
-    spec.model = Some(sample_model());
+    let mut model = sample_model();
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "body".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "body".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    spec.model = Some(model);
 
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     mesh_options.max_elements = 42_000;
@@ -2364,6 +2379,10 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     assert_eq!(
         options.required_boundary_region_ids,
         vec!["root".to_string(), "tip".to_string()]
+    );
+    assert_eq!(
+        options.required_material_region_ids,
+        vec!["body".to_string()]
     );
     assert_eq!(options.min_bounds_coverage_ratio, 0.95);
     assert_eq!(options.max_volume_element_count, Some(42_000));
