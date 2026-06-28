@@ -9308,6 +9308,12 @@ pub fn analysis_run_linear_static_with_options(
         ANALYSIS_RUN_OP_VERSION,
         &context,
     )?;
+    let analysis_mesh_validation_evidence = resolve_analysis_mesh_validation_evidence(
+        options.analysis_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        &context,
+    )?;
     let run = run_linear_static_with_options(
         model,
         backend,
@@ -9396,6 +9402,8 @@ pub fn analysis_run_linear_static_with_options(
     let field_topology_reasons =
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
     let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
+    let mesh_validation_reasons =
+        mesh_validation_evidence_quality_reasons(analysis_mesh_validation_evidence.as_ref());
     let legacy_surrogate_reasons =
         legacy_surrogate_mesh_basis_reasons(model, analysis_mesh.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
@@ -9409,7 +9417,7 @@ pub fn analysis_run_linear_static_with_options(
                 | QualityReasonCode::SolidMeshRenderTopologyIncomplete
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
         )
-    });
+    }) || !mesh_validation_reasons.is_empty();
     let result_quality = if run.fields_are_empty() {
         QualityGate::Fail
     } else if solid_mesh_has_failure {
@@ -9434,6 +9442,7 @@ pub fn analysis_run_linear_static_with_options(
         });
     }
     quality_reasons.extend(solid_mesh_reasons);
+    quality_reasons.extend(mesh_validation_reasons);
     quality_reasons.extend(field_topology_reasons);
     quality_reasons.extend(legacy_surrogate_reasons);
     if solver_convergence == QualityGate::Warn {
@@ -9558,6 +9567,31 @@ fn field_topology_quality_reasons(
             })
         })
         .collect()
+}
+
+fn mesh_validation_evidence_quality_reasons(
+    validation: Option<&runmat_meshing_core::MeshValidationEvidence>,
+) -> Vec<QualityReason> {
+    let Some(validation) = validation else {
+        return Vec::new();
+    };
+    if validation.solve_ready {
+        return Vec::new();
+    }
+    let code = validation
+        .validation_error_code
+        .as_deref()
+        .unwrap_or("unknown");
+    let message = validation
+        .validation_error_message
+        .as_deref()
+        .unwrap_or("mesh evidence validation did not include a message");
+    vec![QualityReason {
+        code: QualityReasonCode::SolidMeshValidationEvidenceFailed,
+        detail: format!(
+            "analysis mesh evidence is not solve-ready: validation_error_code={code}; {message}"
+        ),
+    }]
 }
 
 fn solid_mesh_quality_reasons(
@@ -15462,6 +15496,126 @@ fn resolve_analysis_mesh_artifact(
         )
     })?;
     Ok(Some(mesh))
+}
+
+fn resolve_analysis_mesh_validation_evidence(
+    analysis_mesh_artifact_path: Option<&str>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<Option<runmat_meshing_core::MeshValidationEvidence>, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(None);
+    };
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let Some(evidence_path) = payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let evidence_bytes = fs_read(evidence_path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                (
+                    "analysis_mesh_evidence_artifact_path".to_string(),
+                    evidence_path.to_string(),
+                ),
+            ]),
+        )
+    })?;
+    let evidence_payload =
+        serde_json::from_slice::<serde_json::Value>(&evidence_bytes).map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to parse analysis mesh evidence artifact: {err}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "analysis_mesh_evidence_artifact_path".to_string(),
+                        evidence_path.to_string(),
+                    ),
+                ]),
+            )
+        })?;
+    let Some(validation_value) = evidence_payload
+        .get("mesh_evidence")
+        .and_then(|evidence| evidence.get("validation"))
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    serde_json::from_value::<runmat_meshing_core::MeshValidationEvidence>(validation_value)
+        .map(Some)
+        .map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh evidence validation payload: {err}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "analysis_mesh_evidence_artifact_path".to_string(),
+                        evidence_path.to_string(),
+                    ),
+                ]),
+            )
+        })
 }
 
 fn study_evidence_root() -> PathBuf {
