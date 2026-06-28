@@ -81,7 +81,7 @@ pub use source_topology::{
     extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
     SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
 };
-pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry};
+pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex};
 pub use surface::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves, discretize_topology_surfaces,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,

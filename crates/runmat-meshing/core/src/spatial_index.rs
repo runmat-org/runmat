@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::predicate::{distance_squared, Point3, Triangle3};
@@ -139,6 +141,149 @@ impl<T> LinearSpatialIndex<T> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UniformGridSpatialIndex<T> {
+    entries: Vec<SpatialEntry<T>>,
+    bounds: Aabb3,
+    dimensions: [usize; 3],
+    cells: BTreeMap<[usize; 3], Vec<usize>>,
+}
+
+impl<T> UniformGridSpatialIndex<T> {
+    pub fn from_entries(entries: Vec<SpatialEntry<T>>) -> Self {
+        if entries.is_empty() {
+            return Self {
+                entries,
+                bounds: Aabb3 {
+                    min_m: [0.0, 0.0, 0.0],
+                    max_m: [0.0, 0.0, 0.0],
+                },
+                dimensions: [1, 1, 1],
+                cells: BTreeMap::new(),
+            };
+        }
+        let bounds = entries
+            .iter()
+            .map(|entry| entry.bounds)
+            .reduce(|left, right| Aabb3 {
+                min_m: [
+                    left.min_m[0].min(right.min_m[0]),
+                    left.min_m[1].min(right.min_m[1]),
+                    left.min_m[2].min(right.min_m[2]),
+                ],
+                max_m: [
+                    left.max_m[0].max(right.max_m[0]),
+                    left.max_m[1].max(right.max_m[1]),
+                    left.max_m[2].max(right.max_m[2]),
+                ],
+            })
+            .unwrap();
+        let dimensions = grid_dimensions(bounds, entries.len());
+        let mut cells = BTreeMap::<[usize; 3], Vec<usize>>::new();
+        for (entry_index, entry) in entries.iter().enumerate() {
+            let min_cell = cell_for_point(bounds, dimensions, entry.bounds.min_m);
+            let max_cell = cell_for_point(bounds, dimensions, entry.bounds.max_m);
+            for x in min_cell[0]..=max_cell[0] {
+                for y in min_cell[1]..=max_cell[1] {
+                    for z in min_cell[2]..=max_cell[2] {
+                        cells.entry([x, y, z]).or_default().push(entry_index);
+                    }
+                }
+            }
+        }
+        Self {
+            entries,
+            bounds,
+            dimensions,
+            cells,
+        }
+    }
+
+    pub fn entries(&self) -> &[SpatialEntry<T>] {
+        &self.entries
+    }
+
+    pub fn bounds(&self) -> Aabb3 {
+        self.bounds
+    }
+
+    pub fn query_point(&self, point: Point3) -> Vec<&SpatialEntry<T>> {
+        if self.entries.is_empty() || !self.bounds.contains_point(point) {
+            return Vec::new();
+        }
+        let cell = cell_for_point(self.bounds, self.dimensions, point);
+        self.cells
+            .get(&cell)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| self.entries.get(*index))
+            .filter(|entry| entry.bounds.contains_point(point))
+            .collect()
+    }
+
+    pub fn query_bounds(&self, bounds: Aabb3) -> Vec<&SpatialEntry<T>> {
+        if self.entries.is_empty() || !self.bounds.intersects(bounds) {
+            return Vec::new();
+        }
+        let min_cell = cell_for_point(self.bounds, self.dimensions, bounds.min_m);
+        let max_cell = cell_for_point(self.bounds, self.dimensions, bounds.max_m);
+        let mut entry_indices = BTreeSet::<usize>::new();
+        for x in min_cell[0]..=max_cell[0] {
+            for y in min_cell[1]..=max_cell[1] {
+                for z in min_cell[2]..=max_cell[2] {
+                    if let Some(indices) = self.cells.get(&[x, y, z]) {
+                        entry_indices.extend(indices.iter().copied());
+                    }
+                }
+            }
+        }
+        entry_indices
+            .into_iter()
+            .filter_map(|index| self.entries.get(index))
+            .filter(|entry| entry.bounds.intersects(bounds))
+            .collect()
+    }
+
+    pub fn nearest_by_center(&self, point: Point3) -> Option<&SpatialEntry<T>> {
+        self.entries.iter().min_by(|left, right| {
+            distance_squared(left.bounds.center_m(), point)
+                .total_cmp(&distance_squared(right.bounds.center_m(), point))
+        })
+    }
+}
+
+fn grid_dimensions(bounds: Aabb3, entry_count: usize) -> [usize; 3] {
+    let target_axis_count = ((entry_count as f64).cbrt().ceil() as usize).clamp(1, 64);
+    let spans = [
+        bounds.max_m[0] - bounds.min_m[0],
+        bounds.max_m[1] - bounds.min_m[1],
+        bounds.max_m[2] - bounds.min_m[2],
+    ];
+    let max_span = spans.into_iter().fold(0.0_f64, f64::max);
+    if max_span <= f64::EPSILON {
+        return [1, 1, 1];
+    }
+    spans.map(|span| {
+        ((span / max_span) * target_axis_count as f64)
+            .ceil()
+            .max(1.0) as usize
+    })
+}
+
+fn cell_for_point(bounds: Aabb3, dimensions: [usize; 3], point: Point3) -> [usize; 3] {
+    let mut cell = [0_usize; 3];
+    for axis in 0..3 {
+        let span = bounds.max_m[axis] - bounds.min_m[axis];
+        if span <= f64::EPSILON || dimensions[axis] <= 1 {
+            cell[axis] = 0;
+            continue;
+        }
+        let t = ((point[axis] - bounds.min_m[axis]) / span).clamp(0.0, 1.0);
+        cell[axis] = ((t * dimensions[axis] as f64).floor() as usize).min(dimensions[axis] - 1);
+    }
+    cell
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +323,33 @@ mod tests {
                 .map(|entry| entry.payload),
             Some("right")
         );
+    }
+
+    #[test]
+    fn uniform_grid_spatial_index_filters_point_and_bounds_queries() {
+        let entries = vec![
+            SpatialEntry {
+                bounds: Aabb3::from_points(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]).unwrap(),
+                payload: "left",
+            },
+            SpatialEntry {
+                bounds: Aabb3::from_points(&[[2.0, 0.0, 0.0], [3.0, 1.0, 1.0]]).unwrap(),
+                payload: "right",
+            },
+        ];
+        let index = UniformGridSpatialIndex::from_entries(entries);
+
+        let point_hits = index
+            .query_point([0.5, 0.5, 0.5])
+            .into_iter()
+            .map(|entry| entry.payload)
+            .collect::<Vec<_>>();
+        assert_eq!(point_hits, vec!["left"]);
+        let bounds_hits = index
+            .query_bounds(Aabb3::from_points(&[[2.5, 0.5, 0.5], [4.0, 0.6, 0.6]]).unwrap())
+            .into_iter()
+            .map(|entry| entry.payload)
+            .collect::<Vec<_>>();
+        assert_eq!(bounds_hits, vec!["right"]);
     }
 }

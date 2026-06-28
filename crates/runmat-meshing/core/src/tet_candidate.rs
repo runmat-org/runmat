@@ -8,7 +8,7 @@ use crate::{
         tet_centroid, tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
         tet_signed_volume, triangle_centroid, PointInClosedSurface, Triangle3,
     },
-    spatial_index::{Aabb3, LinearSpatialIndex},
+    spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
     tolerance::MeshingTolerance,
     volume_candidate::{VolumeCandidateComponent, VolumeCandidateSet},
@@ -1434,6 +1434,7 @@ fn contains_point(points: &[[f64; 3]], candidate: [f64; 3], tolerance: MeshingTo
 struct ComponentSurfaceClassifier {
     triangles_by_element_id: BTreeMap<u32, Triangle3>,
     triangle_index: LinearSpatialIndex<u32>,
+    grid_index: UniformGridSpatialIndex<u32>,
     tolerance: MeshingTolerance,
 }
 
@@ -1445,7 +1446,7 @@ impl ComponentSurfaceClassifier {
         tolerance: MeshingTolerance,
     ) -> Result<Self, TetCandidateError> {
         let mut triangles_by_element_id = BTreeMap::<u32, Triangle3>::new();
-        let mut triangle_index = LinearSpatialIndex::<u32>::new();
+        let mut entries = Vec::<SpatialEntry<u32>>::new();
         for element_id in &component.surface_element_ids {
             let element = surface_elements.get(element_id).ok_or(
                 TetCandidateError::MissingSurfaceElement {
@@ -1454,14 +1455,17 @@ impl ComponentSurfaceClassifier {
             )?;
             let triangle = surface_element_points(surface, element)?;
             triangles_by_element_id.insert(*element_id, triangle);
-            triangle_index.insert(
-                Aabb3::from_triangle(triangle).expanded(tolerance),
-                *element_id,
-            );
+            entries.push(SpatialEntry {
+                bounds: Aabb3::from_triangle(triangle).expanded(tolerance),
+                payload: *element_id,
+            });
         }
+        let triangle_index = LinearSpatialIndex::with_entries(entries.clone());
+        let grid_index = UniformGridSpatialIndex::from_entries(entries);
         Ok(Self {
             triangles_by_element_id,
             triangle_index,
+            grid_index,
             tolerance,
         })
     }
@@ -1500,7 +1504,7 @@ impl ComponentSurfaceClassifier {
     }
 
     fn point_is_on_boundary(&self, point: [f64; 3]) -> bool {
-        self.triangle_index.query_point(point).any(|entry| {
+        self.grid_index.query_point(point).into_iter().any(|entry| {
             self.triangles_by_element_id
                 .get(&entry.payload)
                 .is_some_and(|triangle| {
@@ -1511,10 +1515,8 @@ impl ComponentSurfaceClassifier {
 
     fn ray_has_odd_surface_intersections(&self, origin: [f64; 3], direction: [f64; 3]) -> bool {
         let mut intersections = Vec::<f64>::new();
-        for entry in self.triangle_index.entries() {
-            if !ray_can_intersect_bounds(origin, direction, entry.bounds, self.tolerance) {
-                continue;
-            }
+        let query_bounds = ray_query_bounds(origin, direction, self.grid_index.bounds());
+        for entry in self.grid_index.query_bounds(query_bounds) {
             let Some(triangle) = self.triangles_by_element_id.get(&entry.payload).copied() else {
                 continue;
             };
@@ -1532,28 +1534,19 @@ impl ComponentSurfaceClassifier {
     }
 }
 
-fn ray_can_intersect_bounds(
-    origin: [f64; 3],
-    direction: [f64; 3],
-    bounds: Aabb3,
-    tolerance: MeshingTolerance,
-) -> bool {
+fn ray_query_bounds(origin: [f64; 3], direction: [f64; 3], bounds: Aabb3) -> Aabb3 {
+    let mut query = bounds;
     for axis in 0..3 {
         if direction[axis].abs() <= f64::EPSILON {
-            if origin[axis] < bounds.min_m[axis] - tolerance.absolute_m
-                || origin[axis] > bounds.max_m[axis] + tolerance.absolute_m
-            {
-                return false;
-            }
+            query.min_m[axis] = origin[axis];
+            query.max_m[axis] = origin[axis];
         } else if direction[axis] > 0.0 {
-            if bounds.max_m[axis] < origin[axis] - tolerance.absolute_m {
-                return false;
-            }
-        } else if bounds.min_m[axis] > origin[axis] + tolerance.absolute_m {
-            return false;
+            query.min_m[axis] = origin[axis].max(bounds.min_m[axis]);
+        } else {
+            query.max_m[axis] = origin[axis].min(bounds.max_m[axis]);
         }
     }
-    true
+    query
 }
 
 fn surface_element_points(
