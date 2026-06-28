@@ -580,6 +580,42 @@ fn convergence_diagnostics_are_emitted() {
 }
 
 #[test]
+fn solid_continuum_requires_analysis_mesh_when_requested() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let err = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            require_analysis_mesh_for_solid: true,
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect_err("solid continuum solve should require an analysis mesh");
+
+    assert!(matches!(err, crate::FeaRunError::InvalidModel(_)));
+    assert!(err.to_string().contains("require an analysis mesh"));
+}
+
+#[test]
+fn explicit_beam_topology_does_not_require_analysis_mesh() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            require_analysis_mesh_for_solid: true,
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect("explicit beam topology should not require a solid analysis mesh");
+
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
+            && diag.message.contains("structural_beam_element_count=1")
+    }));
+}
+
+#[test]
 fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let result = crate::run_linear_static_with_options(

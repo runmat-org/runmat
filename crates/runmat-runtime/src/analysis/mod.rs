@@ -9319,6 +9319,7 @@ pub fn analysis_run_linear_static_with_options(
             ),
             analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
             analysis_mesh: analysis_mesh.clone(),
+            require_analysis_mesh_for_solid: options.analysis_mesh_artifact_path.is_some(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },

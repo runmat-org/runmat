@@ -544,6 +544,7 @@ pub struct LinearStaticSolveOptions {
     pub prep_context: Option<FeaPrepContext>,
     pub analysis_mesh_artifact_path: Option<String>,
     pub analysis_mesh: Option<AnalysisMeshArtifact>,
+    pub require_analysis_mesh_for_solid: bool,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -556,6 +557,7 @@ impl Default for LinearStaticSolveOptions {
             prep_context: None,
             analysis_mesh_artifact_path: None,
             analysis_mesh: None,
+            require_analysis_mesh_for_solid: false,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }

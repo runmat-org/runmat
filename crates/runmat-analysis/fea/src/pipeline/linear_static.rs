@@ -61,6 +61,15 @@ pub fn run_linear_static_with_options(
 
     let analysis_mesh_present = options.analysis_mesh.is_some();
     let prep_context_present = options.prep_context.is_some();
+    if options.require_analysis_mesh_for_solid
+        && !analysis_mesh_present
+        && !model_has_explicit_structural_elements(model)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
+                .to_string(),
+        ));
+    }
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
