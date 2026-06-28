@@ -2790,10 +2790,12 @@ fn interior_seed_node_relocation_points(
         return Ok(Vec::new());
     }
     let mut boundary_centroid = [0.0_f64; 3];
+    let mut min_boundary_distance = f64::INFINITY;
     for node_id in &boundary_nodes {
         let point = *node_points
             .get(node_id)
             .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?;
+        min_boundary_distance = min_boundary_distance.min(distance(current, point));
         for axis in 0..3 {
             boundary_centroid[axis] += point[axis];
         }
@@ -2815,6 +2817,27 @@ fn interior_seed_node_relocation_points(
                 current[1] * (1.0 - fraction) + target[1] * fraction,
                 current[2] * (1.0 - fraction) + target[2] * fraction,
             ]);
+        }
+    }
+    let local_radius = min_boundary_distance * 0.10;
+    if local_radius.is_finite() && local_radius > MeshingTolerance::default().absolute_m {
+        let directions = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for fraction in [0.5, 1.0] {
+            let radius = local_radius * fraction;
+            for direction in directions {
+                points.push([
+                    current[0] + direction[0] * radius,
+                    current[1] + direction[1] * radius,
+                    current[2] + direction[2] * radius,
+                ]);
+            }
         }
     }
     let tolerance = MeshingTolerance::default();
@@ -5125,6 +5148,60 @@ mod tests {
         assert_eq!(interior_seed_points, vec![[0.0, 0.0, 0.0]]);
         let repaired_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((repaired_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn interior_seed_relocation_points_include_bounded_local_stencil() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.35,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 1.0]),
+            (1, [0.0, 0.0, -1.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+            (6, [0.78, 0.0, 0.0]),
+        ]);
+        let tet_node_ids = [
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 5],
+            [6, 0, 5, 2],
+            [6, 1, 3, 2],
+            [6, 1, 4, 3],
+            [6, 1, 5, 4],
+            [6, 1, 2, 5],
+        ];
+        let tets = tet_node_ids
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let adjacent = (0..tets.len()).collect::<Vec<_>>();
+
+        let points = interior_seed_node_relocation_points(&adjacent, 6, &tets, &node_points)
+            .expect("relocation candidates should build");
+
+        assert!(points.len() > 8);
+        assert!(points.len() <= 20);
+        assert!(points.iter().any(|point| {
+            point[0] > node_points[&6][0]
+                && (point[1] - node_points[&6][1]).abs() <= f64::EPSILON
+                && (point[2] - node_points[&6][2]).abs() <= f64::EPSILON
+        }));
+        let tolerance = MeshingTolerance::default();
+        for (left_index, left) in points.iter().enumerate() {
+            for right in points.iter().skip(left_index + 1) {
+                assert!(!tolerance.point_nearly_equal(*left, *right, 1.0));
+            }
+        }
     }
 
     #[test]
