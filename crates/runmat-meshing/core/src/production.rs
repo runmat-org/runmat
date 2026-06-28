@@ -182,7 +182,7 @@ fn tet_candidate_options_for_mesh(
     let quality = QualityThresholds::default();
     TetCandidateOptions {
         interior_target_size_m: Some(target_size_for_mesh(topology, options)),
-        max_interior_seed_points: options.max_elements.max(1).min(128),
+        max_interior_seed_points: options.max_elements.max(1).min(512),
         max_global_insertion_points: options.max_elements.max(1).min(4096),
         allow_fan_fallback: false,
         dense_recovery_layer_count: 8,
@@ -829,9 +829,10 @@ mod tests {
         assert!((mesh.backend.tet_candidate_volume_ratio - 1.0).abs() < 1.0e-12);
         assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
         assert!(mesh.backend.tet_min_exact_scaled_jacobian.is_finite());
-        assert_eq!(
-            mesh.backend.tet_min_exact_scaled_jacobian,
-            mesh.quality.min_exact_scaled_jacobian
+        assert!(
+            (mesh.backend.tet_min_exact_scaled_jacobian - mesh.quality.min_exact_scaled_jacobian)
+                .abs()
+                < 1.0e-12
         );
         assert_eq!(
             mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
@@ -842,6 +843,10 @@ mod tests {
                     < QualityThresholds::default().min_scaled_jacobian)
                 .count()
         );
+        assert!(mesh
+            .backend
+            .tet_exact_scaled_jacobian_below_threshold_count
+            < 24);
         assert!(mesh.backend.tet_optimization_pass_count <= 2);
         assert!(
             mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2

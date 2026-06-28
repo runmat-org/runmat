@@ -80,6 +80,8 @@ pub struct TetCandidate {
     pub region_ids: Vec<String>,
     pub volume_m3: f64,
     pub aspect_ratio: f64,
+    #[serde(default)]
+    pub exact_scaled_jacobian: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -401,6 +403,7 @@ fn append_component_tets(
         if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
             continue;
         }
+        let exact_scaled_jacobian = tet_scaled_jacobian(points);
         tets.push(TetCandidate {
             tet_id: tets.len() as u32,
             component_id: component.component_id,
@@ -409,6 +412,7 @@ fn append_component_tets(
             region_ids: element.region_ids.clone(),
             volume_m3,
             aspect_ratio,
+            exact_scaled_jacobian,
         });
     }
     Ok(())
@@ -447,6 +451,7 @@ fn candidate_tet(
     if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
         return None;
     }
+    let exact_scaled_jacobian = tet_scaled_jacobian(points);
     Some(TetCandidate {
         tet_id: 0,
         component_id: component.component_id,
@@ -455,6 +460,7 @@ fn candidate_tet(
         region_ids: element.region_ids.clone(),
         volume_m3,
         aspect_ratio,
+        exact_scaled_jacobian,
     })
 }
 
@@ -783,8 +789,13 @@ fn select_layered_fan_seed_point(
         )? {
             continue;
         }
-        let score =
-            score_fan_seed_point(component, point, surface_nodes, surface_elements, options)?;
+        let score = score_layered_fan_seed_point(
+            component,
+            point,
+            surface_nodes,
+            surface_elements,
+            options,
+        )?;
         if best_score.is_none_or(|best| fan_seed_score_is_better(score, best)) {
             best_score = Some(score);
         }
@@ -812,6 +823,144 @@ fn dense_recovery_layer_nodes_exist(
         }
     }
     Ok(true)
+}
+
+fn score_layered_fan_seed_point(
+    component: &VolumeCandidateComponent,
+    fan_seed_point: [f64; 3],
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+) -> Result<FanSeedScore, TetCandidateError> {
+    let mut valid_tet_count = 0_usize;
+    let mut below_threshold_count = 0_usize;
+    let mut total_volume_m3 = 0.0_f64;
+    let mut aspect_ratio_sum = 0.0_f64;
+    let mut max_aspect_ratio = 0.0_f64;
+    let mut min_scaled_jacobian = f64::INFINITY;
+
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let outer_points = [
+            *surface_nodes.get(&element.node_ids[0]).ok_or(
+                TetCandidateError::MissingSurfaceNode {
+                    node_id: element.node_ids[0],
+                },
+            )?,
+            *surface_nodes.get(&element.node_ids[1]).ok_or(
+                TetCandidateError::MissingSurfaceNode {
+                    node_id: element.node_ids[1],
+                },
+            )?,
+            *surface_nodes.get(&element.node_ids[2]).ok_or(
+                TetCandidateError::MissingSurfaceNode {
+                    node_id: element.node_ids[2],
+                },
+            )?,
+        ];
+        let mut layer_ids = element.node_ids;
+        let mut layer_points = outer_points;
+        for layer in 1..options.dense_recovery_layer_count {
+            let mut inner_ids = [0_u32; 3];
+            let mut inner_points = [[0.0; 3]; 3];
+            for corner in 0..3 {
+                inner_ids[corner] = layered_score_node_id(element.element_id, layer, corner);
+                inner_points[corner] = dense_recovery_layer_point(
+                    outer_points[corner],
+                    fan_seed_point,
+                    layer,
+                    options,
+                );
+            }
+            let mut best = None::<LayeredFrustumSplit>;
+            for split_index in 0..6 {
+                let Some(split) = layered_frustum_split(
+                    component,
+                    element,
+                    layer_ids,
+                    inner_ids,
+                    layer_points,
+                    inner_points,
+                    split_index,
+                    options,
+                ) else {
+                    continue;
+                };
+                if best
+                    .as_ref()
+                    .is_none_or(|current| layered_split_is_better(&split, current))
+                {
+                    best = Some(split);
+                }
+            }
+            let Some(split) = best else {
+                continue;
+            };
+            accumulate_fan_seed_score_tets(
+                &split.tets,
+                split.below_threshold_count,
+                split.min_scaled_jacobian,
+                &mut valid_tet_count,
+                &mut below_threshold_count,
+                &mut total_volume_m3,
+                &mut aspect_ratio_sum,
+                &mut max_aspect_ratio,
+                &mut min_scaled_jacobian,
+            );
+            layer_ids = inner_ids;
+            layer_points = inner_points;
+        }
+
+        let final_points = [
+            layer_points[0],
+            layer_points[1],
+            layer_points[2],
+            fan_seed_point,
+        ];
+        if let Some(final_tet) = candidate_tet(
+            component,
+            element,
+            [layer_ids[0], layer_ids[1], layer_ids[2], u32::MAX],
+            final_points,
+            options,
+        ) {
+            let scaled_jacobian = tet_scaled_jacobian(final_points);
+            accumulate_fan_seed_score_tets(
+                &[final_tet],
+                usize::from(scaled_jacobian < options.min_scaled_jacobian),
+                scaled_jacobian,
+                &mut valid_tet_count,
+                &mut below_threshold_count,
+                &mut total_volume_m3,
+                &mut aspect_ratio_sum,
+                &mut max_aspect_ratio,
+                &mut min_scaled_jacobian,
+            );
+        }
+    }
+
+    Ok(fan_seed_score_from_accumulators(
+        fan_seed_point,
+        valid_tet_count,
+        below_threshold_count,
+        total_volume_m3,
+        aspect_ratio_sum,
+        max_aspect_ratio,
+        min_scaled_jacobian,
+        component.volume_m3,
+    ))
+}
+
+fn layered_score_node_id(element_id: u32, layer: usize, corner: usize) -> u32 {
+    1_000_000_u32
+        .saturating_add(element_id.saturating_mul(128))
+        .saturating_add((layer as u32).saturating_mul(3))
+        .saturating_add(corner as u32)
 }
 
 fn component_surface_node_ids(
@@ -958,14 +1107,21 @@ fn append_best_layered_frustum_tets(
 #[derive(Debug, Clone, PartialEq)]
 struct LayeredFrustumSplit {
     tets: Vec<TetCandidate>,
+    below_threshold_count: usize,
     min_scaled_jacobian: f64,
     max_aspect_ratio: f64,
 }
 
 fn layered_split_is_better(candidate: &LayeredFrustumSplit, best: &LayeredFrustumSplit) -> bool {
     candidate
-        .min_scaled_jacobian
-        .total_cmp(&best.min_scaled_jacobian)
+        .below_threshold_count
+        .cmp(&best.below_threshold_count)
+        .reverse()
+        .then_with(|| {
+            candidate
+                .min_scaled_jacobian
+                .total_cmp(&best.min_scaled_jacobian)
+        })
         .then_with(|| best.max_aspect_ratio.total_cmp(&candidate.max_aspect_ratio))
         .is_gt()
 }
@@ -1054,9 +1210,14 @@ fn layered_frustum_split(
         .iter()
         .map(|(_, points)| tet_scaled_jacobian(*points))
         .fold(f64::INFINITY, f64::min);
+    let below_threshold_count = candidates
+        .iter()
+        .filter(|(_, points)| tet_scaled_jacobian(*points) < options.min_scaled_jacobian)
+        .count();
     let max_aspect_ratio = max_candidate_aspect_ratio(&tets);
     Some(LayeredFrustumSplit {
         tets,
+        below_threshold_count,
         min_scaled_jacobian,
         max_aspect_ratio,
     })
@@ -1125,6 +1286,7 @@ fn component_insertion_tet_drafts(
         if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
             continue;
         }
+        let exact_scaled_jacobian = tet_scaled_jacobian(tet_points);
         let source_surface_element_id =
             nearest_surface_element_id(centroid, surface, surface_elements, classifier.index())?;
         let region_ids = surface_elements
@@ -1139,6 +1301,7 @@ fn component_insertion_tet_drafts(
             region_ids,
             volume_m3,
             aspect_ratio,
+            exact_scaled_jacobian,
         });
     }
     Ok((
@@ -1266,13 +1429,18 @@ fn refinement_points_for_tets(
     for tet in tets {
         let points = candidate_tet_points(tet, &all_nodes)?;
         let radius_edge_ratio = tet_radius_edge_ratio(points, tolerance);
+        let exact_scaled_jacobian = tet_scaled_jacobian(points);
         let max_edge_m = tet_max_edge_length(points);
         let sizing_violation =
             max_edge_m > target_size_m * (1.0 + options.sizing_compliance_tolerance);
+        let exact_quality_violation = exact_scaled_jacobian < options.min_scaled_jacobian;
         if sizing_violation {
             sizing_violation_count += 1;
         }
-        if radius_edge_ratio <= options.max_radius_edge_ratio && !sizing_violation {
+        if radius_edge_ratio <= options.max_radius_edge_ratio
+            && !sizing_violation
+            && !exact_quality_violation
+        {
             continue;
         }
         let point = tet_circumsphere(points, tolerance)
@@ -1286,10 +1454,17 @@ fn refinement_points_for_tets(
         if !classifier.contains_point(point) {
             continue;
         }
+        let exact_quality_error = if exact_quality_violation {
+            (options.min_scaled_jacobian - exact_scaled_jacobian) / options.min_scaled_jacobian
+        } else {
+            0.0
+        };
         ranked.push((
             point,
-            radius_edge_ratio.max(max_edge_m / target_size_m),
-            sizing_violation,
+            radius_edge_ratio
+                .max(max_edge_m / target_size_m)
+                .max(exact_quality_error),
+            sizing_violation || exact_quality_violation,
         ));
     }
     ranked.sort_by(|left, right| {
@@ -1467,6 +1642,8 @@ struct CandidateQualitySnapshot {
     max_radius_edge_ratio: f64,
     volume_ratio_error: f64,
     sliver_count: usize,
+    exact_quality_violation_count: usize,
+    min_exact_scaled_jacobian: f64,
 }
 
 impl CandidateQualitySnapshot {
@@ -1479,11 +1656,21 @@ impl CandidateQualitySnapshot {
             .iter()
             .filter(|tet| tet.aspect_ratio > options.sliver_aspect_ratio)
             .count();
+        let exact_quality_violation_count = tets
+            .iter()
+            .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+            .count();
+        let min_exact_scaled_jacobian = tets
+            .iter()
+            .map(|tet| tet.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
         Self {
             max_aspect_ratio,
             max_radius_edge_ratio: 0.0,
             volume_ratio_error: 0.0,
             sliver_count,
+            exact_quality_violation_count,
+            min_exact_scaled_jacobian,
         }
     }
 }
@@ -1493,6 +1680,8 @@ fn candidate_quality_is_no_worse(
     current: CandidateQualitySnapshot,
 ) -> bool {
     proposed.sliver_count <= current.sliver_count
+        && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
+        && proposed.min_exact_scaled_jacobian + 1.0e-12 >= current.min_exact_scaled_jacobian
         && proposed.max_aspect_ratio <= current.max_aspect_ratio * (1.0 + 1.0e-9)
 }
 
@@ -1577,7 +1766,7 @@ fn tet_candidate_quality_summary(
         if radius_edge_ratio.is_finite() {
             max_radius_edge_ratio = max_radius_edge_ratio.max(radius_edge_ratio);
         }
-        let exact_scaled_jacobian = tet_scaled_jacobian(points);
+        let exact_scaled_jacobian = tet.exact_scaled_jacobian;
         min_exact_scaled_jacobian = min_exact_scaled_jacobian.min(exact_scaled_jacobian);
         if exact_scaled_jacobian < options.min_scaled_jacobian {
             exact_scaled_jacobian_below_threshold_count += 1;
@@ -1828,6 +2017,8 @@ fn nearest_surface_element_id(
 struct FanSeedScore {
     point: [f64; 3],
     valid_tet_count: usize,
+    below_threshold_count: usize,
+    min_scaled_jacobian: f64,
     volume_error_ratio: f64,
     max_aspect_ratio: f64,
     mean_aspect_ratio: f64,
@@ -1887,6 +2078,8 @@ fn score_fan_seed_point(
     let mut total_volume_m3 = 0.0_f64;
     let mut aspect_ratio_sum = 0.0_f64;
     let mut max_aspect_ratio = 0.0_f64;
+    let mut min_scaled_jacobian = f64::INFINITY;
+    let mut below_threshold_count = 0_usize;
 
     for element_id in &component.surface_element_ids {
         let element =
@@ -1917,31 +2110,91 @@ fn score_fan_seed_point(
         total_volume_m3 += volume_m3;
         aspect_ratio_sum += aspect_ratio;
         max_aspect_ratio = max_aspect_ratio.max(aspect_ratio);
+        let scaled_jacobian = tet_scaled_jacobian(points);
+        min_scaled_jacobian = min_scaled_jacobian.min(scaled_jacobian);
+        if scaled_jacobian < options.min_scaled_jacobian {
+            below_threshold_count += 1;
+        }
     }
 
+    Ok(fan_seed_score_from_accumulators(
+        point,
+        valid_tet_count,
+        below_threshold_count,
+        total_volume_m3,
+        aspect_ratio_sum,
+        max_aspect_ratio,
+        min_scaled_jacobian,
+        component.volume_m3,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn accumulate_fan_seed_score_tets(
+    tets: &[TetCandidate],
+    below_threshold_count: usize,
+    min_scaled_jacobian: f64,
+    valid_tet_count: &mut usize,
+    total_below_threshold_count: &mut usize,
+    total_volume_m3: &mut f64,
+    aspect_ratio_sum: &mut f64,
+    max_aspect_ratio: &mut f64,
+    total_min_scaled_jacobian: &mut f64,
+) {
+    *valid_tet_count += tets.len();
+    *total_below_threshold_count += below_threshold_count;
+    *total_volume_m3 += tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+    *aspect_ratio_sum += tets.iter().map(|tet| tet.aspect_ratio).sum::<f64>();
+    *max_aspect_ratio = max_aspect_ratio.max(max_candidate_aspect_ratio(tets));
+    *total_min_scaled_jacobian = total_min_scaled_jacobian.min(min_scaled_jacobian);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fan_seed_score_from_accumulators(
+    point: [f64; 3],
+    valid_tet_count: usize,
+    below_threshold_count: usize,
+    total_volume_m3: f64,
+    aspect_ratio_sum: f64,
+    max_aspect_ratio: f64,
+    min_scaled_jacobian: f64,
+    expected_volume_m3: f64,
+) -> FanSeedScore {
     let mean_aspect_ratio = if valid_tet_count == 0 {
         f64::INFINITY
     } else {
         aspect_ratio_sum / valid_tet_count as f64
     };
-    let volume_error_ratio = if component.volume_m3 > 0.0 {
-        ((total_volume_m3 - component.volume_m3).abs() / component.volume_m3).abs()
+    let volume_error_ratio = if expected_volume_m3 > 0.0 {
+        ((total_volume_m3 - expected_volume_m3).abs() / expected_volume_m3).abs()
     } else {
         f64::INFINITY
     };
-    Ok(FanSeedScore {
+    FanSeedScore {
         point,
         valid_tet_count,
+        below_threshold_count,
+        min_scaled_jacobian,
         volume_error_ratio,
         max_aspect_ratio,
         mean_aspect_ratio,
-    })
+    }
 }
 
 fn fan_seed_score_is_better(candidate: FanSeedScore, best: FanSeedScore) -> bool {
     candidate
         .valid_tet_count
         .cmp(&best.valid_tet_count)
+        .then_with(|| {
+            best.below_threshold_count
+                .cmp(&candidate.below_threshold_count)
+        })
+        .then_with(|| {
+            candidate
+                .min_scaled_jacobian
+                .partial_cmp(&best.min_scaled_jacobian)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .then_with(|| {
             best.volume_error_ratio
                 .partial_cmp(&candidate.volume_error_ratio)
