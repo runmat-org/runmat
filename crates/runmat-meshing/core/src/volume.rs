@@ -1640,7 +1640,7 @@ mod tests {
     use super::*;
     use crate::{
         validate_analysis_mesh, BoundaryMeshTriangle, MeshBackendKind, MeshKindRequest,
-        SizingSample,
+        RefinementFocusLevel, SizingSample,
     };
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
@@ -2401,7 +2401,7 @@ mod tests {
     #[test]
     fn production_backend_consumes_external_sizing_field() {
         let geometry = cube_geometry();
-        let options = VolumeMeshingOptions {
+        let mut options = VolumeMeshingOptions {
             backend: MeshBackendKind::Production,
             target_size: MeshTargetSize::LengthM(1.0),
             min_size_m: Some(0.4),
@@ -2410,6 +2410,7 @@ mod tests {
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
         };
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
         let coarse = generate_analysis_mesh(&geometry, options.clone())
             .expect("coarse production mesh should generate");
         let sizing = MeshSizingField {

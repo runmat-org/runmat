@@ -16,7 +16,7 @@ use crate::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
         CurveDiscretizationOptions,
     },
-    options::{MeshTargetSize, VolumeMeshingOptions},
+    options::{MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions},
     predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
@@ -298,6 +298,16 @@ fn production_effective_sizing(
             effective.samples.push(sample);
         }
     }
+    for sample in cad_interface_sizing_samples(topology, options.refinement.focus.interfaces) {
+        if effective
+            .samples
+            .iter()
+            .any(|existing| distance_squared(existing.position_m, sample.position_m) <= 1.0e-24)
+        {
+            continue;
+        }
+        effective.samples.push(sample);
+    }
     if sizing.is_some() || !effective.samples.is_empty() {
         Some(effective)
     } else {
@@ -367,6 +377,43 @@ fn cad_feature_edge_sizing_samples(topology: &SourceTopologyModel) -> Vec<Sizing
                 ],
                 target_size_m: edge.length_m * 0.5,
                 reason: Some("cad.feature_edge".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn cad_interface_sizing_samples(
+    topology: &SourceTopologyModel,
+    focus: RefinementFocusLevel,
+) -> Vec<SizingSample> {
+    let target_fraction = match focus {
+        RefinementFocusLevel::Off => return Vec::new(),
+        RefinementFocusLevel::Normal => 0.5,
+        RefinementFocusLevel::Fine => 0.25,
+    };
+    topology
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            if edge.region_ids.len() < 2 || !edge.length_m.is_finite() || edge.length_m <= 0.0 {
+                return None;
+            }
+            let left = topology
+                .vertices
+                .get(edge.node_ids[0] as usize)
+                .filter(|vertex| vertex.vertex_id == edge.node_ids[0])?;
+            let right = topology
+                .vertices
+                .get(edge.node_ids[1] as usize)
+                .filter(|vertex| vertex.vertex_id == edge.node_ids[1])?;
+            Some(SizingSample {
+                position_m: [
+                    (left.coordinates_m[0] + right.coordinates_m[0]) * 0.5,
+                    (left.coordinates_m[1] + right.coordinates_m[1]) * 0.5,
+                    (left.coordinates_m[2] + right.coordinates_m[2]) * 0.5,
+                ],
+                target_size_m: edge.length_m * target_fraction,
+                reason: Some("cad.interface".to_string()),
             })
         })
         .collect()
@@ -1310,6 +1357,7 @@ mod tests {
         options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
         options.refinement.focus.curvature = false;
         options.refinement.focus.small_features = true;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
 
         let geometry = thin_box_geometry();
         let topology = extract_source_topology(&geometry).expect("topology");
@@ -1323,6 +1371,50 @@ mod tests {
             sample.reason.as_deref() == Some("cad.feature_edge") && sample.target_size_m < 0.1
         }));
         assert_eq!(requested_refinement_points(Some(&sizing)).1, 4);
+    }
+
+    #[test]
+    fn production_sizing_includes_interface_samples_by_focus_level() {
+        let mut options = VolumeMeshingOptions::default();
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Normal;
+        let geometry = cube_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+        let cad_evaluation =
+            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+
+        let normal = production_effective_sizing(&topology, &cad_evaluation, &options, None)
+            .expect("normal interface sizing");
+        let normal_targets = normal
+            .samples
+            .iter()
+            .filter(|sample| sample.reason.as_deref() == Some("cad.interface"))
+            .map(|sample| sample.target_size_m)
+            .collect::<Vec<_>>();
+        assert!(!normal_targets.is_empty());
+        assert!(normal_targets
+            .iter()
+            .all(|target| (*target - 0.5).abs() < 1.0e-12));
+
+        options.refinement.focus.interfaces = RefinementFocusLevel::Fine;
+        let fine = production_effective_sizing(&topology, &cad_evaluation, &options, None)
+            .expect("fine interface sizing");
+        let fine_targets = fine
+            .samples
+            .iter()
+            .filter(|sample| sample.reason.as_deref() == Some("cad.interface"))
+            .map(|sample| sample.target_size_m)
+            .collect::<Vec<_>>();
+        assert_eq!(fine_targets.len(), normal_targets.len());
+        assert!(fine_targets
+            .iter()
+            .all(|target| (*target - 0.25).abs() < 1.0e-12));
+
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        assert!(production_effective_sizing(&topology, &cad_evaluation, &options, None).is_none());
     }
 
     #[test]
