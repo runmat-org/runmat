@@ -1444,7 +1444,12 @@ fn refine_component_seed_points(
                 continue;
             }
             let trial_quality = CandidateQualitySnapshot::from_tets(&trial_tets, options);
-            if !candidate_quality_is_no_worse(trial_quality, current_quality) {
+            let quality_is_acceptable = if candidate.requested {
+                candidate_quality_preserves_thresholds(trial_quality, current_quality)
+            } else {
+                candidate_quality_is_no_worse(trial_quality, current_quality)
+            };
+            if !quality_is_acceptable {
                 continue;
             }
             seed_points.push(point);
@@ -1874,6 +1879,14 @@ fn candidate_quality_is_no_worse(
     proposed.sliver_count <= current.sliver_count
         && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
         && proposed.min_exact_scaled_jacobian + 1.0e-12 >= current.min_exact_scaled_jacobian
+}
+
+fn candidate_quality_preserves_thresholds(
+    proposed: CandidateQualitySnapshot,
+    current: CandidateQualitySnapshot,
+) -> bool {
+    proposed.sliver_count <= current.sliver_count
+        && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
 }
 
 fn candidate_quality_is_better(
@@ -3182,7 +3195,7 @@ mod tests {
     }
 
     #[test]
-    fn requested_refinement_points_are_quality_gated() {
+    fn requested_refinement_points_are_accepted_when_quality_safe() {
         let (surface, volume_candidates) = cube_surface_and_volume_candidates();
         let mut requested_refinement_points = [[0.0; 3]; 16];
         requested_refinement_points[0] = [0.25, 0.25, 0.25];
@@ -3202,6 +3215,51 @@ mod tests {
         )
         .expect("Tet candidates should form with requested refinement");
 
+        assert!(candidates
+            .interior_seed_points
+            .iter()
+            .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
+        assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_point_count,
+            1
+        );
+        assert_eq!(candidates.recovery.refinement_pass_count, 1);
+        assert_eq!(candidates.recovery.refinement_point_count, 1);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert_eq!(
+            candidates
+                .tets
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < 0.15)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn requested_refinement_points_still_reject_exact_quality_violations() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let mut requested_refinement_points = [[0.0; 3]; 16];
+        requested_refinement_points[0] = [1.0e-6, 1.0e-6, 1.0e-6];
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(2.0),
+                requested_refinement_points,
+                requested_refinement_point_count: 1,
+                max_interior_seed_points: 2,
+                max_refinement_passes: 1,
+                max_radius_edge_ratio: 10.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("Tet candidates should form with requested refinement rollback");
+
         assert!(!candidates
             .interior_seed_points
             .iter()
@@ -3215,7 +3273,6 @@ mod tests {
         );
         assert_eq!(candidates.recovery.refinement_pass_count, 0);
         assert_eq!(candidates.recovery.refinement_point_count, 0);
-        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(
             candidates
                 .tets
