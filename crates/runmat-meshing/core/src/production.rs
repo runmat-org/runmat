@@ -20,7 +20,7 @@ use crate::{
     predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::{MeshSizingField, SizingSampleApplication, SizingSampleRejection},
+    sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
         discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
@@ -60,6 +60,7 @@ pub struct ProductionMeshPreparation {
     pub surface_recovery: SurfaceRecoveryReport,
     pub volume_candidates: VolumeCandidateSet,
     pub tet_candidates: TetCandidateSet,
+    pub effective_sizing: Option<MeshSizingField>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +123,7 @@ fn prepare_production_mesh_internal(
         .map_err(ProductionMeshError::CadEvaluation)?;
     let cad_evaluation_report = summarize_cad_evaluation(&cad_evaluation, &topology)
         .map_err(ProductionMeshError::CadEvaluation)?;
+    let effective_sizing = production_effective_sizing(&cad_evaluation, options, sizing);
     let curves = discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
         .map_err(ProductionMeshError::Curve)?;
     let surface = discretize_cad_surfaces_with_curves(
@@ -145,7 +147,7 @@ fn prepare_production_mesh_internal(
     let tet_candidates = form_tet_candidates(
         &surface,
         &volume_candidates,
-        tet_candidate_options_for_mesh(&topology, options, sizing),
+        tet_candidate_options_for_mesh(&topology, options, effective_sizing.as_ref()),
     )
     .map_err(ProductionMeshError::TetCandidate)?;
 
@@ -160,6 +162,7 @@ fn prepare_production_mesh_internal(
         surface_recovery,
         volume_candidates,
         tet_candidates,
+        effective_sizing,
     })
 }
 
@@ -253,6 +256,71 @@ fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 
         }
     }
     (points, count)
+}
+
+fn production_effective_sizing(
+    cad_evaluation: &CadEvaluationModel,
+    options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
+) -> Option<MeshSizingField> {
+    let mut effective = sizing.cloned().unwrap_or_default();
+    if options.refinement.focus.curvature {
+        let base_target_size_m = effective
+            .global_target_size_m
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .or(match options.target_size {
+                MeshTargetSize::LengthM(length_m) if length_m.is_finite() && length_m > 0.0 => {
+                    Some(clamp_mesh_target_size(length_m, options))
+                }
+                MeshTargetSize::LengthM(_) | MeshTargetSize::Auto => None,
+            });
+        for sample in cad_curvature_sizing_samples(cad_evaluation, base_target_size_m) {
+            if effective
+                .samples
+                .iter()
+                .any(|existing| distance_squared(existing.position_m, sample.position_m) <= 1.0e-24)
+            {
+                continue;
+            }
+            effective.samples.push(sample);
+        }
+    }
+    if sizing.is_some() || !effective.samples.is_empty() {
+        Some(effective)
+    } else {
+        None
+    }
+}
+
+fn cad_curvature_sizing_samples(
+    cad_evaluation: &CadEvaluationModel,
+    base_target_size_m: Option<f64>,
+) -> Vec<SizingSample> {
+    cad_evaluation
+        .face_frames
+        .iter()
+        .filter_map(|frame| {
+            let curvature = frame.max_curvature_estimate_1_per_m?;
+            if !curvature.is_finite() || curvature <= 0.0 {
+                return None;
+            }
+            let radius_m = 1.0 / curvature;
+            if !radius_m.is_finite() || radius_m <= 0.0 {
+                return None;
+            }
+            let mut target_size_m = radius_m * 0.25;
+            if let Some(base_target_size_m) =
+                base_target_size_m.filter(|value| value.is_finite() && *value > 0.0)
+            {
+                target_size_m = target_size_m.min(base_target_size_m);
+            }
+            (target_size_m.is_finite() && target_size_m > 0.0).then_some(SizingSample {
+                position_m: frame.origin_m,
+                target_size_m,
+                reason: Some("cad.curvature".to_string()),
+            })
+        })
+        .collect()
 }
 
 fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingOptions) -> f64 {
@@ -485,7 +553,11 @@ fn analysis_mesh_from_preparation(
                 .iter()
                 .map(|element| element.max_projection_error_m),
         ),
-        sizing: production_mesh_sizing(options, sizing, preparation),
+        sizing: production_mesh_sizing(
+            options,
+            preparation.effective_sizing.as_ref().or(sizing),
+            preparation,
+        ),
         backend,
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
@@ -990,9 +1062,10 @@ fn quality_report(
 mod tests {
     use super::*;
     use runmat_geometry_core::{
-        EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
-        RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
-        UnitSystem,
+        CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
+        CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, GeometryAsset,
+        GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping, SourceGeometry,
+        SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
     };
 
     #[test]
@@ -1153,6 +1226,35 @@ mod tests {
     }
 
     #[test]
+    fn production_sizing_includes_cad_curvature_samples() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.5);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = true;
+
+        let mesh =
+            generate_production_analysis_mesh(&cube_geometry_with_curvature_evaluator(), &options)
+                .expect("production mesh should generate with CAD curvature sizing");
+
+        assert!(mesh.backend.cad_curvature_query_count > 0);
+        assert!(mesh.backend.cad_max_curvature_estimate_1_per_m > 0.0);
+        assert!(mesh
+            .sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("cad.curvature")
+                && sample.target_size_m < 0.5));
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("cad.curvature")
+                && sample
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.starts_with("production_requested_tet_seed_"))
+        }));
+        assert!(mesh.backend.tet_requested_refinement_point_count > 0);
+    }
+
+    #[test]
     fn quality_report_summarizes_boundary_projection_error() {
         let quality = quality_report(
             vec![ElementQuality {
@@ -1269,5 +1371,80 @@ mod tests {
             ],
             diagnostics: Vec::new(),
         }
+    }
+
+    fn cube_geometry_with_curvature_evaluator() -> GeometryAsset {
+        let mut geometry = cube_geometry();
+        geometry.regions.push(Region {
+            region_id: "curved_face".to_string(),
+            name: "curved_face".to_string(),
+            tag: Some("cad_face".to_string()),
+            cad_ownership: Some(CadRegionOwnership {
+                face_id: Some(1),
+                label: Some(CadLabelRef {
+                    label_entry: "0:1:1".to_string(),
+                    name: "curved_face".to_string(),
+                    kind: CadSemanticKind::Face,
+                }),
+                owner_path: Vec::new(),
+                layers: Vec::new(),
+                color: None,
+                material: None,
+            }),
+        });
+        geometry
+            .region_entity_mappings
+            .push(RegionEntityMapping::new(
+                "curved_face",
+                "cube_surface",
+                EntityKind::Face,
+                vec![EntityIdRange::new(2, 2)],
+            ));
+        geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
+            evaluator_id: "cad_evaluator_test".to_string(),
+            backend: "test".to_string(),
+            format_name: "step".to_string(),
+            requires_source_geometry: true,
+            faces: vec![CadFaceEvaluator {
+                evaluator_id: "cad_face_1".to_string(),
+                imported_face_id: 1,
+                name: "curved_face".to_string(),
+                supports_point_evaluation: true,
+                supports_projection: true,
+                supports_normal: true,
+                supports_derivatives: true,
+                supports_curvature: true,
+                reference_point_m: Some([0.5, 0.5, 1.0]),
+                reference_unit_normal: Some([0.0, 0.0, 1.0]),
+                evaluation_samples: vec![
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [0.0, 0.0, 1.0],
+                        uv: Some([0.0, 0.0]),
+                        projected_point_m: Some([0.0, 0.0, 1.0]),
+                        unit_normal: Some([0.0, 0.0, 1.0]),
+                        projection_error_m: Some(0.0),
+                    },
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [1.0, 0.0, 1.0],
+                        uv: Some([1.0, 0.0]),
+                        projected_point_m: Some([1.0, 0.0, 1.0]),
+                        unit_normal: Some([0.0, 0.9, 0.4358898943540673]),
+                        projection_error_m: Some(0.0),
+                    },
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [0.0, 1.0, 1.0],
+                        uv: Some([0.0, 1.0]),
+                        projected_point_m: Some([0.0, 1.0, 1.0]),
+                        unit_normal: Some([0.9, 0.0, 0.4358898943540673]),
+                        projection_error_m: Some(0.0),
+                    },
+                ],
+            }],
+            curves: Vec::new(),
+        }];
+        geometry
     }
 }
