@@ -148,9 +148,9 @@ pub fn build_mesh_evidence_artifact(
 
 pub fn build_mesh_evidence_artifact_with_validation_evidence(
     mesh: &AnalysisMeshArtifact,
-    mut validation: MeshValidationEvidence,
+    validation: MeshValidationEvidence,
 ) -> MeshEvidenceArtifact {
-    validation.boundary_recovery = boundary_recovery_evidence(mesh);
+    let validation = validation_evidence(mesh, &validation_options_from_evidence(&validation));
     MeshEvidenceArtifact {
         schema_version: MESH_EVIDENCE_SCHEMA_VERSION.to_string(),
         mesh_id: mesh.mesh_id.clone(),
@@ -161,6 +161,26 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         quality: quality_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
+    }
+}
+
+fn validation_options_from_evidence(
+    validation: &MeshValidationEvidence,
+) -> AnalysisMeshValidationOptions {
+    AnalysisMeshValidationOptions {
+        quality: validation.quality,
+        max_volume_element_count: validation.max_volume_element_count,
+        max_volume_component_count: validation.max_volume_component_count,
+        expected_bounds_m: validation.expected_bounds_m,
+        min_bounds_coverage_ratio: validation.min_bounds_coverage_ratio,
+        expected_volume_m3: validation.expected_volume_m3,
+        min_volume_coverage_ratio: validation.min_volume_coverage_ratio,
+        expected_boundary_area_m2: validation.expected_boundary_area_m2,
+        min_boundary_area_ratio: validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
+        required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
+        required_material_region_ids: validation.required_material_region_ids.clone(),
     }
 }
 
@@ -725,6 +745,29 @@ mod tests {
             .validation_error_message
             .as_deref()
             .is_some_and(|message| message.contains("ElementBudgetExceeded")));
+
+        let mut stale_validation = evidence.validation.clone();
+        stale_validation.solve_ready = false;
+        stale_validation.validation_error_code = Some("stale".to_string());
+        stale_validation.validation_error_message = Some("stale".to_string());
+        stale_validation.volume_element_count = 999;
+        stale_validation.volume_component_count = 999;
+        stale_validation
+            .boundary_recovery
+            .boundary_edge_recovery_ratio = 0.0;
+        let refreshed_evidence =
+            build_mesh_evidence_artifact_with_validation_evidence(&mesh, stale_validation);
+        assert!(refreshed_evidence.validation.solve_ready);
+        assert_eq!(refreshed_evidence.validation.validation_error_code, None);
+        assert_eq!(refreshed_evidence.validation.volume_element_count, 1);
+        assert_eq!(refreshed_evidence.validation.volume_component_count, 1);
+        assert_eq!(
+            refreshed_evidence
+                .validation
+                .boundary_recovery
+                .boundary_edge_recovery_ratio,
+            1.0
+        );
     }
 
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
