@@ -181,6 +181,9 @@ pub enum AnalysisMeshValidationError {
     MissingRequiredMaterialRegion {
         region_id: String,
     },
+    MissingRequiredMaterialRegionCoverage {
+        region_id: String,
+    },
 }
 
 pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) -> &'static str {
@@ -260,6 +263,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         }
         AnalysisMeshValidationError::MissingRequiredMaterialRegion { .. } => {
             "missing_required_material_region"
+        }
+        AnalysisMeshValidationError::MissingRequiredMaterialRegionCoverage { .. } => {
+            "missing_required_material_region_coverage"
         }
     }
 }
@@ -680,11 +686,31 @@ fn validate_required_material_regions(
         .iter()
         .map(|element| element.material_region_id.as_str())
         .collect::<BTreeSet<_>>();
+    let positive_volume = mesh
+        .volume_elements
+        .iter()
+        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
+        .filter(|element| {
+            let Some(points) = element_tet_points(mesh, element.node_ids.as_slice()) else {
+                return false;
+            };
+            let volume_m3 = tet_volume_m3(points);
+            volume_m3.is_finite() && volume_m3 > f64::EPSILON
+        })
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
     for region_id in required_region_ids {
         if !present.contains(region_id.as_str()) {
             return Err(AnalysisMeshValidationError::MissingRequiredMaterialRegion {
                 region_id: region_id.clone(),
             });
+        }
+        if !positive_volume.contains(region_id.as_str()) {
+            return Err(
+                AnalysisMeshValidationError::MissingRequiredMaterialRegionCoverage {
+                    region_id: region_id.clone(),
+                },
+            );
         }
     }
     Ok(())
@@ -867,8 +893,12 @@ fn boundary_face_edges(mesh: &AnalysisMeshArtifact) -> BTreeSet<[u32; 2]> {
 }
 
 pub fn volume_component_count(mesh: &AnalysisMeshArtifact) -> usize {
+    volume_component_element_counts(mesh).len()
+}
+
+pub fn volume_component_element_counts(mesh: &AnalysisMeshArtifact) -> Vec<usize> {
     if mesh.volume_elements.is_empty() {
-        return 0;
+        return Vec::new();
     }
     let mut face_to_elements = BTreeMap::<[u32; 3], Vec<usize>>::new();
     for (element_index, element) in mesh.volume_elements.iter().enumerate() {
@@ -895,15 +925,16 @@ pub fn volume_component_count(mesh: &AnalysisMeshArtifact) -> usize {
     }
 
     let mut visited = vec![false; mesh.volume_elements.len()];
-    let mut component_count = 0_usize;
+    let mut component_element_counts = Vec::<usize>::new();
     for start in 0..mesh.volume_elements.len() {
         if visited[start] {
             continue;
         }
         visited[start] = true;
-        component_count += 1;
+        let mut component_element_count = 0_usize;
         let mut stack = vec![start];
         while let Some(current) = stack.pop() {
+            component_element_count += 1;
             for neighbor in &adjacency[current] {
                 if visited[*neighbor] {
                     continue;
@@ -912,8 +943,9 @@ pub fn volume_component_count(mesh: &AnalysisMeshArtifact) -> usize {
                 stack.push(*neighbor);
             }
         }
+        component_element_counts.push(component_element_count);
     }
-    component_count
+    component_element_counts
 }
 
 fn tet_element_faces(node_ids: &[u32]) -> [[u32; 3]; 4] {
@@ -930,14 +962,21 @@ fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
         .iter()
         .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
         .filter_map(|element| {
-            Some(tet_volume_m3([
-                mesh_node(mesh, element.node_ids[0])?,
-                mesh_node(mesh, element.node_ids[1])?,
-                mesh_node(mesh, element.node_ids[2])?,
-                mesh_node(mesh, element.node_ids[3])?,
-            ]))
+            Some(tet_volume_m3(element_tet_points(
+                mesh,
+                element.node_ids.as_slice(),
+            )?))
         })
         .sum()
+}
+
+fn element_tet_points(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[[f64; 3]; 4]> {
+    Some([
+        mesh_node(mesh, node_ids[0])?,
+        mesh_node(mesh, node_ids[1])?,
+        mesh_node(mesh, node_ids[2])?,
+        mesh_node(mesh, node_ids[3])?,
+    ])
 }
 
 fn mesh_boundary_area_m2(mesh: &AnalysisMeshArtifact) -> f64 {
@@ -1678,6 +1717,30 @@ mod tests {
             err,
             AnalysisMeshValidationError::MissingRequiredMaterialRegion {
                 region_id: "rib".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_required_material_region_without_positive_volume() {
+        let mut mesh = valid_tet_mesh();
+        mesh.nodes[3].coordinates_m = mesh.nodes[0].coordinates_m;
+        let err = validate_analysis_mesh_with_options(
+            &mesh,
+            AnalysisMeshValidationOptions {
+                required_material_region_ids: vec!["mat_region".to_string()],
+                ..AnalysisMeshValidationOptions::default()
+            },
+        )
+        .expect_err("zero-volume material region should fail");
+        assert_eq!(
+            analysis_mesh_validation_error_code(&err),
+            "missing_required_material_region_coverage"
+        );
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::MissingRequiredMaterialRegionCoverage {
+                region_id: "mat_region".to_string()
             }
         );
     }

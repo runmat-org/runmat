@@ -2,11 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    artifact::{AnalysisMeshArtifact, MeshBackendSummary},
+    artifact::{AnalysisMeshArtifact, AnalysisVolumeElement, MeshBackendSummary},
     quality::QualityThresholds,
+    topology::VolumeElementKind,
     validation::{
         analysis_mesh_validation_error_code, mesh_contains_point,
-        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationOptions,
+        validate_analysis_mesh_with_options, volume_component_count,
+        volume_component_element_counts, AnalysisMeshValidationOptions,
     },
 };
 
@@ -255,6 +257,8 @@ pub struct MeshTetRecoveryEvidence {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshRegionEvidence {
     pub material_region_element_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub material_region_volume_m3: BTreeMap<String, f64>,
     pub boundary_region_face_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub boundary_region_recovered_face_counts: BTreeMap<String, usize>,
@@ -276,6 +280,8 @@ pub struct MeshValidationEvidence {
     pub max_volume_element_count: Option<usize>,
     #[serde(default)]
     pub volume_component_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volume_component_element_counts: Vec<usize>,
     #[serde(default)]
     pub max_volume_component_count: Option<usize>,
     #[serde(default)]
@@ -721,10 +727,17 @@ fn percentile(sorted_values: &[f64], ratio: f64) -> Option<f64> {
 
 fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
     let mut material_region_element_counts = BTreeMap::<String, usize>::new();
+    let mut material_region_volume_m3 = BTreeMap::<String, f64>::new();
     for element in &mesh.volume_elements {
         *material_region_element_counts
             .entry(element.material_region_id.clone())
             .or_default() += 1;
+        let volume_m3 = element_volume_m3(mesh, element);
+        if volume_m3.is_finite() && volume_m3 > 0.0 {
+            *material_region_volume_m3
+                .entry(element.material_region_id.clone())
+                .or_default() += volume_m3;
+        }
     }
 
     let mut boundary_region_face_counts = BTreeMap::<String, usize>::new();
@@ -753,10 +766,61 @@ fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
 
     MeshRegionEvidence {
         material_region_element_counts,
+        material_region_volume_m3,
         boundary_region_face_counts,
         boundary_region_recovered_face_counts,
         boundary_region_edge_counts,
     }
+}
+
+fn element_volume_m3(mesh: &AnalysisMeshArtifact, element: &AnalysisVolumeElement) -> f64 {
+    if element.kind != VolumeElementKind::Tet4 || element.node_ids.len() != 4 {
+        return 0.0;
+    }
+    let Some(points) = element_tet_points(mesh, element.node_ids.as_slice()) else {
+        return 0.0;
+    };
+    tet_volume_m3(points)
+}
+
+fn element_tet_points(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[[f64; 3]; 4]> {
+    Some([
+        mesh_node(mesh, node_ids[0])?,
+        mesh_node(mesh, node_ids[1])?,
+        mesh_node(mesh, node_ids[2])?,
+        mesh_node(mesh, node_ids[3])?,
+    ])
+}
+
+fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
+    mesh.nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .map(|node| node.coordinates_m)
+}
+
+fn tet_volume_m3(points: [[f64; 3]; 4]) -> f64 {
+    let ab = [
+        points[1][0] - points[0][0],
+        points[1][1] - points[0][1],
+        points[1][2] - points[0][2],
+    ];
+    let ac = [
+        points[2][0] - points[0][0],
+        points[2][1] - points[0][1],
+        points[2][2] - points[0][2],
+    ];
+    let ad = [
+        points[3][0] - points[0][0],
+        points[3][1] - points[0][1],
+        points[3][2] - points[0][2],
+    ];
+    let cross = [
+        ac[1] * ad[2] - ac[2] * ad[1],
+        ac[2] * ad[0] - ac[0] * ad[2],
+        ac[0] * ad[1] - ac[1] * ad[0],
+    ];
+    ((ab[0] * cross[0] + ab[1] * cross[1] + ab[2] * cross[2]) / 6.0).abs()
 }
 
 fn validation_evidence(
@@ -781,6 +845,7 @@ fn validation_evidence(
         volume_element_count: mesh.volume_elements.len(),
         max_volume_element_count: validation.max_volume_element_count,
         volume_component_count: volume_component_count(mesh),
+        volume_component_element_counts: volume_component_element_counts(mesh),
         max_volume_component_count: validation.max_volume_component_count,
         coverage_sample_count: finite_coverage_sample_count(&validation.coverage_sample_points_m),
         covered_coverage_sample_count: covered_coverage_sample_count(
@@ -1197,6 +1262,7 @@ mod tests {
         assert_eq!(evidence.validation.volume_element_count, 1);
         assert_eq!(evidence.validation.max_volume_element_count, Some(7));
         assert_eq!(evidence.validation.volume_component_count, 1);
+        assert_eq!(evidence.validation.volume_component_element_counts, vec![1]);
         assert_eq!(evidence.validation.max_volume_component_count, Some(1));
         assert_eq!(evidence.validation.coverage_sample_count, 1);
         assert_eq!(evidence.validation.covered_coverage_sample_count, 1);
@@ -1435,6 +1501,10 @@ mod tests {
         assert_eq!(
             evidence.regions.boundary_region_face_counts.get("fixed"),
             Some(&1)
+        );
+        assert_eq!(
+            evidence.regions.material_region_volume_m3.get("solid"),
+            Some(&(1.0 / 6.0))
         );
         assert_eq!(
             evidence
