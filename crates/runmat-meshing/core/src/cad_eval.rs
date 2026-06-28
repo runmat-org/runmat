@@ -148,7 +148,7 @@ pub fn build_cad_evaluation_model(
                 .unwrap_or(source_face.unit_normal),
             source_face.area_m2,
             exact_sample
-                .map(|sample| sample.point_m)
+                .map(exact_backend_sample_point)
                 .or(face.evaluator_reference_point_m),
             face.evaluator_unit_normal.is_some() || !face.evaluator_samples.is_empty(),
             exact_sample.is_some(),
@@ -348,6 +348,13 @@ fn exact_backend_sample(face: &CadFace) -> Option<&CadFaceEvaluationSample> {
                 .projection_error_m
                 .is_none_or(|error| error.is_finite() && error >= 0.0)
     })
+}
+
+fn exact_backend_sample_point(sample: &CadFaceEvaluationSample) -> Point3 {
+    sample
+        .projected_point_m
+        .filter(|point| finite_point(*point))
+        .unwrap_or(sample.point_m)
 }
 
 fn evaluator_max_projection_error(face: &CadFace) -> f64 {
@@ -576,6 +583,37 @@ mod tests {
         assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
         assert_eq!(frame.evaluator_samples.len(), 1);
         assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
+    }
+
+    #[test]
+    fn exact_backend_query_uses_projected_point_for_frame_origin() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.5, 1.02],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.02),
+            }];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+
+        assert_eq!(frame.origin_m, [0.5, 0.5, 1.0]);
+        assert_eq!(frame.evaluator_samples[0].point_m, [0.5, 0.5, 1.02]);
+        assert_eq!(
+            frame.evaluator_samples[0].projected_point_m,
+            Some([0.5, 0.5, 1.0])
+        );
+        assert_eq!(frame.evaluator_max_projection_error_m, 0.02);
     }
 
     #[test]
