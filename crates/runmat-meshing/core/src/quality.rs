@@ -45,6 +45,8 @@ impl Default for AnalysisMeshQualityReport {
 pub struct QualityThresholds {
     pub min_scaled_jacobian: f64,
     pub max_aspect_ratio: f64,
+    #[serde(default = "default_max_boundary_projection_error_m")]
+    pub max_boundary_projection_error_m: f64,
     pub allow_inverted_elements: bool,
 }
 
@@ -53,7 +55,12 @@ impl Default for QualityThresholds {
         Self {
             min_scaled_jacobian: 0.15,
             max_aspect_ratio: 20.0,
+            max_boundary_projection_error_m: default_max_boundary_projection_error_m(),
             allow_inverted_elements: false,
         }
     }
+}
+
+fn default_max_boundary_projection_error_m() -> f64 {
+    1.0e-6
 }

@@ -385,6 +385,13 @@ fn validate_quality(
             reason: "max_aspect_ratio".to_string(),
         });
     }
+    if !mesh.quality.max_boundary_projection_error_m.is_finite()
+        || mesh.quality.max_boundary_projection_error_m > thresholds.max_boundary_projection_error_m
+    {
+        return Err(AnalysisMeshValidationError::QualityThresholdFailed {
+            reason: "max_boundary_projection_error_m".to_string(),
+        });
+    }
     if !thresholds.allow_inverted_elements && mesh.quality.inverted_element_count > 0 {
         return Err(AnalysisMeshValidationError::QualityThresholdFailed {
             reason: "inverted_element_count".to_string(),
@@ -924,6 +931,22 @@ mod tests {
             err,
             AnalysisMeshValidationError::QualityThresholdFailed {
                 reason: "element_exact_scaled_jacobian".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_boundary_projection_quality_threshold_failures() {
+        let mut mesh = valid_tet_mesh();
+        mesh.quality.max_boundary_projection_error_m = 2.0e-6;
+
+        let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect_err("boundary projection error should fail");
+
+        assert_eq!(
+            err,
+            AnalysisMeshValidationError::QualityThresholdFailed {
+                reason: "max_boundary_projection_error_m".to_string()
             }
         );
     }

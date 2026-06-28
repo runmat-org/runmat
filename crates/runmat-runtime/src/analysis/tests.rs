@@ -2337,6 +2337,8 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
         min_scaled_jacobian: 0.25,
         max_aspect_ratio: 10.0,
+        max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
+            .max_boundary_projection_error_m,
         allow_inverted_elements: false,
     };
     let options = analysis_mesh_validation_options_for_study(&spec, &mesh_options);
@@ -2356,6 +2358,8 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
         runmat_meshing_core::QualityThresholds {
             min_scaled_jacobian: 0.25,
             max_aspect_ratio: 10.0,
+            max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
+                .max_boundary_projection_error_m,
             allow_inverted_elements: false,
         }
     );

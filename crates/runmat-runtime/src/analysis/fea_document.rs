@@ -825,12 +825,14 @@ fn quality_preset_thresholds(preset: FeaMeshQualityPreset) -> QualityThresholds 
         FeaMeshQualityPreset::Strict => QualityThresholds {
             min_scaled_jacobian: 0.25,
             max_aspect_ratio: 10.0,
+            max_boundary_projection_error_m: 1.0e-8,
             allow_inverted_elements: false,
         },
         FeaMeshQualityPreset::Balanced => QualityThresholds::default(),
         FeaMeshQualityPreset::Relaxed => QualityThresholds {
             min_scaled_jacobian: 0.05,
             max_aspect_ratio: 50.0,
+            max_boundary_projection_error_m: 1.0e-4,
             allow_inverted_elements: false,
         },
     }
@@ -2184,6 +2186,7 @@ validation:
             QualityThresholds {
                 min_scaled_jacobian: 0.25,
                 max_aspect_ratio: 10.0,
+                max_boundary_projection_error_m: 1.0e-8,
                 allow_inverted_elements: false,
             }
         );
@@ -2214,6 +2217,7 @@ validation:
             QualityThresholds {
                 min_scaled_jacobian: 0.05,
                 max_aspect_ratio: 50.0,
+                max_boundary_projection_error_m: 1.0e-4,
                 allow_inverted_elements: false,
             }
         );
