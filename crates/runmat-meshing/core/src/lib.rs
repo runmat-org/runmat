@@ -71,8 +71,8 @@ pub use predicate::{
     Triangle3,
 };
 pub use production::{
-    generate_production_analysis_mesh, prepare_production_mesh, ProductionMeshError,
-    ProductionMeshPreparation,
+    generate_production_analysis_mesh, generate_production_analysis_mesh_with_sizing,
+    prepare_production_mesh, ProductionMeshError, ProductionMeshPreparation,
 };
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};

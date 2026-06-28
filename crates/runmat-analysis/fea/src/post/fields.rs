@@ -35,7 +35,9 @@ pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
 ) -> Vec<AnalysisField> {
-    if !solve_result.converged {
+    if solve_result.solution.is_empty()
+        || solve_result.solution.iter().any(|value| !value.is_finite())
+    {
         return empty_structural_fields();
     }
 
@@ -1563,6 +1565,36 @@ mod tests {
         assert_eq!(metrics.basis, "solid_tet4_constant_strain");
         assert_eq!(metrics.solver_mesh_node_count, 4);
         assert_eq!(metrics.solver_mesh_element_count, 1);
+    }
+
+    #[test]
+    fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let solve = LinearSolveResult {
+            iterations: 10,
+            residual_norm: 1.0e-4,
+            converged: false,
+            host_sync_count: 0,
+            solver_backend: "test".to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            solution: vec![
+                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+            ],
+            solver_method: "test".to_string(),
+            preconditioner: "none".to_string(),
+            diagnostics: Vec::new(),
+        };
+
+        let fields = recover_result_fields(&summary, &solve);
+
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+            &[4, 3]
+        );
     }
 
     fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {

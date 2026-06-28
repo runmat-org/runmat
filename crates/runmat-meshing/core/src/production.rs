@@ -20,7 +20,7 @@ use crate::{
     predicate::{distance_squared, tet_centroid, tet_scaled_jacobian, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    sizing::MeshSizingField,
+    sizing::{MeshSizingField, SizingSampleApplication, SizingSampleRejection},
     source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
     surface::{
         discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
@@ -160,7 +160,23 @@ pub fn generate_production_analysis_mesh(
     options: &VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
     let preparation = prepare_production_mesh(geometry, options)?;
-    analysis_mesh_from_preparation(&preparation, options)
+    analysis_mesh_from_preparation(&preparation, options, None)
+}
+
+pub fn generate_production_analysis_mesh_with_sizing(
+    geometry: &GeometryAsset,
+    options: &VolumeMeshingOptions,
+    sizing: &MeshSizingField,
+) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
+    let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
+    let base_target_size_m = target_size_for_mesh(&topology, options);
+    let effective_target_size_m = production_sizing_target_size(base_target_size_m, sizing);
+    let mut effective_options = options.clone();
+    if effective_target_size_m < base_target_size_m {
+        effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
+    }
+    let preparation = prepare_production_mesh(geometry, &effective_options)?;
+    analysis_mesh_from_preparation(&preparation, &effective_options, Some(sizing))
 }
 
 fn curve_options_for_mesh(
@@ -194,10 +210,7 @@ fn tet_candidate_options_for_mesh(
         max_radius_edge_ratio: 2.5,
         sizing_compliance_tolerance: 0.35,
         min_scaled_jacobian: quality.min_scaled_jacobian,
-        max_optimization_passes: match options.refinement.strategy {
-            crate::options::RefinementStrategy::None => 0,
-            _ => 2,
-        },
+        max_optimization_passes: 2,
         smoothing_relaxation: 0.30,
         sliver_aspect_ratio: 1.0 / quality.min_scaled_jacobian,
         ..TetCandidateOptions::default()
@@ -217,9 +230,32 @@ fn target_size_for_mesh(topology: &SourceTopologyModel, options: &VolumeMeshingO
     target_size_m
 }
 
+fn production_sizing_target_size(base_target_size_m: f64, sizing: &MeshSizingField) -> f64 {
+    let mut target_size_m = base_target_size_m;
+    for candidate in [
+        sizing.global_target_size_m,
+        sizing.min_size_m,
+        sizing.max_size_m,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if candidate.is_finite() && candidate > 0.0 {
+            target_size_m = target_size_m.min(candidate);
+        }
+    }
+    for sample in &sizing.samples {
+        if sample.target_size_m.is_finite() && sample.target_size_m > 0.0 {
+            target_size_m = target_size_m.min(sample.target_size_m);
+        }
+    }
+    target_size_m.max(1.0e-9)
+}
+
 fn analysis_mesh_from_preparation(
     preparation: &ProductionMeshPreparation,
     options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
 ) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
     let mut node_id_map = BTreeMap::<u32, u32>::new();
     let referenced_candidate_node_ids = referenced_candidate_node_ids(preparation);
@@ -378,13 +414,7 @@ fn analysis_mesh_from_preparation(
         boundary_faces,
         boundary_edges,
         quality: quality_report(quality_elements),
-        sizing: MeshSizingField {
-            global_target_size_m: match options.target_size {
-                MeshTargetSize::LengthM(length) => Some(length),
-                MeshTargetSize::Auto => None,
-            },
-            ..MeshSizingField::default()
-        },
+        sizing: production_mesh_sizing(options, sizing),
         backend,
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
@@ -397,6 +427,60 @@ fn analysis_mesh_from_preparation(
     validate_analysis_mesh_with_options(&mesh, production_validation_options(preparation, options))
         .map_err(ProductionMeshError::Validation)?;
     Ok(mesh)
+}
+
+fn production_mesh_sizing(
+    options: &VolumeMeshingOptions,
+    sizing: Option<&MeshSizingField>,
+) -> MeshSizingField {
+    let mut mesh_sizing = sizing.cloned().unwrap_or_default();
+    if mesh_sizing.global_target_size_m.is_none() {
+        mesh_sizing.global_target_size_m = match options.target_size {
+            MeshTargetSize::LengthM(length) => Some(length),
+            MeshTargetSize::Auto => None,
+        };
+    }
+    if let Some(sizing) = sizing {
+        let mut seen_positions = Vec::<[f64; 3]>::new();
+        mesh_sizing.applied_samples.clear();
+        mesh_sizing.rejected_samples.clear();
+        for sample in &sizing.samples {
+            let valid_position = sample.position_m.iter().all(|value| value.is_finite());
+            let valid_size = sample.target_size_m.is_finite() && sample.target_size_m > 0.0;
+            if !valid_position || !valid_size {
+                mesh_sizing.rejected_samples.push(SizingSampleRejection {
+                    position_m: sample.position_m,
+                    target_size_m: sample.target_size_m,
+                    status: "skipped_invalid".to_string(),
+                    reason: sample.reason.clone(),
+                    detail: Some("sample position and target size must be finite".to_string()),
+                });
+                continue;
+            }
+            if seen_positions
+                .iter()
+                .any(|position| distance_squared(*position, sample.position_m) <= 1.0e-24)
+            {
+                mesh_sizing.rejected_samples.push(SizingSampleRejection {
+                    position_m: sample.position_m,
+                    target_size_m: sample.target_size_m,
+                    status: "skipped_duplicate".to_string(),
+                    reason: sample.reason.clone(),
+                    detail: Some("sample position was already represented".to_string()),
+                });
+                continue;
+            }
+            seen_positions.push(sample.position_m);
+            mesh_sizing.applied_samples.push(SizingSampleApplication {
+                position_m: sample.position_m,
+                target_size_m: sample.target_size_m,
+                inserted_breakpoint_count: 1,
+                reason: sample.reason.clone(),
+                detail: Some("production_global_target_refinement".to_string()),
+            });
+        }
+    }
+    mesh_sizing
 }
 
 fn production_backend_summary(

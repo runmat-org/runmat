@@ -11,7 +11,9 @@ use crate::{
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     predicate::tet_scaled_jacobian,
-    production::generate_production_analysis_mesh,
+    production::{
+        generate_production_analysis_mesh, generate_production_analysis_mesh_with_sizing,
+    },
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{MeshSizingField, SizingSample, SizingSampleApplication, SizingSampleRejection},
@@ -222,7 +224,9 @@ pub fn generate_analysis_mesh(
     geometry: &runmat_geometry_core::GeometryAsset,
     options: VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
+    validate_volume_meshing_options(&options)?;
     let input = BoundaryMeshInput::from_geometry(geometry)?;
+    validate_boundary_regions(&input)?;
     match select_volume_backend(&options).selected {
         MeshBackendKind::StructuredTetFallback => StructuredTetMesher.mesh(&input, &options),
         MeshBackendKind::Production => generate_production_analysis_mesh(geometry, &options)
@@ -236,15 +240,44 @@ pub fn generate_analysis_mesh_with_sizing(
     options: VolumeMeshingOptions,
     sizing: &MeshSizingField,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
+    validate_volume_meshing_options(&options)?;
     let input = BoundaryMeshInput::from_geometry(geometry)?;
+    validate_boundary_regions(&input)?;
     match select_volume_backend(&options).selected {
         MeshBackendKind::StructuredTetFallback => {
             StructuredTetMesher.mesh_with_sizing(&input, &options, Some(sizing))
         }
-        MeshBackendKind::Production => generate_production_analysis_mesh(geometry, &options)
-            .map_err(|err| MeshingError::ProductionBackend(err.to_string())),
+        MeshBackendKind::Production => {
+            generate_production_analysis_mesh_with_sizing(geometry, &options, sizing)
+                .map_err(|err| MeshingError::ProductionBackend(err.to_string()))
+        }
         MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
     }
+}
+
+fn validate_volume_meshing_options(options: &VolumeMeshingOptions) -> Result<(), MeshingError> {
+    if !matches!(options.kind, MeshKindRequest::Solid) {
+        return Err(MeshingError::UnsupportedMeshKind(options.kind));
+    }
+    if !matches!(options.element, VolumeElementKind::Tet4) {
+        return Err(MeshingError::UnsupportedElementKind(options.element));
+    }
+    if options.max_elements == 0 {
+        return Err(MeshingError::InvalidElementBudget);
+    }
+    if let MeshTargetSize::LengthM(length_m) = options.target_size {
+        if !length_m.is_finite() || length_m <= 0.0 {
+            return Err(MeshingError::InvalidTargetSize);
+        }
+    }
+    Ok(())
+}
+
+fn validate_boundary_regions(input: &BoundaryMeshInput) -> Result<(), MeshingError> {
+    if input.region_ids.is_empty() {
+        return Err(MeshingError::EmptyBoundaryRegions);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1680,8 +1713,14 @@ mod tests {
     #[test]
     fn structured_tet_mesher_generates_valid_analysis_mesh() {
         let geometry = cube_geometry();
-        let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
-            .expect("cube should produce an analysis mesh");
+        let mesh = generate_analysis_mesh(
+            &geometry,
+            VolumeMeshingOptions {
+                backend: MeshBackendKind::StructuredTetFallback,
+                ..VolumeMeshingOptions::default()
+            },
+        )
+        .expect("cube should produce an analysis mesh");
 
         validate_analysis_mesh(&mesh, Default::default()).expect("analysis mesh should validate");
         assert_eq!(mesh.schema_version, ANALYSIS_MESH_SCHEMA_VERSION);
@@ -1734,6 +1773,7 @@ mod tests {
         let coarse = generate_analysis_mesh(
             &geometry,
             VolumeMeshingOptions {
+                backend: MeshBackendKind::StructuredTetFallback,
                 kind: MeshKindRequest::Solid,
                 target_size: MeshTargetSize::LengthM(1.0),
                 ..VolumeMeshingOptions::default()
@@ -1743,6 +1783,7 @@ mod tests {
         let fine = generate_analysis_mesh(
             &geometry,
             VolumeMeshingOptions {
+                backend: MeshBackendKind::StructuredTetFallback,
                 kind: MeshKindRequest::Solid,
                 target_size: MeshTargetSize::LengthM(0.25),
                 max_elements: 10_000,
@@ -1761,6 +1802,7 @@ mod tests {
         let mesh = generate_analysis_mesh(
             &geometry,
             VolumeMeshingOptions {
+                backend: MeshBackendKind::StructuredTetFallback,
                 kind: MeshKindRequest::Solid,
                 target_size: MeshTargetSize::LengthM(0.25),
                 max_elements: 10_000,
@@ -1937,6 +1979,7 @@ mod tests {
     fn sizing_field_controls_structured_tet_density() {
         let geometry = cube_geometry();
         let base_options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -1970,6 +2013,7 @@ mod tests {
     fn sizing_field_creates_local_structured_breakpoints() {
         let geometry = cube_geometry();
         let mut options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -2011,6 +2055,7 @@ mod tests {
     fn sizing_field_reports_duplicate_and_invalid_samples() {
         let geometry = cube_geometry();
         let mut options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -2069,6 +2114,7 @@ mod tests {
     fn sizing_field_skips_breakpoints_that_would_violate_quality() {
         let geometry = cube_geometry();
         let mut options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -2118,6 +2164,7 @@ mod tests {
         let mesh = generate_analysis_mesh_with_sizing(
             &geometry,
             VolumeMeshingOptions {
+                backend: MeshBackendKind::StructuredTetFallback,
                 target_size: MeshTargetSize::LengthM(1.0),
                 max_elements: 48,
                 ..VolumeMeshingOptions::default()
@@ -2139,6 +2186,7 @@ mod tests {
     fn curvature_focus_adds_geometry_sizing_samples() {
         let geometry = cube_geometry();
         let mut coarse_options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -2164,6 +2212,7 @@ mod tests {
     fn small_feature_focus_adds_geometry_sizing_samples() {
         let geometry = thin_box_geometry();
         let mut coarse_options = VolumeMeshingOptions {
+            backend: MeshBackendKind::StructuredTetFallback,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 10_000,
             ..VolumeMeshingOptions::default()
@@ -2236,12 +2285,18 @@ mod tests {
     }
 
     #[test]
-    fn auto_backend_uses_structured_fallback_until_production_backend_exists() {
+    fn auto_backend_uses_production_backend_by_default() {
         let geometry = cube_geometry();
         let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
-            .expect("auto backend should generate with fallback");
+            .expect("auto backend should generate with production backend");
 
-        assert_eq!(mesh.provenance.algorithm, "structured_bbox_tet/v1");
+        validate_analysis_mesh(&mesh, QualityThresholds::default())
+            .expect("auto production mesh should validate");
+        assert_eq!(
+            mesh.provenance.algorithm,
+            "production_topology_tet_candidate/v1"
+        );
+        assert_eq!(mesh.backend.backend, "production");
     }
 
     #[test]
@@ -2261,6 +2316,43 @@ mod tests {
         assert_eq!(
             mesh.provenance.algorithm,
             "production_topology_tet_candidate/v1"
+        );
+    }
+
+    #[test]
+    fn production_backend_consumes_external_sizing_field() {
+        let geometry = cube_geometry();
+        let options = VolumeMeshingOptions {
+            backend: MeshBackendKind::Production,
+            target_size: MeshTargetSize::LengthM(1.0),
+            max_elements: 10_000,
+            ..VolumeMeshingOptions::default()
+        };
+        let coarse = generate_analysis_mesh(&geometry, options.clone())
+            .expect("coarse production mesh should generate");
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.5, 0.5],
+                target_size_m: 0.25,
+                reason: Some("structural.stress_gradient".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let refined = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+            .expect("production sizing-driven mesh should generate");
+
+        assert_eq!(refined.backend.backend, "production");
+        assert!(refined.volume_elements.len() > coarse.volume_elements.len());
+        assert_eq!(
+            refined.sizing.global_target_size_m,
+            Some(0.25),
+            "external sizing should lower the production target size"
+        );
+        assert_eq!(refined.sizing.applied_samples.len(), 1);
+        assert_eq!(
+            refined.sizing.applied_samples[0].reason.as_deref(),
+            Some("structural.stress_gradient")
         );
     }
 

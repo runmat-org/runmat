@@ -372,8 +372,10 @@ fn assemble_linear_system_impl(
     electro_thermal_context: Option<FeaElectroThermalContext>,
     strict_analysis_mesh_stiffness: bool,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
-    if let Some(summary) = assemble_beam_system(model) {
-        return Ok(summary);
+    if analysis_mesh.is_none() {
+        if let Some(summary) = assemble_beam_system(model) {
+            return Ok(summary);
+        }
     }
 
     let base_dof_count = (model.loads.len() * 3).max(3);
@@ -3126,6 +3128,53 @@ mod tests {
                 .expect("csr row should include diagonal");
             assert!((summary.operator.stiffness_diag[row] - diagonal) <= 1.0e-8);
         }
+    }
+
+    #[test]
+    fn analysis_mesh_preempts_explicit_beam_topology() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.structural = Some(runmat_analysis_core::StructuralModel {
+            nodes: vec![
+                runmat_analysis_core::StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                runmat_analysis_core::StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+            ],
+            elements: vec![runmat_analysis_core::StructuralElement {
+                element_id: "beam_1".to_string(),
+                region_id: "span".to_string(),
+                kind: runmat_analysis_core::StructuralElementKind::Beam(
+                    runmat_analysis_core::BeamElementModel {
+                        node_ids: [1, 2],
+                        section_id: "rect".to_string(),
+                        reference_axis: [0.0, 1.0, 0.0],
+                    },
+                ),
+            }],
+            beam_sections: vec![runmat_analysis_core::BeamSectionModel {
+                section_id: "rect".to_string(),
+                area_m2: 1.0e-4,
+                iy_m4: 1.0e-9,
+                iz_m4: 1.0e-9,
+                torsion_j_m4: 1.0e-9,
+                outer_fiber_y_m: 0.01,
+                outer_fiber_z_m: 0.01,
+                torsion_outer_radius_m: 0.01,
+            }],
+            shell_sections: Vec::new(),
+        });
+
+        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+
+        assert_eq!(summary.structural_solid_element_count, 1);
+        assert_eq!(summary.structural_solid_recovery.len(), 1);
+        assert_eq!(summary.structural_beam_element_count, 0);
+        assert!(summary.operator.stiffness_csr.is_some());
+        assert!(summary.operator.stiffness_dense.is_none());
     }
 
     #[test]

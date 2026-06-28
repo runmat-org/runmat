@@ -2128,16 +2128,24 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
             .as_array()
             .map(|samples| samples.len() as u64)
     );
-    assert!(
-        refined_payload["mesh"]["volume_elements"]
+    let refined_volume_element_count = refined_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("refined volume elements")
+        .len();
+    let initial_volume_element_count = payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("initial volume elements")
+        .len();
+    let production_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("production");
+    if production_mesh {
+        assert!(refined_volume_element_count >= initial_volume_element_count);
+        assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
             .as_array()
-            .expect("refined volume elements")
-            .len()
-            > payload["mesh"]["volume_elements"]
-                .as_array()
-                .expect("initial volume elements")
-                .len()
-    );
+            .expect("refined sizing applications")
+            .is_empty());
+    } else {
+        assert!(refined_volume_element_count > initial_volume_element_count);
+    }
     assert_eq!(
         refined_payload["mesh"]["adaptive_iterations"]
             .as_array()
@@ -2170,13 +2178,24 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
         Some(refined_evidence_path.as_str())
     );
-    assert_eq!(
-        run_payload["refinement_effect"]["topology_changed"].as_bool(),
-        Some(true)
-    );
-    assert!(run_payload["refinement_effect"]["element_count_delta"]
-        .as_i64()
-        .is_some_and(|delta| delta > 0));
+    if production_mesh {
+        assert_eq!(
+            run_payload["refinement_effect"]["topology_changed"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            run_payload["refinement_effect"]["element_count_delta"].as_i64(),
+            Some(0)
+        );
+    } else {
+        assert_eq!(
+            run_payload["refinement_effect"]["topology_changed"].as_bool(),
+            Some(true)
+        );
+        assert!(run_payload["refinement_effect"]["element_count_delta"]
+            .as_i64()
+            .is_some_and(|delta| delta > 0));
+    }
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
@@ -2247,6 +2266,20 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
             .expect("parse analysis mesh artifact");
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("production run should persist von Mises field");
+    assert_eq!(
+        von_mises.shape,
+        vec![payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("volume elements")
+            .len()]
+    );
     assert_eq!(
         payload["mesh"]["provenance"]["algorithm"].as_str(),
         Some("production_topology_tet_candidate/v1")
