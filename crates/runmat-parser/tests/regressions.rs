@@ -6,3 +6,12 @@ fn seed_script_with_matrix_rows_parses() {
         "parser should accept matrix rows with newlines"
     );
 }
+
+#[test]
+fn comments_are_not_parser_tokens() {
+    let src = "% Grid\nx = 1;\n% Constants\ny = x + 2;";
+    assert!(
+        runmat_parser::parse(src).is_ok(),
+        "parser should treat comments as trivia"
+    );
+}

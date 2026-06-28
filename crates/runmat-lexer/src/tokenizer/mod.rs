@@ -9,7 +9,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     tokenize_detailed(input)
         .into_iter()
         .map(|t| t.token)
-        .filter(|tok| !matches!(tok, Token::Newline))
+        .filter(|tok| {
+            !matches!(
+                tok,
+                Token::Newline | Token::LineComment | Token::BlockComment
+            )
+        })
         .collect()
 }
 

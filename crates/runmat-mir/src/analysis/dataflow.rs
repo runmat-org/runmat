@@ -1,7 +1,7 @@
 use crate::{
     BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCallArg, MirDiagnostic,
     MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand,
-    MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
     AsyncValueFact, CallableIdentity, DimFact, FutureFact, FutureStateFact, NumericClass,
@@ -576,26 +576,7 @@ fn diagnose_block(
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     for stmt in &block.statements {
-        match &stmt.kind {
-            MirStmtKind::Assign { place, value } => {
-                diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
-                diagnose_place_reads(place, state, stmt.span, diagnostics);
-                mark_place_assigned(place, state);
-            }
-            MirStmtKind::MultiAssign { targets, value } => {
-                diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
-                for target in &targets.targets {
-                    if let crate::MirOutputTarget::Place(place) = target {
-                        diagnose_place_reads(place, state, stmt.span, diagnostics);
-                        mark_place_assigned(place, state);
-                    }
-                }
-            }
-            MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
-            MirStmtKind::PlaceMutation(_)
-            | MirStmtKind::WorkspaceEffect { .. }
-            | MirStmtKind::EnvironmentEffect(_) => {}
-        }
+        diagnose_stmt(stmt, state, diagnostics);
     }
 
     match &block.terminator.kind {
@@ -632,9 +613,32 @@ fn diagnose_block(
     }
 }
 
+fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<MirDiagnostic>) {
+    match &stmt.kind {
+        MirStmtKind::Assign { place, value } => {
+            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            diagnose_place_reads(place, state, stmt.span, diagnostics);
+            mark_place_assigned(place, state);
+        }
+        MirStmtKind::MultiAssign { targets, value } => {
+            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            for target in &targets.targets {
+                if let crate::MirOutputTarget::Place(place) = target {
+                    diagnose_place_reads(place, state, stmt.span, diagnostics);
+                    mark_place_assigned(place, state);
+                }
+            }
+        }
+        MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
+        MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::WorkspaceEffect { .. }
+        | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+}
+
 fn diagnose_rvalue_reads(
     value: &MirRvalue,
-    state: &[InitFact],
+    state: &mut [InitFact],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -654,18 +658,7 @@ fn diagnose_rvalue_reads(
         } => {
             diagnose_operand_read(left, state, span, diagnostics);
             for stmt in right_temps {
-                match &stmt.kind {
-                    crate::MirStmtKind::Assign { value, .. }
-                    | crate::MirStmtKind::Expr(value)
-                    | crate::MirStmtKind::MultiAssign { value, .. } => {
-                        diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
-                    }
-                    crate::MirStmtKind::PlaceMutation(place) => {
-                        diagnose_place_reads(&place.place, state, stmt.span, diagnostics);
-                    }
-                    crate::MirStmtKind::WorkspaceEffect { .. }
-                    | crate::MirStmtKind::EnvironmentEffect(_) => {}
-                }
+                diagnose_stmt(stmt, state, diagnostics);
             }
             diagnose_operand_read(right, state, span, diagnostics);
         }

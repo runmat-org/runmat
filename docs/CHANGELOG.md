@@ -2,6 +2,40 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.5.6](https://github.com/runmat-org/runmat/compare/v0.5.5...v0.5.6) - June 2026
+
+_June 28, 2026_
+
+### Desktop
+
+#### Added
+- Add a Command Window (REPL) for interactive RunMat execution, with terminal-style editing, command history, multiline input, selection/copy, LSP-backed syntax highlighting, persisted session transcripts, runtime variables, and figure integration
+- Add richer default sandbox content from file-backed fixtures, including a CAD STEP file, vibration dataset, 2D and 3D examples, signal filtering, flow-field, thermal diffusion, and a markdown welcome document
+- Add Mermaid diagram rendering and editing support in markdown documents alongside existing math and code rendering
+
+#### Changed
+- Improve runtime panel behavior so script and REPL runs keep variables, figures, and selected sessions aligned without unnecessary figure-output placeholder flicker
+- Improve plot, terminal, variable-table, and inspector layouts across narrow panels, resized workspaces, Safari, and Tauri
+- Load default sandbox files from a dedicated fixture directory instead of inlining them in code
+
+#### Fixed
+- Fix Monaco semantic-token timing so files receive highlighting on initial load
+- Fix REPL workspace probes so inspecting variables after a script run does not clear or hide existing figures
+- Fix markdown editor Mermaid blocks so diagrams render consistently with the markdown renderer
+
+### Runtime
+
+#### Changed
+- Preserve comments in detailed lexer and LSP token streams while filtering them from parser-facing tokenization, enabling comment-aware semantic highlighting without changing parser behavior
+- Suppress final-expression output for command-form calls so commands such as `clc` do not emit `ans`
+- Improve MIR read-before-assignment analysis through lowered temporary statements so diagnostics better reflect real initialization state
+
+#### Fixed
+- Fix `contour`, `contourf`, and `contour3` validation for MATLAB-style vector and meshgrid coordinate inputs
+- Fix CPU rendering and export of textured and image-mode surfaces so heatmap-like plots render through textured quads with correct colormap data
+
+---
+
 ## [v0.5.5](https://github.com/runmat-org/runmat/compare/v0.5.3...v0.5.5) - June 2026
 
 _June 26, 2026_

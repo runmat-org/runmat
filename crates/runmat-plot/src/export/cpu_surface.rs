@@ -1,4 +1,4 @@
-use crate::core::{Camera, PipelineType, ProjectionType, RenderData};
+use crate::core::{Camera, ImageData, PipelineType, ProjectionType, RenderData};
 use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
 use font8x8::{UnicodeFonts, BASIC_FONTS};
@@ -1642,18 +1642,118 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
             }
         }
         PipelineType::Textured => {
-            for tri in render_data.vertices.chunks_exact(3) {
-                let (Some(p0), Some(p1), Some(p2)) = (
-                    project_vertex(&tri[0], axes),
-                    project_vertex(&tri[1], axes),
-                    project_vertex(&tri[2], axes),
-                ) else {
-                    continue;
-                };
-                canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+            if draw_textured_image(canvas, render_data, axes) {
+                return;
+            }
+
+            if let Some(indices) = &render_data.indices {
+                for tri in indices.chunks_exact(3) {
+                    let (Some(v0), Some(v1), Some(v2)) = (
+                        render_data.vertices.get(tri[0] as usize),
+                        render_data.vertices.get(tri[1] as usize),
+                        render_data.vertices.get(tri[2] as usize),
+                    ) else {
+                        continue;
+                    };
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(v0, axes),
+                        project_vertex(v1, axes),
+                        project_vertex(v2, axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
+            } else {
+                for tri in render_data.vertices.chunks_exact(3) {
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(&tri[0], axes),
+                        project_vertex(&tri[1], axes),
+                        project_vertex(&tri[2], axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
             }
         }
     }
+}
+
+fn draw_textured_image(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesView) -> bool {
+    let Some(ImageData::Rgba8 {
+        width,
+        height,
+        data,
+    }) = render_data.image.as_ref()
+    else {
+        return false;
+    };
+    if *width == 0 || *height == 0 || data.len() < (*width as usize * *height as usize * 4) {
+        return false;
+    }
+
+    let projected: Vec<ScreenVertex> = render_data
+        .vertices
+        .iter()
+        .filter_map(|vertex| project_vertex(vertex, axes))
+        .collect();
+    if projected.is_empty() {
+        return false;
+    }
+
+    let min_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.width as f32 - 1.0) as i32;
+    let min_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.height as f32 - 1.0) as i32;
+    if min_x > max_x || min_y > max_y {
+        return false;
+    }
+
+    let dst_w = (max_x - min_x).max(1) as f32;
+    let dst_h = (max_y - min_y).max(1) as f32;
+    let src_w = (*width).saturating_sub(1).max(1) as f32;
+    let src_h = (*height).saturating_sub(1).max(1) as f32;
+    let depth = projected.iter().map(|vertex| vertex.z).sum::<f32>() / projected.len() as f32;
+
+    for y in min_y..=max_y {
+        let v = (y - min_y) as f32 / dst_h;
+        let src_y = (v * src_h).round().clamp(0.0, src_h) as usize;
+        for x in min_x..=max_x {
+            let u = (x - min_x) as f32 / dst_w;
+            let src_x = (u * src_w).round().clamp(0.0, src_w) as usize;
+            let src = (src_y * *width as usize + src_x) * 4;
+            canvas.blend_pixel(
+                x,
+                y,
+                [data[src], data[src + 1], data[src + 2], data[src + 3]],
+                depth,
+                axes.has_3d_content,
+            );
+        }
+    }
+
+    true
 }
 
 pub fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {

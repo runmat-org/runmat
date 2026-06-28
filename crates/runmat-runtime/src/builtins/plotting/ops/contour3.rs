@@ -10,7 +10,7 @@ use runmat_plot::plots::ColorMap;
 #[cfg(test)]
 use runmat_plot::plots::PlotElement;
 
-use super::common::tensor_to_surface_grid;
+use super::common::tensor_to_surface_grid_matlab_xy;
 #[cfg(not(target_arch = "wasm32"))]
 use super::contour::build_contour_gpu_plot_with_z_mode_async;
 use super::contour::{
@@ -122,7 +122,8 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                     super::common::gather_tensor_from_gpu_async(handle, name).await?
                 }
             };
-            let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), name)?;
+            let grid =
+                tensor_to_surface_grid_matlab_xy(z_tensor, y_axis.len(), x_axis.len(), name)?;
             contour = Some(build_contour_plot_with_z_mode(
                 name,
                 &x_axis,

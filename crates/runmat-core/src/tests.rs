@@ -11904,6 +11904,26 @@ fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier()
 }
 
 #[test]
+fn command_form_clc_clears_without_ans_display() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+
+    let outcome = execute_text_request(&mut session, "clc").expect("clc succeeds");
+
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "");
+    assert_eq!(
+        outcome
+            .streams
+            .iter()
+            .filter(|entry| entry.stream == ExecutionStreamKind::ClearScreen)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn direct_session_function_call_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     execute_text_request(
