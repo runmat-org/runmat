@@ -709,6 +709,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_quality_seed_star_collapse_count,
+        tet_exact_quality_seed_star_relocation_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_seed_star_relocation_count,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }

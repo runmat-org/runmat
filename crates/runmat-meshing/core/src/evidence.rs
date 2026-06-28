@@ -130,6 +130,8 @@ pub struct MeshTetRecoveryEvidence {
     pub exact_quality_reconnected_cavity_count: usize,
     pub exact_quality_split_cavity_count: usize,
     pub exact_quality_seed_star_collapse_count: usize,
+    #[serde(default)]
+    pub exact_quality_seed_star_relocation_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -397,6 +399,9 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         exact_quality_seed_star_collapse_count: mesh
             .backend
             .tet_exact_quality_seed_star_collapse_count,
+        exact_quality_seed_star_relocation_count: mesh
+            .backend
+            .tet_exact_quality_seed_star_relocation_count,
     }
 }
 
@@ -713,6 +718,7 @@ mod tests {
                 tet_exact_quality_reconnected_cavity_count: 2,
                 tet_exact_quality_split_cavity_count: 3,
                 tet_exact_quality_seed_star_collapse_count: 4,
+                tet_exact_quality_seed_star_relocation_count: 5,
                 ..MeshBackendSummary::default()
             },
             adaptive_iterations: Vec::new(),
@@ -782,6 +788,12 @@ mod tests {
         assert_eq!(
             evidence.tet_recovery.exact_quality_seed_star_collapse_count,
             4
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_seed_star_relocation_count,
+            5
         );
         assert_eq!(evidence.sizing.growth_rate, Some(1.4));
         assert_eq!(

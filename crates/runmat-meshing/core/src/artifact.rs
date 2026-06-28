@@ -164,6 +164,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_exact_quality_seed_star_collapse_count: usize,
     #[serde(default)]
+    pub tet_exact_quality_seed_star_relocation_count: usize,
+    #[serde(default)]
     pub boundary_face_recovery_ratio: f64,
     #[serde(default)]
     pub boundary_edge_recovery_ratio: f64,
@@ -226,6 +228,7 @@ impl Default for MeshBackendSummary {
             tet_exact_quality_reconnected_cavity_count: 0,
             tet_exact_quality_split_cavity_count: 0,
             tet_exact_quality_seed_star_collapse_count: 0,
+            tet_exact_quality_seed_star_relocation_count: 0,
             boundary_face_recovery_ratio: 0.0,
             boundary_edge_recovery_ratio: 0.0,
         }
