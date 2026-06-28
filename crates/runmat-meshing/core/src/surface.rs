@@ -1536,6 +1536,47 @@ mod tests {
     }
 
     #[test]
+    fn curve_driven_cad_surface_splits_edge_hit_exact_samples_without_cracks() {
+        let topology = single_triangle_topology();
+        let cad_topology =
+            crate::build_cad_topology(&geometry_with_edge_hit_face_samples(), &topology)
+                .expect("cad topology");
+        let cad_evaluation =
+            crate::build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let curves = crate::discretize_topology_curves(
+            &topology,
+            crate::CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 1,
+            },
+        )
+        .expect("curves should discretize");
+
+        let surface = discretize_cad_surfaces_with_curves(
+            &topology,
+            &cad_evaluation,
+            &curves,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 1,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("cad-owned curve surface should discretize");
+        let recovered_area = surface
+            .elements
+            .iter()
+            .filter(|element| element.source_face_id == 7)
+            .map(|element| element.area_m2)
+            .sum::<f64>();
+
+        assert_eq!(surface.exact_cad_sample_node_count, 2);
+        assert_eq!(surface.rejected_exact_cad_sample_count, 0);
+        assert!((recovered_area - topology.faces[0].area_m2).abs() <= 1.0e-12);
+        assert_local_surface_edges_are_recovered(&surface.elements);
+    }
+
+    #[test]
     fn rejects_missing_face_vertices() {
         let mut topology = single_triangle_topology();
         topology.vertices.pop();
@@ -1732,5 +1773,49 @@ mod tests {
             },
         ];
         geometry
+    }
+
+    fn geometry_with_edge_hit_face_samples() -> runmat_geometry_core::GeometryAsset {
+        let mut geometry = geometry_with_face_domain_sample();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.50, 0.25, 0.0],
+                uv: Some([0.50, 0.25]),
+                projected_point_m: Some([0.50, 0.25, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.25, 0.125, 0.0],
+                uv: Some([0.25, 0.125]),
+                projected_point_m: Some([0.25, 0.125, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        geometry
+    }
+
+    fn assert_local_surface_edges_are_recovered(elements: &[SurfaceElement]) {
+        let mut counts = BTreeMap::<[u32; 2], usize>::new();
+        for element in elements {
+            for edge in [
+                sorted_node_pair(element.node_ids[0], element.node_ids[1]),
+                sorted_node_pair(element.node_ids[1], element.node_ids[2]),
+                sorted_node_pair(element.node_ids[2], element.node_ids[0]),
+            ] {
+                *counts.entry(edge).or_default() += 1;
+            }
+        }
+        for (edge, count) in counts {
+            let is_boundary = matches!(edge, [0, 1] | [0, 2] | [1, 2]);
+            assert_eq!(
+                count,
+                if is_boundary { 1 } else { 2 },
+                "unexpected local surface edge count for {edge:?}"
+            );
+        }
     }
 }
