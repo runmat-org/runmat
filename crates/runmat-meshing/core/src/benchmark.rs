@@ -1,15 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use runmat_geometry_core::{
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
+};
+
 use crate::{
     artifact::AnalysisMeshArtifact,
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
         MeshTetRecoveryEvidence,
     },
+    generate_analysis_mesh,
     predicate::{tet_volume, triangle_area},
     topology::VolumeElementKind,
     validation::{volume_component_count, AnalysisMeshValidationOptions},
+    MeshTargetSize, VolumeMeshingOptions,
 };
 
 pub const MESH_BENCHMARK_SCHEMA_VERSION: &str = "mesh-benchmark/v1";
@@ -44,6 +52,29 @@ impl MeshBenchmarkInput {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshBenchmarkCase {
+    pub benchmark_id: String,
+    pub tier: MeshBenchmarkTier,
+    pub geometry: GeometryAsset,
+    pub options: VolumeMeshingOptions,
+    pub validation: AnalysisMeshValidationOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshBenchmarkRunError {
+    pub benchmark_id: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for MeshBenchmarkRunError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.benchmark_id, self.message)
+    }
+}
+
+impl std::error::Error for MeshBenchmarkRunError {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshBenchmarkTiming {
@@ -196,6 +227,61 @@ pub fn build_mesh_benchmark_suite_report(
     }
 }
 
+pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {
+    vec![
+        solid_box_benchmark_case(
+            "solid_cube",
+            MeshBenchmarkTier::Solid3d,
+            [1.0, 1.0, 1.0],
+            1.0,
+            6.0,
+            1,
+        ),
+        solid_box_benchmark_case(
+            "thin_slab",
+            MeshBenchmarkTier::ThinFeature,
+            [1.0, 1.0, 0.1],
+            0.1,
+            2.4,
+            1,
+        ),
+        disconnected_boxes_benchmark_case(),
+    ]
+}
+
+pub fn run_generic_mesh_benchmark_suite() -> Result<MeshBenchmarkSuiteReport, MeshBenchmarkRunError>
+{
+    run_mesh_benchmark_cases("generic-production", generic_mesh_benchmark_cases())
+}
+
+pub fn run_mesh_benchmark_cases(
+    suite_id: impl Into<String>,
+    cases: Vec<MeshBenchmarkCase>,
+) -> Result<MeshBenchmarkSuiteReport, MeshBenchmarkRunError> {
+    run_mesh_benchmark_cases_with(suite_id, cases, |case| {
+        generate_analysis_mesh(&case.geometry, case.options.clone()).map_err(|err| err.to_string())
+    })
+}
+
+pub fn run_mesh_benchmark_cases_with(
+    suite_id: impl Into<String>,
+    cases: Vec<MeshBenchmarkCase>,
+    mut mesh_case: impl FnMut(&MeshBenchmarkCase) -> Result<AnalysisMeshArtifact, String>,
+) -> Result<MeshBenchmarkSuiteReport, MeshBenchmarkRunError> {
+    let mut reports = Vec::with_capacity(cases.len());
+    for case in cases {
+        let started = std::time::Instant::now();
+        let mesh = mesh_case(&case).map_err(|message| MeshBenchmarkRunError {
+            benchmark_id: case.benchmark_id.clone(),
+            message,
+        })?;
+        let mut input = MeshBenchmarkInput::new(case.benchmark_id, case.tier);
+        input.timing.total_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+        reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
+    }
+    Ok(build_mesh_benchmark_suite_report(suite_id, reports))
+}
+
 fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmarkSuiteSummary {
     let solve_ready_count = reports
         .iter()
@@ -330,6 +416,196 @@ fn node_coordinates(mesh: &AnalysisMeshArtifact) -> BTreeMap<u32, [f64; 3]> {
         .collect()
 }
 
+fn solid_box_benchmark_case(
+    benchmark_id: &str,
+    tier: MeshBenchmarkTier,
+    dimensions_m: [f64; 3],
+    expected_volume_m3: f64,
+    expected_boundary_area_m2: f64,
+    max_volume_component_count: usize,
+) -> MeshBenchmarkCase {
+    let geometry = box_geometry(benchmark_id, dimensions_m, [0.0, 0.0, 0.0]);
+    benchmark_case(
+        benchmark_id,
+        tier,
+        geometry,
+        expected_volume_m3,
+        expected_boundary_area_m2,
+        max_volume_component_count,
+    )
+}
+
+fn disconnected_boxes_benchmark_case() -> MeshBenchmarkCase {
+    let first = box_surface([1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0);
+    let second = box_surface([1.0, 1.0, 1.0], [1.6, 0.0, 0.0], 8);
+    let mut vertices = first.0;
+    vertices.extend(second.0);
+    let mut triangles = first.1;
+    triangles.extend(second.1);
+    let geometry = geometry_from_surface(
+        "disconnected_boxes",
+        "generic_disconnected_boxes_surface",
+        vertices,
+        triangles,
+    );
+    benchmark_case(
+        "disconnected_boxes",
+        MeshBenchmarkTier::MultiBody,
+        geometry,
+        2.0,
+        12.0,
+        2,
+    )
+}
+
+fn benchmark_case(
+    benchmark_id: &str,
+    tier: MeshBenchmarkTier,
+    geometry: GeometryAsset,
+    expected_volume_m3: f64,
+    expected_boundary_area_m2: f64,
+    max_volume_component_count: usize,
+) -> MeshBenchmarkCase {
+    let characteristic_size = expected_volume_m3.cbrt() / 2.0;
+    MeshBenchmarkCase {
+        benchmark_id: benchmark_id.to_string(),
+        tier,
+        geometry,
+        options: VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(characteristic_size.max(0.02)),
+            ..VolumeMeshingOptions::default()
+        },
+        validation: AnalysisMeshValidationOptions {
+            expected_volume_m3: Some(expected_volume_m3),
+            expected_boundary_area_m2: Some(expected_boundary_area_m2),
+            max_volume_component_count: Some(max_volume_component_count),
+            min_boundary_face_recovery_ratio: 1.0,
+            min_boundary_edge_recovery_ratio: 1.0,
+            require_no_fan_fallback: true,
+            require_no_unrepaired_exact_quality: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    }
+}
+
+fn box_geometry(benchmark_id: &str, dimensions_m: [f64; 3], origin_m: [f64; 3]) -> GeometryAsset {
+    let (vertices, triangles) = box_surface(dimensions_m, origin_m, 0);
+    geometry_from_surface(
+        benchmark_id,
+        &format!("generic_{benchmark_id}_surface"),
+        vertices,
+        triangles,
+    )
+}
+
+fn geometry_from_surface(
+    geometry_suffix: &str,
+    mesh_id: &str,
+    vertices: Vec<[f64; 3]>,
+    triangles: Vec<[u32; 3]>,
+) -> GeometryAsset {
+    let face_count = triangles.len() as u64;
+    GeometryAsset {
+        geometry_id: format!("geo_benchmark_{geometry_suffix}"),
+        source: GeometrySource {
+            path: format!("/fixtures/{geometry_suffix}.step"),
+            sha256: format!("generic-{geometry_suffix}"),
+            importer_version: "benchmark-fixture/v1".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: mesh_id.to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: vertices.len() as u64,
+            element_count: face_count,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(mesh_id, vertices, triangles)],
+        regions: vec![
+            Region {
+                region_id: "benchmark_root".to_string(),
+                name: "benchmark_root".to_string(),
+                tag: Some("support".to_string()),
+                cad_ownership: None,
+            },
+            Region {
+                region_id: "benchmark_tip".to_string(),
+                name: "benchmark_tip".to_string(),
+                tag: Some("load".to_string()),
+                cad_ownership: None,
+            },
+        ],
+        region_entity_mappings: vec![
+            RegionEntityMapping::new(
+                "benchmark_root",
+                mesh_id,
+                EntityKind::Face,
+                vec![EntityIdRange::new(0, face_count / 2)],
+            ),
+            RegionEntityMapping::new(
+                "benchmark_tip",
+                mesh_id,
+                EntityKind::Face,
+                vec![EntityIdRange::new(
+                    face_count / 2,
+                    face_count - face_count / 2,
+                )],
+            ),
+        ],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn box_surface(
+    dimensions_m: [f64; 3],
+    origin_m: [f64; 3],
+    node_offset: u32,
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let [sx, sy, sz] = dimensions_m;
+    let [ox, oy, oz] = origin_m;
+    let vertices = vec![
+        [ox, oy, oz],
+        [ox + sx, oy, oz],
+        [ox + sx, oy + sy, oz],
+        [ox, oy + sy, oz],
+        [ox, oy, oz + sz],
+        [ox + sx, oy, oz + sz],
+        [ox + sx, oy + sy, oz + sz],
+        [ox, oy + sy, oz + sz],
+    ];
+    let triangles = [
+        [0, 2, 1],
+        [0, 3, 2],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [1, 2, 6],
+        [1, 6, 5],
+        [2, 3, 7],
+        [2, 7, 6],
+        [3, 0, 4],
+        [3, 4, 7],
+    ]
+    .into_iter()
+    .map(|triangle| {
+        [
+            triangle[0] + node_offset,
+            triangle[1] + node_offset,
+            triangle[2] + node_offset,
+        ]
+    })
+    .collect();
+    (vertices, triangles)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +728,70 @@ mod tests {
             Some(1.0 - 1.0 / 6.0)
         );
         assert_eq!(suite.summary.total_ms, Some(10.0));
+    }
+
+    #[test]
+    fn generic_benchmark_cases_are_valid_closed_geometry() {
+        let cases = generic_mesh_benchmark_cases();
+
+        assert_eq!(cases.len(), 3);
+        assert_eq!(cases[0].benchmark_id, "solid_cube");
+        assert_eq!(cases[1].tier, MeshBenchmarkTier::ThinFeature);
+        assert_eq!(cases[2].tier, MeshBenchmarkTier::MultiBody);
+        for case in cases {
+            case.geometry
+                .validate()
+                .expect("generic benchmark geometry should validate");
+            assert_eq!(case.options.backend, crate::MeshBackendKind::Auto);
+            assert!(case.validation.expected_volume_m3.is_some());
+            assert!(case.validation.expected_boundary_area_m2.is_some());
+            assert_eq!(case.validation.min_boundary_face_recovery_ratio, 1.0);
+            assert_eq!(case.validation.min_boundary_edge_recovery_ratio, 1.0);
+            assert!(case.validation.require_no_fan_fallback);
+            assert!(case.validation.require_no_unrepaired_exact_quality);
+        }
+    }
+
+    #[test]
+    fn benchmark_case_runner_builds_suite_from_mesh_producer() {
+        let cases = generic_mesh_benchmark_cases()
+            .into_iter()
+            .take(2)
+            .collect::<Vec<_>>();
+
+        let suite = run_mesh_benchmark_cases_with("injected", cases, |_| Ok(fixture_mesh()))
+            .expect("injected benchmark mesh producer should run");
+
+        assert_eq!(suite.suite_id, "injected");
+        assert_eq!(suite.summary.report_count, 2);
+        assert_eq!(suite.summary.solve_ready_count, 0);
+        assert_eq!(suite.summary.failed_count, 2);
+        assert_eq!(
+            suite
+                .summary
+                .failure_counts_by_code
+                .get("volume_coverage_failed"),
+            Some(&2)
+        );
+        assert!(suite.summary.total_ms.is_some());
+        assert_eq!(suite.reports[0].benchmark_id, "solid_cube");
+        assert_eq!(suite.reports[1].benchmark_id, "thin_slab");
+    }
+
+    #[test]
+    fn benchmark_case_runner_reports_mesh_generation_failure() {
+        let case = generic_mesh_benchmark_cases()
+            .into_iter()
+            .next()
+            .expect("generic benchmark case");
+
+        let err = run_mesh_benchmark_cases_with("injected", vec![case], |_| {
+            Err("mesh failed".to_string())
+        })
+        .expect_err("mesh producer failure should propagate with benchmark id");
+
+        assert_eq!(err.benchmark_id, "solid_cube");
+        assert_eq!(err.message, "mesh failed");
     }
 
     fn fixture_mesh() -> AnalysisMeshArtifact {
