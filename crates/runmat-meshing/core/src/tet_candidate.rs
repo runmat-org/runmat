@@ -2162,6 +2162,7 @@ fn candidate_quality_is_no_worse(
     proposed.sliver_count <= current.sliver_count
         && proposed.exact_quality_violation_count <= current.exact_quality_violation_count
         && proposed.min_exact_scaled_jacobian + 1.0e-12 >= current.min_exact_scaled_jacobian
+        && proposed.max_aspect_ratio <= current.max_aspect_ratio + 1.0e-12
 }
 
 fn candidate_quality_preserves_thresholds(
@@ -2183,6 +2184,11 @@ fn candidate_quality_is_better(
             && (proposed.min_exact_scaled_jacobian - current.min_exact_scaled_jacobian).abs()
                 <= 1.0e-12
             && proposed.sliver_count < current.sliver_count)
+        || (proposed.exact_quality_violation_count == current.exact_quality_violation_count
+            && proposed.sliver_count == current.sliver_count
+            && (proposed.min_exact_scaled_jacobian - current.min_exact_scaled_jacobian).abs()
+                <= 1.0e-12
+            && proposed.max_aspect_ratio + 1.0e-12 < current.max_aspect_ratio)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -4892,6 +4898,38 @@ mod tests {
             candidates.recovery.smoothed_point_count <= candidates.interior_seed_points.len() * 2
         );
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn optimization_quality_ordering_tracks_aspect_ratio_without_relaxing_exact_quality() {
+        let current = CandidateQualitySnapshot {
+            max_aspect_ratio: 12.0,
+            max_radius_edge_ratio: 0.0,
+            volume_ratio_error: 0.0,
+            sliver_count: 0,
+            exact_quality_violation_count: 0,
+            min_exact_scaled_jacobian: 0.45,
+        };
+        let aspect_improved = CandidateQualitySnapshot {
+            max_aspect_ratio: 8.0,
+            ..current
+        };
+        let aspect_regressed = CandidateQualitySnapshot {
+            max_aspect_ratio: 16.0,
+            ..current
+        };
+        let exact_regressed = CandidateQualitySnapshot {
+            min_exact_scaled_jacobian: 0.44,
+            max_aspect_ratio: 8.0,
+            ..current
+        };
+
+        assert!(candidate_quality_is_no_worse(aspect_improved, current));
+        assert!(candidate_quality_is_better(aspect_improved, current));
+        assert!(!candidate_quality_is_no_worse(aspect_regressed, current));
+        assert!(!candidate_quality_is_better(aspect_regressed, current));
+        assert!(!candidate_quality_is_no_worse(exact_regressed, current));
+        assert!(!candidate_quality_is_better(exact_regressed, current));
     }
 
     #[test]
