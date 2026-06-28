@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use runmat_geometry_core::CadFaceEvaluationSampleSource;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -446,7 +447,7 @@ fn append_curve_driven_face_elements(
     nodes: &mut Vec<SurfaceNode>,
     elements: &mut Vec<SurfaceElement>,
 ) {
-    if segments.len() <= 3 {
+    if segments.len() <= 3 && !has_exact_face_domain_samples(frame) {
         append_curve_fan_face_elements(face, frame, segments, nodes, elements);
         return;
     }
@@ -460,6 +461,7 @@ fn append_curve_driven_face_elements(
     }
 
     let mut points = boundary_triangulation_points(frame, segments, nodes);
+    append_exact_face_domain_sample_points(face, frame, nodes, &mut points);
     append_face_lattice_points(face, frame, segments, nodes, &mut points);
     let triangles = triangulate_face_points(&points);
     if triangles.is_empty() {
@@ -593,6 +595,62 @@ fn boundary_triangulation_points(
         }
     }
     points
+}
+
+fn append_exact_face_domain_sample_points(
+    face: &SourceTopologyFace,
+    frame: &crate::CadFaceEvaluationFrame,
+    nodes: &mut Vec<SurfaceNode>,
+    points: &mut Vec<FaceTriangulationPoint>,
+) {
+    let face_points = face
+        .node_ids
+        .map(|node_id| nodes[node_id as usize].coordinates_m);
+    for sample in &frame.evaluator_samples {
+        if !is_usable_exact_face_domain_sample(sample) {
+            continue;
+        }
+        let coordinates = sample
+            .projected_point_m
+            .filter(|point| finite_point3(*point))
+            .unwrap_or(sample.point_m);
+        let projection = project_to_face(frame, coordinates);
+        if !point_in_triangle_3d(projection.point_m, face_points) {
+            continue;
+        }
+        if points
+            .iter()
+            .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
+        {
+            continue;
+        }
+        let node_id = nodes.len() as u32;
+        nodes.push(SurfaceNode {
+            node_id,
+            source_vertex_id: u32::MAX,
+            coordinates_m: projection.point_m,
+        });
+        points.push(FaceTriangulationPoint {
+            node_id,
+            uv: projection.uv,
+        });
+    }
+}
+
+fn has_exact_face_domain_samples(frame: &crate::CadFaceEvaluationFrame) -> bool {
+    frame
+        .evaluator_samples
+        .iter()
+        .any(is_usable_exact_face_domain_sample)
+}
+
+fn is_usable_exact_face_domain_sample(
+    sample: &runmat_geometry_core::CadFaceEvaluationSample,
+) -> bool {
+    sample.source == CadFaceEvaluationSampleSource::BackendQuery
+        && finite_point3(sample.point_m)
+        && sample.uv.is_some_and(finite_point2)
+        && sample.projected_point_m.is_none_or(finite_point3)
 }
 
 fn append_face_lattice_points(
@@ -906,6 +964,34 @@ fn distance2_2d(left: [f64; 2], right: [f64; 2]) -> f64 {
     dx * dx + dy * dy
 }
 
+fn finite_point2(point: [f64; 2]) -> bool {
+    point.iter().all(|value| value.is_finite())
+}
+
+fn finite_point3(point: [f64; 3]) -> bool {
+    point.iter().all(|value| value.is_finite())
+}
+
+fn point_in_triangle_3d(point: [f64; 3], triangle: [[f64; 3]; 3]) -> bool {
+    let v0 = sub(triangle[2], triangle[0]);
+    let v1 = sub(triangle[1], triangle[0]);
+    let v2 = sub(point, triangle[0]);
+    let dot00 = dot(v0, v0);
+    let dot01 = dot(v0, v1);
+    let dot02 = dot(v0, v2);
+    let dot11 = dot(v1, v1);
+    let dot12 = dot(v1, v2);
+    let denominator = dot00 * dot11 - dot01 * dot01;
+    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
+        return false;
+    }
+    let inv_denominator = 1.0 / denominator;
+    let u = (dot11 * dot02 - dot01 * dot12) * inv_denominator;
+    let v = (dot00 * dot12 - dot01 * dot02) * inv_denominator;
+    let tolerance = 1.0e-10;
+    u >= -tolerance && v >= -tolerance && u + v <= 1.0 + tolerance
+}
+
 fn sorted_node_pair(left: u32, right: u32) -> [u32; 2] {
     if left <= right {
         [left, right]
@@ -1003,6 +1089,11 @@ mod tests {
     use super::*;
     use crate::{
         SourceTopologyEdge, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
+    };
+    use runmat_geometry_core::{
+        CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
+        CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, Region,
+        RegionEntityMapping,
     };
 
     #[test]
@@ -1127,6 +1218,51 @@ mod tests {
     }
 
     #[test]
+    fn curve_driven_cad_surface_uses_exact_face_domain_samples() {
+        let topology = single_triangle_topology();
+        let cad_topology =
+            crate::build_cad_topology(&geometry_with_face_domain_sample(), &topology)
+                .expect("cad topology");
+        let cad_evaluation =
+            crate::build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let curves = crate::discretize_topology_curves(
+            &topology,
+            crate::CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 1,
+            },
+        )
+        .expect("curves should discretize");
+
+        let surface = discretize_cad_surfaces_with_curves(
+            &topology,
+            &cad_evaluation,
+            &curves,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 1,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("cad-owned curve surface should discretize");
+
+        assert_eq!(surface.nodes.len(), topology.vertices.len() + 1);
+        assert!(surface.elements.len() >= 2);
+        assert!(surface
+            .nodes
+            .iter()
+            .any(|node| node.coordinates_m == [0.25, 0.25, 0.0]));
+        assert!(surface
+            .elements
+            .iter()
+            .any(|element| element.parametric_node_uv.contains(&[0.25, 0.25])));
+        assert!(surface
+            .elements
+            .iter()
+            .all(|element| element.cad_face_id == Some("face_a".to_string())));
+    }
+
+    #[test]
     fn rejects_missing_face_vertices() {
         let mut topology = single_triangle_topology();
         topology.vertices.pop();
@@ -1224,5 +1360,63 @@ mod tests {
             region_entity_mappings: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn geometry_with_face_domain_sample() -> runmat_geometry_core::GeometryAsset {
+        let mut geometry = geometry_for_topology();
+        geometry.regions = vec![Region {
+            region_id: "face_a".to_string(),
+            name: "face".to_string(),
+            tag: Some("cad_face".to_string()),
+            cad_ownership: Some(CadRegionOwnership {
+                face_id: Some(7),
+                label: Some(CadLabelRef {
+                    label_entry: "0:1:7".to_string(),
+                    name: "face".to_string(),
+                    kind: CadSemanticKind::Face,
+                }),
+                owner_path: Vec::new(),
+                layers: Vec::new(),
+                color: None,
+                material: None,
+            }),
+        }];
+        geometry.region_entity_mappings = vec![RegionEntityMapping {
+            region_id: "face_a".to_string(),
+            mesh_id: "surface".to_string(),
+            entity_kind: EntityKind::Face,
+            ranges: vec![EntityIdRange {
+                start: 11,
+                count: 1,
+            }],
+        }];
+        geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
+            evaluator_id: "cad_evaluator_test".to_string(),
+            backend: "test".to_string(),
+            format_name: "step".to_string(),
+            requires_source_geometry: true,
+            faces: vec![CadFaceEvaluator {
+                evaluator_id: "cad_face_7".to_string(),
+                imported_face_id: 7,
+                name: "face".to_string(),
+                supports_point_evaluation: true,
+                supports_projection: true,
+                supports_normal: true,
+                supports_derivatives: true,
+                supports_curvature: true,
+                reference_point_m: Some([0.25, 0.25, 0.0]),
+                reference_unit_normal: Some([0.0, 0.0, 1.0]),
+                evaluation_samples: vec![CadFaceEvaluationSample {
+                    source: CadFaceEvaluationSampleSource::BackendQuery,
+                    point_m: [0.25, 0.25, 0.03],
+                    uv: Some([0.25, 0.25]),
+                    projected_point_m: Some([0.25, 0.25, 0.0]),
+                    unit_normal: Some([0.0, 0.0, 1.0]),
+                    projection_error_m: Some(0.03),
+                }],
+            }],
+            curves: Vec::new(),
+        }];
+        geometry
     }
 }
