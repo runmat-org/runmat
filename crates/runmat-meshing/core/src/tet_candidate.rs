@@ -2680,6 +2680,28 @@ fn repair_exact_quality_tets_once(
             repaired.extend(candidates);
             continue;
         }
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_face_neighbor_cavity_reconnection(
+                tet_index,
+                tets,
+                &face_adjacency,
+                &node_points,
+                options,
+            )?
+        {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
+            repaired.extend(candidates);
+            continue;
+        }
         let points = candidate_tet_points(tet, &node_points)?;
         let Some((split_point, candidates)) =
             best_centroid_split_tets(tet, *next_node_id, points, options)
@@ -3687,6 +3709,140 @@ fn best_two_tet_reconnection(
             (neighbor_index, candidates, quality_gain_only)
         }),
     )
+}
+
+fn best_face_neighbor_cavity_reconnection(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut neighbor_indices = BTreeSet::<usize>::from([tet_index]);
+    for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+        if let Some(adjacent) = face_adjacency.get(&face) {
+            neighbor_indices.extend(adjacent.iter().copied());
+        }
+    }
+    if neighbor_indices.len() < 3 || neighbor_indices.len() > 10 {
+        return Ok(None);
+    }
+    let adjacent = neighbor_indices.into_iter().collect::<Vec<_>>();
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let Some(candidates) =
+        face_neighbor_cavity_reconnection_candidates(&adjacent, tets, node_points, options)?
+    else {
+        return Ok(None);
+    };
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let min_exact = min_exact_scaled_jacobian(candidates.iter());
+    if !cavity_reconnection_improves_quality(
+        candidate_below_count,
+        min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        return Ok(None);
+    }
+    let quality_gain_only = candidate_below_count == original_below_count;
+    Ok(Some((adjacent, candidates, quality_gain_only)))
+}
+
+fn face_neighbor_cavity_reconnection_candidates(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let reference = &tets[adjacent[0]];
+    let mut original_volume = 0.0_f64;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok(None);
+        }
+        original_volume += tet.volume_m3;
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    if boundary_faces.len() < 4 {
+        return Ok(None);
+    }
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 16 {
+        return Ok(None);
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok(None);
+        };
+        candidates.push(candidate);
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
+    if candidate_boundary_faces != boundary_faces {
+        return Ok(None);
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok(None);
+    }
+    Ok(Some(candidates))
+}
+
+fn boundary_faces_from_tets(tets: &[TetCandidate]) -> BTreeSet<[u32; 3]> {
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in tets {
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect()
 }
 
 fn count_exact_quality_violations<'a>(
@@ -5886,6 +6042,63 @@ mod tests {
 
         assert_eq!(tets.len(), 3);
         assert!((max_candidate_aspect_ratio(&tets) - expected.max_aspect_ratio).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn face_neighbor_cavity_reconnection_repairs_general_split_cavity() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let outer_tet = raw_candidate_tet(0, 0, &[], [0, 1, 2, 3], points, options)
+            .expect("outer tet should be valid");
+        let split_point = [0.04, 0.04, 0.04];
+        let split_tets = centroid_split_tets(&outer_tet, 4, split_point, points, options);
+        assert_eq!(split_tets.len(), 4);
+        assert!(split_tets
+            .iter()
+            .any(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian));
+        let node_points = BTreeMap::from([
+            (0, points[0]),
+            (1, points[1]),
+            (2, points[2]),
+            (3, points[3]),
+            (4, split_point),
+        ]);
+        let face_adjacency = tet_face_adjacency(&split_tets);
+
+        let (indices, candidates, quality_gain_only) = best_face_neighbor_cavity_reconnection(
+            0,
+            &split_tets,
+            &face_adjacency,
+            &node_points,
+            options,
+        )
+        .expect("general cavity reconnection should evaluate")
+        .expect("general cavity reconnection should be available");
+
+        assert_eq!(indices.len(), split_tets.len());
+        assert!(!quality_gain_only);
+        assert_eq!(
+            boundary_faces_from_tets(&candidates),
+            boundary_faces_from_tets(&split_tets)
+        );
+        assert!(
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian)
+                < count_exact_quality_violations(split_tets.iter(), options.min_scaled_jacobian)
+        );
+        let original_volume = split_tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+        assert_eq!(candidates.len(), 1);
+        assert!((candidates[0].volume_m3 - outer_tet.volume_m3).abs() < 1.0e-12);
     }
 
     #[test]
