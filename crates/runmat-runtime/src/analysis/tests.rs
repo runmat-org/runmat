@@ -6577,6 +6577,62 @@ fn refinement_effect_summary_reports_topology_deltas() {
     assert_eq!(no_op["topology_changed"].as_bool(), Some(false));
 }
 
+#[test]
+fn no_topology_growth_marks_latest_adaptive_iteration_converged() {
+    let root = temp_artifact_root("adaptive-no-topology-growth");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.adaptive_iterations
+        .push(runmat_meshing_core::AdaptiveIterationSummary {
+            iteration_index: 0,
+            node_count: mesh.nodes.len(),
+            element_count: mesh.volume_elements.len(),
+            convergence_status: runmat_meshing_core::AdaptiveConvergenceStatus::Pending,
+            indicators: vec![runmat_meshing_core::RefinementIndicatorSummary {
+                namespace: "structural".to_string(),
+                name: "stress_gradient".to_string(),
+                requested_mode: runmat_meshing_core::RefinementIndicatorMode::Auto,
+                status: runmat_meshing_core::RefinementIndicatorStatus::Used,
+                detail: None,
+            }],
+            markers: Vec::new(),
+            sizing_update: runmat_meshing_core::SizingFieldUpdate::default(),
+        });
+    let payload = serde_json::json!({
+        "schema_version": "fea_study_analysis_mesh_artifact/v1",
+        "mesh": mesh,
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&payload).expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let decoded_mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
+    mark_latest_adaptive_iteration_converged(
+        &artifact_path,
+        payload,
+        decoded_mesh,
+        "adaptive refinement produced no topology growth",
+    )
+    .expect("mark convergence");
+
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let iteration = &persisted["mesh"]["adaptive_iterations"][0];
+    assert_eq!(iteration["convergence_status"].as_str(), Some("converged"));
+    assert_eq!(
+        iteration["indicators"][0]["detail"].as_str(),
+        Some("adaptive refinement produced no topology growth")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn analysis_mesh_with_boundary_regions(
     fixed_region_ids: &[&str],
     load_region_ids: &[&str],

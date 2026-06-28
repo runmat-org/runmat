@@ -13889,6 +13889,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
     let Some(path) = analysis_mesh_artifact_path else {
         return Ok(None);
     };
+    let path_buf = PathBuf::from(path);
     let bytes = fs_read(path).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -13999,6 +14000,34 @@ fn generate_and_persist_refined_study_analysis_mesh(
     );
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
+    if !refinement_effect_topology_changed(&refinement_effect) {
+        mark_latest_adaptive_iteration_converged(
+            &path_buf,
+            payload,
+            mesh,
+            "adaptive refinement produced no topology growth",
+        )
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to persist adaptive convergence update: {err}"),
+                BTreeMap::from([
+                    ("study_id".to_string(), spec.study_id.clone()),
+                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                ]),
+            )
+        })?;
+        return Ok(None);
+    }
     let validation_options =
         analysis_mesh_validation_options_for_generated_mesh(spec, &options, &refined_mesh);
     runmat_meshing_core::validate_analysis_mesh_with_options(
@@ -14112,6 +14141,36 @@ fn generate_and_persist_refined_study_analysis_mesh(
             ]),
         )
     })
+}
+
+fn refinement_effect_topology_changed(refinement_effect: &serde_json::Value) -> bool {
+    refinement_effect
+        .get("topology_changed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn mark_latest_adaptive_iteration_converged(
+    analysis_mesh_artifact_path: &PathBuf,
+    mut payload: serde_json::Value,
+    mut mesh: AnalysisMeshArtifact,
+    detail: &str,
+) -> Result<(), String> {
+    let Some(latest_iteration) = mesh.adaptive_iterations.last_mut() else {
+        return Ok(());
+    };
+    latest_iteration.convergence_status = AdaptiveConvergenceStatus::Converged;
+    for indicator in &mut latest_iteration.indicators {
+        if indicator.status == runmat_meshing_core::RefinementIndicatorStatus::Used {
+            indicator.detail = Some(detail.to_string());
+        }
+    }
+    payload["mesh"] = serde_json::to_value(&mesh)
+        .map_err(|err| format!("failed to encode mesh payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| format!("failed to encode analysis mesh artifact: {err}"))?;
+    atomic_write_bytes(analysis_mesh_artifact_path, &bytes)?;
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)
 }
 
 fn attach_initial_adaptive_mesh_summary(
