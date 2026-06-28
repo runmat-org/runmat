@@ -870,6 +870,12 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     let topology_id = descriptor.topology_id.as_deref()?;
     let actual_entities = field_entity_count(field, &descriptor, values.len());
+    if descriptor.location == AnalysisFieldLocation::Element
+        && topology_id == "analysis_mesh"
+        && element_field_maps_to_render_triangles(meshes, actual_entities)
+    {
+        return None;
+    }
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
     let (location, expected_entities) = match descriptor.location {
@@ -896,6 +902,19 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
         total_vertices,
         total_triangles
     ))
+}
+
+fn element_field_maps_to_render_triangles(meshes: &[MeshCounts], element_count: usize) -> bool {
+    if element_count == 0 || meshes.is_empty() {
+        return false;
+    }
+    meshes.iter().all(|mesh| {
+        mesh.triangle_volume_element_indices.len() == mesh.triangles
+            && mesh
+                .triangle_volume_element_indices
+                .iter()
+                .all(|index| index.is_some_and(|index| index < element_count))
+    })
 }
 
 fn field_entity_count(
@@ -1758,6 +1777,36 @@ mod tests {
         assert!(warning.contains("element_kind=tet4"));
         assert!(warning.contains("value_count=1"));
         assert!(warning.contains("render_triangle_count=12"));
+    }
+
+    #[test]
+    fn field_topology_warning_accepts_mapped_solver_element_fields() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
+        }];
+
+        assert_eq!(field_topology_mismatch_warning(&field, &meshes), None);
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_unmapped_solver_triangles() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            triangle_volume_element_indices: vec![Some(0), None, Some(1)],
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("unmapped solver triangle should warn");
+
+        assert!(warning.contains("structural.von_mises"));
+        assert!(warning.contains("render_triangle_count=3"));
     }
 
     #[test]
