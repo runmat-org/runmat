@@ -1617,7 +1617,7 @@ fn refinement_points_for_tets(
             continue;
         }
         if classifier.contains_point(*point) && !contains_point(seed_points, *point, tolerance) {
-            for (candidate_index, candidate_point) in requested_refinement_candidate_points(
+            for candidate_point in requested_refinement_candidate_points(
                 *point,
                 seed_points,
                 classifier,
@@ -1625,12 +1625,11 @@ fn refinement_points_for_tets(
                 tolerance,
             )
             .into_iter()
-            .enumerate()
             {
                 let requested_distance_m = distance(candidate_point, *point);
                 ranked.push(RankedRefinementPoint {
                     point: candidate_point,
-                    score: requested_refinement_score(candidate_index),
+                    score: requested_refinement_score(requested_distance_m, target_size_m),
                     requested_id: Some(requested_id),
                     requested_distance_m,
                     quality_driven: false,
@@ -1753,8 +1752,13 @@ fn compare_points_lexicographically(left: [f64; 3], right: [f64; 3]) -> std::cmp
         .then_with(|| left[2].total_cmp(&right[2]))
 }
 
-fn requested_refinement_score(candidate_index: usize) -> f64 {
-    f64::MAX / (candidate_index as f64 + 2.0)
+fn requested_refinement_score(distance_m: f64, target_size_m: f64) -> f64 {
+    let normalized_distance = if target_size_m.is_finite() && target_size_m > 0.0 {
+        distance_m / target_size_m
+    } else {
+        distance_m
+    };
+    1.0e12 - normalized_distance.max(0.0)
 }
 
 fn requested_refinement_candidate_points(
@@ -4753,28 +4757,28 @@ mod tests {
         let mut ranked = vec![
             RankedRefinementPoint {
                 point: [0.4, 0.0, 0.0],
-                score: requested_refinement_score(1),
+                score: requested_refinement_score(0.2, 1.0),
                 requested_id: Some(1),
                 requested_distance_m: 0.2,
                 quality_driven: false,
             },
             RankedRefinementPoint {
                 point: [0.3, 0.0, 0.0],
-                score: requested_refinement_score(1),
+                score: requested_refinement_score(0.3, 1.0),
                 requested_id: Some(0),
                 requested_distance_m: 0.3,
                 quality_driven: false,
             },
             RankedRefinementPoint {
                 point: [0.1, 0.0, 0.0],
-                score: requested_refinement_score(0),
+                score: requested_refinement_score(0.1, 1.0),
                 requested_id: Some(1),
                 requested_distance_m: 0.1,
                 quality_driven: false,
             },
             RankedRefinementPoint {
                 point: [0.2, 0.0, 0.0],
-                score: requested_refinement_score(0),
+                score: requested_refinement_score(0.2, 1.0),
                 requested_id: Some(1),
                 requested_distance_m: 0.2,
                 quality_driven: false,
@@ -4794,8 +4798,9 @@ mod tests {
         assert_eq!(ranked[0].point, [0.1, 0.0, 0.0]);
         assert_eq!(ranked[1].requested_id, Some(1));
         assert_eq!(ranked[1].point, [0.2, 0.0, 0.0]);
-        assert_eq!(ranked[2].requested_id, Some(0));
-        assert_eq!(ranked[3].requested_id, Some(1));
+        assert_eq!(ranked[2].requested_id, Some(1));
+        assert_eq!(ranked[2].point, [0.4, 0.0, 0.0]);
+        assert_eq!(ranked[3].requested_id, Some(0));
         assert_eq!(ranked[4].requested_id, None);
     }
 
