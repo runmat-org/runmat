@@ -1453,6 +1453,26 @@ mod tests {
                     .count()
             )
         );
+        let curvature_inserted = evidence
+            .sizing
+            .inserted_breakpoint_by_reason
+            .get("cad.curvature")
+            .copied()
+            .unwrap_or_default();
+        let curvature_uninserted = evidence
+            .sizing
+            .uninserted_sample_by_reason
+            .get("cad.curvature")
+            .copied()
+            .unwrap_or_default();
+        assert_eq!(
+            curvature_inserted + curvature_uninserted,
+            mesh.sizing
+                .applied_samples
+                .iter()
+                .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
+                .count()
+        );
         assert!(mesh.backend.tet_requested_refinement_point_count > 0);
     }
 

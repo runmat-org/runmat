@@ -79,6 +79,10 @@ pub struct MeshSizingEvidence {
     pub rejected_sample_count: usize,
     pub inserted_breakpoint_count: usize,
     #[serde(default)]
+    pub inserted_breakpoint_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub uninserted_sample_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub requested_tet_refinement_point_count: usize,
     #[serde(default)]
     pub accepted_requested_tet_refinement_point_count: usize,
@@ -295,13 +299,21 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
     }
 
     let mut applied_by_reason = BTreeMap::<String, usize>::new();
+    let mut inserted_breakpoint_by_reason = BTreeMap::<String, usize>::new();
+    let mut uninserted_sample_by_reason = BTreeMap::<String, usize>::new();
     let mut inserted_breakpoint_count = 0_usize;
     for application in &mesh.sizing.applied_samples {
         let reason = application
             .reason
             .clone()
             .unwrap_or_else(|| "unspecified".to_string());
-        *applied_by_reason.entry(reason).or_default() += 1;
+        *applied_by_reason.entry(reason.clone()).or_default() += 1;
+        if application.inserted_breakpoint_count > 0 {
+            *inserted_breakpoint_by_reason.entry(reason).or_default() +=
+                application.inserted_breakpoint_count;
+        } else {
+            *uninserted_sample_by_reason.entry(reason).or_default() += 1;
+        }
         inserted_breakpoint_count += application.inserted_breakpoint_count;
     }
 
@@ -328,6 +340,8 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         applied_sample_count: mesh.sizing.applied_samples.len(),
         rejected_sample_count: mesh.sizing.rejected_samples.len(),
         inserted_breakpoint_count,
+        inserted_breakpoint_by_reason,
+        uninserted_sample_by_reason,
         requested_tet_refinement_point_count: mesh.backend.tet_requested_refinement_point_count,
         accepted_requested_tet_refinement_point_count: mesh
             .backend
@@ -719,13 +733,22 @@ mod tests {
                         reason: Some("cad.interface".to_string()),
                     },
                 ],
-                applied_samples: vec![SizingSampleApplication {
-                    position_m: [0.0, 0.0, 0.0],
-                    target_size_m: 0.25,
-                    inserted_breakpoint_count: 2,
-                    reason: Some("load_region".to_string()),
-                    detail: Some("sample detail should not be copied".to_string()),
-                }],
+                applied_samples: vec![
+                    SizingSampleApplication {
+                        position_m: [0.0, 0.0, 0.0],
+                        target_size_m: 0.25,
+                        inserted_breakpoint_count: 2,
+                        reason: Some("load_region".to_string()),
+                        detail: Some("sample detail should not be copied".to_string()),
+                    },
+                    SizingSampleApplication {
+                        position_m: [0.5, 0.0, 0.0],
+                        target_size_m: 0.2,
+                        inserted_breakpoint_count: 0,
+                        reason: Some("cad.curvature".to_string()),
+                        detail: Some("sample detail should not be copied".to_string()),
+                    },
+                ],
                 rejected_samples: vec![SizingSampleRejection {
                     position_m: [0.1, 0.0, 0.0],
                     target_size_m: 0.1,
@@ -844,6 +867,20 @@ mod tests {
         );
         assert_eq!(
             evidence.sizing.applied_by_reason.get("load_region"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .inserted_breakpoint_by_reason
+                .get("load_region"),
+            Some(&2)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .uninserted_sample_by_reason
+                .get("cad.curvature"),
             Some(&1)
         );
         assert_eq!(evidence.tet_recovery.candidate_count, 12);
