@@ -6,7 +6,7 @@ use crate::{
     predicate::{
         add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
         tet_centroid, tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
-        tet_signed_volume, triangle_centroid, PointInClosedSurface, Triangle3,
+        tet_scaled_jacobian, tet_signed_volume, triangle_centroid, PointInClosedSurface, Triangle3,
     },
     spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
@@ -919,7 +919,7 @@ fn append_best_layered_frustum_tets(
     options: TetCandidateOptions,
     tets: &mut Vec<TetCandidate>,
 ) {
-    let mut best = None::<Vec<TetCandidate>>;
+    let mut best = None::<LayeredFrustumSplit>;
     for diagonal_index in 0..3 {
         let split = layered_frustum_split(
             component,
@@ -934,15 +934,31 @@ fn append_best_layered_frustum_tets(
         let Some(split) = split else {
             continue;
         };
-        if best.as_ref().is_none_or(|current| {
-            max_candidate_aspect_ratio(&split) < max_candidate_aspect_ratio(current)
-        }) {
+        if best
+            .as_ref()
+            .is_none_or(|current| layered_split_is_better(&split, current))
+        {
             best = Some(split);
         }
     }
     if let Some(split) = best {
-        tets.extend(split);
+        tets.extend(split.tets);
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LayeredFrustumSplit {
+    tets: Vec<TetCandidate>,
+    min_scaled_jacobian: f64,
+    max_aspect_ratio: f64,
+}
+
+fn layered_split_is_better(candidate: &LayeredFrustumSplit, best: &LayeredFrustumSplit) -> bool {
+    candidate
+        .min_scaled_jacobian
+        .total_cmp(&best.min_scaled_jacobian)
+        .then_with(|| best.max_aspect_ratio.total_cmp(&candidate.max_aspect_ratio))
+        .is_gt()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -955,7 +971,7 @@ fn layered_frustum_split(
     inner_points: [[f64; 3]; 3],
     diagonal_index: usize,
     options: TetCandidateOptions,
-) -> Option<Vec<TetCandidate>> {
+) -> Option<LayeredFrustumSplit> {
     let a = diagonal_index % 3;
     let b = (diagonal_index + 1) % 3;
     let c = (diagonal_index + 2) % 3;
@@ -988,10 +1004,20 @@ fn layered_frustum_split(
             ],
         ),
     ];
-    candidates
-        .into_iter()
-        .map(|(node_ids, points)| candidate_tet(component, element, node_ids, points, options))
-        .collect()
+    let tets = candidates
+        .iter()
+        .map(|(node_ids, points)| candidate_tet(component, element, *node_ids, *points, options))
+        .collect::<Option<Vec<_>>>()?;
+    let min_scaled_jacobian = candidates
+        .iter()
+        .map(|(_, points)| tet_scaled_jacobian(*points))
+        .fold(f64::INFINITY, f64::min);
+    let max_aspect_ratio = max_candidate_aspect_ratio(&tets);
+    Some(LayeredFrustumSplit {
+        tets,
+        min_scaled_jacobian,
+        max_aspect_ratio,
+    })
 }
 
 fn max_candidate_aspect_ratio(tets: &[TetCandidate]) -> f64 {
@@ -2346,8 +2372,14 @@ mod tests {
                     options,
                 )
             })
-            .map(|split| max_candidate_aspect_ratio(&split))
-            .fold(f64::INFINITY, f64::min);
+            .reduce(|best, candidate| {
+                if layered_split_is_better(&candidate, &best) {
+                    candidate
+                } else {
+                    best
+                }
+            })
+            .expect("at least one split should be valid");
 
         let mut tets = Vec::<TetCandidate>::new();
         append_best_layered_frustum_tets(
@@ -2362,7 +2394,7 @@ mod tests {
         );
 
         assert_eq!(tets.len(), 3);
-        assert!((max_candidate_aspect_ratio(&tets) - expected).abs() < 1.0e-12);
+        assert!((max_candidate_aspect_ratio(&tets) - expected.max_aspect_ratio).abs() < 1.0e-12);
     }
 
     #[test]
