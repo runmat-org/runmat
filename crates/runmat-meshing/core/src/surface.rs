@@ -489,12 +489,14 @@ fn append_curve_driven_face_elements(
 
     let mut points = boundary_triangulation_points(frame, segments, nodes);
     let boundary_point_count = points.len();
-    let sample_report = append_exact_face_domain_sample_points(face, frame, nodes, &mut points);
-    append_face_lattice_points(face, frame, segments, nodes, &mut points);
+    let boundary_polygon = boundary_loop_polygon(&points[..boundary_point_count]);
+    let sample_report =
+        append_exact_face_domain_sample_points(face, frame, &boundary_polygon, nodes, &mut points);
+    append_face_lattice_points(face, frame, &boundary_polygon, segments, nodes, &mut points);
     let triangles = if boundary_point_count == 3 {
         triangulate_triangle_points_by_insertion(&points, boundary_point_count)
     } else {
-        triangulate_face_points(&points)
+        triangulate_face_points(&points, &boundary_polygon)
     };
     if triangles.is_empty() {
         append_curve_fan_face_elements(face, frame, segments, nodes, elements);
@@ -694,6 +696,7 @@ fn face_edges_are_recovered(
 fn append_exact_face_domain_sample_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
+    boundary_polygon: &[[f64; 2]],
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
 ) -> ExactCadSampleSurfaceReport {
@@ -716,6 +719,10 @@ fn append_exact_face_domain_sample_points(
             continue;
         }
         let local_uv = frame_local_uv(frame, projection.point_m);
+        if !point_in_polygon_2d(local_uv, boundary_polygon) {
+            report.rejected_count += 1;
+            continue;
+        }
         if points
             .iter()
             .any(|point| distance2_2d(point.uv, local_uv) <= 1.0e-24)
@@ -762,6 +769,7 @@ fn is_usable_exact_face_domain_sample(
 fn append_face_lattice_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
+    boundary_polygon: &[[f64; 2]],
     segments: &[FaceCurveSegment],
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
@@ -791,6 +799,9 @@ fn append_face_lattice_points(
                 corners[0][2] * w + corners[1][2] * u + corners[2][2] * v,
             ];
             let projection = project_to_face(frame, coordinates);
+            if !point_in_polygon_2d(projection.uv, boundary_polygon) {
+                continue;
+            }
             if points
                 .iter()
                 .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
@@ -819,7 +830,10 @@ fn segments_per_source_edge(segments: &[FaceCurveSegment]) -> BTreeMap<u32, usiz
     counts
 }
 
-fn triangulate_face_points(points: &[FaceTriangulationPoint]) -> Vec<FaceTriangle> {
+fn triangulate_face_points(
+    points: &[FaceTriangulationPoint],
+    boundary_polygon: &[[f64; 2]],
+) -> Vec<FaceTriangle> {
     if points.len() < 3 {
         return Vec::new();
     }
@@ -885,7 +899,6 @@ fn triangulate_face_points(points: &[FaceTriangulationPoint]) -> Vec<FaceTriangl
         }
     }
 
-    let polygon = boundary_polygon(points);
     triangles
         .into_iter()
         .filter(|triangle| {
@@ -905,7 +918,7 @@ fn triangulate_face_points(points: &[FaceTriangulationPoint]) -> Vec<FaceTriangl
         .filter(|triangle| {
             let centroid =
                 triangle_centroid_2d(triangle.point_indices.map(|index| points[index].uv));
-            point_in_polygon_2d(centroid, &polygon)
+            point_in_polygon_2d(centroid, boundary_polygon)
         })
         .collect()
 }
@@ -1103,43 +1116,26 @@ fn triangle_centroid_2d(points: [[f64; 2]; 3]) -> [f64; 2] {
     ]
 }
 
-fn boundary_polygon(points: &[FaceTriangulationPoint]) -> Vec<[f64; 2]> {
-    convex_hull_2d(&points.iter().map(|point| point.uv).collect::<Vec<_>>())
-}
-
-fn convex_hull_2d(points: &[[f64; 2]]) -> Vec<[f64; 2]> {
-    let mut sorted = points.to_vec();
-    sorted.sort_by(|left, right| {
-        left[0]
-            .total_cmp(&right[0])
-            .then_with(|| left[1].total_cmp(&right[1]))
-    });
-    sorted.dedup_by(|left, right| distance2_2d(*left, *right) <= 1.0e-24);
-    if sorted.len() <= 3 {
-        return sorted;
-    }
-    let mut lower = Vec::<[f64; 2]>::new();
-    for point in &sorted {
-        while lower.len() >= 2
-            && cross_2d(lower[lower.len() - 2], lower[lower.len() - 1], *point) <= 1.0e-12
+fn boundary_loop_polygon(points: &[FaceTriangulationPoint]) -> Vec<[f64; 2]> {
+    let mut polygon = Vec::<[f64; 2]>::new();
+    for point in points {
+        if polygon
+            .last()
+            .is_some_and(|last| distance2_2d(*last, point.uv) <= 1.0e-24)
         {
-            lower.pop();
+            continue;
         }
-        lower.push(*point);
+        polygon.push(point.uv);
     }
-    let mut upper = Vec::<[f64; 2]>::new();
-    for point in sorted.iter().rev() {
-        while upper.len() >= 2
-            && cross_2d(upper[upper.len() - 2], upper[upper.len() - 1], *point) <= 1.0e-12
-        {
-            upper.pop();
-        }
-        upper.push(*point);
+    if polygon.len() > 1
+        && distance2_2d(
+            polygon[0],
+            *polygon.last().expect("polygon should be non-empty"),
+        ) <= 1.0e-24
+    {
+        polygon.pop();
     }
-    lower.pop();
-    upper.pop();
-    lower.extend(upper);
-    lower
+    polygon
 }
 
 fn point_in_polygon_2d(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
@@ -1577,6 +1573,52 @@ mod tests {
     }
 
     #[test]
+    fn curve_driven_cad_surface_rejects_samples_outside_concave_trim_loop() {
+        let mut topology = single_triangle_topology();
+        topology.faces[0].area_m2 = 0.275;
+        let cad_topology =
+            crate::build_cad_topology(&geometry_with_concave_trim_rejected_sample(), &topology)
+                .expect("cad topology");
+        let cad_evaluation =
+            crate::build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let curves = concave_trim_curve_discretization();
+
+        let surface = discretize_cad_surfaces_with_curves(
+            &topology,
+            &cad_evaluation,
+            &curves,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 2,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("concave trimmed surface should discretize");
+        let recovered_area = surface
+            .elements
+            .iter()
+            .filter(|element| element.source_face_id == 7)
+            .map(|element| element.area_m2)
+            .sum::<f64>();
+        let trim_loop = [[0.0, 0.0], [0.5, 0.45], [1.0, 0.0], [0.0, 1.0]];
+
+        assert_eq!(surface.exact_cad_sample_node_count, 0);
+        assert_eq!(surface.rejected_exact_cad_sample_count, 1);
+        assert!((recovered_area - topology.faces[0].area_m2).abs() <= 1.0e-12);
+        assert!(!surface
+            .nodes
+            .iter()
+            .any(|node| node.coordinates_m == [0.5, 0.2, 0.0]));
+        assert!(surface.elements.iter().all(|element| {
+            let centroid = triangle_centroid_2d(element.node_ids.map(|node_id| {
+                let point = surface.nodes[node_id as usize].coordinates_m;
+                [point[0], point[1]]
+            }));
+            point_in_polygon_2d(centroid, &trim_loop)
+        }));
+        assert_surface_edges_are_recovered(&surface.elements, &[[0, 3], [1, 3], [1, 2], [0, 2]]);
+    }
+
+    #[test]
     fn rejects_missing_face_vertices() {
         let mut topology = single_triangle_topology();
         topology.vertices.pop();
@@ -1798,7 +1840,103 @@ mod tests {
         geometry
     }
 
+    fn geometry_with_concave_trim_rejected_sample() -> runmat_geometry_core::GeometryAsset {
+        let mut geometry = geometry_with_face_domain_sample();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.2, 0.0],
+                uv: Some([0.5, 0.2]),
+                projected_point_m: Some([0.5, 0.2, 0.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            }];
+        geometry
+    }
+
+    fn concave_trim_curve_discretization() -> crate::curve::CurveDiscretization {
+        crate::curve::CurveDiscretization {
+            nodes: vec![
+                crate::curve::CurveNode {
+                    node_id: 0,
+                    source_edge_id: 0,
+                    parameter: 0.0,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 1,
+                    source_edge_id: 0,
+                    parameter: 0.5,
+                    coordinates_m: [0.5, 0.45, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 2,
+                    source_edge_id: 0,
+                    parameter: 1.0,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 3,
+                    source_edge_id: 1,
+                    parameter: 0.0,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 4,
+                    source_edge_id: 1,
+                    parameter: 1.0,
+                    coordinates_m: [0.0, 1.0, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 5,
+                    source_edge_id: 2,
+                    parameter: 0.0,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                crate::curve::CurveNode {
+                    node_id: 6,
+                    source_edge_id: 2,
+                    parameter: 1.0,
+                    coordinates_m: [0.0, 1.0, 0.0],
+                },
+            ],
+            elements: vec![
+                crate::curve::CurveElement {
+                    element_id: 0,
+                    source_edge_id: 0,
+                    node_ids: [0, 1],
+                    length_m: 0.6726812023536856,
+                },
+                crate::curve::CurveElement {
+                    element_id: 1,
+                    source_edge_id: 0,
+                    node_ids: [1, 2],
+                    length_m: 0.6726812023536856,
+                },
+                crate::curve::CurveElement {
+                    element_id: 2,
+                    source_edge_id: 1,
+                    node_ids: [3, 4],
+                    length_m: 2.0_f64.sqrt(),
+                },
+                crate::curve::CurveElement {
+                    element_id: 3,
+                    source_edge_id: 2,
+                    node_ids: [5, 6],
+                    length_m: 1.0,
+                },
+            ],
+        }
+    }
+
     fn assert_local_surface_edges_are_recovered(elements: &[SurfaceElement]) {
+        assert_surface_edges_are_recovered(elements, &[[0, 1], [0, 2], [1, 2]]);
+    }
+
+    fn assert_surface_edges_are_recovered(
+        elements: &[SurfaceElement],
+        boundary_edges: &[[u32; 2]],
+    ) {
         let mut counts = BTreeMap::<[u32; 2], usize>::new();
         for element in elements {
             for edge in [
@@ -1810,7 +1948,7 @@ mod tests {
             }
         }
         for (edge, count) in counts {
-            let is_boundary = matches!(edge, [0, 1] | [0, 2] | [1, 2]);
+            let is_boundary = boundary_edges.contains(&edge);
             assert_eq!(
                 count,
                 if is_boundary { 1 } else { 2 },
