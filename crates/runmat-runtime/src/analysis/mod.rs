@@ -9308,7 +9308,7 @@ pub fn analysis_run_linear_static_with_options(
         ANALYSIS_RUN_OP_VERSION,
         &context,
     )?;
-    let analysis_mesh_validation_evidence = resolve_analysis_mesh_validation_evidence(
+    let analysis_mesh_validation_evidence = resolve_analysis_mesh_validation_evidence_status(
         options.analysis_mesh_artifact_path.as_deref(),
         ANALYSIS_RUN_OPERATION,
         ANALYSIS_RUN_OP_VERSION,
@@ -9403,7 +9403,7 @@ pub fn analysis_run_linear_static_with_options(
         field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
     let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
     let mesh_validation_reasons =
-        mesh_validation_evidence_quality_reasons(analysis_mesh_validation_evidence.as_ref());
+        mesh_validation_evidence_quality_reasons(&analysis_mesh_validation_evidence);
     let legacy_surrogate_reasons =
         legacy_surrogate_mesh_basis_reasons(model, analysis_mesh.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
@@ -9569,11 +9569,25 @@ fn field_topology_quality_reasons(
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum MeshValidationEvidenceStatus {
+    NotRequested,
+    Missing { detail: String },
+    Present(runmat_meshing_core::MeshValidationEvidence),
+}
+
 fn mesh_validation_evidence_quality_reasons(
-    validation: Option<&runmat_meshing_core::MeshValidationEvidence>,
+    validation: &MeshValidationEvidenceStatus,
 ) -> Vec<QualityReason> {
-    let Some(validation) = validation else {
-        return Vec::new();
+    let validation = match validation {
+        MeshValidationEvidenceStatus::NotRequested => return Vec::new(),
+        MeshValidationEvidenceStatus::Missing { detail } => {
+            return vec![QualityReason {
+                code: QualityReasonCode::SolidMeshValidationEvidenceMissing,
+                detail: format!("analysis mesh evidence is missing: {detail}"),
+            }];
+        }
+        MeshValidationEvidenceStatus::Present(validation) => validation,
     };
     if validation.solve_ready {
         return Vec::new();
@@ -15498,14 +15512,14 @@ fn resolve_analysis_mesh_artifact(
     Ok(Some(mesh))
 }
 
-fn resolve_analysis_mesh_validation_evidence(
+fn resolve_analysis_mesh_validation_evidence_status(
     analysis_mesh_artifact_path: Option<&str>,
     operation: &'static str,
     op_version: &'static str,
     context: &OperationContext,
-) -> Result<Option<runmat_meshing_core::MeshValidationEvidence>, OperationErrorEnvelope> {
+) -> Result<MeshValidationEvidenceStatus, OperationErrorEnvelope> {
     let Some(path) = analysis_mesh_artifact_path else {
-        return Ok(None);
+        return Ok(MeshValidationEvidenceStatus::NotRequested);
     };
     let bytes = fs_read(path).map_err(|err| {
         operation_error(
@@ -15541,7 +15555,9 @@ fn resolve_analysis_mesh_validation_evidence(
         .get("mesh_evidence_artifact_path")
         .and_then(serde_json::Value::as_str)
     else {
-        return Ok(None);
+        return Ok(MeshValidationEvidenceStatus::Missing {
+            detail: "analysis mesh artifact has no mesh_evidence_artifact_path".to_string(),
+        });
     };
     let evidence_bytes = fs_read(evidence_path).map_err(|err| {
         operation_error(
@@ -15591,10 +15607,12 @@ fn resolve_analysis_mesh_validation_evidence(
         .and_then(|evidence| evidence.get("validation"))
         .cloned()
     else {
-        return Ok(None);
+        return Ok(MeshValidationEvidenceStatus::Missing {
+            detail: "mesh evidence artifact has no mesh_evidence.validation payload".to_string(),
+        });
     };
     serde_json::from_value::<runmat_meshing_core::MeshValidationEvidence>(validation_value)
-        .map(Some)
+        .map(MeshValidationEvidenceStatus::Present)
         .map_err(|err| {
             operation_error(
                 operation,

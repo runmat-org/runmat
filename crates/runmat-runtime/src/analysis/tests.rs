@@ -5245,7 +5245,9 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     evidence.validation_error_code = Some("coverage_sample_failed".to_string());
     evidence.validation_error_message = Some("coverage sample was outside the solid".to_string());
 
-    let reasons = mesh_validation_evidence_quality_reasons(Some(&evidence));
+    let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
+        evidence.clone(),
+    ));
 
     assert_eq!(reasons.len(), 1);
     assert_eq!(
@@ -5260,8 +5262,25 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
         .contains("coverage sample was outside the solid"));
 
     evidence.solve_ready = true;
-    assert!(mesh_validation_evidence_quality_reasons(Some(&evidence)).is_empty());
-    assert!(mesh_validation_evidence_quality_reasons(None).is_empty());
+    assert!(
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(evidence))
+            .is_empty()
+    );
+    assert!(
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::NotRequested)
+            .is_empty()
+    );
+
+    let missing =
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Missing {
+            detail: "analysis mesh artifact has no mesh_evidence_artifact_path".to_string(),
+        });
+    assert_eq!(missing.len(), 1);
+    assert_eq!(
+        missing[0].code,
+        QualityReasonCode::SolidMeshValidationEvidenceMissing
+    );
+    assert!(missing[0].detail.contains("mesh_evidence_artifact_path"));
 }
 
 #[test]
@@ -5337,6 +5356,58 @@ fn analysis_mesh_evidence_failure_rejects_direct_run() {
     assert!(reason
         .detail
         .contains("validation_error_code=coverage_sample_failed"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_mesh_missing_evidence_rejects_direct_run() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("mesh-evidence-missing-rejects-direct-run");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh": analysis_mesh_with_boundary_regions(&["root"], &["tip"]),
+        }))
+        .expect("encode analysis mesh"),
+    )
+    .expect("write analysis mesh");
+
+    let envelope = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Exploratory,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-mesh-evidence-missing-rejects-direct-run".to_string()),
+            None,
+        ),
+    )
+    .expect("run should complete and reject on missing mesh evidence");
+
+    assert_eq!(envelope.data.result_quality, QualityGate::Fail);
+    assert_eq!(envelope.data.run_status, RunStatus::Rejected);
+    assert!(!envelope.data.publishable);
+    let reason = envelope
+        .data
+        .quality_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshValidationEvidenceMissing)
+        .expect("missing mesh evidence should be reported");
+    assert!(reason.detail.contains("mesh_evidence_artifact_path"));
 
     let _ = fs::remove_dir_all(&root);
 }
