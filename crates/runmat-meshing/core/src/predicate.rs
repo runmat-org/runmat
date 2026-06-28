@@ -108,6 +108,28 @@ pub fn tet_edge_aspect_ratio(points: Tetrahedron3) -> f64 {
     max_edge / min_edge.max(f64::EPSILON)
 }
 
+pub fn tet_scaled_jacobian(points: Tetrahedron3) -> f64 {
+    let corners = [
+        (points[0], points[1], points[2], points[3]),
+        (points[1], points[0], points[3], points[2]),
+        (points[2], points[0], points[1], points[3]),
+        (points[3], points[0], points[2], points[1]),
+    ];
+    corners
+        .into_iter()
+        .map(|(origin, first, second, third)| {
+            let first = sub(first, origin);
+            let second = sub(second, origin);
+            let third = sub(third, origin);
+            let denominator = norm(first) * norm(second) * norm(third);
+            if denominator <= f64::EPSILON {
+                return 0.0;
+            }
+            (2.0_f64.sqrt() * dot(first, cross(second, third)) / denominator).abs()
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
 pub fn ray_triangle_intersection(
     origin: Point3,
     direction: Point3,
@@ -357,6 +379,25 @@ mod tests {
             orient_tet_node_ids([1, 3, 2, 4], [tet[0], tet[2], tet[1], tet[3]]);
         assert_eq!(node_ids, [1, 2, 3, 4]);
         assert!((volume - 1.0 / 6.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn tet_scaled_jacobian_reports_shape_quality() {
+        let orthogonal = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let sliver = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0e-4, 1.0e-4, 1.0e-5],
+        ];
+
+        assert!(tet_scaled_jacobian(orthogonal) > 0.5);
+        assert!(tet_scaled_jacobian(sliver) < 0.01);
     }
 
     #[test]

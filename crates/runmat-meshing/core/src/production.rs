@@ -17,6 +17,7 @@ use crate::{
         CurveDiscretizationOptions,
     },
     options::{MeshTargetSize, VolumeMeshingOptions},
+    predicate::{distance_squared, tet_centroid, triangle_centroid},
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality},
     sizing::MeshSizingField,
@@ -246,6 +247,13 @@ fn analysis_mesh_from_preparation(
     let mut source_surface_to_tet = BTreeMap::<u32, Vec<String>>::new();
     let mut volume_elements = Vec::<AnalysisVolumeElement>::new();
     let mut quality_elements = Vec::<ElementQuality>::new();
+    let mut tet_centroids = Vec::<(String, [f64; 3])>::new();
+    let candidate_nodes_by_id = preparation
+        .tet_candidates
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
     for tet in &preparation.tet_candidates.tets {
         let element_id = format!("prod_tet_{}", tet.tet_id + 1);
         let node_ids = tet
@@ -279,6 +287,29 @@ fn analysis_mesh_from_preparation(
                 region_ids: tet.region_ids.clone(),
             }],
         });
+        let tet_points = [
+            *candidate_nodes_by_id.get(&tet.node_ids[0]).ok_or(
+                ProductionMeshError::MissingCandidateNode {
+                    node_id: tet.node_ids[0],
+                },
+            )?,
+            *candidate_nodes_by_id.get(&tet.node_ids[1]).ok_or(
+                ProductionMeshError::MissingCandidateNode {
+                    node_id: tet.node_ids[1],
+                },
+            )?,
+            *candidate_nodes_by_id.get(&tet.node_ids[2]).ok_or(
+                ProductionMeshError::MissingCandidateNode {
+                    node_id: tet.node_ids[2],
+                },
+            )?,
+            *candidate_nodes_by_id.get(&tet.node_ids[3]).ok_or(
+                ProductionMeshError::MissingCandidateNode {
+                    node_id: tet.node_ids[3],
+                },
+            )?,
+        ];
+        tet_centroids.push((element_id.clone(), tet_centroid(tet_points)));
         quality_elements.push(ElementQuality {
             element_id,
             scaled_jacobian: (1.0 / tet.aspect_ratio.max(1.0)).min(1.0),
@@ -302,14 +333,22 @@ fn analysis_mesh_from_preparation(
                         .ok_or(ProductionMeshError::MissingCandidateNode { node_id: *node_id })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let mut adjacent_volume_element_ids = source_surface_to_tet
+                .get(&element.element_id)
+                .cloned()
+                .unwrap_or_default();
+            if adjacent_volume_element_ids.is_empty() {
+                if let Some(nearest_tet_id) =
+                    nearest_tet_for_boundary_element(element, &preparation.surface, &tet_centroids)
+                {
+                    adjacent_volume_element_ids.push(nearest_tet_id);
+                }
+            }
             Ok(AnalysisBoundaryFace {
                 face_id: format!("prod_boundary_{}", element.element_id + 1),
                 kind: BoundaryElementKind::Tri3,
                 node_ids,
-                adjacent_volume_element_ids: source_surface_to_tet
-                    .get(&element.element_id)
-                    .cloned()
-                    .unwrap_or_default(),
+                adjacent_volume_element_ids,
                 region_ids: element.region_ids.clone(),
                 provenance: vec![MeshEntityProvenance {
                     source_geometry_id: preparation.topology.source_geometry_id.clone(),
@@ -468,6 +507,25 @@ fn boundary_face_recovery_ratio(boundary_faces: &[AnalysisBoundaryFace]) -> f64 
         .filter(|face| !face.adjacent_volume_element_ids.is_empty())
         .count();
     recovered_count as f64 / boundary_faces.len() as f64
+}
+
+fn nearest_tet_for_boundary_element(
+    element: &crate::surface::SurfaceElement,
+    surface: &SurfaceDiscretization,
+    tet_centroids: &[(String, [f64; 3])],
+) -> Option<String> {
+    let points = [
+        surface.nodes[element.node_ids[0] as usize].coordinates_m,
+        surface.nodes[element.node_ids[1] as usize].coordinates_m,
+        surface.nodes[element.node_ids[2] as usize].coordinates_m,
+    ];
+    let centroid = triangle_centroid(points);
+    tet_centroids
+        .iter()
+        .min_by(|(_, left), (_, right)| {
+            distance_squared(*left, centroid).total_cmp(&distance_squared(*right, centroid))
+        })
+        .map(|(element_id, _)| element_id.clone())
 }
 
 fn boundary_edge_recovery_ratio(

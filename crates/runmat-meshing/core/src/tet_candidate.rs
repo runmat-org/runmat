@@ -1070,10 +1070,9 @@ fn insertion_tet_status(
         .iter()
         .map(|tet| tet.aspect_ratio)
         .fold(0.0_f64, f64::max);
-    let validation_aspect_limit = options.sliver_aspect_ratio.min(1.0 / 0.15);
     InsertionStatus {
         accepted: (0.90..=1.10).contains(&volume_ratio)
-            && max_aspect_ratio <= validation_aspect_limit,
+            && max_aspect_ratio <= options.sliver_aspect_ratio,
         volume_ratio,
         max_aspect_ratio,
     }
