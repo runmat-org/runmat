@@ -40,13 +40,15 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use benchmark::{
-    build_mesh_benchmark_report, build_mesh_benchmark_suite_report, generic_mesh_benchmark_cases,
-    run_generic_mesh_benchmark_suite, run_mesh_benchmark_cases, run_mesh_benchmark_cases_with,
-    MeshBenchmarkCase, MeshBenchmarkCoverageMetrics, MeshBenchmarkInput, MeshBenchmarkReport,
-    MeshBenchmarkRunError, MeshBenchmarkSolveReadiness, MeshBenchmarkSuiteReport,
-    MeshBenchmarkSuiteSummary, MeshBenchmarkTier, MeshBenchmarkTiming,
-    MeshBenchmarkTopologyMetrics, MESH_BENCHMARK_SCHEMA_VERSION,
-    MESH_BENCHMARK_SUITE_SCHEMA_VERSION,
+    build_mesh_benchmark_report, build_mesh_benchmark_suite_report, compare_mesh_benchmark_suites,
+    generic_mesh_benchmark_cases, run_generic_mesh_benchmark_suite, run_mesh_benchmark_cases,
+    run_mesh_benchmark_cases_with, MeshBenchmarkCase, MeshBenchmarkCaseComparison,
+    MeshBenchmarkComparisonReport, MeshBenchmarkComparisonSummary,
+    MeshBenchmarkComparisonThresholds, MeshBenchmarkCoverageMetrics, MeshBenchmarkInput,
+    MeshBenchmarkReport, MeshBenchmarkRunError, MeshBenchmarkSolveReadiness,
+    MeshBenchmarkSuiteReport, MeshBenchmarkSuiteSummary, MeshBenchmarkTier, MeshBenchmarkTiming,
+    MeshBenchmarkTopologyMetrics, MESH_BENCHMARK_COMPARISON_SCHEMA_VERSION,
+    MESH_BENCHMARK_SCHEMA_VERSION, MESH_BENCHMARK_SUITE_SCHEMA_VERSION,
 };
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use cad_eval::{
