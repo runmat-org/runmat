@@ -9406,6 +9406,7 @@ pub fn analysis_run_linear_static_with_options(
                 | QualityReasonCode::SolidMeshUnmappedLoadRegion
                 | QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
                 | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
+                | QualityReasonCode::SolidMeshRenderTopologyIncomplete
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
         )
     });
@@ -9592,6 +9593,12 @@ fn solid_mesh_quality_reasons(
             detail,
         });
     }
+    if let Some(detail) = render_topology_gap_detail(mesh) {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshRenderTopologyIncomplete,
+            detail,
+        });
+    }
     reasons.extend(boundary_region_mapping_reasons(model, mesh));
     let thresholds = runmat_meshing_core::QualityThresholds::default();
     if !mesh.quality.min_scaled_jacobian.is_finite()
@@ -9635,6 +9642,61 @@ fn solid_mesh_quality_reasons(
         }
     }
     reasons
+}
+
+fn render_topology_gap_detail(mesh: &AnalysisMeshArtifact) -> Option<String> {
+    if mesh.volume_elements.is_empty() {
+        return None;
+    }
+    let volume_element_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.element_id.as_str())
+        .collect::<HashSet<_>>();
+    let node_ids = mesh
+        .nodes
+        .iter()
+        .map(|node| node.node_id)
+        .collect::<HashSet<_>>();
+    let mut renderable_boundary_face_count = 0_usize;
+    let mut unmapped_boundary_face_count = 0_usize;
+    let mut invalid_node_boundary_face_count = 0_usize;
+    for face in &mesh.boundary_faces {
+        if face.kind != runmat_meshing_core::BoundaryElementKind::Tri3 || face.node_ids.len() != 3 {
+            continue;
+        }
+        renderable_boundary_face_count += 1;
+        if face
+            .node_ids
+            .iter()
+            .any(|node_id| !node_ids.contains(node_id))
+        {
+            invalid_node_boundary_face_count += 1;
+            continue;
+        }
+        if !face
+            .adjacent_volume_element_ids
+            .iter()
+            .any(|element_id| volume_element_ids.contains(element_id.as_str()))
+        {
+            unmapped_boundary_face_count += 1;
+        }
+    }
+    if renderable_boundary_face_count == 0 {
+        return Some(format!(
+            "analysis mesh has {} volume elements but no renderable Tri3 boundary faces for solver field visualization",
+            mesh.volume_elements.len()
+        ));
+    }
+    if invalid_node_boundary_face_count > 0 || unmapped_boundary_face_count > 0 {
+        return Some(format!(
+            "analysis mesh render topology is incomplete: renderable_boundary_face_count={} invalid_node_boundary_face_count={} unmapped_boundary_face_count={}",
+            renderable_boundary_face_count,
+            invalid_node_boundary_face_count,
+            unmapped_boundary_face_count
+        ));
+    }
+    None
 }
 
 struct BoundaryProjectionWarningThresholds {

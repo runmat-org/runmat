@@ -5292,6 +5292,39 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 }
 
 #[test]
+fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
+    let no_boundary = minimal_analysis_mesh();
+    let no_boundary_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&no_boundary));
+    let no_boundary_reason = no_boundary_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+        .expect("missing boundary render topology should be reported");
+    assert!(no_boundary_reason
+        .detail
+        .contains("no renderable Tri3 boundary faces"));
+
+    let mut unmapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    unmapped.boundary_faces[0]
+        .adjacent_volume_element_ids
+        .clear();
+    unmapped.boundary_faces[1].adjacent_volume_element_ids = vec!["missing_tet".to_string()];
+
+    let unmapped_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&unmapped));
+    let unmapped_reason = unmapped_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+        .expect("unmapped boundary render topology should be reported");
+    assert!(unmapped_reason
+        .detail
+        .contains("unmapped_boundary_face_count=2"));
+
+    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(solid_mesh_quality_reasons(&sample_model(), Some(&mapped))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete));
+}
+
+#[test]
 fn solid_mesh_material_coverage_uses_region_assignments() {
     let mesh = minimal_analysis_mesh();
     let mut single_material = sample_model();

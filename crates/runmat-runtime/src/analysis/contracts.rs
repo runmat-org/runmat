@@ -329,6 +329,7 @@ pub enum QualityReasonCode {
     SolidMeshUnmappedLoadRegion,
     SolidMeshUnmappedBoundaryConditionRegion,
     SolidMeshMaterialCoverageIncomplete,
+    SolidMeshRenderTopologyIncomplete,
     SolidMeshQualityMinJacobianFailed,
     SolidMeshQualityAspectRatioWarn,
     SolidMeshBoundaryProjectionWarn,
