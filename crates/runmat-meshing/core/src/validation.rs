@@ -158,6 +158,77 @@ pub enum AnalysisMeshValidationError {
     },
 }
 
+pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) -> &'static str {
+    match error {
+        AnalysisMeshValidationError::UnsupportedSchema { .. } => "unsupported_schema",
+        AnalysisMeshValidationError::EmptyNodes => "empty_nodes",
+        AnalysisMeshValidationError::EmptyVolumeElements => "empty_volume_elements",
+        AnalysisMeshValidationError::DuplicateNodeId { .. } => "duplicate_node_id",
+        AnalysisMeshValidationError::NonFiniteNodeCoordinate { .. } => "non_finite_node_coordinate",
+        AnalysisMeshValidationError::DuplicateElementId { .. } => "duplicate_element_id",
+        AnalysisMeshValidationError::UnsupportedVolumeElementKind { .. } => {
+            "unsupported_volume_element_kind"
+        }
+        AnalysisMeshValidationError::WrongVolumeElementNodeCount { .. } => {
+            "wrong_volume_element_node_count"
+        }
+        AnalysisMeshValidationError::UnknownVolumeElementNode { .. } => {
+            "unknown_volume_element_node"
+        }
+        AnalysisMeshValidationError::RepeatedVolumeElementNode { .. } => {
+            "repeated_volume_element_node"
+        }
+        AnalysisMeshValidationError::MissingMaterialRegion { .. } => "missing_material_region",
+        AnalysisMeshValidationError::DuplicateBoundaryFaceId { .. } => "duplicate_boundary_face_id",
+        AnalysisMeshValidationError::UnsupportedBoundaryElementKind { .. } => {
+            "unsupported_boundary_element_kind"
+        }
+        AnalysisMeshValidationError::WrongBoundaryFaceNodeCount { .. } => {
+            "wrong_boundary_face_node_count"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryFaceNode { .. } => "unknown_boundary_face_node",
+        AnalysisMeshValidationError::RepeatedBoundaryFaceNode { .. } => {
+            "repeated_boundary_face_node"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryAdjacentElement { .. } => {
+            "unknown_boundary_adjacent_element"
+        }
+        AnalysisMeshValidationError::DuplicateBoundaryEdgeId { .. } => "duplicate_boundary_edge_id",
+        AnalysisMeshValidationError::WrongBoundaryEdgeNodeCount { .. } => {
+            "wrong_boundary_edge_node_count"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryEdgeNode { .. } => "unknown_boundary_edge_node",
+        AnalysisMeshValidationError::RepeatedBoundaryEdgeNode { .. } => {
+            "repeated_boundary_edge_node"
+        }
+        AnalysisMeshValidationError::UnknownBoundaryEdgeAdjacentFace { .. } => {
+            "unknown_boundary_edge_adjacent_face"
+        }
+        AnalysisMeshValidationError::QualityThresholdFailed { .. } => "quality_threshold_failed",
+        AnalysisMeshValidationError::ElementBudgetExceeded { .. } => "element_budget_exceeded",
+        AnalysisMeshValidationError::VolumeComponentCountExceeded { .. } => {
+            "volume_component_count_exceeded"
+        }
+        AnalysisMeshValidationError::BoundsCoverageFailed { .. } => "bounds_coverage_failed",
+        AnalysisMeshValidationError::VolumeCoverageFailed { .. } => "volume_coverage_failed",
+        AnalysisMeshValidationError::BoundaryAreaCoverageFailed { .. } => {
+            "boundary_area_coverage_failed"
+        }
+        AnalysisMeshValidationError::BoundaryFaceRecoveryFailed { .. } => {
+            "boundary_face_recovery_failed"
+        }
+        AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
+            "boundary_edge_recovery_failed"
+        }
+        AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
+            "missing_required_boundary_region"
+        }
+        AnalysisMeshValidationError::MissingRequiredMaterialRegion { .. } => {
+            "missing_required_material_region"
+        }
+    }
+}
+
 pub fn validate_analysis_mesh(
     mesh: &AnalysisMeshArtifact,
     thresholds: QualityThresholds,
@@ -1094,6 +1165,10 @@ mod tests {
         let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
             .expect_err("low jacobian should fail");
         assert_eq!(
+            analysis_mesh_validation_error_code(&err),
+            "quality_threshold_failed"
+        );
+        assert_eq!(
             err,
             AnalysisMeshValidationError::QualityThresholdFailed {
                 reason: "min_scaled_jacobian".to_string()
@@ -1263,6 +1338,10 @@ mod tests {
             },
         )
         .expect_err("missing material region should fail");
+        assert_eq!(
+            analysis_mesh_validation_error_code(&err),
+            "missing_required_material_region"
+        );
         assert_eq!(
             err,
             AnalysisMeshValidationError::MissingRequiredMaterialRegion {

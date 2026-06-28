@@ -5,8 +5,8 @@ use crate::{
     artifact::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
     validation::{
-        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,
-        AnalysisMeshValidationOptions,
+        analysis_mesh_validation_error_code, validate_analysis_mesh_with_options,
+        volume_component_count, AnalysisMeshValidationOptions,
     },
 };
 
@@ -384,7 +384,7 @@ fn validation_evidence(
         Ok(()) => (true, None, None),
         Err(err) => (
             false,
-            Some(validation_error_code(&err).to_string()),
+            Some(analysis_mesh_validation_error_code(&err).to_string()),
             Some(format!("{err:?}")),
         ),
     };
@@ -414,77 +414,6 @@ fn validation_evidence(
 
 fn default_solve_ready() -> bool {
     true
-}
-
-fn validation_error_code(error: &AnalysisMeshValidationError) -> &'static str {
-    match error {
-        AnalysisMeshValidationError::UnsupportedSchema { .. } => "unsupported_schema",
-        AnalysisMeshValidationError::EmptyNodes => "empty_nodes",
-        AnalysisMeshValidationError::EmptyVolumeElements => "empty_volume_elements",
-        AnalysisMeshValidationError::DuplicateNodeId { .. } => "duplicate_node_id",
-        AnalysisMeshValidationError::NonFiniteNodeCoordinate { .. } => "non_finite_node_coordinate",
-        AnalysisMeshValidationError::DuplicateElementId { .. } => "duplicate_element_id",
-        AnalysisMeshValidationError::UnsupportedVolumeElementKind { .. } => {
-            "unsupported_volume_element_kind"
-        }
-        AnalysisMeshValidationError::WrongVolumeElementNodeCount { .. } => {
-            "wrong_volume_element_node_count"
-        }
-        AnalysisMeshValidationError::UnknownVolumeElementNode { .. } => {
-            "unknown_volume_element_node"
-        }
-        AnalysisMeshValidationError::RepeatedVolumeElementNode { .. } => {
-            "repeated_volume_element_node"
-        }
-        AnalysisMeshValidationError::MissingMaterialRegion { .. } => "missing_material_region",
-        AnalysisMeshValidationError::DuplicateBoundaryFaceId { .. } => "duplicate_boundary_face_id",
-        AnalysisMeshValidationError::UnsupportedBoundaryElementKind { .. } => {
-            "unsupported_boundary_element_kind"
-        }
-        AnalysisMeshValidationError::WrongBoundaryFaceNodeCount { .. } => {
-            "wrong_boundary_face_node_count"
-        }
-        AnalysisMeshValidationError::UnknownBoundaryFaceNode { .. } => "unknown_boundary_face_node",
-        AnalysisMeshValidationError::RepeatedBoundaryFaceNode { .. } => {
-            "repeated_boundary_face_node"
-        }
-        AnalysisMeshValidationError::UnknownBoundaryAdjacentElement { .. } => {
-            "unknown_boundary_adjacent_element"
-        }
-        AnalysisMeshValidationError::DuplicateBoundaryEdgeId { .. } => "duplicate_boundary_edge_id",
-        AnalysisMeshValidationError::WrongBoundaryEdgeNodeCount { .. } => {
-            "wrong_boundary_edge_node_count"
-        }
-        AnalysisMeshValidationError::UnknownBoundaryEdgeNode { .. } => "unknown_boundary_edge_node",
-        AnalysisMeshValidationError::RepeatedBoundaryEdgeNode { .. } => {
-            "repeated_boundary_edge_node"
-        }
-        AnalysisMeshValidationError::UnknownBoundaryEdgeAdjacentFace { .. } => {
-            "unknown_boundary_edge_adjacent_face"
-        }
-        AnalysisMeshValidationError::QualityThresholdFailed { .. } => "quality_threshold_failed",
-        AnalysisMeshValidationError::ElementBudgetExceeded { .. } => "element_budget_exceeded",
-        AnalysisMeshValidationError::VolumeComponentCountExceeded { .. } => {
-            "volume_component_count_exceeded"
-        }
-        AnalysisMeshValidationError::BoundsCoverageFailed { .. } => "bounds_coverage_failed",
-        AnalysisMeshValidationError::VolumeCoverageFailed { .. } => "volume_coverage_failed",
-        AnalysisMeshValidationError::BoundaryAreaCoverageFailed { .. } => {
-            "boundary_area_coverage_failed"
-        }
-        AnalysisMeshValidationError::BoundaryFaceRecoveryFailed { .. } => {
-            "boundary_face_recovery_failed"
-        }
-        AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
-            "boundary_edge_recovery_failed"
-        }
-        AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
-            "missing_required_boundary_region"
-        }
-        AnalysisMeshValidationError::MissingRequiredMaterialRegion { .. } => {
-            "missing_required_material_region"
-        }
-    }
 }
 
 fn boundary_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshBoundaryRecoveryEvidence {

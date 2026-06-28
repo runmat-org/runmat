@@ -13494,6 +13494,10 @@ fn generate_and_persist_study_analysis_mesh(
                     ("study_id".to_string(), spec.study_id.clone()),
                     ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
                     ("mesh_id".to_string(), mesh.mesh_id.clone()),
+                    (
+                        "mesh_validation_code".to_string(),
+                        runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                    ),
                 ]),
             )
         })?;
@@ -14014,6 +14018,10 @@ fn generate_and_persist_refined_study_analysis_mesh(
                 ("study_id".to_string(), spec.study_id.clone()),
                 ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
                 ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
+                (
+                    "mesh_validation_code".to_string(),
+                    runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                ),
             ]),
         )
     })?;
@@ -15254,7 +15262,13 @@ fn resolve_analysis_mesh_artifact(
                 severity: OperationErrorSeverity::Error,
             },
             format!("analysis mesh artifact failed validation: {err:?}"),
-            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            BTreeMap::from([
+                ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                (
+                    "mesh_validation_code".to_string(),
+                    runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                ),
+            ]),
         )
     })?;
     Ok(Some(mesh))
