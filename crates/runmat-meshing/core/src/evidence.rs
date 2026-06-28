@@ -81,6 +81,8 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub accepted_requested_tet_refinement_point_count: usize,
     #[serde(default)]
+    pub accepted_requested_tet_refinement_surrogate_point_count: usize,
+    #[serde(default)]
     pub requested_tet_refinement_acceptance_ratio: Option<f64>,
     pub applied_by_reason: BTreeMap<String, usize>,
     pub rejected_by_status: BTreeMap<String, usize>,
@@ -312,6 +314,9 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         accepted_requested_tet_refinement_point_count: mesh
             .backend
             .tet_accepted_requested_refinement_point_count,
+        accepted_requested_tet_refinement_surrogate_point_count: mesh
+            .backend
+            .tet_accepted_requested_refinement_surrogate_point_count,
         requested_tet_refinement_acceptance_ratio: if mesh
             .backend
             .tet_requested_refinement_point_count
@@ -723,6 +728,7 @@ mod tests {
                 tet_refinement_point_count: 5,
                 tet_requested_refinement_point_count: 4,
                 tet_accepted_requested_refinement_point_count: 3,
+                tet_accepted_requested_refinement_surrogate_point_count: 2,
                 tet_optimization_pass_count: 1,
                 tet_smoothed_point_count: 2,
                 tet_sliver_candidate_count: 1,
@@ -779,6 +785,12 @@ mod tests {
                 .sizing
                 .accepted_requested_tet_refinement_point_count,
             3
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_surrogate_point_count,
+            2
         );
         assert_eq!(
             evidence.sizing.requested_tet_refinement_acceptance_ratio,

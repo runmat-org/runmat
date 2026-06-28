@@ -113,6 +113,8 @@ pub struct TetRecoveryReport {
     pub requested_refinement_point_count: usize,
     #[serde(default)]
     pub accepted_requested_refinement_point_count: usize,
+    #[serde(default)]
+    pub accepted_requested_refinement_surrogate_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
     pub min_exact_scaled_jacobian: f64,
@@ -210,6 +212,7 @@ pub fn form_tet_candidates(
     let mut refinement_point_count = 0_usize;
     let mut requested_refinement_point_count = 0_usize;
     let mut accepted_requested_refinement_point_count = 0_usize;
+    let mut accepted_requested_refinement_surrogate_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     let mut optimization_pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
@@ -238,6 +241,8 @@ pub fn form_tet_candidates(
         refinement_point_count += refinement.inserted_point_count;
         requested_refinement_point_count += refinement.requested_point_count;
         accepted_requested_refinement_point_count += refinement.accepted_requested_point_count;
+        accepted_requested_refinement_surrogate_point_count +=
+            refinement.accepted_requested_surrogate_point_count;
         sizing_violation_count += refinement.sizing_violation_count;
         if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
             add_dense_recovery_layer_points(
@@ -381,6 +386,7 @@ pub fn form_tet_candidates(
             refinement_point_count,
             requested_refinement_point_count,
             accepted_requested_refinement_point_count,
+            accepted_requested_refinement_surrogate_point_count,
             max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
             min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
@@ -1384,6 +1390,7 @@ struct SeedRefinementSummary {
     inserted_point_count: usize,
     requested_point_count: usize,
     accepted_requested_point_count: usize,
+    accepted_requested_surrogate_point_count: usize,
     accepted_requested_points: Vec<AcceptedRequestedRefinementPoint>,
     sizing_violation_count: usize,
 }
@@ -1414,6 +1421,7 @@ fn refine_component_seed_points(
             inserted_point_count: 0,
             requested_point_count: 0,
             accepted_requested_point_count: 0,
+            accepted_requested_surrogate_point_count: 0,
             accepted_requested_points: Vec::new(),
             sizing_violation_count: 0,
         });
@@ -1425,6 +1433,7 @@ fn refine_component_seed_points(
     let mut inserted_point_count = 0_usize;
     let mut requested_point_count = 0_usize;
     let mut accepted_requested_point_count = 0_usize;
+    let mut accepted_requested_surrogate_point_count = 0_usize;
     let mut accepted_requested_points = Vec::<AcceptedRequestedRefinementPoint>::new();
     let mut accepted_requested_ids = BTreeSet::<usize>::new();
     let mut sizing_violation_count = 0_usize;
@@ -1514,6 +1523,13 @@ fn refine_component_seed_points(
             if let Some(requested_id) = candidate.requested_id {
                 accepted_requested_ids.insert(requested_id);
                 accepted_requested_point_count += 1;
+                if !tolerance.point_nearly_equal(
+                    point,
+                    options.requested_refinement_points[requested_id],
+                    1.0,
+                ) {
+                    accepted_requested_surrogate_point_count += 1;
+                }
                 accepted_requested_points.push(AcceptedRequestedRefinementPoint {
                     seed_index,
                     requested_point: point,
@@ -1532,6 +1548,7 @@ fn refine_component_seed_points(
         inserted_point_count,
         requested_point_count,
         accepted_requested_point_count,
+        accepted_requested_surrogate_point_count,
         accepted_requested_points,
         sizing_violation_count,
     })
@@ -4394,6 +4411,12 @@ mod tests {
                 .accepted_requested_refinement_point_count,
             1
         );
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_surrogate_point_count,
+            0
+        );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
@@ -4454,6 +4477,12 @@ mod tests {
                 .accepted_requested_refinement_point_count,
             1
         );
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_surrogate_point_count,
+            1
+        );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(
@@ -4492,6 +4521,12 @@ mod tests {
             candidates
                 .recovery
                 .accepted_requested_refinement_point_count,
+            1
+        );
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_surrogate_point_count,
             1
         );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
