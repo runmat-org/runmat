@@ -11,7 +11,7 @@ use crate::{
     artifact::AnalysisMeshArtifact,
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
-        MeshTetRecoveryEvidence,
+        MeshSizingEvidence, MeshTetRecoveryEvidence,
     },
     generate_analysis_mesh, generate_analysis_mesh_with_sizing,
     predicate::{tet_volume, triangle_area},
@@ -104,6 +104,7 @@ pub struct MeshBenchmarkReport {
     pub timing: MeshBenchmarkTiming,
     pub topology: MeshBenchmarkTopologyMetrics,
     pub cad: MeshCadEvidence,
+    pub sizing: MeshSizingEvidence,
     pub coverage: MeshBenchmarkCoverageMetrics,
     pub quality: MeshQualityEvidence,
     pub tet_recovery: MeshTetRecoveryEvidence,
@@ -285,6 +286,7 @@ pub fn build_mesh_benchmark_report(
             volume_component_count: volume_component_count(mesh),
         },
         cad: evidence.cad,
+        sizing: evidence.sizing,
         coverage: MeshBenchmarkCoverageMetrics {
             expected_volume_m3: validation.expected_volume_m3,
             actual_volume_m3,
@@ -1288,13 +1290,27 @@ mod tests {
         },
         provenance::AnalysisMeshProvenance,
         quality::{AnalysisMeshQualityReport, ElementQuality},
-        sizing::MeshSizingField,
+        sizing::{MeshSizingField, SizingSample, SizingSampleApplication},
         topology::{BoundaryElementKind, VolumeElementKind},
     };
 
     #[test]
     fn benchmark_report_records_solve_ready_mesh_metrics() {
-        let mesh = fixture_mesh();
+        let mut mesh = fixture_mesh();
+        mesh.sizing.samples.push(SizingSample {
+            position_m: [0.25, 0.25, 0.25],
+            target_size_m: 0.1,
+            reason: Some("structural.stress_gradient".to_string()),
+        });
+        mesh.sizing.applied_samples.push(SizingSampleApplication {
+            position_m: [0.25, 0.25, 0.25],
+            target_size_m: 0.1,
+            inserted_breakpoint_count: 0,
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: None,
+        });
+        mesh.backend.tet_requested_refinement_point_count = 1;
+        mesh.backend.tet_accepted_requested_refinement_point_count = 1;
         let validation = AnalysisMeshValidationOptions {
             expected_volume_m3: Some(1.0 / 6.0),
             expected_boundary_area_m2: Some(0.5),
@@ -1325,6 +1341,19 @@ mod tests {
         assert_eq!(report.coverage.volume_coverage_ratio, Some(1.0));
         assert_eq!(report.coverage.boundary_area_ratio, Some(1.0));
         assert_eq!(report.coverage.coverage_sample_ratio, Some(1.0));
+        assert_eq!(report.sizing.sample_count, 1);
+        assert_eq!(report.sizing.requested_tet_refinement_point_count, 1);
+        assert_eq!(
+            report.sizing.requested_tet_refinement_acceptance_ratio,
+            Some(1.0)
+        );
+        assert_eq!(
+            report
+                .sizing
+                .uninserted_sample_by_reason
+                .get("structural.stress_gradient"),
+            Some(&1)
+        );
         assert_eq!(report.quality.exact_scaled_jacobian_p50, Some(0.45));
         assert!(report.solve_readiness.solve_ready);
         assert_eq!(report.solve_readiness.validation_error_code, None);
