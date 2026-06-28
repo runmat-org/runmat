@@ -292,9 +292,11 @@ fn face_frame(
 ) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
     let edge = sub(points[1], points[0]);
     let edge_length = norm(edge);
-    if edge_length <= f64::EPSILON || norm(unit_normal) <= f64::EPSILON {
+    let normal_length = norm(unit_normal);
+    if edge_length <= f64::EPSILON || normal_length <= f64::EPSILON {
         return Err(CadEvaluationError::DegenerateFace { source_face_id });
     }
+    let unit_normal = scale(unit_normal, 1.0 / normal_length);
     let u_axis = scale(edge, 1.0 / edge_length);
     let v_axis = crate::predicate::cross(unit_normal, u_axis);
     let v_length = norm(v_axis);
@@ -608,6 +610,34 @@ mod tests {
         assert_eq!(frame.evaluator_max_projection_error_m, 2.0e-6);
         assert_eq!(frame.evaluator_samples.len(), 1);
         assert_eq!(frame.evaluator_samples[0].uv, Some([0.5, 0.5]));
+    }
+
+    #[test]
+    fn cad_face_frames_normalize_backend_normals() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples =
+            vec![CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.5, 0.5, 1.0],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 2.0]),
+                projection_error_m: Some(0.0),
+            }];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.exact_query_backed)
+            .expect("one frame should be exact-query backed");
+        let projection = project_to_face(frame, [0.5, 0.5, 1.25]);
+
+        assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
+        assert!((norm(frame.v_axis) - 1.0).abs() <= 1.0e-12);
+        assert!((projection.distance_m - 0.25).abs() <= 1.0e-12);
     }
 
     #[test]
