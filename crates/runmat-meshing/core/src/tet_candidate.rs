@@ -122,6 +122,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub accepted_requested_refinement_surrogate_point_count: usize,
     #[serde(default)]
+    pub rejected_requested_refinement_point_count: usize,
+    #[serde(default)]
     pub dropped_requested_refinement_point_count: usize,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
@@ -274,6 +276,7 @@ pub fn form_tet_candidates(
     let mut requested_refinement_point_count = 0_usize;
     let mut accepted_requested_refinement_point_count = 0_usize;
     let mut accepted_requested_refinement_surrogate_point_count = 0_usize;
+    let mut rejected_requested_refinement_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     let mut optimization_pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
@@ -306,6 +309,7 @@ pub fn form_tet_candidates(
         accepted_requested_refinement_point_count += refinement.accepted_requested_point_count;
         accepted_requested_refinement_surrogate_point_count +=
             refinement.accepted_requested_surrogate_point_count;
+        rejected_requested_refinement_point_count += refinement.rejected_requested_point_count;
         sizing_violation_count += refinement.sizing_violation_count;
         if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
             add_dense_recovery_layer_points(
@@ -475,6 +479,7 @@ pub fn form_tet_candidates(
             accepted_requested_refinement_candidate_count,
             accepted_requested_refinement_point_count,
             accepted_requested_refinement_surrogate_point_count,
+            rejected_requested_refinement_point_count,
             dropped_requested_refinement_point_count,
             max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
@@ -1557,6 +1562,7 @@ struct SeedRefinementSummary {
     requested_point_count: usize,
     accepted_requested_point_count: usize,
     accepted_requested_surrogate_point_count: usize,
+    rejected_requested_point_count: usize,
     accepted_requested_points: Vec<AcceptedRequestedRefinementPoint>,
     sizing_violation_count: usize,
 }
@@ -1590,6 +1596,7 @@ fn refine_component_seed_points(
             requested_point_count: 0,
             accepted_requested_point_count: 0,
             accepted_requested_surrogate_point_count: 0,
+            rejected_requested_point_count: 0,
             accepted_requested_points: Vec::new(),
             sizing_violation_count: 0,
         });
@@ -1604,6 +1611,7 @@ fn refine_component_seed_points(
     let mut accepted_requested_surrogate_point_count = 0_usize;
     let mut accepted_requested_points = Vec::<AcceptedRequestedRefinementPoint>::new();
     let mut accepted_requested_ids = BTreeSet::<usize>::new();
+    let mut attempted_requested_ids = BTreeSet::<usize>::new();
     let mut sizing_violation_count = 0_usize;
     for _ in 0..options.max_refinement_passes {
         if seed_points.len() >= options.max_interior_seed_points {
@@ -1640,6 +1648,7 @@ fn refine_component_seed_points(
             include_quality_driven_refinement,
         )?;
         requested_point_count += refinement_points.requested_point_count;
+        attempted_requested_ids.extend(refinement_points.requested_ids.iter().copied());
         sizing_violation_count += refinement_points.sizing_violation_count;
         if refinement_points.points.is_empty() {
             break;
@@ -1722,9 +1731,22 @@ fn refine_component_seed_points(
         requested_point_count,
         accepted_requested_point_count,
         accepted_requested_surrogate_point_count,
+        rejected_requested_point_count: rejected_requested_refinement_point_count(
+            &attempted_requested_ids,
+            &accepted_requested_ids,
+        ),
         accepted_requested_points,
         sizing_violation_count,
     })
+}
+
+fn rejected_requested_refinement_point_count(
+    attempted_requested_ids: &BTreeSet<usize>,
+    accepted_requested_ids: &BTreeSet<usize>,
+) -> usize {
+    attempted_requested_ids
+        .difference(accepted_requested_ids)
+        .count()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1736,6 +1758,7 @@ struct RefinementPointCandidate {
 #[derive(Debug, Clone, PartialEq)]
 struct RefinementPointSet {
     points: Vec<RefinementPointCandidate>,
+    requested_ids: Vec<usize>,
     requested_point_count: usize,
     sizing_violation_count: usize,
 }
@@ -1756,12 +1779,14 @@ fn refinement_points_for_tets(
     let Some(target_size_m) = options.interior_target_size_m else {
         return Ok(RefinementPointSet {
             points: Vec::new(),
+            requested_ids: Vec::new(),
             requested_point_count: 0,
             sizing_violation_count: 0,
         });
     };
     let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
     let mut ranked = Vec::<RankedRefinementPoint>::new();
+    let mut requested_ids = Vec::<usize>::new();
     let mut requested_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     for (requested_id, point) in options
@@ -1792,6 +1817,7 @@ fn refinement_points_for_tets(
                     quality_driven: false,
                 });
             }
+            requested_ids.push(requested_id);
             requested_point_count += 1;
         }
     }
@@ -1868,6 +1894,7 @@ fn refinement_points_for_tets(
     }
     Ok(RefinementPointSet {
         points,
+        requested_ids,
         requested_point_count,
         sizing_violation_count,
     })
@@ -6257,6 +6284,12 @@ mod tests {
                 .accepted_requested_refinement_surrogate_point_count,
             0
         );
+        assert_eq!(
+            candidates
+                .recovery
+                .rejected_requested_refinement_point_count,
+            0
+        );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
@@ -6336,6 +6369,12 @@ mod tests {
                 .accepted_requested_refinement_surrogate_point_count,
             1
         );
+        assert_eq!(
+            candidates
+                .recovery
+                .rejected_requested_refinement_point_count,
+            0
+        );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(
@@ -6388,6 +6427,12 @@ mod tests {
                 .accepted_requested_refinement_surrogate_point_count,
             1
         );
+        assert_eq!(
+            candidates
+                .recovery
+                .rejected_requested_refinement_point_count,
+            0
+        );
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(candidates.accepted_requested_refinement_points.len(), 1);
@@ -6436,6 +6481,17 @@ mod tests {
         assert_eq!(retained.points, vec![[0.1, 0.1, 0.1], [0.3, 0.3, 0.3]]);
         assert_eq!(retained.sample_indices, vec![0, 2]);
         assert_eq!(retained.dropped_sample_indices, vec![1]);
+    }
+
+    #[test]
+    fn rejected_requested_refinement_counts_attempted_unaccepted_markers() {
+        let attempted = BTreeSet::from([0_usize, 1, 2, 4]);
+        let accepted = BTreeSet::from([1_usize, 4]);
+
+        assert_eq!(
+            rejected_requested_refinement_point_count(&attempted, &accepted),
+            2
+        );
     }
 
     #[test]

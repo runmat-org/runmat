@@ -1070,6 +1070,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .accepted_requested_refinement_surrogate_point_count,
+        tet_rejected_requested_refinement_point_count: preparation
+            .tet_candidates
+            .recovery
+            .rejected_requested_refinement_point_count,
         tet_dropped_requested_refinement_point_count: preparation
             .tet_candidates
             .recovery
