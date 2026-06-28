@@ -1484,7 +1484,8 @@ fn refine_component_seed_points(
     if options.max_refinement_passes == 0
         || seed_points.len() >= options.max_interior_seed_points
         || options.interior_target_size_m.is_none()
-        || dense_component_for_global_insertion(component, seed_points.len(), options)
+        || (dense_component_for_global_insertion(component, seed_points.len(), options)
+            && options.requested_refinement_point_count == 0)
     {
         return Ok(SeedRefinementSummary {
             pass_count: 0,
@@ -1526,6 +1527,8 @@ fn refine_component_seed_points(
             break;
         }
 
+        let include_quality_driven_refinement =
+            !dense_component_for_global_insertion(component, seed_points.len(), options);
         let point_budget = options.max_interior_seed_points - seed_points.len();
         let refinement_points = refinement_points_for_tets(
             &candidate_tets,
@@ -1537,6 +1540,7 @@ fn refine_component_seed_points(
             options,
             point_budget,
             &accepted_requested_ids,
+            include_quality_driven_refinement,
         )?;
         requested_point_count += refinement_points.requested_point_count;
         sizing_violation_count += refinement_points.sizing_violation_count;
@@ -1650,6 +1654,7 @@ fn refinement_points_for_tets(
     options: TetCandidateOptions,
     point_budget: usize,
     accepted_requested_ids: &BTreeSet<usize>,
+    include_quality_driven_refinement: bool,
 ) -> Result<RefinementPointSet, TetCandidateError> {
     let Some(target_size_m) = options.interior_target_size_m else {
         return Ok(RefinementPointSet {
@@ -1693,52 +1698,54 @@ fn refinement_points_for_tets(
             requested_point_count += 1;
         }
     }
-    for tet in tets {
-        let points = candidate_tet_points(tet, &all_nodes)?;
-        let radius_edge_ratio = tet_radius_edge_ratio(points, tolerance);
-        let exact_scaled_jacobian = tet_scaled_jacobian(points);
-        let max_edge_m = tet_max_edge_length(points);
-        let sizing_violation =
-            max_edge_m > target_size_m * (1.0 + options.sizing_compliance_tolerance);
-        let exact_quality_violation = exact_scaled_jacobian < options.min_scaled_jacobian;
-        if sizing_violation {
-            sizing_violation_count += 1;
+    if include_quality_driven_refinement {
+        for tet in tets {
+            let points = candidate_tet_points(tet, &all_nodes)?;
+            let radius_edge_ratio = tet_radius_edge_ratio(points, tolerance);
+            let exact_scaled_jacobian = tet_scaled_jacobian(points);
+            let max_edge_m = tet_max_edge_length(points);
+            let sizing_violation =
+                max_edge_m > target_size_m * (1.0 + options.sizing_compliance_tolerance);
+            let exact_quality_violation = exact_scaled_jacobian < options.min_scaled_jacobian;
+            if sizing_violation {
+                sizing_violation_count += 1;
+            }
+            if radius_edge_ratio <= options.max_radius_edge_ratio
+                && !sizing_violation
+                && !exact_quality_violation
+            {
+                continue;
+            }
+            let point = if exact_quality_violation {
+                tet_centroid(points)
+            } else {
+                tet_circumsphere(points, tolerance)
+                    .map(|(center, _)| center)
+                    .unwrap_or_else(|| tet_centroid(points))
+            };
+            let point = if classifier.contains_point(point) {
+                point
+            } else {
+                tet_centroid(points)
+            };
+            if !classifier.contains_point(point) {
+                continue;
+            }
+            let exact_quality_error = if exact_quality_violation {
+                (options.min_scaled_jacobian - exact_scaled_jacobian) / options.min_scaled_jacobian
+            } else {
+                0.0
+            };
+            ranked.push(RankedRefinementPoint {
+                point,
+                score: radius_edge_ratio
+                    .max(max_edge_m / target_size_m)
+                    .max(exact_quality_error),
+                requested_id: None,
+                requested_distance_m: f64::INFINITY,
+                quality_driven: sizing_violation || exact_quality_violation,
+            });
         }
-        if radius_edge_ratio <= options.max_radius_edge_ratio
-            && !sizing_violation
-            && !exact_quality_violation
-        {
-            continue;
-        }
-        let point = if exact_quality_violation {
-            tet_centroid(points)
-        } else {
-            tet_circumsphere(points, tolerance)
-                .map(|(center, _)| center)
-                .unwrap_or_else(|| tet_centroid(points))
-        };
-        let point = if classifier.contains_point(point) {
-            point
-        } else {
-            tet_centroid(points)
-        };
-        if !classifier.contains_point(point) {
-            continue;
-        }
-        let exact_quality_error = if exact_quality_violation {
-            (options.min_scaled_jacobian - exact_scaled_jacobian) / options.min_scaled_jacobian
-        } else {
-            0.0
-        };
-        ranked.push(RankedRefinementPoint {
-            point,
-            score: radius_edge_ratio
-                .max(max_edge_m / target_size_m)
-                .max(exact_quality_error),
-            requested_id: None,
-            requested_distance_m: f64::INFINITY,
-            quality_driven: sizing_violation || exact_quality_violation,
-        });
     }
     ranked.sort_by(compare_ranked_refinement_points);
     let mut points = Vec::<RefinementPointCandidate>::new();
@@ -5839,6 +5846,47 @@ mod tests {
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn dense_components_accept_requested_refinement_without_global_insertion() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let mut requested_refinement_points = [[0.0; 3]; 16];
+        requested_refinement_points[0] = [0.25, 0.25, 0.25];
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                interior_target_size_m: Some(2.0),
+                requested_refinement_points,
+                requested_refinement_point_count: 1,
+                max_interior_seed_points: 2,
+                max_refinement_passes: 1,
+                max_global_insertion_points: 4,
+                allow_fan_fallback: false,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("dense component should retain quality-safe requested refinement");
+
+        assert_eq!(candidates.recovery.insertion_component_count, 1);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
+        assert_eq!(candidates.recovery.requested_refinement_point_count, 1);
+        assert_eq!(
+            candidates
+                .recovery
+                .accepted_requested_refinement_point_count,
+            1
+        );
+        assert_eq!(
+            candidates.accepted_requested_refinement_sample_indices,
+            vec![0]
+        );
+        assert!(candidates
+            .interior_seed_points
+            .iter()
+            .any(|point| distance_squared(*point, requested_refinement_points[0]) <= 1.0e-24));
     }
 
     #[test]
