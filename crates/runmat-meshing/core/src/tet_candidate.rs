@@ -46,7 +46,7 @@ impl Default for TetCandidateOptions {
             requested_refinement_point_count: 0,
             max_interior_seed_points: 1,
             max_global_insertion_points: 512,
-            allow_fan_fallback: true,
+            allow_fan_fallback: false,
             dense_recovery_layer_count: 4,
             max_dense_recovery_nodes: 20_000,
             max_refinement_passes: 0,
@@ -3687,13 +3687,49 @@ mod tests {
             &volume_candidates,
             TetCandidateOptions {
                 max_aspect_ratio: 1.01,
-                allow_fan_fallback: false,
                 ..TetCandidateOptions::default()
             },
         )
-        .expect_err("disabled fallback should expose recovery failure");
+        .expect_err("strict recovery should expose recovery failure");
 
         assert_eq!(err, TetCandidateError::RecoveryFailed { component_id: 0 });
+    }
+
+    #[test]
+    fn fan_fallback_requires_explicit_opt_in() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+
+        let strict_err = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                max_global_insertion_points: 4,
+                sliver_aspect_ratio: 1.0,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect_err("strict default should reject unrecovered insertion");
+        assert_eq!(
+            strict_err,
+            TetCandidateError::RecoveryFailed { component_id: 0 }
+        );
+
+        let candidates = form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            TetCandidateOptions {
+                max_global_insertion_points: 4,
+                sliver_aspect_ratio: 1.0,
+                allow_fan_fallback: true,
+                ..TetCandidateOptions::default()
+            },
+        )
+        .expect("explicit compatibility fallback should recover a candidate");
+
+        assert_eq!(candidates.recovery.insertion_component_count, 0);
+        assert_eq!(candidates.recovery.fan_fallback_component_count, 1);
+        assert_eq!(candidates.recovery.recovered_component_ratio, 0.0);
+        assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }
 
     #[test]
