@@ -974,6 +974,8 @@ pub struct AnalysisRenderMesh {
     pub vertices: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vertex_volume_node_indices: Vec<Option<usize>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triangle_volume_element_indices: Vec<Option<usize>>,
 }
 

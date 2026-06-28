@@ -16019,6 +16019,9 @@ fn render_topology_from_prep_context(
             mesh_id: "solver_surface".to_string(),
             vertices: prep.element_topology_node_coordinates_m.clone(),
             triangles,
+            vertex_volume_node_indices: (0..prep.element_topology_node_coordinates_m.len())
+                .map(Some)
+                .collect(),
             triangle_volume_element_indices: Vec::new(),
         }],
     })
@@ -16076,6 +16079,7 @@ fn render_topology_from_analysis_mesh(
             mesh_id: "analysis_mesh_boundary".to_string(),
             vertices: mesh.nodes.iter().map(|node| node.coordinates_m).collect(),
             triangles,
+            vertex_volume_node_indices: (0..mesh.nodes.len()).map(Some).collect(),
             triangle_volume_element_indices,
         }],
     })

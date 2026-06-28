@@ -79,6 +79,7 @@ struct MeshCounts {
     plot_index: usize,
     vertices: usize,
     triangles: usize,
+    vertex_volume_node_indices: Vec<Option<usize>>,
     triangle_volume_element_indices: Vec<Option<usize>>,
 }
 
@@ -848,10 +849,17 @@ fn collect_mesh_counts_with_topology(
                 })
                 .map(|render_mesh| render_mesh.triangle_volume_element_indices.clone())
                 .unwrap_or_default();
+            let vertex_volume_node_indices = topology_mesh
+                .filter(|render_mesh| {
+                    render_mesh.vertex_volume_node_indices.len() == mesh.vertices().len()
+                })
+                .map(|render_mesh| render_mesh.vertex_volume_node_indices.clone())
+                .unwrap_or_default();
             counts.push(MeshCounts {
                 plot_index,
                 vertices: mesh.vertices().len(),
                 triangles: mesh.triangles().len(),
+                vertex_volume_node_indices,
                 triangle_volume_element_indices,
             });
             if topology_mesh.is_some() {
@@ -952,6 +960,9 @@ fn scalar_overlay(
             options,
         );
     }
+    if let Some(overlay) = scalar_overlay_from_node_values(field, meshes, options) {
+        return Some(overlay);
+    }
     if values.len() == total_triangles {
         return scalar_overlay_from_values(
             field,
@@ -1036,6 +1047,48 @@ fn scalar_overlay_from_element_values(
     })
 }
 
+fn scalar_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+        || field_entity_count(field, &descriptor, values.len()) != values.len()
+    {
+        return None;
+    }
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let values = values
+        .iter()
+        .copied()
+        .map(f64_to_f32)
+        .collect::<Option<Vec<_>>>()?;
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(*values.get(node_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+    })
+}
+
 fn scalar_overlay_from_values<I>(
     field: &AnalysisField,
     location: MeshFieldLocation,
@@ -1080,6 +1133,9 @@ fn vector_overlay(
             });
         }
     }
+    if let Some(overlay) = vector_overlay_from_node_values(field, meshes, options) {
+        return Some(overlay);
+    }
 
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
     if let Some(vectors) = vectors_for_count(field, total_triangles) {
@@ -1097,6 +1153,44 @@ fn vector_overlay(
     None
 }
 
+fn vector_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<VectorOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(*vectors.get(node_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(VectorOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+        stride: glyph_stride(total_vertices, options.max_vector_glyphs),
+    })
+}
+
 fn deformation_overlay(
     field: &AnalysisField,
     meshes: &[MeshCounts],
@@ -1107,12 +1201,43 @@ fn deformation_overlay(
     if total_vertices > options.max_overlay_values {
         return None;
     }
-    let vectors = vectors_for_count(field, total_vertices)?;
-    let scale = deformation_scale(&vectors, figure);
+    if let Some(vectors) = vectors_for_count(field, total_vertices) {
+        let scale = deformation_scale(&vectors, figure);
+        return Some(DeformationOverlay {
+            field_id: field.field_id.clone(),
+            label: field.field_id.clone(),
+            chunks: split_vec3(&vectors, meshes.iter().map(|mesh| mesh.vertices))?,
+            scale,
+        });
+    }
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let mut projected = Vec::with_capacity(total_vertices);
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            let vector = *vectors.get(node_index)?;
+            projected.push(vector);
+            chunk.push(vector);
+        }
+        chunks.push(chunk);
+    }
+    let scale = deformation_scale(&projected, figure);
     Some(DeformationOverlay {
         field_id: field.field_id.clone(),
-        label: field.field_id.clone(),
-        chunks: split_vec3(&vectors, meshes.iter().map(|mesh| mesh.vertices))?,
+        label: format!("{} boundary projection", field.field_id),
+        chunks,
         scale,
     })
 }
@@ -1607,6 +1732,7 @@ mod tests {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 triangles: vec![[0, 1, 2]],
+                vertex_volume_node_indices: vec![Some(0), Some(1), Some(2)],
                 triangle_volume_element_indices: Vec::new(),
             }],
         }
@@ -1766,6 +1892,7 @@ mod tests {
             plot_index: 0,
             vertices: 4,
             triangles: 12,
+            vertex_volume_node_indices: Vec::new(),
             triangle_volume_element_indices: Vec::new(),
         }];
 
@@ -1786,6 +1913,7 @@ mod tests {
             plot_index: 0,
             vertices: 5,
             triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
             triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
         }];
 
@@ -1799,6 +1927,7 @@ mod tests {
             plot_index: 0,
             vertices: 5,
             triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
             triangle_volume_element_indices: vec![Some(0), None, Some(1)],
         }];
 
@@ -1816,6 +1945,7 @@ mod tests {
             plot_index: 0,
             vertices: 5,
             triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
             triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
         }];
 
@@ -1824,5 +1954,105 @@ mod tests {
 
         assert_eq!(overlay.location, MeshFieldLocation::Triangle);
         assert_eq!(overlay.chunks, vec![vec![10.0, 42.0, 42.0]]);
+    }
+
+    #[test]
+    fn scalar_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.nodal_von_mises",
+            vec![4],
+            vec![1.0, 2.0, 3.0, 4.0],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node scalar field should project to render vertices");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![1.0, 4.0, 2.0]]);
+    }
+
+    #[test]
+    fn vector_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![4, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0, //
+                4.0, 0.0, 0.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = vector_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector field should project to render vertices");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn deformation_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![4, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0, //
+                4.0, 0.0, 0.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let overlay = deformation_overlay(
+            &field,
+            &meshes,
+            &figure,
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("node vector field should project to render deformation");
+
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
     }
 }
