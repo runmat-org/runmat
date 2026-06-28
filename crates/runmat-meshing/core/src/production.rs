@@ -8,8 +8,9 @@ use crate::{
         AnalysisVolumeElement, MeshBackendSummary, ANALYSIS_MESH_SCHEMA_VERSION,
     },
     cad_eval::{
-        build_cad_evaluation_model, summarize_cad_evaluation, CadEvaluationError,
-        CadEvaluationModel, CadEvaluationReport, CadEvaluationSource,
+        build_cad_evaluation_model_with_provider, summarize_cad_evaluation, CadEvaluationError,
+        CadEvaluationModel, CadEvaluationReport, CadEvaluationSource, CadFaceEvaluatorProvider,
+        NoopCadFaceEvaluatorProvider,
     },
     cad_topology::{build_cad_topology, CadTopologyError, CadTopologyModel, CadTopologySource},
     curve::{
@@ -111,19 +112,29 @@ pub fn prepare_production_mesh(
     geometry: &GeometryAsset,
     options: &VolumeMeshingOptions,
 ) -> Result<ProductionMeshPreparation, ProductionMeshError> {
-    prepare_production_mesh_internal(geometry, options, None)
+    prepare_production_mesh_internal(geometry, options, None, &NoopCadFaceEvaluatorProvider)
+}
+
+pub fn prepare_production_mesh_with_cad_evaluator(
+    geometry: &GeometryAsset,
+    options: &VolumeMeshingOptions,
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
+) -> Result<ProductionMeshPreparation, ProductionMeshError> {
+    prepare_production_mesh_internal(geometry, options, None, evaluator_provider)
 }
 
 fn prepare_production_mesh_internal(
     geometry: &GeometryAsset,
     options: &VolumeMeshingOptions,
     sizing: Option<&MeshSizingField>,
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
 ) -> Result<ProductionMeshPreparation, ProductionMeshError> {
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
     let cad_topology =
         build_cad_topology(geometry, &topology).map_err(ProductionMeshError::CadTopology)?;
-    let cad_evaluation = build_cad_evaluation_model(&cad_topology, &topology)
-        .map_err(ProductionMeshError::CadEvaluation)?;
+    let cad_evaluation =
+        build_cad_evaluation_model_with_provider(&cad_topology, &topology, evaluator_provider)
+            .map_err(ProductionMeshError::CadEvaluation)?;
     let cad_evaluation_report = summarize_cad_evaluation(&cad_evaluation, &topology)
         .map_err(ProductionMeshError::CadEvaluation)?;
     let effective_sizing = production_effective_sizing(&topology, &cad_evaluation, options, sizing);
@@ -177,6 +188,16 @@ pub fn generate_production_analysis_mesh(
     analysis_mesh_from_preparation(&preparation, options, None)
 }
 
+pub fn generate_production_analysis_mesh_with_cad_evaluator(
+    geometry: &GeometryAsset,
+    options: &VolumeMeshingOptions,
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
+) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
+    let preparation =
+        prepare_production_mesh_with_cad_evaluator(geometry, options, evaluator_provider)?;
+    analysis_mesh_from_preparation(&preparation, options, None)
+}
+
 pub fn generate_production_analysis_mesh_with_sizing(
     geometry: &GeometryAsset,
     options: &VolumeMeshingOptions,
@@ -190,7 +211,35 @@ pub fn generate_production_analysis_mesh_with_sizing(
     if effective_target_size_m < base_target_size_m {
         effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
     }
-    let preparation = prepare_production_mesh_internal(geometry, &effective_options, Some(sizing))?;
+    let preparation = prepare_production_mesh_internal(
+        geometry,
+        &effective_options,
+        Some(sizing),
+        &NoopCadFaceEvaluatorProvider,
+    )?;
+    analysis_mesh_from_preparation(&preparation, &effective_options, Some(sizing))
+}
+
+pub fn generate_production_analysis_mesh_with_sizing_and_cad_evaluator(
+    geometry: &GeometryAsset,
+    options: &VolumeMeshingOptions,
+    sizing: &MeshSizingField,
+    evaluator_provider: &dyn CadFaceEvaluatorProvider,
+) -> Result<AnalysisMeshArtifact, ProductionMeshError> {
+    let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
+    let base_target_size_m = target_size_for_mesh(&topology, options);
+    let effective_target_size_m =
+        production_sizing_target_size(base_target_size_m, sizing, options);
+    let mut effective_options = options.clone();
+    if effective_target_size_m < base_target_size_m {
+        effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
+    }
+    let preparation = prepare_production_mesh_internal(
+        geometry,
+        &effective_options,
+        Some(sizing),
+        evaluator_provider,
+    )?;
     analysis_mesh_from_preparation(&preparation, &effective_options, Some(sizing))
 }
 
@@ -1693,6 +1742,111 @@ mod tests {
     }
 
     #[test]
+    fn production_preparation_consumes_live_cad_provider_for_surface_and_sizing() {
+        #[derive(Debug)]
+        struct LiveProvider;
+
+        impl CadFaceEvaluatorProvider for LiveProvider {
+            fn evaluate_face(
+                &self,
+                request: &crate::cad_eval::CadFaceEvaluationRequest<'_>,
+            ) -> Vec<CadFaceEvaluationSample> {
+                assert_eq!(request.imported_face_id, Some(1));
+                assert_eq!(request.evaluator_id, Some("cad_face_1"));
+                assert!(request.supports_projection);
+                assert!(request.supports_derivatives);
+                assert!(request.supports_curvature);
+                vec![
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::BackendQuery,
+                        point_m: [0.0, 0.0, 1.0],
+                        uv: Some([0.0, 0.0]),
+                        projected_point_m: Some([0.0, 0.0, 1.0]),
+                        unit_normal: Some([0.0, 0.0, 1.0]),
+                        projection_error_m: Some(0.0),
+                    },
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::TessellationEstimate,
+                        point_m: [0.75, 0.25, 1.0],
+                        uv: Some([0.75, 0.25]),
+                        projected_point_m: Some([0.75, 0.25, 1.0]),
+                        unit_normal: Some([0.0, 0.8, 0.6]),
+                        projection_error_m: Some(0.0),
+                    },
+                    CadFaceEvaluationSample {
+                        source: CadFaceEvaluationSampleSource::TessellationEstimate,
+                        point_m: [0.90, 0.70, 1.0],
+                        uv: Some([0.90, 0.70]),
+                        projected_point_m: Some([0.90, 0.70, 1.0]),
+                        unit_normal: Some([0.8, 0.0, 0.6]),
+                        projection_error_m: Some(0.0),
+                    },
+                ]
+            }
+        }
+
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.5);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = true;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let mut geometry = cube_geometry_with_curvature_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0]
+            .evaluation_samples
+            .clear();
+
+        let preparation =
+            prepare_production_mesh_with_cad_evaluator(&geometry, &options, &LiveProvider)
+                .expect("production preparation should consume live CAD provider");
+        let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect("production mesh should preserve live CAD evidence");
+        let curvature_samples = preparation
+            .effective_sizing
+            .as_ref()
+            .expect("live curvature should create sizing")
+            .samples
+            .iter()
+            .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            preparation.cad_evaluation.source,
+            CadEvaluationSource::ParametricCad
+        );
+        assert!(preparation.cad_evaluation_report.live_query_face_count > 0);
+        assert_eq!(
+            preparation.cad_evaluation_report.live_query_face_count,
+            preparation.cad_evaluation_report.exact_query_face_count
+        );
+        assert!(preparation.cad_evaluation_report.derivative_query_count > 0);
+        assert!(preparation.cad_evaluation_report.curvature_query_count > 0);
+        assert!(preparation
+            .surface
+            .elements
+            .iter()
+            .any(|element| element.cad_face_id.is_some()));
+        assert!(!curvature_samples.is_empty());
+        assert!(curvature_samples
+            .iter()
+            .all(|sample| sample.target_size_m < 0.5));
+        assert_eq!(mesh.backend.cad_evaluation_source, "parametric_cad");
+        assert_eq!(
+            mesh.backend.cad_evaluation_live_query_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            mesh.backend.surface_cad_face_count,
+            surface_cad_face_count(&preparation.surface)
+        );
+        assert!(mesh
+            .sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("cad.curvature")));
+    }
+
+    #[test]
     fn production_sizing_includes_small_feature_edge_and_proximity_samples() {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.5);
@@ -1704,8 +1858,8 @@ mod tests {
         let geometry = thin_box_geometry();
         let topology = extract_source_topology(&geometry).expect("topology");
         let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
-        let cad_evaluation =
-            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let cad_evaluation = crate::cad_eval::build_cad_evaluation_model(&cad_topology, &topology)
+            .expect("cad evaluation");
         let sizing = production_effective_sizing(&topology, &cad_evaluation, &options, None)
             .expect("feature-edge sizing");
 
@@ -1746,8 +1900,8 @@ mod tests {
         let geometry = cube_geometry();
         let topology = extract_source_topology(&geometry).expect("topology");
         let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
-        let cad_evaluation =
-            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let cad_evaluation = crate::cad_eval::build_cad_evaluation_model(&cad_topology, &topology)
+            .expect("cad evaluation");
 
         let effective =
             production_effective_sizing(&topology, &cad_evaluation, &options, Some(&sizing))
@@ -1777,8 +1931,8 @@ mod tests {
         let geometry = cube_geometry();
         let topology = extract_source_topology(&geometry).expect("topology");
         let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
-        let cad_evaluation =
-            build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+        let cad_evaluation = crate::cad_eval::build_cad_evaluation_model(&cad_topology, &topology)
+            .expect("cad evaluation");
 
         let normal = production_effective_sizing(&topology, &cad_evaluation, &options, None)
             .expect("normal interface sizing");
