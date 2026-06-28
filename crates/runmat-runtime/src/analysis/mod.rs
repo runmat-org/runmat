@@ -40,11 +40,10 @@ use runmat_analysis_fea::{
 use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
-    validate_analysis_mesh, AdaptiveConvergenceStatus, AdaptiveIterationSummary,
-    AnalysisMeshArtifact, AnalysisMeshValidationOptions, ElementFamilyHint, MeshConnectivityClass,
-    MeshTargetSize, RefinementIndicatorAvailability, RefinementIndicatorSample,
-    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, SourceEntityKind,
-    VolumeMeshingOptions,
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, AnalysisMeshArtifact,
+    AnalysisMeshValidationOptions, ElementFamilyHint, MeshConnectivityClass, MeshTargetSize,
+    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
+    RefinementStrategy, SizingFieldUpdate, SourceEntityKind, VolumeMeshingOptions,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13795,6 +13794,41 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     validation
 }
 
+fn analysis_mesh_validation_options_for_loaded_artifact(
+    payload: &serde_json::Value,
+    mesh: &AnalysisMeshArtifact,
+) -> Result<AnalysisMeshValidationOptions, serde_json::Error> {
+    let Some(options_value) = payload.get("mesh_options") else {
+        return Ok(AnalysisMeshValidationOptions::default());
+    };
+    let options = serde_json::from_value::<VolumeMeshingOptions>(options_value.clone())?;
+    let mut validation = AnalysisMeshValidationOptions {
+        quality: options.validation.quality,
+        max_volume_element_count: Some(options.max_elements),
+        max_volume_component_count: options.validation.max_volume_component_count,
+        min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
+        min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
+        min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
+        ..AnalysisMeshValidationOptions::default()
+    };
+    if mesh.backend.backend != "production" {
+        validation.min_boundary_edge_recovery_ratio = 0.0;
+    } else if validation.max_volume_component_count.is_none()
+        && mesh.backend.volume_candidate_count > 0
+    {
+        validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
+    }
+    if mesh.backend.backend == "production" {
+        validation.require_no_fan_fallback = true;
+        validation.require_no_unrepaired_exact_quality = true;
+        validation.coverage_sample_points_m = production_body_coverage_sample_points(mesh);
+        validation.min_coverage_sample_ratio = 1.0;
+    }
+    Ok(validation)
+}
+
 fn production_body_coverage_sample_points(mesh: &AnalysisMeshArtifact) -> Vec<[f64; 3]> {
     mesh.nodes
         .iter()
@@ -14173,6 +14207,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
         refined_mesh.mesh_id,
         mesh.adaptive_iterations.len()
     );
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut refined_mesh);
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
     let refinement_convergence = runmat_meshing_core::evaluate_adaptive_convergence(
@@ -15547,27 +15582,45 @@ fn resolve_analysis_mesh_artifact(
             BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
         )
     })?;
-    validate_analysis_mesh(&mesh, Default::default()).map_err(|err| {
-        operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("analysis mesh artifact failed validation: {err:?}"),
-            BTreeMap::from([
-                ("analysis_mesh_artifact_path".to_string(), path.to_string()),
-                (
-                    "mesh_validation_code".to_string(),
-                    runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
-                ),
-            ]),
-        )
-    })?;
+    let validation_options = analysis_mesh_validation_options_for_loaded_artifact(&payload, &mesh)
+        .map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh options: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options).map_err(
+        |err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("analysis mesh artifact failed validation: {err:?}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "mesh_validation_code".to_string(),
+                        runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                    ),
+                ]),
+            )
+        },
+    )?;
     Ok(Some(mesh))
 }
 

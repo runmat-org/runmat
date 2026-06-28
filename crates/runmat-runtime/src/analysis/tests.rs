@@ -1988,7 +1988,14 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
-    spec.mesh_options = Some(runmat_meshing_core::VolumeMeshingOptions::default());
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetFallback;
+    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
+        min_scaled_jacobian: 0.0,
+        max_aspect_ratio: 1.0e9,
+        ..runmat_meshing_core::QualityThresholds::default()
+    };
+    spec.mesh_options = Some(mesh_options);
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
@@ -2109,6 +2116,19 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         &fs::read(refined_artifact_path).expect("read refined mesh artifact"),
     )
     .expect("parse refined mesh artifact");
+    let refined_boundary_faces = refined_payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("refined boundary faces");
+    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
+        .as_array()
+        .expect("refined face region ids")
+        .iter()
+        .any(|region| region.as_str() == Some("root"))));
+    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
+        .as_array()
+        .expect("refined face region ids")
+        .iter()
+        .any(|region| region.as_str() == Some("tip"))));
     assert_eq!(
         refined_payload["source_analysis_mesh_artifact_path"].as_str(),
         Some(artifact_path.as_str())
