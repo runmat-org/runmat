@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets_with_anchor_trim,
-        evaluate_constrained_cavity_refill_candidates, ConstrainedCavityNode,
-        ConstrainedCavityRefillOptions,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavityExtractionError,
+        ConstrainedCavityNode, ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     predicate::{
         add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
@@ -4390,11 +4390,19 @@ fn diagnostic_constrained_seed_star_refill_no_candidate_reason(
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
 ) -> Result<&'static str, TetCandidateError> {
-    let Some(cavity) =
-        constrained_cavity_from_selected_tets_with_anchor_trim(tets, adjacent, tet_index, vec![])
-            .map_err(|_| TetCandidateError::InvalidOptions)?
-    else {
-        return Ok("constrained_seed_star_refill_invalid_cavity");
+    let cavity = match constrained_cavity_from_selected_tets_with_anchor_trim(
+        tets,
+        adjacent,
+        tet_index,
+        vec![],
+    ) {
+        Ok(Some(cavity)) => cavity,
+        Ok(None) => return Ok("constrained_seed_star_refill_empty_trimmed_cavity"),
+        Err(err) => {
+            return Ok(diagnostic_constrained_seed_star_cavity_extraction_bucket(
+                &err,
+            ))
+        }
     };
     let boundary_node_ids = cavity
         .boundary_faces
@@ -4438,6 +4446,76 @@ fn diagnostic_constrained_seed_star_refill_no_candidate_reason(
     Ok(diagnostic_constrained_seed_star_refill_reason_bucket(
         &evaluation.rejected_by_reason,
     ))
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_seed_star_cavity_extraction_bucket(
+    err: &ConstrainedCavityExtractionError,
+) -> &'static str {
+    match err {
+        ConstrainedCavityExtractionError::EmptySelection => {
+            "constrained_seed_star_refill_empty_selection"
+        }
+        ConstrainedCavityExtractionError::SelectedTetIndexOutOfBounds { .. } => {
+            "constrained_seed_star_refill_selected_tet_out_of_bounds"
+        }
+        ConstrainedCavityExtractionError::DuplicateSelectedTetIndex { .. } => {
+            "constrained_seed_star_refill_duplicate_selected_tet"
+        }
+        ConstrainedCavityExtractionError::Validation(err) => {
+            diagnostic_constrained_seed_star_cavity_validation_bucket(err)
+        }
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_seed_star_cavity_validation_bucket(
+    err: &ConstrainedCavityValidationError,
+) -> &'static str {
+    match err {
+        ConstrainedCavityValidationError::EmptyRemovedTetSet => {
+            "constrained_seed_star_refill_empty_removed_tet_set"
+        }
+        ConstrainedCavityValidationError::InvalidTargetVolume { .. } => {
+            "constrained_seed_star_refill_invalid_target_volume"
+        }
+        ConstrainedCavityValidationError::TooFewBoundaryFaces { .. } => {
+            "constrained_seed_star_refill_too_few_boundary_faces"
+        }
+        ConstrainedCavityValidationError::DegenerateBoundaryFace { .. } => {
+            "constrained_seed_star_refill_degenerate_boundary_face"
+        }
+        ConstrainedCavityValidationError::DuplicateBoundaryFace { .. } => {
+            "constrained_seed_star_refill_duplicate_boundary_face"
+        }
+        ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. } => {
+            "constrained_seed_star_refill_non_manifold_boundary_edge"
+        }
+        ConstrainedCavityValidationError::ProtectedNodeOutsideBoundary { .. } => {
+            "constrained_seed_star_refill_protected_node_outside_boundary"
+        }
+        ConstrainedCavityValidationError::InvalidRefillVolume { .. } => {
+            "constrained_seed_star_refill_invalid_refill_volume"
+        }
+        ConstrainedCavityValidationError::BoundaryFaceCountMismatch { .. } => {
+            "constrained_seed_star_refill_boundary_face_count_mismatch"
+        }
+        ConstrainedCavityValidationError::MissingBoundaryFace { .. } => {
+            "constrained_seed_star_refill_missing_boundary_face"
+        }
+        ConstrainedCavityValidationError::UnexpectedBoundaryFace { .. } => {
+            "constrained_seed_star_refill_unexpected_boundary_face"
+        }
+        ConstrainedCavityValidationError::BoundarySourceFaceMismatch { .. } => {
+            "constrained_seed_star_refill_boundary_source_face_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundarySourceEdgeMismatch { .. } => {
+            "constrained_seed_star_refill_boundary_source_edge_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
+            "constrained_seed_star_refill_boundary_region_mismatch"
+        }
+    }
 }
 
 #[cfg(test)]
