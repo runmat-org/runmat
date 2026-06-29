@@ -164,7 +164,7 @@ pub fn build_cad_topology(
         })
         .collect::<Vec<_>>();
 
-    let faces = topology
+    let face_seeds = topology
         .faces
         .iter()
         .map(|face| {
@@ -214,6 +214,7 @@ pub fn build_cad_topology(
             }
         })
         .collect::<Vec<_>>();
+    let faces = merge_stable_cad_faces(face_seeds);
 
     let face_ids_by_source_face = faces
         .iter()
@@ -241,6 +242,8 @@ pub fn build_cad_topology(
                 .adjacent_face_ids
                 .iter()
                 .filter_map(|face_id| face_ids_by_source_face.get(face_id).cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect(),
             length_m: edge.length_m,
         })
@@ -269,11 +272,7 @@ pub fn build_cad_topology(
 
     let semantic_face_count = faces
         .iter()
-        .filter(|face| {
-            face.region_ids
-                .iter()
-                .any(|region_id| semantic_face_regions.contains(region_id))
-        })
+        .filter(|face| semantic_face_regions.contains(&face.entity_id.id))
         .count();
     let imported_face_count = faces
         .iter()
@@ -370,6 +369,82 @@ fn imported_face_id_for_regions(
         .find_map(|region_id| imported_face_ids_by_region.get(region_id).copied())
 }
 
+fn merge_stable_cad_faces(face_seeds: Vec<CadFace>) -> Vec<CadFace> {
+    let mut merged = BTreeMap::<String, (CadFace, BTreeMap<u32, usize>)>::new();
+    for face in face_seeds {
+        let key = face.entity_id.id.clone();
+        let source_edge_counts = face
+            .source_edge_ids
+            .iter()
+            .map(|edge_id| (*edge_id, 1_usize))
+            .collect::<BTreeMap<_, _>>();
+        match merged.get_mut(&key) {
+            Some((existing, edge_counts)) => {
+                existing
+                    .source_face_ids
+                    .extend(face.source_face_ids.iter().copied());
+                existing
+                    .source_edge_ids
+                    .extend(face.source_edge_ids.iter().copied());
+                existing.region_ids.extend(face.region_ids.iter().cloned());
+                existing.unit_normal = area_weighted_normal(
+                    existing.unit_normal,
+                    existing.area_m2,
+                    face.unit_normal,
+                    face.area_m2,
+                );
+                existing.area_m2 += face.area_m2;
+                for (source_edge_id, count) in source_edge_counts {
+                    *edge_counts.entry(source_edge_id).or_default() += count;
+                }
+            }
+            None => {
+                merged.insert(key, (face, source_edge_counts));
+            }
+        }
+    }
+    merged
+        .into_values()
+        .map(|(mut face, edge_counts)| {
+            face.source_face_ids.sort_unstable();
+            face.source_face_ids.dedup();
+            face.source_edge_ids.sort_unstable();
+            face.source_edge_ids.dedup();
+            face.region_ids.sort();
+            face.region_ids.dedup();
+            face.loop_edge_ids = edge_counts
+                .into_iter()
+                .filter_map(|(edge_id, count)| (count == 1).then(|| format!("cad_edge_{edge_id}")))
+                .collect();
+            face
+        })
+        .collect()
+}
+
+fn area_weighted_normal(
+    left_normal: [f64; 3],
+    left_area_m2: f64,
+    right_normal: [f64; 3],
+    right_area_m2: f64,
+) -> [f64; 3] {
+    let combined = [
+        left_normal[0] * left_area_m2 + right_normal[0] * right_area_m2,
+        left_normal[1] * left_area_m2 + right_normal[1] * right_area_m2,
+        left_normal[2] * left_area_m2 + right_normal[2] * right_area_m2,
+    ];
+    let length =
+        (combined[0] * combined[0] + combined[1] * combined[1] + combined[2] * combined[2]).sqrt();
+    if !length.is_finite() || length <= f64::EPSILON {
+        left_normal
+    } else {
+        [
+            combined[0] / length,
+            combined[1] / length,
+            combined[2] / length,
+        ]
+    }
+}
+
 fn evaluator_faces_by_imported_id(geometry: &GeometryAsset) -> BTreeMap<u64, &CadFaceEvaluator> {
     geometry
         .source_geometry
@@ -454,21 +529,25 @@ mod tests {
         let cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
 
         assert_eq!(cad.source, CadTopologySource::SemanticCad);
-        assert!(cad.report.semantic_face_count > 0);
-        assert_eq!(cad.report.imported_face_count, 2);
-        assert_eq!(cad.report.evaluator_face_count, 2);
-        assert!(cad
+        assert_eq!(cad.report.face_count, 11);
+        assert_eq!(cad.report.semantic_face_count, 1);
+        assert_eq!(cad.report.imported_face_count, 1);
+        assert_eq!(cad.report.evaluator_face_count, 1);
+        let semantic_face = cad
             .faces
             .iter()
-            .any(|face| face.entity_id.id == "face_000001"));
-        assert!(cad
-            .faces
-            .iter()
-            .any(|face| face.imported_face_id == Some(1)));
-        assert!(cad
-            .faces
-            .iter()
-            .any(|face| face.evaluator_reference_point_m == Some([0.5, 0.5, 0.0])));
+            .find(|face| face.entity_id.id == "face_000001")
+            .expect("semantic face should be merged");
+        assert_eq!(semantic_face.imported_face_id, Some(1));
+        assert_eq!(
+            semantic_face.evaluator_reference_point_m,
+            Some([0.5, 0.5, 0.0])
+        );
+        assert_eq!(semantic_face.source_face_ids, vec![0, 1]);
+        assert_eq!(semantic_face.source_edge_ids.len(), 5);
+        assert_eq!(semantic_face.loop_edge_ids.len(), 4);
+        assert!((semantic_face.area_m2 - 1.0).abs() <= 1.0e-12);
+        assert_eq!(semantic_face.unit_normal, [0.0, 0.0, -1.0]);
     }
 
     fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {

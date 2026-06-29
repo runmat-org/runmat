@@ -197,62 +197,70 @@ pub fn build_cad_evaluation_model_with_provider(
         .iter()
         .map(|face| (face.face_id, face))
         .collect::<BTreeMap<_, _>>();
-    let mut frames = Vec::<CadFaceEvaluationFrame>::with_capacity(cad_topology.faces.len());
+    let frame_capacity = cad_topology
+        .faces
+        .iter()
+        .map(|face| face.source_face_ids.len().max(1))
+        .sum();
+    let mut frames = Vec::<CadFaceEvaluationFrame>::with_capacity(frame_capacity);
     for face in &cad_topology.faces {
-        let source_face_id = face
-            .source_face_ids
-            .first()
-            .copied()
-            .ok_or(CadEvaluationError::MissingSourceFace { source_face_id: 0 })?;
-        let source_face = source_faces
-            .get(&source_face_id)
-            .ok_or(CadEvaluationError::MissingSourceFace { source_face_id })?;
-        let points = [
-            topology_vertex(topology, source_face.node_ids[0])?,
-            topology_vertex(topology, source_face.node_ids[1])?,
-            topology_vertex(topology, source_face.node_ids[2])?,
-        ];
-        let fallback_reference_point_m = face
-            .evaluator_reference_point_m
-            .unwrap_or_else(|| triangle_centroid(points));
-        let fallback_unit_normal = face
-            .evaluator_unit_normal
-            .unwrap_or(source_face.unit_normal);
-        let live_samples = live_evaluator_samples(
-            evaluator_provider,
-            face,
-            source_face_id,
-            fallback_reference_point_m,
-            fallback_unit_normal,
-        );
-        let live_query_backed = !live_samples.samples.is_empty();
-        let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples);
-        let exact_sample = exact_backend_sample(&evaluator_samples.samples);
-        let evaluator_max_projection_error_m =
-            evaluator_max_projection_error(&evaluator_samples.samples);
-        let frame = face_frame(
-            face.entity_id.id.clone(),
-            source_face_id,
-            points,
-            exact_sample
-                .and_then(|sample| sample.unit_normal)
-                .or(face.evaluator_unit_normal)
-                .unwrap_or(source_face.unit_normal),
-            source_face.area_m2,
-            exact_sample
-                .map(exact_backend_sample_point)
-                .or(face.evaluator_reference_point_m),
-            face.evaluator_id.is_some()
-                || face.evaluator_unit_normal.is_some()
-                || !evaluator_samples.samples.is_empty(),
-            exact_sample.is_some(),
-            live_query_backed,
-            evaluator_samples.samples.len(),
-            evaluator_samples.rejected_count,
-            evaluator_max_projection_error_m,
-            evaluator_samples.samples,
-        )?;
-        frames.push(frame);
+        if face.source_face_ids.is_empty() {
+            return Err(CadEvaluationError::MissingSourceFace { source_face_id: 0 });
+        }
+        for source_face_id in &face.source_face_ids {
+            let source_face =
+                source_faces
+                    .get(source_face_id)
+                    .ok_or(CadEvaluationError::MissingSourceFace {
+                        source_face_id: *source_face_id,
+                    })?;
+            let points = [
+                topology_vertex(topology, source_face.node_ids[0])?,
+                topology_vertex(topology, source_face.node_ids[1])?,
+                topology_vertex(topology, source_face.node_ids[2])?,
+            ];
+            let fallback_reference_point_m = face
+                .evaluator_reference_point_m
+                .unwrap_or_else(|| triangle_centroid(points));
+            let fallback_unit_normal = face
+                .evaluator_unit_normal
+                .unwrap_or(source_face.unit_normal);
+            let live_samples = live_evaluator_samples(
+                evaluator_provider,
+                face,
+                *source_face_id,
+                fallback_reference_point_m,
+                fallback_unit_normal,
+            );
+            let live_query_backed = !live_samples.samples.is_empty();
+            let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples);
+            let exact_sample = exact_backend_sample(&evaluator_samples.samples);
+            let evaluator_max_projection_error_m =
+                evaluator_max_projection_error(&evaluator_samples.samples);
+            let frame = face_frame(
+                face.entity_id.id.clone(),
+                *source_face_id,
+                points,
+                exact_sample
+                    .and_then(|sample| sample.unit_normal)
+                    .or(face.evaluator_unit_normal)
+                    .unwrap_or(source_face.unit_normal),
+                source_face.area_m2,
+                exact_sample
+                    .map(exact_backend_sample_point)
+                    .or(face.evaluator_reference_point_m),
+                face.evaluator_id.is_some()
+                    || face.evaluator_unit_normal.is_some()
+                    || !evaluator_samples.samples.is_empty(),
+                exact_sample.is_some(),
+                live_query_backed,
+                evaluator_samples.samples.len(),
+                evaluator_samples.rejected_count,
+                evaluator_max_projection_error_m,
+                evaluator_samples.samples,
+            )?;
+            frames.push(frame);
+        }
     }
     let evaluator_backed_frame_count = frames.iter().filter(|frame| frame.evaluator_backed).count();
     let live_query_face_count = frames
@@ -263,31 +271,24 @@ pub fn build_cad_evaluation_model_with_provider(
         .iter()
         .filter(|frame| frame.exact_query_backed)
         .count();
-    let point_evaluation_supported_face_count = cad_topology
-        .faces
-        .iter()
-        .filter(|face| face.evaluator_supports_point_evaluation)
-        .count();
-    let projection_supported_face_count = cad_topology
-        .faces
-        .iter()
-        .filter(|face| face.evaluator_supports_projection)
-        .count();
-    let normal_supported_face_count = cad_topology
-        .faces
-        .iter()
-        .filter(|face| face.evaluator_supports_normal)
-        .count();
-    let derivative_supported_face_count = cad_topology
-        .faces
-        .iter()
-        .filter(|face| face.evaluator_supports_derivatives)
-        .count();
-    let curvature_supported_face_count = cad_topology
-        .faces
-        .iter()
-        .filter(|face| face.evaluator_supports_curvature)
-        .count();
+    let point_evaluation_supported_face_count =
+        evaluator_supported_source_face_count(cad_topology, |face| {
+            face.evaluator_supports_point_evaluation
+        });
+    let projection_supported_face_count =
+        evaluator_supported_source_face_count(cad_topology, |face| {
+            face.evaluator_supports_projection
+        });
+    let normal_supported_face_count =
+        evaluator_supported_source_face_count(cad_topology, |face| face.evaluator_supports_normal);
+    let derivative_supported_face_count =
+        evaluator_supported_source_face_count(cad_topology, |face| {
+            face.evaluator_supports_derivatives
+        });
+    let curvature_supported_face_count =
+        evaluator_supported_source_face_count(cad_topology, |face| {
+            face.evaluator_supports_curvature
+        });
     let missing_exact_query_face_count =
         evaluator_backed_frame_count.saturating_sub(exact_query_face_count);
     let evaluator_sample_count = frames
@@ -594,6 +595,18 @@ fn evaluation_source(
     } else {
         CadEvaluationSource::PlanarFacetApproximation
     }
+}
+
+fn evaluator_supported_source_face_count(
+    cad_topology: &CadTopologyModel,
+    predicate: impl Fn(&CadFace) -> bool,
+) -> usize {
+    cad_topology
+        .faces
+        .iter()
+        .filter(|face| predicate(face))
+        .map(|face| face.source_face_ids.len().max(1))
+        .sum()
 }
 
 fn cad_uv_domain_summary(
@@ -1002,7 +1015,7 @@ mod tests {
         let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
 
         assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
-        assert_eq!(model.report.evaluator_face_count, 2);
+        assert_eq!(model.report.evaluator_face_count, 1);
         assert_eq!(model.report.point_evaluation_supported_face_count, 2);
         assert_eq!(model.report.projection_supported_face_count, 2);
         assert_eq!(model.report.normal_supported_face_count, 2);
