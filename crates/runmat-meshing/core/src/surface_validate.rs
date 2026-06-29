@@ -55,6 +55,8 @@ pub enum SurfaceValidationError {
     },
     EdgeConformityFailed {
         source_edge_id: u32,
+        source_edge_node_ids: [u32; 2],
+        recovered_segment_count: usize,
     },
     OpenSourceLoop {
         source_edge_id: u32,
@@ -101,9 +103,14 @@ impl std::fmt::Display for SurfaceValidationError {
             Self::MissingSourceEdge { source_edge_id } => {
                 write!(formatter, "source edge {source_edge_id} is missing")
             }
-            Self::EdgeConformityFailed { source_edge_id } => write!(
+            Self::EdgeConformityFailed {
+                source_edge_id,
+                source_edge_node_ids,
+                recovered_segment_count,
+            } => write!(
                 formatter,
-                "source edge {source_edge_id} is not represented by a matching surface element edge"
+                "source edge {source_edge_id} with endpoints {:?} is not represented by a matching surface element edge; recovered surface segment count is {recovered_segment_count}",
+                source_edge_node_ids
             ),
             Self::OpenSourceLoop {
                 source_edge_id,
@@ -239,6 +246,11 @@ pub fn validate_surface_discretization(
             if !conforming_source_edges.contains(&edge.edge_id) {
                 return Err(SurfaceValidationError::EdgeConformityFailed {
                     source_edge_id: edge.edge_id,
+                    source_edge_node_ids: edge.node_ids,
+                    recovered_segment_count: surface_edges
+                        .get(&edge.edge_id)
+                        .map(Vec::len)
+                        .unwrap_or_default(),
                 });
             }
         }
@@ -589,6 +601,41 @@ mod tests {
         assert!(err
             .to_string()
             .contains(&format!("source face {source_face_id}")));
+    }
+
+    #[test]
+    fn edge_conformity_failure_reports_recovered_segment_count() {
+        let topology = cube_topology();
+        let mut surface =
+            discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
+                .expect("surface should discretize");
+        let edge = topology.edges[0].clone();
+        for element in &mut surface.elements {
+            for source_edge_id in &mut element.source_edge_ids {
+                if *source_edge_id == edge.edge_id {
+                    *source_edge_id = INTERNAL_SOURCE_EDGE_ID;
+                }
+            }
+        }
+
+        let err = validate_surface_discretization(
+            &topology,
+            &surface,
+            SurfaceValidationOptions::default(),
+        )
+        .expect_err("missing source edge recovery should fail");
+
+        assert_eq!(
+            err,
+            SurfaceValidationError::EdgeConformityFailed {
+                source_edge_id: edge.edge_id,
+                source_edge_node_ids: edge.node_ids,
+                recovered_segment_count: 0,
+            }
+        );
+        let message = err.to_string();
+        assert!(message.contains(&format!("source edge {}", edge.edge_id)));
+        assert!(message.contains("recovered surface segment count is 0"));
     }
 
     #[test]
