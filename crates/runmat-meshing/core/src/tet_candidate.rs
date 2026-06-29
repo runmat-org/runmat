@@ -1107,6 +1107,11 @@ fn append_consistent_sweep_frustum_tets(
     options: TetCandidateOptions,
     tets: &mut Vec<TetCandidate>,
 ) {
+    let order = sweep_column_order(outer_ids);
+    let outer_ids = order.map(|index| outer_ids[index]);
+    let inner_ids = order.map(|index| inner_ids[index]);
+    let outer_points = order.map(|index| outer_points[index]);
+    let inner_points = order.map(|index| inner_points[index]);
     if let Some(split) = layered_frustum_split(
         component,
         element,
@@ -1114,11 +1119,17 @@ fn append_consistent_sweep_frustum_tets(
         inner_ids,
         outer_points,
         inner_points,
-        0,
+        3,
         options,
     ) {
         tets.extend(split.tets);
     }
+}
+
+fn sweep_column_order(node_ids: [u32; 3]) -> [usize; 3] {
+    let mut order = [0_usize, 1, 2];
+    order.sort_by_key(|index| node_ids[*index]);
+    order
 }
 
 fn thin_sweep_axis(

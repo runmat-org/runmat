@@ -45,7 +45,7 @@ use crate::{
     tolerance::MeshingTolerance,
     topology::{BoundaryElementKind, VolumeElementKind},
     validation::{
-        validate_analysis_mesh_with_options, AnalysisMeshValidationError,
+        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,
         AnalysisMeshValidationOptions,
     },
     volume_candidate::{
@@ -2575,6 +2575,8 @@ mod tests {
 
         let preparation =
             prepare_production_mesh(&thin_box_geometry(), &options).expect("thin mesh prepares");
+        let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect("thin analysis mesh should build");
 
         assert_eq!(
             preparation
@@ -2608,6 +2610,7 @@ mod tests {
             preparation.tet_candidates.tets.len() > 1_000,
             "thin sweep recovery should retain a production-scale solver topology"
         );
+        assert_eq!(volume_component_count(&mesh), 1);
     }
 
     fn volume_element_centroid_count_within(
