@@ -46,6 +46,8 @@ _June 26, 2026_
 - Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+- Add generalized eigenvalue support through `eig(A, B)`
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](/docs/fea) for details. We will share more details as this work matures.
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
@@ -54,9 +56,24 @@ _June 26, 2026_
 
 #### Fixed
 - Fix GC safety by replacing dereference-oriented pointer APIs with opaque handles, explicit root guards, guarded borrow access, thread-local rooting, and Miri-backed soundness coverage
-- Fix WebAssembly and release publishing issues around OCCT feature wiring, generated builtin registries, TypeScript package builds, headless compatibility checks, and nested crate publishing
 - Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
 - Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
+- Fix `clear` inside active VM execution frames so hidden loop slots are preserved and browser/desktop workers do not trap or close response channels
+- Fix interactive `input()` evaluation on native by removing nested executor blocking from the input hook path
+- Fix MAT-file load robustness for compressed Level-5 payloads, endian variants, broader numeric storage classes, UTF char encodings, sparse matrices, and clearer unsupported-format diagnostics
+
+### Agent
+
+#### Added
+- Added “Fix with RunMat Agent” to execution errors for easy agent-assisted fixes
+
+#### Changed
+- Improve browser Agent transport so turn submission, approvals, and resumes are scheduled work instead of long-running worker RPCs, allowing progress views and parallel/new Agent sessions to respond promptly
+- Gate FEA/geometry Agent tools and model-visible guidance behind the same product feature flags as the desktop UI
+
+#### Fixed
+- Fix Agent prompt stickiness so only the active/current running turn is treated as sticky context
+- Fix usage-cap and insufficient-credit flows so desktop shows upgrade interruptions instead of generic failures
 
 ### Development
 
