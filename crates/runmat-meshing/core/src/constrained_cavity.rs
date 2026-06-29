@@ -92,6 +92,8 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub cap_candidate_count: usize,
     pub outside_candidate_count: usize,
     pub duplicate_candidate_count: usize,
+    pub max_rejected_scaled_jacobian: f64,
+    pub rejected_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -1090,6 +1092,8 @@ pub(crate) fn diagnostic_boundary_node_completion(
         cap_candidate_count: 0,
         outside_candidate_count: 0,
         duplicate_candidate_count: 0,
+        max_rejected_scaled_jacobian: 0.0,
+        rejected_scaled_jacobian_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     loop {
@@ -1111,6 +1115,15 @@ pub(crate) fn diagnostic_boundary_node_completion(
         aggregate.cap_candidate_count += diagnostic.cap_candidate_count;
         aggregate.outside_candidate_count += diagnostic.outside_candidate_count;
         aggregate.duplicate_candidate_count += diagnostic.duplicate_candidate_count;
+        aggregate.max_rejected_scaled_jacobian = aggregate
+            .max_rejected_scaled_jacobian
+            .max(diagnostic.max_rejected_scaled_jacobian);
+        for (bin, count) in diagnostic.rejected_scaled_jacobian_bins {
+            *aggregate
+                .rejected_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
         for (reason, count) in diagnostic.rejected_by_reason {
             *aggregate.rejected_by_reason.entry(reason).or_default() += count;
         }
@@ -1140,6 +1153,8 @@ pub(crate) fn diagnostic_boundary_node_completion(
             cap_candidate_count: 0,
             outside_candidate_count: 0,
             duplicate_candidate_count: 0,
+            max_rejected_scaled_jacobian: 0.0,
+            rejected_scaled_jacobian_bins: BTreeMap::new(),
             rejected_by_reason: BTreeMap::new(),
         });
     }
@@ -1160,6 +1175,8 @@ fn diagnostic_boundary_face_completion(
     let mut cap_candidate_count = 0_usize;
     let mut outside_candidate_count = 0_usize;
     let mut duplicate_candidate_count = 0_usize;
+    let mut max_rejected_scaled_jacobian = 0.0_f64;
+    let mut rejected_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut rejected_by_reason = BTreeMap::<&'static str, usize>::new();
     let mut saw_non_duplicate = false;
     for node_id in cavity_boundary_node_ids(cavity) {
@@ -1189,6 +1206,14 @@ fn diagnostic_boundary_face_completion(
                 }
             }
             Err(reason) => {
+                let exact_scaled_jacobian = tet_scaled_jacobian(points);
+                if exact_scaled_jacobian.is_finite() {
+                    max_rejected_scaled_jacobian =
+                        max_rejected_scaled_jacobian.max(exact_scaled_jacobian);
+                    *rejected_scaled_jacobian_bins
+                        .entry(diagnostic_scaled_jacobian_bin(exact_scaled_jacobian))
+                        .or_default() += 1;
+                }
                 *rejected_by_reason
                     .entry(boundary_node_refill_rejection_reason(reason))
                     .or_default() += 1;
@@ -1208,7 +1233,24 @@ fn diagnostic_boundary_face_completion(
         cap_candidate_count,
         outside_candidate_count,
         duplicate_candidate_count,
+        max_rejected_scaled_jacobian,
+        rejected_scaled_jacobian_bins,
         rejected_by_reason,
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_scaled_jacobian_bin(value: f64) -> String {
+    if value < 0.01 {
+        "lt_0_01".to_string()
+    } else if value < 0.05 {
+        "lt_0_05".to_string()
+    } else if value < 0.10 {
+        "lt_0_10".to_string()
+    } else if value < 0.15 {
+        "lt_0_15".to_string()
+    } else {
+        "gte_0_15".to_string()
     }
 }
 
@@ -2201,6 +2243,8 @@ mod tests {
         assert_eq!(diagnostic.reason, "boundary_node_completion_no_candidate");
         assert!(diagnostic.missing_face_count > 0);
         assert_eq!(diagnostic.cap_candidate_count, 0);
+        assert!(diagnostic.max_rejected_scaled_jacobian < 0.95);
+        assert!(!diagnostic.rejected_scaled_jacobian_bins.is_empty());
         assert!(!diagnostic.rejected_by_reason.is_empty());
     }
 

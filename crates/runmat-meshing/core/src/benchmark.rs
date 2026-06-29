@@ -3424,6 +3424,9 @@ mod tests {
         let mut trimmed_seed_star_completion_cap_candidates = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_completion_outside_candidates = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_completion_duplicate_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_completion_max_rejected_quality = 0.0_f64;
+        let mut trimmed_seed_star_completion_rejected_quality_bins =
+            BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
@@ -3551,6 +3554,14 @@ mod tests {
                                     *trimmed_seed_star_completion_duplicate_candidates
                                         .entry(diagnostic.duplicate_candidate_count)
                                         .or_default() += 1;
+                                    trimmed_seed_star_completion_max_rejected_quality =
+                                        trimmed_seed_star_completion_max_rejected_quality
+                                            .max(diagnostic.max_rejected_scaled_jacobian);
+                                    for (bin, count) in diagnostic.rejected_scaled_jacobian_bins {
+                                        *trimmed_seed_star_completion_rejected_quality_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
                                     for (reason, count) in diagnostic.rejected_by_reason {
                                         *trimmed_seed_star_completion_rejected_by_reason
                                             .entry(reason.to_string())
@@ -3702,12 +3713,14 @@ mod tests {
             trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_completion_reason,
             trimmed_seed_star_completion_missing_faces,
             trimmed_seed_star_completion_cap_candidates,
             trimmed_seed_star_completion_outside_candidates,
             trimmed_seed_star_completion_duplicate_candidates,
+            trimmed_seed_star_completion_max_rejected_quality,
+            trimmed_seed_star_completion_rejected_quality_bins,
             trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
