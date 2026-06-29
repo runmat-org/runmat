@@ -3,6 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    constrained_cavity::{
+        constrained_cavity_from_selected_tets_with_anchor_trim,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavityNode,
+        ConstrainedCavityRefillOptions,
+    },
     predicate::{
         add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
         tet_centroid, tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
@@ -3572,6 +3577,27 @@ fn repair_exact_quality_tets_once(
             repaired.push(tet.clone());
             continue;
         }
+        if let Some((neighbor_indices, candidates)) = best_constrained_interior_seed_star_refill(
+            tet_index,
+            tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            options,
+        )? {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
+            summary.node_adjacent_reconnected_cavity_count += 1;
+            repaired.extend(candidates);
+            continue;
+        }
         if let Some((neighbor_indices, candidates)) = best_interior_seed_node_collapse(
             tet_index,
             tets,
@@ -4120,6 +4146,149 @@ fn tet_node_adjacency(tets: &[TetCandidate]) -> BTreeMap<u32, Vec<usize>> {
 enum InteriorSeedCollapseScope {
     FourTetOnly,
     LargerStarsOnly,
+}
+
+fn best_constrained_interior_seed_star_refill(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    interior_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    for interior_node_id in tet
+        .node_ids
+        .into_iter()
+        .filter(|node_id| interior_node_ids.contains(node_id))
+    {
+        let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
+            continue;
+        };
+        if !adjacent.contains(&tet_index) || adjacent.len() < 5 {
+            continue;
+        }
+        let Some((neighbor_indices, candidates)) =
+            constrained_interior_seed_star_refill_candidates(
+                tet_index,
+                tets,
+                adjacent,
+                node_points,
+                options,
+            )?
+        else {
+            continue;
+        };
+        let original_below_count = count_exact_quality_violations(
+            neighbor_indices.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if candidate_below_count >= original_below_count {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_below_count, best_min_exact)| {
+                candidate_below_count < *best_below_count
+                    || (candidate_below_count == *best_below_count
+                        && candidate_min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                neighbor_indices,
+                candidates,
+                candidate_below_count,
+                candidate_min_exact,
+            ));
+        }
+    }
+    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+}
+
+fn constrained_interior_seed_star_refill_candidates(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    adjacent: &[usize],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let Some(cavity) =
+        constrained_cavity_from_selected_tets_with_anchor_trim(tets, adjacent, tet_index, vec![])
+            .map_err(|_| TetCandidateError::InvalidOptions)?
+    else {
+        return Ok(None);
+    };
+    let index_by_tet_id = tets
+        .iter()
+        .enumerate()
+        .map(|(index, tet)| (tet.tet_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let selected_indices = cavity
+        .removed_tet_ids
+        .iter()
+        .map(|tet_id| {
+            index_by_tet_id
+                .get(tet_id)
+                .copied()
+                .ok_or(TetCandidateError::InvalidOptions)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if selected_indices.is_empty() || !selected_indices.contains(&tet_index) {
+        return Ok(None);
+    }
+    let boundary_node_ids = cavity
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.node_ids)
+        .collect::<BTreeSet<_>>();
+    let boundary_nodes = boundary_node_ids
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let refill = evaluate_constrained_cavity_refill_candidates(
+        &cavity,
+        &boundary_nodes,
+        &[],
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    )
+    .map_err(|_| TetCandidateError::InvalidOptions)?
+    .refill;
+    let Some(refill) = refill else {
+        return Ok(None);
+    };
+    let reference = &tets[selected_indices[0]];
+    let candidates = refill
+        .tets
+        .into_iter()
+        .map(|tet| TetCandidate {
+            tet_id: 0,
+            component_id: reference.component_id,
+            node_ids: tet.node_ids,
+            source_surface_element_id: reference.source_surface_element_id,
+            region_ids: reference.region_ids.clone(),
+            volume_m3: tet.volume_m3,
+            aspect_ratio: tet.aspect_ratio,
+            exact_scaled_jacobian: tet.exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+    Ok(Some((selected_indices, candidates)))
 }
 
 fn best_interior_seed_node_collapse(
@@ -8537,6 +8706,71 @@ mod tests {
         );
         let collapsed_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((collapsed_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn constrained_refill_replaces_low_quality_interior_seed_star() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.0,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [1.0, 0.0, 0.0]),
+            (1, [0.0, 1.0, 0.0]),
+            (2, [-1.0, 0.0, 0.0]),
+            (3, [0.0, -1.0, 0.0]),
+            (4, [0.0, 0.0, 1.0]),
+            (5, [0.0, 0.0, -1.0]),
+            (6, [0.0, 0.0, 0.0]),
+        ]);
+        let boundary_faces = [
+            [0, 1, 4],
+            [1, 2, 4],
+            [2, 3, 4],
+            [3, 0, 4],
+            [1, 0, 5],
+            [2, 1, 5],
+            [3, 2, 5],
+            [0, 3, 5],
+        ];
+        let tets = boundary_faces
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, face)| TetCandidate {
+                tet_id: tet_id as u32,
+                component_id: 0,
+                node_ids: [face[0], face[1], face[2], 6],
+                source_surface_element_id: 0,
+                region_ids: vec!["body".to_string()],
+                volume_m3: 1.0 / 6.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: -0.1,
+            })
+            .collect::<Vec<_>>();
+        let node_adjacency = tet_node_adjacency(&tets);
+        let interior_node_ids = BTreeSet::from([6]);
+
+        let (indices, candidates) = best_constrained_interior_seed_star_refill(
+            0,
+            &tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            options,
+        )
+        .expect("constrained refill should evaluate")
+        .expect("closed seed star should be refilled from boundary nodes");
+
+        assert_eq!(indices, (0..8).collect::<Vec<_>>());
+        assert!(!candidates.is_empty());
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.exact_scaled_jacobian >= options.min_scaled_jacobian));
+        assert_eq!(
+            boundary_faces_from_tets(&candidates),
+            boundary_faces_from_tets(&tets)
+        );
     }
 
     #[test]
