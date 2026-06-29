@@ -5,6 +5,7 @@ pub mod benchmark;
 pub mod boundary;
 pub mod cad_eval;
 pub mod cad_topology;
+pub mod constrained_cavity;
 pub mod curve;
 pub mod evidence;
 pub mod field_mapping;
@@ -66,6 +67,11 @@ pub use cad_eval::{
 pub use cad_topology::{
     build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
+};
+pub use constrained_cavity::{
+    validate_constrained_cavity, validate_constrained_cavity_refill_volume, ConstrainedCavity,
+    ConstrainedCavityBoundaryFace, ConstrainedCavityValidationError,
+    ConstrainedCavityValidationReport,
 };
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
