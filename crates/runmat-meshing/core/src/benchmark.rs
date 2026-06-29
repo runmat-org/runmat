@@ -251,6 +251,8 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_no_missing_surface_source_edges: bool,
     #[serde(default)]
+    pub require_all_surface_source_edge_loops_closed: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -268,6 +270,7 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
             require_all_solve_ready: true,
             require_no_budget_exceeded: true,
             require_no_missing_surface_source_edges: true,
+            require_all_surface_source_edge_loops_closed: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -556,6 +559,26 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 "surface_source_edges_missing",
                 format!(
                     "{missing_source_edge_count} surface source edges are missing from benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_all_surface_source_edge_loops_closed {
+        let open_source_edge_loop_count = suite
+            .reports
+            .iter()
+            .map(|report| {
+                report
+                    .cad
+                    .surface_source_edge_loop_count
+                    .saturating_sub(report.cad.surface_closed_edge_loop_count)
+            })
+            .sum::<usize>();
+        if open_source_edge_loop_count > 0 {
+            violations.push(gate_violation(
+                "surface_source_edge_loops_open",
+                format!(
+                    "{open_source_edge_loop_count} surface source-edge loops are not closed in benchmark reports"
                 ),
             ));
         }
@@ -2278,6 +2301,8 @@ mod tests {
         over_budget.timing.total_ms = Some(8.0);
         over_budget.artifacts.analysis_mesh_json_bytes = Some(1500);
         over_budget.artifacts.mesh_evidence_json_bytes = Some(1700);
+        over_budget.cad.surface_source_edge_loop_count = 2;
+        over_budget.cad.surface_closed_edge_loop_count = 1;
         over_budget.cad.surface_missing_source_edge_count = 2;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
@@ -2312,6 +2337,7 @@ mod tests {
         assert!(codes.contains(&"not_all_reports_solve_ready"));
         assert!(codes.contains(&"element_budget_exceeded"));
         assert!(codes.contains(&"surface_source_edges_missing"));
+        assert!(codes.contains(&"surface_source_edge_loops_open"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
