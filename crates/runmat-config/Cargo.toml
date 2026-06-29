@@ -1,6 +1,6 @@
 [package]
 name = "runmat-config"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 description = "Shared configuration schema and loaders for RunMat"
 license = "Apache-2.0"

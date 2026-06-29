@@ -1,6 +1,6 @@
 [package]
 name = "runmat-gc-miri-tests"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 publish = false
 description = "Miri-focused soundness tests for the RunMat garbage collector"
