@@ -287,6 +287,10 @@ pub struct MeshBenchmarkCaseComparison {
     pub tier: MeshBenchmarkTier,
     pub baseline_present: bool,
     pub candidate_present: bool,
+    #[serde(default)]
+    pub baseline_generation_failed: bool,
+    #[serde(default)]
+    pub candidate_generation_failed: bool,
     pub baseline_solve_ready: Option<bool>,
     pub candidate_solve_ready: Option<bool>,
     pub baseline_failure_code: Option<String>,
@@ -544,6 +548,18 @@ pub fn compare_mesh_benchmark_suites(
                 .iter()
                 .map(|report| report.benchmark_id.clone()),
         )
+        .chain(
+            baseline
+                .generation_failures
+                .iter()
+                .map(|failure| failure.benchmark_id.clone()),
+        )
+        .chain(
+            candidate
+                .generation_failures
+                .iter()
+                .map(|failure| failure.benchmark_id.clone()),
+        )
         .collect::<Vec<_>>();
     benchmark_ids.sort();
     benchmark_ids.dedup();
@@ -558,6 +574,16 @@ pub fn compare_mesh_benchmark_suites(
         .iter()
         .map(|report| (report.benchmark_id.as_str(), report))
         .collect::<BTreeMap<_, _>>();
+    let baseline_failure_by_id = baseline
+        .generation_failures
+        .iter()
+        .map(|failure| (failure.benchmark_id.as_str(), failure))
+        .collect::<BTreeMap<_, _>>();
+    let candidate_failure_by_id = candidate
+        .generation_failures
+        .iter()
+        .map(|failure| (failure.benchmark_id.as_str(), failure))
+        .collect::<BTreeMap<_, _>>();
 
     let cases = benchmark_ids
         .iter()
@@ -566,6 +592,8 @@ pub fn compare_mesh_benchmark_suites(
                 benchmark_id,
                 baseline_by_id.get(benchmark_id.as_str()).copied(),
                 candidate_by_id.get(benchmark_id.as_str()).copied(),
+                baseline_failure_by_id.get(benchmark_id.as_str()).copied(),
+                candidate_failure_by_id.get(benchmark_id.as_str()).copied(),
                 thresholds,
             )
         })
@@ -587,11 +615,15 @@ fn compare_mesh_benchmark_case(
     benchmark_id: &str,
     baseline: Option<&MeshBenchmarkReport>,
     candidate: Option<&MeshBenchmarkReport>,
+    baseline_generation_failure: Option<&MeshBenchmarkGenerationFailure>,
+    candidate_generation_failure: Option<&MeshBenchmarkGenerationFailure>,
     thresholds: MeshBenchmarkComparisonThresholds,
 ) -> MeshBenchmarkCaseComparison {
     let tier = baseline
         .map(|report| report.tier)
         .or_else(|| candidate.map(|report| report.tier))
+        .or_else(|| baseline_generation_failure.map(|failure| failure.tier))
+        .or_else(|| candidate_generation_failure.map(|failure| failure.tier))
         .unwrap_or(MeshBenchmarkTier::Solid3d);
     let min_exact_scaled_jacobian_delta = finite_delta(
         baseline.map(|report| report.quality.min_exact_scaled_jacobian),
@@ -632,14 +664,16 @@ fn compare_mesh_benchmark_case(
             candidate.map(|report| report.solve_readiness.solve_ready)
         ),
         (Some(true), Some(false))
-    );
-    let candidate_new_failure = matches!(
-        (
-            baseline.and_then(|report| report.solve_readiness.validation_error_code.as_deref()),
-            candidate.and_then(|report| report.solve_readiness.validation_error_code.as_deref())
-        ),
-        (None, Some(_))
-    );
+    ) || (baseline
+        .is_some_and(|report| report.solve_readiness.solve_ready)
+        && candidate_generation_failure.is_some());
+    let baseline_failure_code = baseline
+        .and_then(|report| report.solve_readiness.validation_error_code.clone())
+        .or_else(|| baseline_generation_failure.map(|_| "mesh_generation_failed".to_string()));
+    let candidate_failure_code = candidate
+        .and_then(|report| report.solve_readiness.validation_error_code.clone())
+        .or_else(|| candidate_generation_failure.map(|_| "mesh_generation_failed".to_string()));
+    let candidate_new_failure = baseline_failure_code.is_none() && candidate_failure_code.is_some();
     let quality_regressed = quality_regressed(
         baseline.map(|report| report.quality.min_exact_scaled_jacobian),
         candidate.map(|report| report.quality.min_exact_scaled_jacobian),
@@ -659,14 +693,18 @@ fn compare_mesh_benchmark_case(
     MeshBenchmarkCaseComparison {
         benchmark_id: benchmark_id.to_string(),
         tier,
-        baseline_present: baseline.is_some(),
-        candidate_present: candidate.is_some(),
-        baseline_solve_ready: baseline.map(|report| report.solve_readiness.solve_ready),
-        candidate_solve_ready: candidate.map(|report| report.solve_readiness.solve_ready),
-        baseline_failure_code: baseline
-            .and_then(|report| report.solve_readiness.validation_error_code.clone()),
-        candidate_failure_code: candidate
-            .and_then(|report| report.solve_readiness.validation_error_code.clone()),
+        baseline_present: baseline.is_some() || baseline_generation_failure.is_some(),
+        candidate_present: candidate.is_some() || candidate_generation_failure.is_some(),
+        baseline_generation_failed: baseline_generation_failure.is_some(),
+        candidate_generation_failed: candidate_generation_failure.is_some(),
+        baseline_solve_ready: baseline
+            .map(|report| report.solve_readiness.solve_ready)
+            .or_else(|| baseline_generation_failure.map(|_| false)),
+        candidate_solve_ready: candidate
+            .map(|report| report.solve_readiness.solve_ready)
+            .or_else(|| candidate_generation_failure.map(|_| false)),
+        baseline_failure_code,
+        candidate_failure_code,
         min_exact_scaled_jacobian_delta,
         max_aspect_ratio_delta,
         volume_coverage_error_delta,
@@ -2086,6 +2124,51 @@ mod tests {
         assert_eq!(comparison.cases[0].tier, MeshBenchmarkTier::Solid3d);
         assert!(comparison.cases[0].baseline_present);
         assert!(!comparison.cases[0].candidate_present);
+    }
+
+    #[test]
+    fn benchmark_comparison_tracks_collected_generation_failures() {
+        let baseline = build_mesh_benchmark_suite_report(
+            "baseline",
+            vec![ready_report("case_a", 0.5, 2.0, 0.0, 10.0, true, None)],
+        );
+        let candidate = build_mesh_benchmark_suite_report_with_failures(
+            "candidate",
+            Vec::new(),
+            vec![MeshBenchmarkGenerationFailure {
+                benchmark_id: "case_a".to_string(),
+                tier: MeshBenchmarkTier::Solid3d,
+                message: "generation failed".to_string(),
+            }],
+        );
+
+        let comparison = compare_mesh_benchmark_suites(
+            "generation_failure",
+            &baseline,
+            &candidate,
+            MeshBenchmarkComparisonThresholds::default(),
+        );
+
+        assert_eq!(comparison.summary.compared_case_count, 1);
+        assert_eq!(comparison.summary.missing_candidate_case_count, 0);
+        assert_eq!(comparison.summary.publishability_regression_count, 1);
+        assert_eq!(comparison.summary.candidate_new_failure_count, 1);
+        assert_eq!(comparison.summary.regression_count, 1);
+        assert!(comparison.summary.has_regression);
+        let case = &comparison.cases[0];
+        assert_eq!(case.benchmark_id, "case_a");
+        assert!(case.baseline_present);
+        assert!(case.candidate_present);
+        assert!(!case.baseline_generation_failed);
+        assert!(case.candidate_generation_failed);
+        assert_eq!(case.baseline_solve_ready, Some(true));
+        assert_eq!(case.candidate_solve_ready, Some(false));
+        assert_eq!(
+            case.candidate_failure_code.as_deref(),
+            Some("mesh_generation_failed")
+        );
+        assert!(case.publishability_regressed);
+        assert!(case.candidate_new_failure);
     }
 
     fn assert_close(actual: Option<f64>, expected: f64) {
