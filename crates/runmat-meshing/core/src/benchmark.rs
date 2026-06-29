@@ -263,6 +263,8 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_no_dropped_requested_refinement_points: bool,
     #[serde(default)]
+    pub require_no_unrepaired_exact_quality_cavities: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -286,6 +288,7 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
             require_no_missing_cad_curvature_queries: true,
             require_no_rejected_requested_refinement_points: true,
             require_no_dropped_requested_refinement_points: true,
+            require_no_unrepaired_exact_quality_cavities: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -669,6 +672,21 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 "requested_refinement_points_dropped",
                 format!(
                     "{dropped_requested_refinement_count} requested refinement points were dropped after recovery in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_unrepaired_exact_quality_cavities {
+        let unrepaired_exact_quality_count = suite
+            .reports
+            .iter()
+            .map(|report| report.solve_readiness.unrepaired_exact_quality_total_count)
+            .sum::<usize>();
+        if unrepaired_exact_quality_count > 0 {
+            violations.push(gate_violation(
+                "unrepaired_exact_quality_cavities",
+                format!(
+                    "{unrepaired_exact_quality_count} exact-quality recovery cavities remain unrepaired in benchmark reports"
                 ),
             ));
         }
@@ -2403,6 +2421,9 @@ mod tests {
         over_budget
             .sizing
             .dropped_requested_tet_refinement_point_count = 7;
+        over_budget
+            .solve_readiness
+            .unrepaired_exact_quality_total_count = 8;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
             vec![over_budget],
@@ -2442,6 +2463,7 @@ mod tests {
         assert!(codes.contains(&"cad_curvature_queries_missing"));
         assert!(codes.contains(&"requested_refinement_points_rejected"));
         assert!(codes.contains(&"requested_refinement_points_dropped"));
+        assert!(codes.contains(&"unrepaired_exact_quality_cavities"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
