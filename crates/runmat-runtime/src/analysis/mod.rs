@@ -15254,6 +15254,9 @@ fn append_solved_adaptive_mesh_summary(
                 completed_iterations: mesh.adaptive_iterations.len(),
                 element_budget_reached,
                 field_change: (stress_gradient_used
+                    || electromagnetic_flux_density_used
+                    || electromagnetic_electric_field_used
+                    || electromagnetic_current_density_used
                     || acoustic_pressure_gradient_used
                     || acoustic_pressure_curvature_used
                     || cfd_velocity_gradient_used
