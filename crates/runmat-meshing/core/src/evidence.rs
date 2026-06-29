@@ -25,6 +25,8 @@ pub struct MeshEvidenceArtifact {
     #[serde(default)]
     pub cad: MeshCadEvidence,
     pub topology: MeshTopologyEvidence,
+    #[serde(default)]
+    pub adaptive: MeshAdaptiveEvidence,
     pub sizing: MeshSizingEvidence,
     pub quality: MeshQualityEvidence,
     #[serde(default)]
@@ -125,6 +127,37 @@ pub struct MeshTopologyEvidence {
     pub adaptive_iteration_count: usize,
     pub bounds_min_m: Option<[f64; 3]>,
     pub bounds_max_m: Option<[f64; 3]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MeshAdaptiveEvidence {
+    pub iteration_count: usize,
+    #[serde(default)]
+    pub latest_iteration_index: Option<usize>,
+    #[serde(default)]
+    pub latest_convergence_status: Option<String>,
+    #[serde(default)]
+    pub latest_indicator_count: usize,
+    #[serde(default)]
+    pub latest_used_indicator_count: usize,
+    #[serde(default)]
+    pub latest_marker_count: usize,
+    #[serde(default)]
+    pub latest_sizing_update_sample_count: usize,
+    #[serde(default)]
+    pub marker_count: usize,
+    #[serde(default)]
+    pub sizing_update_sample_count: usize,
+    #[serde(default)]
+    pub latest_indicator_status_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub latest_marker_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub latest_sizing_update_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub marker_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub sizing_update_by_reason: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -398,6 +431,7 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         debug: None,
         cad: cad_evidence(mesh),
         topology: topology_evidence(mesh),
+        adaptive: adaptive_evidence(mesh),
         sizing: sizing_evidence(mesh),
         quality: quality_evidence(mesh),
         tet_recovery: tet_recovery_evidence(mesh),
@@ -499,6 +533,83 @@ fn topology_evidence(mesh: &AnalysisMeshArtifact) -> MeshTopologyEvidence {
         bounds_min_m: bounds.map(|bounds| bounds[0]),
         bounds_max_m: bounds.map(|bounds| bounds[1]),
     }
+}
+
+fn adaptive_evidence(mesh: &AnalysisMeshArtifact) -> MeshAdaptiveEvidence {
+    let mut marker_count = 0_usize;
+    let mut sizing_update_sample_count = 0_usize;
+    let mut marker_by_reason = BTreeMap::<String, usize>::new();
+    let mut sizing_update_by_reason = BTreeMap::<String, usize>::new();
+    for iteration in &mesh.adaptive_iterations {
+        marker_count += iteration.markers.len();
+        sizing_update_sample_count += iteration.sizing_update.samples.len();
+        for marker in &iteration.markers {
+            *marker_by_reason.entry(marker.reason.clone()).or_default() += 1;
+        }
+        for sample in &iteration.sizing_update.samples {
+            let reason = sample
+                .reason
+                .clone()
+                .unwrap_or_else(|| "unspecified".to_string());
+            *sizing_update_by_reason.entry(reason).or_default() += 1;
+        }
+    }
+
+    let Some(latest) = mesh.adaptive_iterations.last() else {
+        return MeshAdaptiveEvidence {
+            iteration_count: 0,
+            ..MeshAdaptiveEvidence::default()
+        };
+    };
+
+    let mut latest_indicator_status_counts = BTreeMap::<String, usize>::new();
+    for indicator in &latest.indicators {
+        *latest_indicator_status_counts
+            .entry(serde_label(&indicator.status))
+            .or_default() += 1;
+    }
+    let mut latest_marker_by_reason = BTreeMap::<String, usize>::new();
+    for marker in &latest.markers {
+        *latest_marker_by_reason
+            .entry(marker.reason.clone())
+            .or_default() += 1;
+    }
+    let mut latest_sizing_update_by_reason = BTreeMap::<String, usize>::new();
+    for sample in &latest.sizing_update.samples {
+        let reason = sample
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *latest_sizing_update_by_reason.entry(reason).or_default() += 1;
+    }
+
+    MeshAdaptiveEvidence {
+        iteration_count: mesh.adaptive_iterations.len(),
+        latest_iteration_index: Some(latest.iteration_index),
+        latest_convergence_status: Some(serde_label(&latest.convergence_status)),
+        latest_indicator_count: latest.indicators.len(),
+        latest_used_indicator_count: latest
+            .indicators
+            .iter()
+            .filter(|indicator| serde_label(&indicator.status) == "used")
+            .count(),
+        latest_marker_count: latest.markers.len(),
+        latest_sizing_update_sample_count: latest.sizing_update.samples.len(),
+        marker_count,
+        sizing_update_sample_count,
+        latest_indicator_status_counts,
+        latest_marker_by_reason,
+        latest_sizing_update_by_reason,
+        marker_by_reason,
+        sizing_update_by_reason,
+    }
+}
+
+fn serde_label<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
@@ -1114,10 +1225,15 @@ fn volume_bin(value: f64) -> String {
 mod tests {
     use super::*;
     use crate::{
+        adaptive::{
+            AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
+            RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
+        },
         artifact::{
             AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshNode, AnalysisVolumeElement,
             ANALYSIS_MESH_SCHEMA_VERSION,
         },
+        options::RefinementIndicatorMode,
         provenance::AnalysisMeshProvenance,
         quality::{AnalysisMeshQualityReport, ElementQuality},
         sizing::{
@@ -1366,6 +1482,10 @@ mod tests {
         assert_eq!(evidence.cad.surface_exact_cad_sample_node_count, 4);
         assert_eq!(evidence.cad.surface_rejected_exact_cad_sample_count, 5);
         assert_eq!(evidence.topology.node_count, 4);
+        assert_eq!(evidence.adaptive.iteration_count, 0);
+        assert_eq!(evidence.adaptive.latest_convergence_status, None);
+        assert_eq!(evidence.adaptive.marker_count, 0);
+        assert_eq!(evidence.adaptive.sizing_update_sample_count, 0);
         assert_eq!(evidence.validation.volume_element_count, 1);
         assert_eq!(evidence.validation.max_volume_element_count, Some(7));
         assert_eq!(evidence.validation.volume_component_count, 1);
@@ -1736,6 +1856,153 @@ mod tests {
         );
     }
 
+    #[test]
+    fn evidence_summarizes_adaptive_iterations_without_raw_marker_details() {
+        let mut mesh = minimal_evidence_mesh();
+        mesh.adaptive_iterations = vec![
+            AdaptiveIterationSummary {
+                iteration_index: 0,
+                node_count: 4,
+                element_count: 1,
+                convergence_status: AdaptiveConvergenceStatus::Pending,
+                indicators: vec![RefinementIndicatorSummary {
+                    namespace: "structural".to_string(),
+                    name: "load_regions".to_string(),
+                    requested_mode: RefinementIndicatorMode::Auto,
+                    status: RefinementIndicatorStatus::Used,
+                    detail: Some("field available".to_string()),
+                }],
+                markers: vec![RefinementMarker {
+                    entity_id: "face_1".to_string(),
+                    weight: 1.0,
+                    reason: "structural.load_regions".to_string(),
+                }],
+                sizing_update: SizingFieldUpdate {
+                    samples: vec![SizingSample {
+                        position_m: [0.0, 0.0, 1.0],
+                        target_size_m: 0.25,
+                        reason: Some("structural.load_regions".to_string()),
+                    }],
+                    min_size_m: None,
+                    max_size_m: None,
+                },
+            },
+            AdaptiveIterationSummary {
+                iteration_index: 1,
+                node_count: 5,
+                element_count: 2,
+                convergence_status: AdaptiveConvergenceStatus::Converged,
+                indicators: vec![
+                    RefinementIndicatorSummary {
+                        namespace: "structural".to_string(),
+                        name: "stress_gradient".to_string(),
+                        requested_mode: RefinementIndicatorMode::Auto,
+                        status: RefinementIndicatorStatus::Used,
+                        detail: None,
+                    },
+                    RefinementIndicatorSummary {
+                        namespace: "thermal".to_string(),
+                        name: "temperature_gradient".to_string(),
+                        requested_mode: RefinementIndicatorMode::Auto,
+                        status: RefinementIndicatorStatus::SkippedMissingField,
+                        detail: Some("required recovered field is unavailable".to_string()),
+                    },
+                ],
+                markers: vec![
+                    RefinementMarker {
+                        entity_id: "tet_1".to_string(),
+                        weight: 1.0,
+                        reason: "structural.stress_gradient".to_string(),
+                    },
+                    RefinementMarker {
+                        entity_id: "tet_2".to_string(),
+                        weight: 0.5,
+                        reason: "structural.stress_gradient".to_string(),
+                    },
+                ],
+                sizing_update: SizingFieldUpdate {
+                    samples: vec![
+                        SizingSample {
+                            position_m: [0.2, 0.2, 0.2],
+                            target_size_m: 0.2,
+                            reason: Some("structural.stress_gradient".to_string()),
+                        },
+                        SizingSample {
+                            position_m: [0.4, 0.2, 0.2],
+                            target_size_m: 0.2,
+                            reason: Some("structural.stress_gradient".to_string()),
+                        },
+                    ],
+                    min_size_m: None,
+                    max_size_m: None,
+                },
+            },
+        ];
+
+        let evidence =
+            build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
+
+        assert_eq!(evidence.topology.adaptive_iteration_count, 2);
+        assert_eq!(evidence.adaptive.iteration_count, 2);
+        assert_eq!(evidence.adaptive.latest_iteration_index, Some(1));
+        assert_eq!(
+            evidence.adaptive.latest_convergence_status.as_deref(),
+            Some("converged")
+        );
+        assert_eq!(evidence.adaptive.latest_indicator_count, 2);
+        assert_eq!(evidence.adaptive.latest_used_indicator_count, 1);
+        assert_eq!(evidence.adaptive.latest_marker_count, 2);
+        assert_eq!(evidence.adaptive.latest_sizing_update_sample_count, 2);
+        assert_eq!(evidence.adaptive.marker_count, 3);
+        assert_eq!(evidence.adaptive.sizing_update_sample_count, 3);
+        assert_eq!(
+            evidence.adaptive.latest_indicator_status_counts.get("used"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .latest_indicator_status_counts
+                .get("skipped_missing_field"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .latest_marker_by_reason
+                .get("structural.stress_gradient"),
+            Some(&2)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .latest_sizing_update_by_reason
+                .get("structural.stress_gradient"),
+            Some(&2)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .marker_by_reason
+                .get("structural.load_regions"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .marker_by_reason
+                .get("structural.stress_gradient"),
+            Some(&2)
+        );
+        assert_eq!(
+            evidence
+                .adaptive
+                .sizing_update_by_reason
+                .get("structural.load_regions"),
+            Some(&1)
+        );
+    }
+
     #[cfg(feature = "dev-evidence")]
     #[test]
     fn dev_mesh_evidence_caps_debug_events() {
@@ -1805,6 +2072,64 @@ mod tests {
             adjacent_boundary_face_ids: vec!["face_1".to_string()],
             region_ids: vec!["fixed".to_string()],
             provenance: Vec::new(),
+        }
+    }
+
+    fn minimal_evidence_mesh() -> AnalysisMeshArtifact {
+        AnalysisMeshArtifact {
+            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+            mesh_id: "adaptive_mesh".to_string(),
+            nodes: vec![
+                node(1, [0.0, 0.0, 0.0]),
+                node(2, [1.0, 0.0, 0.0]),
+                node(3, [0.0, 1.0, 0.0]),
+                node(4, [0.0, 0.0, 1.0]),
+            ],
+            volume_elements: vec![AnalysisVolumeElement {
+                element_id: "tet_1".to_string(),
+                kind: VolumeElementKind::Tet4,
+                node_ids: vec![1, 2, 3, 4],
+                material_region_id: "solid".to_string(),
+                provenance: Vec::new(),
+            }],
+            boundary_faces: vec![AnalysisBoundaryFace {
+                face_id: "face_1".to_string(),
+                kind: BoundaryElementKind::Tri3,
+                node_ids: vec![1, 2, 3],
+                adjacent_volume_element_ids: vec!["tet_1".to_string()],
+                region_ids: vec!["fixed".to_string()],
+                provenance: Vec::new(),
+            }],
+            boundary_edges: vec![
+                boundary_edge("edge_1", [1, 2]),
+                boundary_edge("edge_2", [2, 3]),
+                boundary_edge("edge_3", [1, 3]),
+            ],
+            sizing: MeshSizingField::default(),
+            quality: AnalysisMeshQualityReport {
+                min_scaled_jacobian: 0.5,
+                min_exact_scaled_jacobian: 0.45,
+                mean_aspect_ratio: 2.0,
+                max_aspect_ratio: 2.0,
+                inverted_element_count: 0,
+                mean_boundary_projection_error_m: 0.0,
+                max_boundary_projection_error_m: 0.0,
+                elements: vec![ElementQuality {
+                    element_id: "tet_1".to_string(),
+                    scaled_jacobian: 0.5,
+                    exact_scaled_jacobian: 0.45,
+                    aspect_ratio: 2.0,
+                    volume_m3: 1.0 / 6.0,
+                }],
+            },
+            backend: MeshBackendSummary::default(),
+            adaptive_iterations: Vec::new(),
+            provenance: AnalysisMeshProvenance {
+                algorithm: "test".to_string(),
+                source_geometry_id: "geo".to_string(),
+                source_geometry_revision: 1,
+                source_geometry_sha256: None,
+            },
         }
     }
 
