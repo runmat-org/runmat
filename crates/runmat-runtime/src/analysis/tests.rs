@@ -5723,12 +5723,29 @@ fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
         .expect("unmapped boundary render topology should be reported");
     assert!(unmapped_reason
         .detail
-        .contains("unmapped_boundary_face_count=2"));
+        .contains("field_mapping_error=boundary face"));
 
     let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
     assert!(solid_mesh_quality_reasons(&sample_model(), Some(&mapped))
         .iter()
         .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete));
+}
+
+#[test]
+fn analysis_mesh_render_topology_requires_solver_field_mapping() {
+    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(render_topology_from_analysis_mesh(Some(&mapped)).is_some());
+
+    let mut stale_node = mapped.clone();
+    stale_node.boundary_faces[0].node_ids[0] = 99;
+    assert_eq!(render_topology_from_analysis_mesh(Some(&stale_node)), None);
+
+    let mut stale_element = mapped;
+    stale_element.boundary_faces[0].adjacent_volume_element_ids = vec!["missing_tet".to_string()];
+    assert_eq!(
+        render_topology_from_analysis_mesh(Some(&stale_element)),
+        None
+    );
 }
 
 #[test]

@@ -9746,39 +9746,12 @@ fn render_topology_gap_detail(mesh: &AnalysisMeshArtifact) -> Option<String> {
     if mesh.volume_elements.is_empty() {
         return None;
     }
-    let volume_element_ids = mesh
-        .volume_elements
-        .iter()
-        .map(|element| element.element_id.as_str())
-        .collect::<HashSet<_>>();
-    let node_ids = mesh
-        .nodes
-        .iter()
-        .map(|node| node.node_id)
-        .collect::<HashSet<_>>();
     let mut renderable_boundary_face_count = 0_usize;
-    let mut unmapped_boundary_face_count = 0_usize;
-    let mut invalid_node_boundary_face_count = 0_usize;
     for face in &mesh.boundary_faces {
         if face.kind != runmat_meshing_core::BoundaryElementKind::Tri3 || face.node_ids.len() != 3 {
             continue;
         }
         renderable_boundary_face_count += 1;
-        if face
-            .node_ids
-            .iter()
-            .any(|node_id| !node_ids.contains(node_id))
-        {
-            invalid_node_boundary_face_count += 1;
-            continue;
-        }
-        if !face
-            .adjacent_volume_element_ids
-            .iter()
-            .any(|element_id| volume_element_ids.contains(element_id.as_str()))
-        {
-            unmapped_boundary_face_count += 1;
-        }
     }
     if renderable_boundary_face_count == 0 {
         return Some(format!(
@@ -9786,15 +9759,25 @@ fn render_topology_gap_detail(mesh: &AnalysisMeshArtifact) -> Option<String> {
             mesh.volume_elements.len()
         ));
     }
-    if invalid_node_boundary_face_count > 0 || unmapped_boundary_face_count > 0 {
+    if let Err(err) = validate_analysis_mesh_solver_field_mapping(mesh) {
         return Some(format!(
-            "analysis mesh render topology is incomplete: renderable_boundary_face_count={} invalid_node_boundary_face_count={} unmapped_boundary_face_count={}",
-            renderable_boundary_face_count,
-            invalid_node_boundary_face_count,
-            unmapped_boundary_face_count
+            "analysis mesh render topology is incomplete: renderable_boundary_face_count={} field_mapping_error={}",
+            renderable_boundary_face_count, err
         ));
     }
     None
+}
+
+fn validate_analysis_mesh_solver_field_mapping(mesh: &AnalysisMeshArtifact) -> Result<(), String> {
+    let element_values = vec![0.0_f64; mesh.volume_elements.len()];
+    runmat_meshing_core::map_volume_scalar_field_to_boundary_faces(mesh, &element_values)
+        .map_err(|err| err.to_string())?;
+    let node_values = vec![[0.0_f64; 3]; mesh.nodes.len()];
+    runmat_meshing_core::map_nodal_vector_field_to_boundary_nodes(mesh, &node_values)
+        .map_err(|err| err.to_string())?;
+    runmat_meshing_core::map_nodal_vector_field_to_boundary_faces(mesh, &node_values)
+        .map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 struct BoundaryProjectionWarningThresholds {
@@ -16222,6 +16205,9 @@ fn render_topology_from_analysis_mesh(
 ) -> Option<AnalysisRenderTopology> {
     let mesh = mesh?;
     if mesh.nodes.is_empty() || mesh.boundary_faces.is_empty() {
+        return None;
+    }
+    if validate_analysis_mesh_solver_field_mapping(mesh).is_err() {
         return None;
     }
 
