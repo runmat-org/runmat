@@ -100,6 +100,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_evaluation_sample_count: usize,
     #[serde(default)]
+    pub cad_evaluation_rejected_sample_count: usize,
+    #[serde(default)]
     pub cad_projection_query_count: usize,
     #[serde(default)]
     pub cad_derivative_query_count: usize,
@@ -268,6 +270,7 @@ impl Default for MeshBackendSummary {
             cad_evaluation_live_query_face_count: 0,
             cad_evaluation_exact_query_face_count: 0,
             cad_evaluation_sample_count: 0,
+            cad_evaluation_rejected_sample_count: 0,
             cad_projection_query_count: 0,
             cad_derivative_query_count: 0,
             cad_curvature_query_count: 0,

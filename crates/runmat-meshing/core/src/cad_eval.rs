@@ -35,6 +35,8 @@ pub struct CadFaceEvaluationFrame {
     #[serde(default)]
     pub evaluator_sample_count: usize,
     #[serde(default)]
+    pub evaluator_rejected_sample_count: usize,
+    #[serde(default)]
     pub evaluator_max_projection_error_m: f64,
     #[serde(default)]
     pub evaluator_samples: Vec<CadFaceEvaluationSample>,
@@ -73,6 +75,8 @@ pub struct CadEvaluationReport {
     pub exact_query_face_count: usize,
     #[serde(default)]
     pub evaluator_sample_count: usize,
+    #[serde(default)]
+    pub evaluator_rejected_sample_count: usize,
     pub normal_query_count: usize,
     pub projection_query_count: usize,
     #[serde(default)]
@@ -205,10 +209,11 @@ pub fn build_cad_evaluation_model_with_provider(
             fallback_reference_point_m,
             fallback_unit_normal,
         );
-        let live_query_backed = !live_samples.is_empty();
+        let live_query_backed = !live_samples.samples.is_empty();
         let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples);
-        let exact_sample = exact_backend_sample(&evaluator_samples);
-        let evaluator_max_projection_error_m = evaluator_max_projection_error(&evaluator_samples);
+        let exact_sample = exact_backend_sample(&evaluator_samples.samples);
+        let evaluator_max_projection_error_m =
+            evaluator_max_projection_error(&evaluator_samples.samples);
         let frame = face_frame(
             face.entity_id.id.clone(),
             source_face_id,
@@ -223,12 +228,13 @@ pub fn build_cad_evaluation_model_with_provider(
                 .or(face.evaluator_reference_point_m),
             face.evaluator_id.is_some()
                 || face.evaluator_unit_normal.is_some()
-                || !evaluator_samples.is_empty(),
+                || !evaluator_samples.samples.is_empty(),
             exact_sample.is_some(),
             live_query_backed,
-            evaluator_samples.len(),
+            evaluator_samples.samples.len(),
+            evaluator_samples.rejected_count,
             evaluator_max_projection_error_m,
-            evaluator_samples,
+            evaluator_samples.samples,
         )?;
         frames.push(frame);
     }
@@ -244,6 +250,10 @@ pub fn build_cad_evaluation_model_with_provider(
     let evaluator_sample_count = frames
         .iter()
         .map(|frame| frame.evaluator_sample_count)
+        .sum();
+    let evaluator_rejected_sample_count = frames
+        .iter()
+        .map(|frame| frame.evaluator_rejected_sample_count)
         .sum();
     let max_evaluator_projection_error_m = frames
         .iter()
@@ -280,6 +290,7 @@ pub fn build_cad_evaluation_model_with_provider(
         live_query_face_count,
         exact_query_face_count,
         evaluator_sample_count,
+        evaluator_rejected_sample_count,
         normal_query_count: frames.len(),
         projection_query_count: frames.len(),
         derivative_query_count,
@@ -430,6 +441,7 @@ pub fn summarize_cad_evaluation(
         live_query_face_count: model.report.live_query_face_count,
         exact_query_face_count: model.report.exact_query_face_count,
         evaluator_sample_count: model.report.evaluator_sample_count,
+        evaluator_rejected_sample_count: model.report.evaluator_rejected_sample_count,
         normal_query_count: model.face_frames.len(),
         projection_query_count,
         derivative_query_count: model.report.derivative_query_count,
@@ -453,6 +465,7 @@ fn face_frame(
     exact_query_backed: bool,
     live_query_backed: bool,
     evaluator_sample_count: usize,
+    evaluator_rejected_sample_count: usize,
     evaluator_max_projection_error_m: f64,
     evaluator_samples: Vec<CadFaceEvaluationSample>,
 ) -> Result<CadFaceEvaluationFrame, CadEvaluationError> {
@@ -493,6 +506,7 @@ fn face_frame(
         exact_query_backed,
         live_query_backed,
         evaluator_sample_count,
+        evaluator_rejected_sample_count,
         evaluator_max_projection_error_m,
         evaluator_samples,
         u_derivative_m_per_uv,
@@ -649,13 +663,19 @@ fn evaluator_max_projection_error(samples: &[CadFaceEvaluationSample]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct BoundedCadFaceEvaluationSamples {
+    samples: Vec<CadFaceEvaluationSample>,
+    rejected_count: usize,
+}
+
 fn live_evaluator_samples(
     evaluator_provider: &dyn CadFaceEvaluatorProvider,
     face: &CadFace,
     source_face_id: u32,
     reference_point_m: Point3,
     reference_unit_normal: Point3,
-) -> Vec<CadFaceEvaluationSample> {
+) -> BoundedCadFaceEvaluationSamples {
     if face.evaluator_id.is_none()
         || !(face.evaluator_supports_point_evaluation
             || face.evaluator_supports_projection
@@ -663,7 +683,7 @@ fn live_evaluator_samples(
             || face.evaluator_supports_derivatives
             || face.evaluator_supports_curvature)
     {
-        return Vec::new();
+        return BoundedCadFaceEvaluationSamples::default();
     }
     let request = CadFaceEvaluationRequest {
         face_id: &face.entity_id.id,
@@ -678,24 +698,48 @@ fn live_evaluator_samples(
         reference_point_m,
         reference_unit_normal,
     };
-    evaluator_provider
-        .evaluate_face(&request)
-        .into_iter()
-        .filter(bounded_sample_is_valid)
-        .take(8)
-        .collect()
+    bounded_cad_face_evaluation_samples(evaluator_provider.evaluate_face(&request))
 }
 
 fn merged_bounded_evaluator_samples(
     face: &CadFace,
-    live_samples: Vec<CadFaceEvaluationSample>,
-) -> Vec<CadFaceEvaluationSample> {
-    live_samples
+    live_samples: BoundedCadFaceEvaluationSamples,
+) -> BoundedCadFaceEvaluationSamples {
+    let imported = bounded_cad_face_evaluation_samples(face.evaluator_samples.clone());
+    let mut samples = live_samples
+        .samples
         .into_iter()
-        .chain(face.evaluator_samples.iter().cloned())
-        .filter(|sample| bounded_sample_is_valid(sample))
-        .take(8)
-        .collect()
+        .chain(imported.samples)
+        .collect::<Vec<_>>();
+    let rejected_count = live_samples
+        .rejected_count
+        .saturating_add(imported.rejected_count)
+        .saturating_add(samples.len().saturating_sub(8));
+    samples.truncate(8);
+    BoundedCadFaceEvaluationSamples {
+        samples,
+        rejected_count,
+    }
+}
+
+fn bounded_cad_face_evaluation_samples(
+    samples: Vec<CadFaceEvaluationSample>,
+) -> BoundedCadFaceEvaluationSamples {
+    let mut accepted = Vec::<CadFaceEvaluationSample>::new();
+    let mut rejected_count = 0_usize;
+    for sample in samples {
+        if bounded_sample_is_valid(&sample) {
+            accepted.push(sample);
+        } else {
+            rejected_count += 1;
+        }
+    }
+    rejected_count = rejected_count.saturating_add(accepted.len().saturating_sub(8));
+    accepted.truncate(8);
+    BoundedCadFaceEvaluationSamples {
+        samples: accepted,
+        rejected_count,
+    }
 }
 
 fn bounded_sample_is_valid(sample: &CadFaceEvaluationSample) -> bool {
@@ -1262,6 +1306,43 @@ mod tests {
         assert_eq!(frame.origin_m, [0.8, 0.5, 1.0]);
         assert_eq!(frame.evaluator_max_projection_error_m, 0.002);
         assert_eq!(frame.evaluator_samples.len(), 2);
+    }
+
+    #[test]
+    fn evaluator_sample_report_counts_invalid_and_over_budget_samples() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = (0..10)
+            .map(|index| CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [index as f64 * 0.01, 0.5, 1.0],
+                uv: Some([index as f64 * 0.01, 0.5]),
+                projected_point_m: Some([index as f64 * 0.01, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            })
+            .chain(std::iter::once(CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [f64::NAN, 0.5, 1.0],
+                uv: Some([0.5, 0.5]),
+                projected_point_m: Some([0.5, 0.5, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            }))
+            .collect();
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.evaluator_samples.len() == 8)
+            .expect("sample-backed frame should retain bounded valid samples");
+
+        assert_eq!(frame.evaluator_sample_count, 8);
+        assert_eq!(frame.evaluator_rejected_sample_count, 3);
+        assert_eq!(model.report.evaluator_sample_count, 16);
+        assert_eq!(model.report.evaluator_rejected_sample_count, 6);
     }
 
     #[test]
