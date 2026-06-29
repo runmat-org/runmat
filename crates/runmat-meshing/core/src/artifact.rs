@@ -230,6 +230,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_untangling_reconnected_boundary_adjacent_cavity_count: usize,
     #[serde(default)]
+    pub tet_untangling_reconnected_node_adjacent_cavity_count: usize,
+    #[serde(default)]
     pub tet_exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub tet_exact_quality_reconnected_cavity_count: usize,
@@ -357,6 +359,7 @@ impl Default for MeshBackendSummary {
             tet_untangling_relocated_seed_count: 0,
             tet_untangling_reconnected_edge_star_count: 0,
             tet_untangling_reconnected_boundary_adjacent_cavity_count: 0,
+            tet_untangling_reconnected_node_adjacent_cavity_count: 0,
             tet_exact_quality_repair_pass_count: 0,
             tet_exact_quality_reconnected_cavity_count: 0,
             tet_exact_quality_reconnection_quality_gain_count: 0,

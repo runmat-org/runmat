@@ -167,6 +167,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub untangling_reconnected_boundary_adjacent_cavity_count: usize,
     #[serde(default)]
+    pub untangling_reconnected_node_adjacent_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub exact_quality_reconnected_cavity_count: usize,
@@ -539,6 +541,8 @@ pub fn form_tet_candidates(
             untangling_reconnected_edge_star_count: untangling.reconnected_edge_star_count,
             untangling_reconnected_boundary_adjacent_cavity_count: untangling
                 .reconnected_boundary_adjacent_cavity_count,
+            untangling_reconnected_node_adjacent_cavity_count: untangling
+                .reconnected_node_adjacent_cavity_count,
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
             exact_quality_reconnection_quality_gain_count: repair.reconnection_quality_gain_count,
@@ -3384,6 +3388,7 @@ struct UntanglingSummary {
     relocated_seed_count: usize,
     reconnected_edge_star_count: usize,
     reconnected_boundary_adjacent_cavity_count: usize,
+    reconnected_node_adjacent_cavity_count: usize,
 }
 
 fn untangle_near_singular_tets(
@@ -3476,6 +3481,21 @@ fn untangle_near_singular_tets(
                 applied = true;
                 summary.pass_count += 1;
                 summary.reconnected_boundary_adjacent_cavity_count += 1;
+                break;
+            }
+            if let Some((indices, candidates)) = best_node_adjacent_cavity_untangling(
+                tet_index,
+                tets,
+                &face_adjacency,
+                &node_adjacency,
+                &node_points,
+                threshold,
+                options,
+            )? {
+                replace_tet_indices(tets, &indices, candidates);
+                applied = true;
+                summary.pass_count += 1;
+                summary.reconnected_node_adjacent_cavity_count += 1;
                 break;
             }
         }
@@ -4046,6 +4066,106 @@ fn best_boundary_adjacent_cavity_untangling(
         .is_some_and(|group| group.as_slice() != expanded.as_slice())
     {
         candidate_groups.push(expanded);
+    }
+
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    for group in candidate_groups {
+        if group.len() < 4 || group.len() > 24 {
+            continue;
+        }
+        let original_near_singular_count =
+            count_tets_below_exact_quality(group.iter().map(|index| &tets[*index]), threshold);
+        if original_near_singular_count == 0 {
+            continue;
+        }
+        let original_full_bad_count = count_exact_quality_violations(
+            group.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_full_bad_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        if candidate_full_bad_count > original_full_bad_count {
+            continue;
+        }
+        let candidate_near_singular_count =
+            count_tets_below_exact_quality(candidates.iter(), threshold);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        let improves = candidate_near_singular_count < original_near_singular_count
+            || (candidate_near_singular_count == original_near_singular_count
+                && candidate_min_exact > original_min_exact + 1.0e-12);
+        if !improves {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_count, best_min_exact)| {
+                candidate_near_singular_count < *best_count
+                    || (candidate_near_singular_count == *best_count
+                        && candidate_min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                group,
+                candidates,
+                candidate_near_singular_count,
+                candidate_min_exact,
+            ));
+        }
+    }
+
+    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+}
+
+fn best_node_adjacent_cavity_untangling(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    threshold: f64,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let adjacent = connected_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    if adjacent.len() < 4 || adjacent.len() > 24 {
+        return Ok(None);
+    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    if adjacent.len() <= face_closure.len() {
+        return Ok(None);
+    }
+
+    let base = face_closure.into_iter().collect::<BTreeSet<_>>();
+    let extra = adjacent
+        .iter()
+        .copied()
+        .filter(|index| !base.contains(index))
+        .collect::<Vec<_>>();
+    let mut candidate_groups = vec![adjacent.clone()];
+    for extra_index in &extra {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        candidate_groups.push(group.into_iter().collect());
+    }
+    for left in 0..extra.len() {
+        for right in (left + 1)..extra.len() {
+            let mut group = base.clone();
+            group.insert(extra[left]);
+            group.insert(extra[right]);
+            candidate_groups.push(group.into_iter().collect());
+        }
     }
 
     let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
@@ -8506,6 +8626,65 @@ mod tests {
         assert_eq!(face_closure, vec![0, 1]);
         assert_eq!(node_closure, vec![0, 1, 2]);
         assert!(!node_closure.contains(&3));
+    }
+
+    #[test]
+    fn node_adjacent_cavity_untangling_rejects_unclosed_node_touching_groups() {
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [
+            ([0, 1, 2, 3], 0.05),
+            ([0, 1, 2, 4], 0.8),
+            ([0, 5, 6, 7], 0.05),
+            ([0, 8, 9, 10], 0.05),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(tet_id, (node_ids, exact_scaled_jacobian))| TetCandidate {
+            tet_id: tet_id as u32,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [0.0, 0.0, 1.0]),
+            (4, [0.0, 0.0, -1.0]),
+            (5, [2.0, 0.0, 0.0]),
+            (6, [0.0, 2.0, 0.0]),
+            (7, [0.0, 0.0, 2.0]),
+            (8, [-2.0, 0.0, 0.0]),
+            (9, [0.0, -2.0, 0.0]),
+            (10, [0.0, 0.0, -2.0]),
+        ]);
+        let face_adjacency = tet_face_adjacency(&tets);
+        let node_adjacency = tet_node_adjacency(&tets);
+        let threshold = untangling_exact_quality_threshold(options);
+
+        let result = best_node_adjacent_cavity_untangling(
+            0,
+            &tets,
+            &face_adjacency,
+            &node_adjacency,
+            &node_points,
+            threshold,
+            options,
+        )
+        .expect("node-adjacent untangling should evaluate");
+
+        assert!(
+            result.is_none(),
+            "node-touching groups that do not form a closed remeshable cavity must stay fail-closed"
+        );
     }
 
     #[test]

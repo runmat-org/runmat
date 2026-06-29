@@ -296,6 +296,8 @@ pub struct MeshTetRecoveryEvidence {
     pub untangling_reconnected_edge_star_count: usize,
     #[serde(default)]
     pub untangling_reconnected_boundary_adjacent_cavity_count: usize,
+    #[serde(default)]
+    pub untangling_reconnected_node_adjacent_cavity_count: usize,
     pub exact_quality_repair_pass_count: usize,
     pub exact_quality_reconnected_cavity_count: usize,
     #[serde(default)]
@@ -893,6 +895,9 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         untangling_reconnected_boundary_adjacent_cavity_count: mesh
             .backend
             .tet_untangling_reconnected_boundary_adjacent_cavity_count,
+        untangling_reconnected_node_adjacent_cavity_count: mesh
+            .backend
+            .tet_untangling_reconnected_node_adjacent_cavity_count,
         exact_quality_repair_pass_count: mesh.backend.tet_exact_quality_repair_pass_count,
         exact_quality_reconnected_cavity_count: mesh
             .backend
@@ -1457,6 +1462,7 @@ mod tests {
                 tet_untangling_relocated_seed_count: 3,
                 tet_untangling_reconnected_edge_star_count: 4,
                 tet_untangling_reconnected_boundary_adjacent_cavity_count: 5,
+                tet_untangling_reconnected_node_adjacent_cavity_count: 11,
                 tet_exact_quality_repair_pass_count: 1,
                 tet_exact_quality_reconnected_cavity_count: 2,
                 tet_exact_quality_reconnection_quality_gain_count: 1,
@@ -1731,6 +1737,12 @@ mod tests {
                 .tet_recovery
                 .untangling_reconnected_boundary_adjacent_cavity_count,
             5
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .untangling_reconnected_node_adjacent_cavity_count,
+            11
         );
         assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
         assert_eq!(

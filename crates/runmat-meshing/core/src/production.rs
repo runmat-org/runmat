@@ -1232,6 +1232,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .untangling_reconnected_boundary_adjacent_cavity_count,
+        tet_untangling_reconnected_node_adjacent_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .untangling_reconnected_node_adjacent_cavity_count,
         tet_exact_quality_repair_pass_count: preparation
             .tet_candidates
             .recovery
@@ -1814,6 +1818,10 @@ mod tests {
         preparation
             .tet_candidates
             .recovery
+            .untangling_reconnected_node_adjacent_cavity_count = 6;
+        preparation
+            .tet_candidates
+            .recovery
             .exact_quality_repair_pass_count = 1;
         preparation
             .tet_candidates
@@ -1869,6 +1877,11 @@ mod tests {
                 .tet_untangling_reconnected_boundary_adjacent_cavity_count,
             5
         );
+        assert_eq!(
+            mesh.backend
+                .tet_untangling_reconnected_node_adjacent_cavity_count,
+            6
+        );
         assert_eq!(mesh.backend.tet_exact_quality_repair_pass_count, 1);
         assert_eq!(mesh.backend.tet_exact_quality_reconnected_cavity_count, 2);
         assert_eq!(
@@ -1918,6 +1931,12 @@ mod tests {
                 .tet_recovery
                 .untangling_reconnected_boundary_adjacent_cavity_count,
             5
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .untangling_reconnected_node_adjacent_cavity_count,
+            6
         );
         assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
         assert_eq!(
