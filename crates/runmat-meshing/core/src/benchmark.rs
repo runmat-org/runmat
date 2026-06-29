@@ -2320,6 +2320,7 @@ mod tests {
             diagnostic_small_cavity_boundary_mismatch_shapes,
             diagnostic_small_cavity_exact_cover_rejection_reasons,
             diagnostic_small_cavity_missing_face_classes,
+            diagnostic_small_cavity_missing_face_topology,
             diagnostic_small_cavity_reconnection_rejection_reasons,
             diagnostic_small_cavity_star_insertion_rejection_reasons, TetCandidateOptions,
         },
@@ -3109,6 +3110,10 @@ mod tests {
         let mut bad_face_star_insert_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_one_ring_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut bad_face_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
+        let mut bad_one_ring_missing_face_topology =
+            BTreeMap::<(usize, usize, usize, usize, usize, usize, usize), usize>::new();
+        let mut bad_face_missing_face_topology =
+            BTreeMap::<(usize, usize, usize, usize, usize, usize, usize), usize>::new();
         let mut diagnosed_bad_edges = BTreeSet::<[u32; 2]>::new();
         let diagnostic_options = TetCandidateOptions {
             min_scaled_jacobian: case.options.validation.quality.min_scaled_jacobian,
@@ -3279,6 +3284,21 @@ mod tests {
             *bad_face_missing_face_class
                 .entry(face_missing_class)
                 .or_default() += 1;
+            let (one_ring_missing_topology, face_missing_topology) =
+                diagnostic_small_cavity_missing_face_topology(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &face_index_adjacency,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("small cavity missing face topology diagnostic should evaluate");
+            *bad_one_ring_missing_face_topology
+                .entry(one_ring_missing_topology)
+                .or_default() += 1;
+            *bad_face_missing_face_topology
+                .entry(face_missing_topology)
+                .or_default() += 1;
         }
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
@@ -3328,6 +3348,10 @@ mod tests {
         eprintln!(
             "annular recovery bad_small_cavity_missing_face_class one_ring={:?} face_closure={:?}",
             bad_one_ring_missing_face_class, bad_face_missing_face_class,
+        );
+        eprintln!(
+            "annular recovery bad_small_cavity_missing_face_topology one_ring={:?} face_closure={:?}",
+            bad_one_ring_missing_face_topology, bad_face_missing_face_topology,
         );
 
         let mut valid_seed_star_cavity_count = 0_usize;

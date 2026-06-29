@@ -5768,6 +5768,38 @@ pub(crate) fn diagnostic_small_cavity_missing_face_classes(
 }
 
 #[cfg(test)]
+type MissingFaceTopology = (usize, usize, usize, usize, usize, usize, usize);
+
+#[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_missing_face_topology(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<(MissingFaceTopology, MissingFaceTopology), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_missing_face_topology(
+            &one_ring,
+            tets,
+            face_adjacency,
+            node_points,
+            options,
+        )?,
+        diagnostic_face_cavity_missing_face_topology(
+            &face_closure,
+            tets,
+            face_adjacency,
+            node_points,
+            options,
+        )?,
+    ))
+}
+
+#[cfg(test)]
 fn diagnostic_face_cavity_missing_face_class(
     adjacent: &[usize],
     tets: &[TetCandidate],
@@ -5845,6 +5877,160 @@ fn diagnostic_face_cavity_missing_face_class(
         .filter(|face| !boundary_faces.contains(*face))
         .count();
     Ok((missing_global, missing_internal, unexpected))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_missing_face_topology(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<MissingFaceTopology, TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok((0, 0, 0, 0, 0, 0, 0));
+    };
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok((0, 0, 0, 0, 0, 0, 0));
+        }
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 16 {
+        return Ok((0, 0, 0, 0, 0, 0, 0));
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok((0, 0, 0, 0, 0, 0, 0));
+        };
+        candidates.push(candidate);
+    }
+    let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
+    let missing_faces = boundary_faces
+        .iter()
+        .filter(|face| !candidate_boundary_faces.contains(*face))
+        .copied()
+        .collect::<Vec<_>>();
+    let unexpected = candidate_boundary_faces
+        .iter()
+        .filter(|face| !boundary_faces.contains(*face))
+        .count();
+    Ok(diagnostic_missing_face_topology(
+        &missing_faces,
+        face_adjacency,
+        unexpected,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_missing_face_topology(
+    missing_faces: &[[u32; 3]],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    unexpected: usize,
+) -> MissingFaceTopology {
+    let mut missing_global = 0_usize;
+    let mut missing_internal = 0_usize;
+    let mut node_degrees = BTreeMap::<u32, usize>::new();
+    let mut edge_degrees = BTreeMap::<[u32; 2], usize>::new();
+    for face in missing_faces {
+        if face_adjacency.get(face).map_or(0, Vec::len) == 1 {
+            missing_global += 1;
+        } else {
+            missing_internal += 1;
+        }
+        for node_id in face {
+            *node_degrees.entry(*node_id).or_default() += 1;
+        }
+        for edge in face_node_edges(*face) {
+            *edge_degrees.entry(edge).or_default() += 1;
+        }
+    }
+    let max_node_degree = node_degrees.values().copied().max().unwrap_or(0);
+    let max_edge_degree = edge_degrees.values().copied().max().unwrap_or(0);
+    let shared_edge_count = edge_degrees.values().filter(|count| **count > 1).count();
+    let edge_component_count = missing_face_edge_component_count(missing_faces);
+    (
+        missing_global,
+        missing_internal,
+        edge_component_count,
+        max_node_degree,
+        max_edge_degree,
+        shared_edge_count,
+        unexpected,
+    )
+}
+
+#[cfg(test)]
+fn missing_face_edge_component_count(missing_faces: &[[u32; 3]]) -> usize {
+    let mut remaining = (0..missing_faces.len()).collect::<BTreeSet<_>>();
+    let mut component_count = 0_usize;
+    while let Some(seed) = remaining.first().copied() {
+        remaining.remove(&seed);
+        component_count += 1;
+        let mut stack = vec![seed];
+        while let Some(current) = stack.pop() {
+            let current_edges = face_node_edges(missing_faces[current])
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            let neighbors = remaining
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    face_node_edges(missing_faces[*candidate])
+                        .into_iter()
+                        .any(|edge| current_edges.contains(&edge))
+                })
+                .collect::<Vec<_>>();
+            for neighbor in neighbors {
+                remaining.remove(&neighbor);
+                stack.push(neighbor);
+            }
+        }
+    }
+    component_count
+}
+
+#[cfg(test)]
+fn face_node_edges(node_ids: [u32; 3]) -> [[u32; 2]; 3] {
+    [
+        sorted_node_edge([node_ids[0], node_ids[1]]),
+        sorted_node_edge([node_ids[0], node_ids[2]]),
+        sorted_node_edge([node_ids[1], node_ids[2]]),
+    ]
 }
 
 #[cfg(test)]
@@ -10368,6 +10554,20 @@ mod tests {
         assert_eq!(counts.boundary_adjacent_count, 4);
         assert_eq!(counts.interior_seed_count, 4);
         assert_eq!(counts.edge_star_count, 4);
+    }
+
+    #[test]
+    fn missing_face_topology_groups_edge_connected_clusters() {
+        let missing_faces = [[0, 1, 2], [0, 1, 3], [3, 4, 5]];
+        let face_adjacency = BTreeMap::from([
+            ([0, 1, 2], vec![0]),
+            ([0, 1, 3], vec![0, 1]),
+            ([3, 4, 5], vec![2, 3]),
+        ]);
+
+        let topology = diagnostic_missing_face_topology(&missing_faces, &face_adjacency, 4);
+
+        assert_eq!(topology, (1, 2, 2, 2, 2, 1, 4));
     }
 
     #[test]
