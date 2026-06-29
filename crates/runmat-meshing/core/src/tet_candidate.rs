@@ -7405,6 +7405,27 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             ("one_ring", "boundary_face_mismatch_constrained_trim_no_candidate") => {
                 "one_ring_boundary_face_mismatch_constrained_trim_no_candidate"
             }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_component_mismatch") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_component_mismatch"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_too_few_boundary_faces") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_too_few_boundary_faces"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_boundary_node_count") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_boundary_node_count"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_boundary_face_mismatch") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_boundary_face_mismatch"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_raw_candidate_rejected") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_raw_candidate_rejected"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_empty_tetrahedralization") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_empty_tetrahedralization"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_trim_volume_mismatch") => {
+                "one_ring_boundary_face_mismatch_constrained_trim_volume_mismatch"
+            }
             ("one_ring", "boundary_face_mismatch_constrained_trim_no_improvement") => {
                 "one_ring_boundary_face_mismatch_constrained_trim_no_improvement"
             }
@@ -7447,6 +7468,27 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             }
             (_, "boundary_face_mismatch_constrained_trim_no_candidate") => {
                 "face_closure_boundary_face_mismatch_constrained_trim_no_candidate"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_component_mismatch") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_component_mismatch"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_too_few_boundary_faces") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_too_few_boundary_faces"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_boundary_node_count") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_boundary_node_count"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_boundary_face_mismatch") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_boundary_face_mismatch"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_raw_candidate_rejected") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_raw_candidate_rejected"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_empty_tetrahedralization") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_empty_tetrahedralization"
+            }
+            (_, "boundary_face_mismatch_constrained_trim_volume_mismatch") => {
+                "face_closure_boundary_face_mismatch_constrained_trim_volume_mismatch"
             }
             (_, "boundary_face_mismatch_constrained_trim_no_improvement") => {
                 "face_closure_boundary_face_mismatch_constrained_trim_no_improvement"
@@ -7721,12 +7763,19 @@ fn diagnostic_constrained_boundary_mismatch_trim_reason(
         options.min_scaled_jacobian,
     );
     let original_min_exact = min_exact_scaled_jacobian(trimmed.iter().map(|index| &tets[*index]));
-    let candidates =
-        match face_neighbor_cavity_reconnection_candidates(&trimmed, tets, node_points, options) {
-            Ok(Some(candidates)) => candidates,
-            Ok(None) => return "boundary_face_mismatch_constrained_trim_no_candidate",
-            Err(_) => return "boundary_face_mismatch_constrained_trim_no_candidate",
-        };
+    let (candidates, rejection) = match diagnostic_face_neighbor_cavity_reconnection_candidates(
+        &trimmed,
+        tets,
+        node_points,
+        options,
+    ) {
+        Ok(Some(result)) => result,
+        Ok(None) => return "boundary_face_mismatch_constrained_trim_no_candidate",
+        Err(_) => return "boundary_face_mismatch_constrained_trim_no_candidate",
+    };
+    if let Some(reason) = rejection {
+        return diagnostic_constrained_trim_candidate_reason(reason);
+    }
     let candidate_below_count =
         count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
     let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
@@ -7739,6 +7788,36 @@ fn diagnostic_constrained_boundary_mismatch_trim_reason(
         "boundary_face_mismatch_constrained_trim_reconnectable"
     } else {
         "boundary_face_mismatch_constrained_trim_no_improvement"
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_trim_candidate_reason(reason: &'static str) -> &'static str {
+    match reason {
+        "component_mismatch" => "boundary_face_mismatch_constrained_trim_component_mismatch",
+        "too_few_boundary_faces" => {
+            "boundary_face_mismatch_constrained_trim_too_few_boundary_faces"
+        }
+        "boundary_node_count" => "boundary_face_mismatch_constrained_trim_boundary_node_count",
+        "raw_candidate_rejected" => {
+            "boundary_face_mismatch_constrained_trim_raw_candidate_rejected"
+        }
+        "empty_tetrahedralization" => {
+            "boundary_face_mismatch_constrained_trim_empty_tetrahedralization"
+        }
+        "boundary_face_mismatch"
+        | "boundary_face_mismatch_constrained_available"
+        | "boundary_face_mismatch_constrained_no_refill"
+        | "boundary_face_mismatch_constrained_invalid"
+        | "boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+        | "boundary_face_mismatch_constrained_non_manifold_trim_available"
+        | "boundary_face_mismatch_constrained_non_manifold_trim_not_found"
+        | "boundary_face_mismatch_constrained_trim_no_candidate"
+        | "boundary_face_mismatch_constrained_trim_no_improvement" => {
+            "boundary_face_mismatch_constrained_trim_boundary_face_mismatch"
+        }
+        "volume_mismatch" => "boundary_face_mismatch_constrained_trim_volume_mismatch",
+        _ => "boundary_face_mismatch_constrained_trim_no_candidate",
     }
 }
 
@@ -7969,6 +8048,32 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         ("boundary_cavity", Some("boundary_face_mismatch_constrained_trim_no_candidate")) => {
             "boundary_cavity_boundary_face_mismatch_constrained_trim_no_candidate"
         }
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_trim_component_mismatch")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_trim_component_mismatch"
+        }
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_trim_too_few_boundary_faces"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_trim_too_few_boundary_faces",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_trim_boundary_node_count"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_trim_boundary_node_count",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_trim_boundary_face_mismatch"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_trim_boundary_face_mismatch",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_trim_raw_candidate_rejected"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_trim_raw_candidate_rejected",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_trim_empty_tetrahedralization"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_trim_empty_tetrahedralization",
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_trim_volume_mismatch")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_trim_volume_mismatch"
+        }
         ("boundary_cavity", Some("boundary_face_mismatch_constrained_trim_no_improvement")) => {
             "boundary_cavity_boundary_face_mismatch_constrained_trim_no_improvement"
         }
@@ -8015,6 +8120,27 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         }
         (_, Some("boundary_face_mismatch_constrained_trim_no_candidate")) => {
             "node_cavity_boundary_face_mismatch_constrained_trim_no_candidate"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_component_mismatch")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_component_mismatch"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_too_few_boundary_faces")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_too_few_boundary_faces"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_boundary_node_count")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_boundary_node_count"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_boundary_face_mismatch")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_boundary_face_mismatch"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_raw_candidate_rejected")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_raw_candidate_rejected"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_empty_tetrahedralization")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_empty_tetrahedralization"
+        }
+        (_, Some("boundary_face_mismatch_constrained_trim_volume_mismatch")) => {
+            "node_cavity_boundary_face_mismatch_constrained_trim_volume_mismatch"
         }
         (_, Some("boundary_face_mismatch_constrained_trim_no_improvement")) => {
             "node_cavity_boundary_face_mismatch_constrained_trim_no_improvement"
