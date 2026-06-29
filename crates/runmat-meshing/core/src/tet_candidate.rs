@@ -328,7 +328,9 @@ pub fn form_tet_candidates(
         duplicate_requested_refinement_ids
             .extend(refinement.duplicate_requested_ids.iter().copied());
         sizing_violation_count += refinement.sizing_violation_count;
-        if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
+        let dense_component =
+            dense_component_for_global_insertion(component, component_seed_points.len(), options);
+        if dense_component {
             add_dense_recovery_layer_points(
                 component,
                 &mut component_seed_points,
@@ -338,16 +340,20 @@ pub fn form_tet_candidates(
                 tolerance,
             )?;
         }
-        let optimization = smooth_component_seed_points(
-            component,
-            &mut component_seed_points,
-            &surface_nodes,
-            &surface_elements,
-            surface,
-            options,
-            tolerance,
-            next_node_id,
-        )?;
+        let optimization = if dense_component {
+            SmoothingSummary::empty()
+        } else {
+            smooth_component_seed_points(
+                component,
+                &mut component_seed_points,
+                &surface_nodes,
+                &surface_elements,
+                surface,
+                options,
+                tolerance,
+                next_node_id,
+            )?
+        };
         optimization_pass_count += optimization.pass_count;
         smoothed_point_count += optimization.smoothed_point_count;
         sliver_candidate_count += optimization.sliver_candidate_count;
@@ -7233,6 +7239,8 @@ mod tests {
         assert_eq!(candidates.recovery.insertion_component_count, 1);
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
         assert_eq!(candidates.recovery.recovered_component_ratio, 1.0);
+        assert_eq!(candidates.recovery.optimization_pass_count, 0);
+        assert_eq!(candidates.recovery.smoothed_point_count, 0);
         assert!((candidates.total_volume_m3 - 1.0).abs() < 1.0e-12);
     }
 

@@ -42,6 +42,7 @@ use crate::{
         form_tet_candidates, TetCandidateError, TetCandidateNodeSource, TetCandidateOptions,
         TetCandidateSet,
     },
+    tolerance::MeshingTolerance,
     topology::{BoundaryElementKind, VolumeElementKind},
     validation::{
         validate_analysis_mesh_with_options, AnalysisMeshValidationError,
@@ -267,9 +268,9 @@ fn tet_candidate_options_for_mesh(
         requested_refinement_points: requested_refinement.0,
         requested_refinement_point_count: requested_refinement.1,
         max_interior_seed_points: options.max_elements.max(1).min(512),
-        max_global_insertion_points: options.max_elements.max(1).min(4096),
+        max_global_insertion_points: global_insertion_point_limit_for_mesh(topology, options),
         allow_fan_fallback: false,
-        dense_recovery_layer_count: 8,
+        dense_recovery_layer_count: dense_recovery_layer_count_for_mesh(topology),
         max_dense_recovery_nodes: options.max_elements.max(1).min(250_000),
         max_refinement_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
@@ -282,6 +283,43 @@ fn tet_candidate_options_for_mesh(
         smoothing_relaxation: 0.30,
         sliver_aspect_ratio: 1.0 / quality.min_scaled_jacobian,
         ..TetCandidateOptions::default()
+    }
+}
+
+fn global_insertion_point_limit_for_mesh(
+    topology: &SourceTopologyModel,
+    options: &VolumeMeshingOptions,
+) -> usize {
+    let default_limit = options.max_elements.max(1).min(4096);
+    if topology_span_aspect_ratio(topology) >= 6.0 {
+        default_limit.min(128)
+    } else {
+        default_limit
+    }
+}
+
+fn dense_recovery_layer_count_for_mesh(topology: &SourceTopologyModel) -> usize {
+    if topology_span_aspect_ratio(topology) >= 6.0 {
+        3
+    } else {
+        8
+    }
+}
+
+fn topology_span_aspect_ratio(topology: &SourceTopologyModel) -> f64 {
+    let spans = (0..3)
+        .map(|axis| topology.bounds_max_m[axis] - topology.bounds_min_m[axis])
+        .collect::<Vec<_>>();
+    let max_span = spans.iter().copied().fold(0.0_f64, f64::max);
+    let min_span = spans
+        .iter()
+        .copied()
+        .filter(|span| span.is_finite() && *span > MeshingTolerance::default().absolute_m)
+        .fold(f64::INFINITY, f64::min);
+    if max_span.is_finite() && min_span.is_finite() {
+        max_span / min_span
+    } else {
+        1.0
     }
 }
 
@@ -2867,6 +2905,108 @@ mod tests {
             sample.reason.as_deref() == Some("cad.proximity") && sample.target_size_m < 0.1
         }));
         assert!(requested_refinement_points(Some(&sizing)).1 > 4);
+    }
+
+    #[test]
+    #[ignore = "expensive thin-feature stage timing diagnostic"]
+    fn thin_box_preparation_stage_timings_are_observable() {
+        let geometry = thin_box_geometry();
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.1_f64.cbrt() / 2.0);
+        options.max_elements = 50_000;
+
+        let started = std::time::Instant::now();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        eprintln!(
+            "thin_box topology elapsed_ms={:.1}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+        eprintln!(
+            "thin_box cad_topology elapsed_ms={:.1}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let cad_evaluation = crate::cad_eval::build_cad_evaluation_model(&cad_topology, &topology)
+            .expect("cad evaluation");
+        eprintln!(
+            "thin_box cad_evaluation elapsed_ms={:.1}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let effective_sizing =
+            production_effective_sizing(&topology, &cad_evaluation, &options, None);
+        eprintln!(
+            "thin_box sizing elapsed_ms={:.1}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let curves =
+            discretize_topology_curves(&topology, curve_options_for_mesh(&topology, &options))
+                .expect("curves");
+        eprintln!(
+            "thin_box curves elapsed_ms={:.1}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let surface = discretize_cad_surfaces_with_curves(
+            &topology,
+            &cad_evaluation,
+            &curves,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 8,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("surface");
+        eprintln!(
+            "thin_box surface elapsed_ms={:.1}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let stage = std::time::Instant::now();
+        let volume_candidates =
+            prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
+                .expect("volume candidates");
+        eprintln!(
+            "thin_box volume_candidates elapsed_ms={:.1} components={} nodes={} surface_elements={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            volume_candidates.components.len(),
+            volume_candidates
+                .components
+                .iter()
+                .map(|component| component.node_ids.len())
+                .sum::<usize>(),
+            volume_candidates
+                .components
+                .iter()
+                .map(|component| component.surface_element_ids.len())
+                .sum::<usize>()
+        );
+
+        let stage = std::time::Instant::now();
+        match form_tet_candidates(
+            &surface,
+            &volume_candidates,
+            tet_candidate_options_for_mesh(&topology, &options, effective_sizing.as_ref()),
+        ) {
+            Ok(tet_candidates) => eprintln!(
+                "thin_box tet_candidates elapsed_ms={:.1} nodes={} tets={}",
+                stage.elapsed().as_secs_f64() * 1000.0,
+                tet_candidates.nodes.len(),
+                tet_candidates.tets.len()
+            ),
+            Err(err) => eprintln!(
+                "thin_box tet_candidates_failed elapsed_ms={:.1}: {err}",
+                stage.elapsed().as_secs_f64() * 1000.0
+            ),
+        }
     }
 
     #[test]
