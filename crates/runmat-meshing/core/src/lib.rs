@@ -3,6 +3,7 @@ pub mod artifact;
 pub mod backend;
 pub mod benchmark;
 pub mod boundary;
+pub mod boundary_recovery_queue;
 pub mod cad_eval;
 pub mod cad_topology;
 pub mod constrained_cavity;
@@ -58,6 +59,10 @@ pub use benchmark::{
     MESH_BENCHMARK_SCHEMA_VERSION, MESH_BENCHMARK_SUITE_SCHEMA_VERSION,
 };
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use boundary_recovery_queue::{
+    build_boundary_recovery_queue, BoundaryRecoveryPriority, BoundaryRecoveryQueue,
+    BoundaryRecoveryQueueError, BoundaryRecoveryQueueItem, BoundaryRecoveryReason,
+};
 pub use cad_eval::{
     build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
     summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,
