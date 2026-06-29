@@ -7396,6 +7396,12 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             ("one_ring", "boundary_face_mismatch_constrained_non_manifold_boundary_edge") => {
                 "one_ring_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
             }
+            ("one_ring", "boundary_face_mismatch_constrained_non_manifold_trim_available") => {
+                "one_ring_boundary_face_mismatch_constrained_non_manifold_trim_available"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_non_manifold_trim_not_found") => {
+                "one_ring_boundary_face_mismatch_constrained_non_manifold_trim_not_found"
+            }
             ("one_ring", "boundary_face_mismatch_constrained_duplicate_boundary_face") => {
                 "one_ring_boundary_face_mismatch_constrained_duplicate_boundary_face"
             }
@@ -7423,6 +7429,12 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             }
             (_, "boundary_face_mismatch_constrained_non_manifold_boundary_edge") => {
                 "face_closure_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+            }
+            (_, "boundary_face_mismatch_constrained_non_manifold_trim_available") => {
+                "face_closure_boundary_face_mismatch_constrained_non_manifold_trim_available"
+            }
+            (_, "boundary_face_mismatch_constrained_non_manifold_trim_not_found") => {
+                "face_closure_boundary_face_mismatch_constrained_non_manifold_trim_not_found"
             }
             (_, "boundary_face_mismatch_constrained_duplicate_boundary_face") => {
                 "face_closure_boundary_face_mismatch_constrained_duplicate_boundary_face"
@@ -7528,6 +7540,7 @@ fn diagnostic_face_neighbor_cavity_reconnection_candidates(
     if candidate_boundary_faces != boundary_faces {
         let reason = diagnostic_constrained_boundary_mismatch_reason(
             adjacent,
+            tets,
             &boundary_faces,
             &boundary_nodes,
             original_volume,
@@ -7549,6 +7562,7 @@ fn diagnostic_face_neighbor_cavity_reconnection_candidates(
 #[cfg(test)]
 fn diagnostic_constrained_boundary_mismatch_reason(
     adjacent: &[usize],
+    tets: &[TetCandidate],
     boundary_faces: &BTreeSet<[u32; 3]>,
     boundary_nodes: &BTreeSet<u32>,
     original_volume: f64,
@@ -7598,21 +7612,28 @@ fn diagnostic_constrained_boundary_mismatch_reason(
             Ok("boundary_face_mismatch_constrained_available")
         }
         Ok(_) => Ok("boundary_face_mismatch_constrained_no_refill"),
-        Err(err) => Ok(diagnostic_constrained_boundary_mismatch_error_reason(&err)),
+        Err(err) => Ok(diagnostic_constrained_boundary_mismatch_error_reason(
+            &err, adjacent, tets,
+        )),
     }
 }
 
 #[cfg(test)]
 fn diagnostic_constrained_boundary_mismatch_error_reason(
     err: &crate::constrained_cavity::ConstrainedCavityRefillError,
+    adjacent: &[usize],
+    tets: &[TetCandidate],
 ) -> &'static str {
     match err {
         crate::constrained_cavity::ConstrainedCavityRefillError::InvalidOptions => {
             "boundary_face_mismatch_constrained_invalid_options"
         }
-        crate::constrained_cavity::ConstrainedCavityRefillError::Validation(err) => {
-            diagnostic_constrained_boundary_mismatch_validation_reason(err)
-        }
+        crate::constrained_cavity::ConstrainedCavityRefillError::Validation(err) => match err {
+            ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. } => {
+                diagnostic_constrained_boundary_mismatch_trim_reason(adjacent, tets)
+            }
+            _ => diagnostic_constrained_boundary_mismatch_validation_reason(err),
+        },
         crate::constrained_cavity::ConstrainedCavityRefillError::MissingBoundaryNode { .. } => {
             "boundary_face_mismatch_constrained_missing_boundary_node"
         }
@@ -7628,6 +7649,26 @@ fn diagnostic_constrained_boundary_mismatch_error_reason(
         crate::constrained_cavity::ConstrainedCavityRefillError::NoValidCandidate { .. } => {
             "boundary_face_mismatch_constrained_no_valid_candidate"
         }
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_boundary_mismatch_trim_reason(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+) -> &'static str {
+    let Some(anchor_tet_index) = adjacent.first().copied() else {
+        return "boundary_face_mismatch_constrained_non_manifold_boundary_edge";
+    };
+    match constrained_cavity_from_selected_tets_with_anchor_trim(
+        tets,
+        adjacent,
+        anchor_tet_index,
+        Vec::new(),
+    ) {
+        Ok(Some(_)) => "boundary_face_mismatch_constrained_non_manifold_trim_available",
+        Ok(None) => "boundary_face_mismatch_constrained_non_manifold_trim_not_found",
+        Err(_) => "boundary_face_mismatch_constrained_non_manifold_boundary_edge",
     }
 }
 
@@ -7848,6 +7889,14 @@ fn diagnostic_cavity_candidate_invalid_bucket(
             "boundary_cavity",
             Some("boundary_face_mismatch_constrained_non_manifold_boundary_edge"),
         ) => "boundary_cavity_boundary_face_mismatch_constrained_non_manifold_boundary_edge",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_non_manifold_trim_available"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_non_manifold_trim_available",
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_non_manifold_trim_not_found"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_non_manifold_trim_not_found",
         ("boundary_cavity", Some("boundary_face_mismatch_constrained_duplicate_boundary_face")) => {
             "boundary_cavity_boundary_face_mismatch_constrained_duplicate_boundary_face"
         }
@@ -7878,6 +7927,12 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         }
         (_, Some("boundary_face_mismatch_constrained_non_manifold_boundary_edge")) => {
             "node_cavity_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+        }
+        (_, Some("boundary_face_mismatch_constrained_non_manifold_trim_available")) => {
+            "node_cavity_boundary_face_mismatch_constrained_non_manifold_trim_available"
+        }
+        (_, Some("boundary_face_mismatch_constrained_non_manifold_trim_not_found")) => {
+            "node_cavity_boundary_face_mismatch_constrained_non_manifold_trim_not_found"
         }
         (_, Some("boundary_face_mismatch_constrained_duplicate_boundary_face")) => {
             "node_cavity_boundary_face_mismatch_constrained_duplicate_boundary_face"
