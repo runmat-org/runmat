@@ -77,10 +77,11 @@ pub struct TetCandidateNode {
     pub source: TetCandidateNodeSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TetCandidateNodeSource {
     Surface,
+    BoundaryRecovery,
     InteriorSeed,
 }
 
@@ -377,15 +378,21 @@ pub fn form_tet_candidates(
         optimization_rejected_edit_count += optimization.rejected_edit_count;
         optimization_quality.record(optimization);
 
+        let node_classifier =
+            ComponentSurfaceClassifier::new(component, surface, &surface_elements, tolerance)?;
         let mut component_seed_node_ids = Vec::<u32>::with_capacity(component_seed_points.len());
+        let mut component_seed_node_sources =
+            Vec::<TetCandidateNodeSource>::with_capacity(component_seed_points.len());
         for point in &component_seed_points {
             let node_id = next_node_id;
             next_node_id = next_node_id.saturating_add(1);
             component_seed_node_ids.push(node_id);
+            let source = seed_node_source(*point, &node_classifier);
+            component_seed_node_sources.push(source);
             nodes.push(TetCandidateNode {
                 node_id,
                 coordinates_m: *point,
-                source: TetCandidateNodeSource::InteriorSeed,
+                source,
             });
         }
         for accepted in &refinement.accepted_requested_points {
@@ -398,7 +405,14 @@ pub fn form_tet_candidates(
                 ));
             }
         }
-        interior_seed_points.extend(component_seed_points.iter().copied());
+        interior_seed_points.extend(
+            component_seed_points
+                .iter()
+                .zip(component_seed_node_sources.iter())
+                .filter_map(|(point, source)| {
+                    matches!(source, TetCandidateNodeSource::InteriorSeed).then_some(*point)
+                }),
+        );
 
         let insertion_status = append_component_insertion_tets(
             component,
@@ -2429,12 +2443,13 @@ fn refinement_points_for_tets(
                     .map(|(center, _)| center)
                     .unwrap_or_else(|| tet_centroid(points))
             };
-            let point = if classifier.contains_point(point) {
-                point
-            } else {
-                tet_centroid(points)
-            };
-            if !classifier.contains_point(point) {
+            let point =
+                if classifier.contains_protected_interior_point(point, target_size_m, tolerance) {
+                    point
+                } else {
+                    tet_centroid(points)
+                };
+            if !classifier.contains_protected_interior_point(point, target_size_m, tolerance) {
                 continue;
             }
             let exact_quality_error = if exact_quality_violation {
@@ -2553,7 +2568,14 @@ fn requested_refinement_candidate_points(
 ) -> Vec<[f64; 3]> {
     let mut candidates = Vec::<[f64; 3]>::new();
     if seed_points.is_empty() {
-        candidates.push(requested_point);
+        push_requested_refinement_candidate(
+            &mut candidates,
+            requested_point,
+            seed_points,
+            classifier,
+            target_size_m,
+            tolerance,
+        );
         return candidates;
     }
     let clearance = classifier.nearest_surface_distance(requested_point);
@@ -2586,6 +2608,7 @@ fn requested_refinement_candidate_points(
             candidate,
             seed_points,
             classifier,
+            target_size_m,
             tolerance,
         );
     }
@@ -2618,6 +2641,7 @@ fn requested_refinement_candidate_points(
                 candidate,
                 seed_points,
                 classifier,
+                target_size_m,
                 tolerance,
             );
         }
@@ -2652,6 +2676,7 @@ fn requested_refinement_candidate_points(
                 candidate,
                 seed_points,
                 classifier,
+                target_size_m,
                 tolerance,
             );
         }
@@ -2682,6 +2707,7 @@ fn requested_refinement_candidate_points(
                 candidate,
                 seed_points,
                 classifier,
+                target_size_m,
                 tolerance,
             );
         }
@@ -2694,9 +2720,10 @@ fn push_requested_refinement_candidate(
     candidate: [f64; 3],
     seed_points: &[[f64; 3]],
     classifier: &ComponentSurfaceClassifier,
+    target_size_m: f64,
     tolerance: MeshingTolerance,
 ) {
-    if classifier.contains_interior_point(candidate)
+    if classifier.contains_protected_interior_point(candidate, target_size_m, tolerance)
         && !contains_point(candidates, candidate, tolerance)
         && !contains_point(seed_points, candidate, tolerance)
     {
@@ -3567,6 +3594,16 @@ fn repair_exact_quality_tets_once(
             matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
         })
         .collect::<BTreeSet<_>>();
+    let removable_seed_node_ids = nodes
+        .iter()
+        .filter_map(|node| {
+            matches!(
+                node.source,
+                TetCandidateNodeSource::InteriorSeed | TetCandidateNodeSource::BoundaryRecovery
+            )
+            .then_some(node.node_id)
+        })
+        .collect::<BTreeSet<_>>();
     let mut consumed = vec![false; tets.len()];
     let mut summary = TetQualityRepairPassSummary::default();
     for (tet_index, tet) in tets.iter().enumerate() {
@@ -3581,7 +3618,7 @@ fn repair_exact_quality_tets_once(
             tet_index,
             tets,
             &node_adjacency,
-            &interior_node_ids,
+            &removable_seed_node_ids,
             &node_points,
             options,
         )? {
@@ -3602,7 +3639,7 @@ fn repair_exact_quality_tets_once(
             tet_index,
             tets,
             &node_adjacency,
-            &interior_node_ids,
+            &removable_seed_node_ids,
             &node_points,
             InteriorSeedCollapseScope::FourTetOnly,
             options,
@@ -3657,7 +3694,7 @@ fn repair_exact_quality_tets_once(
             tet_index,
             tets,
             &node_adjacency,
-            &interior_node_ids,
+            &removable_seed_node_ids,
             &node_points,
             InteriorSeedCollapseScope::LargerStarsOnly,
             options,
@@ -7028,6 +7065,17 @@ fn contains_point(points: &[[f64; 3]], candidate: [f64; 3], tolerance: MeshingTo
         .any(|point| tolerance.point_nearly_equal(*point, candidate, 1.0))
 }
 
+fn seed_node_source(
+    point: [f64; 3],
+    classifier: &ComponentSurfaceClassifier,
+) -> TetCandidateNodeSource {
+    if classifier.point_is_on_boundary(point) {
+        TetCandidateNodeSource::BoundaryRecovery
+    } else {
+        TetCandidateNodeSource::InteriorSeed
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ComponentSurfaceClassifier {
     triangles_by_element_id: BTreeMap<u32, Triangle3>,
@@ -7327,6 +7375,31 @@ mod tests {
     }
 
     #[test]
+    fn boundary_seed_points_are_classified_as_boundary_recovery_nodes() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance =
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
+        let classifier =
+            ComponentSurfaceClassifier::new(component, &surface, &surface_elements, tolerance)
+                .expect("cube classifier should build");
+
+        assert_eq!(
+            seed_node_source([0.0, 0.5, 0.5], &classifier),
+            TetCandidateNodeSource::BoundaryRecovery
+        );
+        assert_eq!(
+            seed_node_source([0.5, 0.5, 0.5], &classifier),
+            TetCandidateNodeSource::InteriorSeed
+        );
+    }
+
+    #[test]
     fn refinement_pass_rolls_back_quality_regressing_seed_points() {
         let (surface, volume_candidates) = cube_surface_and_volume_candidates();
 
@@ -7358,6 +7431,60 @@ mod tests {
                 .filter(|tet| tet.exact_scaled_jacobian < 0.15)
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn quality_refinement_rejects_boundary_centroid_seed_points() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_nodes = surface
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance =
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
+        let classifier =
+            ComponentSurfaceClassifier::new(component, &surface, &surface_elements, tolerance)
+                .expect("cube classifier should build");
+        let bad_boundary_tet = TetCandidate {
+            tet_id: 0,
+            component_id: component.component_id,
+            node_ids: [0, 1, 2, 3],
+            source_surface_element_id: 0,
+            region_ids: vec!["body".to_string()],
+            volume_m3: 0.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: -1.0,
+        };
+
+        let points = refinement_points_for_tets(
+            &[bad_boundary_tet],
+            &surface_nodes,
+            &[],
+            &[],
+            tolerance,
+            &classifier,
+            TetCandidateOptions {
+                interior_target_size_m: Some(0.5),
+                max_refinement_passes: 1,
+                ..TetCandidateOptions::default()
+            },
+            4,
+            &BTreeSet::new(),
+            true,
+        )
+        .expect("refinement point selection should complete");
+
+        assert!(
+            points.points.is_empty(),
+            "quality-driven refinement must not add boundary centroid seed points"
         );
     }
 
@@ -8633,6 +8760,70 @@ mod tests {
             "collapsed tet should clear the exact-quality gate"
         );
         assert!((split_tets[0].volume_m3 - outer_tet.volume_m3).abs() < 1.0e-12);
+        assert!(!nodes.iter().any(|node| node.node_id == 4));
+        assert!(interior_seed_points.is_empty());
+    }
+
+    #[test]
+    fn repair_collapses_bad_boundary_recovery_seed_star_when_quality_improves() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let outer_tet = raw_candidate_tet(0, 0, &[], [0, 1, 2, 3], points, options)
+            .expect("outer tet should be valid");
+        let split_point = [0.04, 0.04, 0.04];
+        let mut split_tets = centroid_split_tets(&outer_tet, 4, split_point, points, options);
+        let mut nodes = vec![
+            TetCandidateNode {
+                node_id: 0,
+                coordinates_m: points[0],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 1,
+                coordinates_m: points[1],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 2,
+                coordinates_m: points[2],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 3,
+                coordinates_m: points[3],
+                source: TetCandidateNodeSource::Surface,
+            },
+            TetCandidateNode {
+                node_id: 4,
+                coordinates_m: split_point,
+                source: TetCandidateNodeSource::BoundaryRecovery,
+            },
+        ];
+        let mut interior_seed_points = Vec::new();
+        let mut next_node_id = 5;
+
+        let repair = repair_exact_quality_tets_once(
+            &mut nodes,
+            &mut split_tets,
+            &mut interior_seed_points,
+            &mut next_node_id,
+            options,
+        )
+        .expect("repair should evaluate");
+
+        assert!(repair.changed);
+        assert_eq!(repair.seed_star_collapse_count, 1);
+        assert_eq!(split_tets.len(), 1);
+        assert!(split_tets[0].exact_scaled_jacobian >= options.min_scaled_jacobian);
         assert!(!nodes.iter().any(|node| node.node_id == 4));
         assert!(interior_seed_points.is_empty());
     }

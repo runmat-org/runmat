@@ -1000,7 +1000,8 @@ fn analysis_mesh_from_preparation(
                     source_geometry_id: preparation.topology.source_geometry_id.clone(),
                     source_geometry_revision: preparation.topology.source_geometry_revision,
                     source_entity_kind: match node.source {
-                        TetCandidateNodeSource::Surface => SourceEntityKind::Mesh,
+                        TetCandidateNodeSource::Surface
+                        | TetCandidateNodeSource::BoundaryRecovery => SourceEntityKind::Mesh,
                         TetCandidateNodeSource::InteriorSeed => SourceEntityKind::Body,
                     },
                     source_entity_id: node.node_id.to_string(),
