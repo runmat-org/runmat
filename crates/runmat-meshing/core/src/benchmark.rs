@@ -2986,16 +2986,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "documents remaining Tet recovery work for annular through-bore fixtures"]
-    fn annular_bore_block_benchmark_reaches_tet_recovery_gate() {
+    #[ignore = "documents remaining exact-quality recovery work for annular through-bore fixtures"]
+    fn annular_bore_block_benchmark_reaches_exact_quality_gate() {
         let case = annular_bore_block_benchmark_case();
         let err = generate_mesh_for_benchmark_case(&case)
-            .expect_err("annular bore block should expose Tet recovery gap");
+            .expect_err("annular bore block should expose exact-quality recovery gap");
         let message = err.to_string();
 
         assert!(
-            message.contains("Tet candidate recovery failed"),
-            "expected Tet recovery gate, got {message}"
+            message.contains("UnrepairedExactQualityPresent"),
+            "expected exact-quality recovery gate, got {message}"
         );
     }
 

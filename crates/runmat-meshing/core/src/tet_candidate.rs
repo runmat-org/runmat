@@ -1068,6 +1068,13 @@ fn append_sweep_tets(
             }
         }
     }
+    for (node_id, point) in seed_node_ids.iter().zip(seed_points.iter()) {
+        if points_on_axis_plane(&[*point; 3], axis, component.bounds_max_m[axis], tolerance) {
+            upper_node_by_key
+                .entry(projected_key(*point, axis, tolerance))
+                .or_insert((*node_id, *point));
+        }
+    }
 
     if lower_elements.is_empty() || upper_node_by_key.is_empty() {
         return Ok(None);
@@ -1172,6 +1179,22 @@ fn add_sweep_recovery_layer_points(
         return Ok(());
     }
     let mut inserted = 0_usize;
+    for (key, lower_point) in &lower_node_by_key {
+        if upper_node_by_key.contains_key(key) {
+            continue;
+        }
+        if inserted >= max_extra_points {
+            return Ok(());
+        }
+        let mut upper_point = *lower_point;
+        upper_point[axis] = component.bounds_max_m[axis];
+        if contains_point(seed_points, upper_point, tolerance) {
+            continue;
+        }
+        seed_points.push(upper_point);
+        upper_node_by_key.insert(*key, upper_point);
+        inserted += 1;
+    }
     for (key, lower_point) in lower_node_by_key {
         let Some(upper_point) = upper_node_by_key.get(&key).copied() else {
             continue;
@@ -1277,21 +1300,28 @@ fn sweep_axis(
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
     tolerance: MeshingTolerance,
 ) -> Result<Option<usize>, TetCandidateError> {
-    let mut best = None::<(usize, usize)>;
+    let mut best = None::<(usize, f64, usize)>;
     for axis in 0..3 {
         let cap =
             sweep_axis_cap_match(component, surface_nodes, surface_elements, axis, tolerance)?;
-        if cap.is_match && best.is_none_or(|(_, count)| cap.lower_element_count > count) {
-            best = Some((axis, cap.lower_element_count));
+        if cap.is_match
+            && best.is_none_or(|(_, area_m2, count)| {
+                cap.lower_projected_area_m2 > area_m2 + tolerance.absolute_m
+                    || ((cap.lower_projected_area_m2 - area_m2).abs() <= tolerance.absolute_m
+                        && cap.lower_element_count > count)
+            })
+        {
+            best = Some((axis, cap.lower_projected_area_m2, cap.lower_element_count));
         }
     }
-    Ok(best.map(|(axis, _)| axis))
+    Ok(best.map(|(axis, _, _)| axis))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SweepAxisCapMatch {
     is_match: bool,
     lower_element_count: usize,
+    lower_projected_area_m2: f64,
 }
 
 fn sweep_axis_cap_match(
@@ -1306,6 +1336,7 @@ fn sweep_axis_cap_match(
         return Ok(SweepAxisCapMatch {
             is_match: false,
             lower_element_count: 0,
+            lower_projected_area_m2: 0.0,
         });
     }
 
@@ -1313,6 +1344,7 @@ fn sweep_axis_cap_match(
     let mut upper_keys = BTreeSet::<[i64; 2]>::new();
     let mut lower_element_count = 0_usize;
     let mut upper_element_count = 0_usize;
+    let mut lower_projected_area_m2 = 0.0_f64;
     for element_id in &component.surface_element_ids {
         let element =
             surface_elements
@@ -1323,6 +1355,7 @@ fn sweep_axis_cap_match(
         let node_points = element_node_points(element, surface_nodes)?;
         if points_on_axis_plane(&node_points, axis, component.bounds_min_m[axis], tolerance) {
             lower_element_count += 1;
+            lower_projected_area_m2 += projected_triangle_area_m2(&node_points, axis);
             lower_keys.extend(node_points.map(|point| projected_key(point, axis, tolerance)));
         } else if points_on_axis_plane(&node_points, axis, component.bounds_max_m[axis], tolerance)
         {
@@ -1331,13 +1364,31 @@ fn sweep_axis_cap_match(
         }
     }
 
+    let keys_match = lower_keys == upper_keys;
+    let bounds_match = projected_key_bounds(&lower_keys) == projected_key_bounds(&upper_keys);
     Ok(SweepAxisCapMatch {
         is_match: lower_element_count > 0
             && upper_element_count > 0
             && lower_keys.len() >= 3
-            && lower_keys == upper_keys,
+            && upper_keys.len() >= 3
+            && (keys_match || bounds_match),
         lower_element_count,
+        lower_projected_area_m2,
     })
+}
+
+fn projected_key_bounds(keys: &BTreeSet<[i64; 2]>) -> Option<([i64; 2], [i64; 2])> {
+    let mut iter = keys.iter();
+    let first = *iter.next()?;
+    let mut min_key = first;
+    let mut max_key = first;
+    for key in iter {
+        for axis in 0..2 {
+            min_key[axis] = min_key[axis].min(key[axis]);
+            max_key[axis] = max_key[axis].max(key[axis]);
+        }
+    }
+    Some((min_key, max_key))
 }
 
 fn element_node_points(
@@ -1396,6 +1447,22 @@ fn projected_key(point: [f64; 3], axis: usize, tolerance: MeshingTolerance) -> [
         out += 1;
     }
     key
+}
+
+fn projected_triangle_area_m2(points: &[[f64; 3]; 3], axis: usize) -> f64 {
+    let mut coordinate_axes = [0_usize; 2];
+    let mut out = 0_usize;
+    for coordinate_axis in 0..3 {
+        if coordinate_axis == axis {
+            continue;
+        }
+        coordinate_axes[out] = coordinate_axis;
+        out += 1;
+    }
+    let a = [points[0][coordinate_axes[0]], points[0][coordinate_axes[1]]];
+    let b = [points[1][coordinate_axes[0]], points[1][coordinate_axes[1]]];
+    let c = [points[2][coordinate_axes[0]], points[2][coordinate_axes[1]]];
+    0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs()
 }
 
 fn dense_recovery_component_exceeds_budget(
@@ -7839,6 +7906,81 @@ mod tests {
         assert!(tets.iter().all(|tet| tet.exact_scaled_jacobian > 0.0));
         let total_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((total_volume - component.volume_m3).abs() <= component.volume_m3 * 1.0e-9);
+    }
+
+    #[test]
+    fn sweep_axis_uses_projected_cap_area_when_cap_interiors_differ() {
+        let surface_nodes = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [1.0, 1.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [0.5, 0.5, 0.0]),
+            (5, [0.0, 0.0, 0.2]),
+            (6, [1.0, 0.0, 0.2]),
+            (7, [1.0, 1.0, 0.2]),
+            (8, [0.0, 1.0, 0.2]),
+            (9, [0.45, 0.55, 0.2]),
+        ]);
+        let elements = vec![
+            sweep_test_surface_element(0, [0, 1, 4]),
+            sweep_test_surface_element(1, [1, 2, 4]),
+            sweep_test_surface_element(2, [2, 3, 4]),
+            sweep_test_surface_element(3, [3, 0, 4]),
+            sweep_test_surface_element(4, [5, 9, 6]),
+            sweep_test_surface_element(5, [6, 9, 7]),
+            sweep_test_surface_element(6, [7, 9, 8]),
+            sweep_test_surface_element(7, [8, 9, 5]),
+            sweep_test_surface_element(8, [0, 5, 6]),
+            sweep_test_surface_element(9, [0, 6, 1]),
+            sweep_test_surface_element(10, [1, 6, 7]),
+            sweep_test_surface_element(11, [1, 7, 2]),
+            sweep_test_surface_element(12, [2, 7, 8]),
+            sweep_test_surface_element(13, [2, 8, 3]),
+            sweep_test_surface_element(14, [3, 8, 5]),
+            sweep_test_surface_element(15, [3, 5, 0]),
+        ];
+        let surface_elements = elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let component = VolumeCandidateComponent {
+            component_id: 0,
+            surface_element_ids: elements.iter().map(|element| element.element_id).collect(),
+            source_face_ids: Vec::new(),
+            node_ids: surface_nodes.keys().copied().collect(),
+            region_ids: Vec::new(),
+            bounds_min_m: [0.0, 0.0, 0.0],
+            bounds_max_m: [1.0, 1.0, 0.2],
+            surface_area_m2: 2.8,
+            signed_volume_m3: 0.2,
+            volume_m3: 0.2,
+        };
+
+        let axis = sweep_axis(
+            &component,
+            &surface_nodes,
+            &surface_elements,
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m),
+        )
+        .expect("sweep axis should evaluate");
+
+        assert_eq!(axis, Some(2));
+    }
+
+    fn sweep_test_surface_element(element_id: u32, node_ids: [u32; 3]) -> SurfaceElement {
+        SurfaceElement {
+            element_id,
+            source_face_id: element_id,
+            cad_face_id: None,
+            source_edge_ids: [crate::INTERNAL_SOURCE_EDGE_ID; 3],
+            node_ids,
+            parametric_node_uv: [[0.0, 0.0]; 3],
+            max_projection_error_m: 0.0,
+            region_ids: Vec::new(),
+            area_m2: 1.0,
+            unit_normal: [0.0, 0.0, 1.0],
+        }
     }
 
     #[test]
