@@ -2437,8 +2437,47 @@ mod tests {
     #[test]
     #[ignore = "expensive production fixture suite; run manually when closing meshing gates"]
     fn generic_benchmark_suite_collects_current_fixture_readiness() {
-        let case_count = generic_mesh_benchmark_cases().len();
-        let suite = run_generic_mesh_benchmark_suite_collecting_failures();
+        let cases = generic_mesh_benchmark_cases();
+        let case_count = cases.len();
+        let mut reports = Vec::with_capacity(case_count);
+        let mut generation_failures = Vec::new();
+        for case in cases {
+            eprintln!(
+                "starting mesh benchmark case id={} tier={:?}",
+                case.benchmark_id, case.tier
+            );
+            let started = std::time::Instant::now();
+            match generate_mesh_for_benchmark_case(&case) {
+                Ok(mesh) => {
+                    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    eprintln!(
+                        "finished mesh benchmark case id={} elapsed_ms={elapsed_ms:.1}",
+                        case.benchmark_id
+                    );
+                    let mut input = MeshBenchmarkInput::new(case.benchmark_id, case.tier);
+                    input.timing.total_ms = Some(elapsed_ms);
+                    reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
+                }
+                Err(message) => {
+                    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    eprintln!(
+                        "failed mesh benchmark case id={} elapsed_ms={elapsed_ms:.1}: {message}",
+                        case.benchmark_id
+                    );
+                    generation_failures.push(MeshBenchmarkGenerationFailure {
+                        benchmark_id: case.benchmark_id,
+                        tier: case.tier,
+                        message,
+                        total_ms: Some(elapsed_ms),
+                    });
+                }
+            }
+        }
+        let suite = build_mesh_benchmark_suite_report_with_failures(
+            "generic-production",
+            reports,
+            generation_failures,
+        );
 
         assert_eq!(suite.suite_id, "generic-production");
         assert_eq!(
