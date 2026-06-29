@@ -940,11 +940,20 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     let topology_id = descriptor.topology_id.as_deref()?;
     let actual_entities = field_entity_count(field, &descriptor, values.len());
-    if descriptor.location == AnalysisFieldLocation::Element
-        && topology_id == "analysis_mesh"
-        && element_field_maps_to_render_triangles(meshes, actual_entities)
-    {
-        return None;
+    if topology_id == "analysis_mesh" {
+        match descriptor.location {
+            AnalysisFieldLocation::Element => {
+                if element_field_maps_to_render_triangles(meshes, actual_entities) {
+                    return None;
+                }
+            }
+            AnalysisFieldLocation::Node => {
+                if node_field_maps_to_render_vertices(meshes, actual_entities) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
     }
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
@@ -959,7 +968,7 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
         | AnalysisFieldLocation::Global
         | AnalysisFieldLocation::Unknown => return None,
     };
-    if actual_entities == expected_entities {
+    if actual_entities == expected_entities && topology_id != "analysis_mesh" {
         return None;
     }
     Some(format!(
@@ -984,6 +993,19 @@ fn element_field_maps_to_render_triangles(meshes: &[MeshCounts], element_count: 
                 .triangle_volume_element_indices
                 .iter()
                 .all(|index| index.is_some_and(|index| index < element_count))
+    })
+}
+
+fn node_field_maps_to_render_vertices(meshes: &[MeshCounts], node_count: usize) -> bool {
+    if node_count == 0 || meshes.is_empty() {
+        return false;
+    }
+    meshes.iter().all(|mesh| {
+        mesh.vertex_volume_node_indices.len() == mesh.vertices
+            && mesh
+                .vertex_volume_node_indices
+                .iter()
+                .all(|index| index.is_some_and(|index| index < node_count))
     })
 }
 
@@ -2009,6 +2031,80 @@ mod tests {
         }];
 
         assert_eq!(field_topology_mismatch_warning(&field, &meshes), None);
+    }
+
+    #[test]
+    fn field_topology_warning_accepts_mapped_solver_node_fields() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 2,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        assert_eq!(field_topology_mismatch_warning(&field, &meshes), None);
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_unmapped_solver_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), None, Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("unmapped solver vertex should warn");
+
+        assert!(warning.contains("structural.displacement"));
+        assert!(warning.contains("render_vertex_count=3"));
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_stale_solver_vertex_indices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("stale solver vertex index should warn");
+
+        assert!(warning.contains("structural.displacement"));
+        assert!(warning.contains("render_vertex_count=3"));
     }
 
     #[test]
