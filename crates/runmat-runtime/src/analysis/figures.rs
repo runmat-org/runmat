@@ -11,7 +11,7 @@ use runmat_plot::plots::{
 };
 
 use super::contracts::{
-    AnalysisFieldDescriptor, AnalysisFieldLocation, AnalysisRenderTopology,
+    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisRenderTopology,
     AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
     AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
 };
@@ -1034,6 +1034,21 @@ fn scalar_overlay(
     options: AnalysisFigureGenerationOptions,
 ) -> Option<ScalarOverlay> {
     let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh") {
+        return match (&descriptor.kind, descriptor.location) {
+            (AnalysisFieldKind::Scalar, AnalysisFieldLocation::Node) => {
+                scalar_overlay_from_node_values(field, meshes, options)
+            }
+            (AnalysisFieldKind::Scalar, AnalysisFieldLocation::Element) => {
+                scalar_overlay_from_element_values(field, meshes, options)
+            }
+            (AnalysisFieldKind::Vector, AnalysisFieldLocation::Node) => {
+                scalar_overlay_from_node_vector_magnitudes(field, meshes, options)
+            }
+            _ => None,
+        };
+    }
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
     if values.len() == total_vertices {
@@ -1087,6 +1102,43 @@ fn scalar_overlay(
         }
     }
     None
+}
+
+fn scalar_overlay_from_node_vector_magnitudes(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(vectors.get(node_index)?.length());
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: format!("{}.magnitude", field.field_id),
+        label: format!("{} magnitude boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+    })
 }
 
 fn scalar_overlay_from_element_values(
@@ -1204,6 +1256,14 @@ fn vector_overlay(
     meshes: &[MeshCounts],
     options: AnalysisFigureGenerationOptions,
 ) -> Option<VectorOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh")
+        && descriptor.kind == AnalysisFieldKind::Vector
+        && descriptor.location == AnalysisFieldLocation::Node
+    {
+        return vector_overlay_from_node_values(field, meshes, options);
+    }
+
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     if let Some(vectors) = vectors_for_count(field, total_vertices) {
         if total_vertices <= options.max_overlay_values {
@@ -1285,6 +1345,13 @@ fn deformation_overlay(
     if total_vertices > options.max_overlay_values {
         return None;
     }
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh")
+        && descriptor.kind == AnalysisFieldKind::Vector
+        && descriptor.location == AnalysisFieldLocation::Node
+    {
+        return deformation_overlay_from_node_values(field, meshes, figure, options);
+    }
     if let Some(vectors) = vectors_for_count(field, total_vertices) {
         let scale = deformation_scale(&vectors, figure);
         return Some(DeformationOverlay {
@@ -1293,6 +1360,19 @@ fn deformation_overlay(
             chunks: split_vec3(&vectors, meshes.iter().map(|mesh| mesh.vertices))?,
             scale,
         });
+    }
+    None
+}
+
+fn deformation_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    figure: &Figure,
+    options: AnalysisFigureGenerationOptions,
+) -> Option<DeformationOverlay> {
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
     }
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     if descriptor.location != AnalysisFieldLocation::Node
@@ -2144,6 +2224,25 @@ mod tests {
     }
 
     #[test]
+    fn scalar_overlay_prefers_solver_element_mapping_when_counts_match() {
+        let field =
+            AnalysisField::host_f64("structural.von_mises", vec![3], vec![10.0, 20.0, 30.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: vec![Some(2), Some(0), Some(1)],
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("element scalar field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Triangle);
+        assert_eq!(overlay.chunks, vec![vec![30.0, 10.0, 20.0]]);
+    }
+
+    #[test]
     fn structural_summary_figure_reports_reactions_and_metrics() {
         let fields = vec![
             AnalysisField::host_f64(
@@ -2206,6 +2305,51 @@ mod tests {
     }
 
     #[test]
+    fn scalar_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field =
+            AnalysisField::host_f64("structural.nodal_von_mises", vec![3], vec![1.0, 2.0, 3.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node scalar field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![3.0, 1.0, 2.0]]);
+    }
+
+    #[test]
+    fn scalar_overlay_prefers_solver_node_mapping_for_vector_magnitude_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector magnitude should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![3.0, 1.0, 2.0]]);
+    }
+
+    #[test]
     fn vector_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
@@ -2234,6 +2378,39 @@ mod tests {
             vec![vec![
                 Vec3::new(1.0, 0.0, 0.0),
                 Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn vector_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = vector_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
                 Vec3::new(0.0, 2.0, 0.0)
             ]]
         );
@@ -2278,6 +2455,49 @@ mod tests {
             vec![vec![
                 Vec3::new(1.0, 0.0, 0.0),
                 Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn deformation_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let overlay = deformation_overlay(
+            &field,
+            &meshes,
+            &figure,
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("node vector field should use explicit solver deformation mapping");
+
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
                 Vec3::new(0.0, 2.0, 0.0)
             ]]
         );
