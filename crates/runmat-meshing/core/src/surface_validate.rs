@@ -207,7 +207,7 @@ pub fn validate_surface_discretization(
             unit_normal(points).ok_or(SurfaceValidationError::DegenerateElement {
                 element_id: element.element_id,
             })?;
-        let alignment = dot(surface_normal, source_face.unit_normal);
+        let alignment = dot(surface_normal, element.unit_normal);
         min_orientation_alignment = min_orientation_alignment.min(alignment);
         if alignment < options.min_orientation_alignment {
             return Err(SurfaceValidationError::OrientationMismatch {

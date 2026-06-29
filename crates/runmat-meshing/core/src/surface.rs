@@ -800,32 +800,47 @@ fn append_curve_fan_face_elements(
     });
 
     for segment in segments {
-        let points = [
+        let mut node_ids = [segment.node_ids[0], segment.node_ids[1], centroid_node_id];
+        let mut points = [
             nodes[segment.node_ids[0] as usize].coordinates_m,
             nodes[segment.node_ids[1] as usize].coordinates_m,
             centroid,
         ];
+        let mut parametric_node_uv = [
+            project_to_face(frame, points[0]).uv,
+            project_to_face(frame, points[1]).uv,
+            centroid_projection.uv,
+        ];
+        if dot(
+            cross(sub(points[1], points[0]), sub(points[2], points[0])),
+            frame.unit_normal,
+        ) < 0.0
+        {
+            node_ids.swap(1, 2);
+            points.swap(1, 2);
+            parametric_node_uv.swap(1, 2);
+        }
         let left_projection = project_to_face(frame, points[0]);
         let right_projection = project_to_face(frame, points[1]);
         let max_projection_error_m = left_projection
             .distance_m
             .max(right_projection.distance_m)
             .max(centroid_projection.distance_m);
+        let segment_edge = sorted_node_pair(segment.node_ids[0], segment.node_ids[1]);
+        let source_edge_ids = triangle_edges_2d([0, 1, 2]).map(|edge| {
+            if sorted_node_pair(node_ids[edge[0]], node_ids[edge[1]]) == segment_edge {
+                segment.source_edge_id
+            } else {
+                INTERNAL_SOURCE_EDGE_ID
+            }
+        });
         elements.push(SurfaceElement {
             element_id: elements.len() as u32,
             source_face_id: face.face_id,
             cad_face_id: Some(frame.face_id.clone()),
-            source_edge_ids: [
-                segment.source_edge_id,
-                INTERNAL_SOURCE_EDGE_ID,
-                INTERNAL_SOURCE_EDGE_ID,
-            ],
-            node_ids: [segment.node_ids[0], segment.node_ids[1], centroid_node_id],
-            parametric_node_uv: [
-                left_projection.uv,
-                right_projection.uv,
-                centroid_projection.uv,
-            ],
+            source_edge_ids,
+            node_ids,
+            parametric_node_uv,
             max_projection_error_m,
             region_ids: face.region_ids.clone(),
             area_m2: triangle_area(points),
@@ -1750,6 +1765,62 @@ mod tests {
                 .iter()
                 .any(|edge_id| *edge_id == INTERNAL_SOURCE_EDGE_ID)
         }));
+    }
+
+    #[test]
+    fn curve_fan_fallback_orients_elements_to_cad_frame() {
+        let face = single_triangle_topology().faces[0].clone();
+        let frame = planar_test_frame(face.face_id);
+        let mut nodes = vec![
+            SurfaceNode {
+                node_id: 0,
+                source_vertex_id: 0,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            SurfaceNode {
+                node_id: 1,
+                source_vertex_id: 1,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+            SurfaceNode {
+                node_id: 2,
+                source_vertex_id: 2,
+                coordinates_m: [0.0, 1.0, 0.0],
+            },
+        ];
+        let segments = [
+            FaceCurveSegment {
+                node_ids: [1, 0],
+                source_edge_id: 0,
+            },
+            FaceCurveSegment {
+                node_ids: [2, 1],
+                source_edge_id: 1,
+            },
+            FaceCurveSegment {
+                node_ids: [0, 2],
+                source_edge_id: 2,
+            },
+        ];
+        let mut elements = Vec::<SurfaceElement>::new();
+
+        append_curve_fan_face_elements(&face, &frame, &segments, &mut nodes, &mut elements);
+
+        assert_eq!(elements.len(), 3);
+        assert!(elements.iter().all(|element| {
+            let points = element
+                .node_ids
+                .map(|node_id| nodes[node_id as usize].coordinates_m);
+            dot(
+                cross(sub(points[1], points[0]), sub(points[2], points[0])),
+                frame.unit_normal,
+            ) > 0.0
+        }));
+        for source_edge_id in [0, 1, 2] {
+            assert!(elements
+                .iter()
+                .any(|element| element.source_edge_ids.contains(&source_edge_id)));
+        }
     }
 
     #[test]

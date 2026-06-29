@@ -2986,16 +2986,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "documents remaining surface/topology recovery work for annular through-bore fixtures"]
-    fn annular_bore_block_benchmark_reaches_surface_topology_gate() {
+    #[ignore = "documents remaining Tet recovery work for annular through-bore fixtures"]
+    fn annular_bore_block_benchmark_reaches_tet_recovery_gate() {
         let case = annular_bore_block_benchmark_case();
         let err = generate_mesh_for_benchmark_case(&case)
-            .expect_err("annular bore block should expose surface/topology recovery gap");
+            .expect_err("annular bore block should expose Tet recovery gap");
         let message = err.to_string();
 
         assert!(
-            message.contains("orientation alignment"),
-            "expected surface orientation recovery gate, got {message}"
+            message.contains("Tet candidate recovery failed"),
+            "expected Tet recovery gate, got {message}"
         );
     }
 
