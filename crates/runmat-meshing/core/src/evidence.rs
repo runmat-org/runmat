@@ -82,6 +82,16 @@ pub struct MeshCadEvidence {
     pub exact_query_face_count: usize,
     #[serde(default)]
     pub missing_exact_query_face_count: usize,
+    #[serde(default)]
+    pub point_evaluation_supported_face_count: usize,
+    #[serde(default)]
+    pub projection_supported_face_count: usize,
+    #[serde(default)]
+    pub normal_supported_face_count: usize,
+    #[serde(default)]
+    pub derivative_supported_face_count: usize,
+    #[serde(default)]
+    pub curvature_supported_face_count: usize,
     pub evaluator_sample_count: usize,
     #[serde(default)]
     pub evaluator_rejected_sample_count: usize,
@@ -448,6 +458,17 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
         live_query_face_count: mesh.backend.cad_evaluation_live_query_face_count,
         exact_query_face_count: mesh.backend.cad_evaluation_exact_query_face_count,
         missing_exact_query_face_count: mesh.backend.cad_evaluation_missing_exact_query_face_count,
+        point_evaluation_supported_face_count: mesh
+            .backend
+            .cad_evaluation_point_supported_face_count,
+        projection_supported_face_count: mesh
+            .backend
+            .cad_evaluation_projection_supported_face_count,
+        normal_supported_face_count: mesh.backend.cad_evaluation_normal_supported_face_count,
+        derivative_supported_face_count: mesh
+            .backend
+            .cad_evaluation_derivative_supported_face_count,
+        curvature_supported_face_count: mesh.backend.cad_evaluation_curvature_supported_face_count,
         evaluator_sample_count: mesh.backend.cad_evaluation_sample_count,
         evaluator_rejected_sample_count: mesh.backend.cad_evaluation_rejected_sample_count,
         projection_query_count: mesh.backend.cad_projection_query_count,
@@ -1225,6 +1246,11 @@ mod tests {
                 cad_evaluation_live_query_face_count: 0,
                 cad_evaluation_exact_query_face_count: 1,
                 cad_evaluation_missing_exact_query_face_count: 1,
+                cad_evaluation_point_supported_face_count: 2,
+                cad_evaluation_projection_supported_face_count: 2,
+                cad_evaluation_normal_supported_face_count: 2,
+                cad_evaluation_derivative_supported_face_count: 2,
+                cad_evaluation_curvature_supported_face_count: 1,
                 cad_evaluation_sample_count: 8,
                 cad_evaluation_rejected_sample_count: 9,
                 cad_projection_query_count: 12,
@@ -1321,6 +1347,11 @@ mod tests {
         assert_eq!(evidence.cad.imported_face_count, 3);
         assert_eq!(evidence.cad.exact_query_face_count, 1);
         assert_eq!(evidence.cad.missing_exact_query_face_count, 1);
+        assert_eq!(evidence.cad.point_evaluation_supported_face_count, 2);
+        assert_eq!(evidence.cad.projection_supported_face_count, 2);
+        assert_eq!(evidence.cad.normal_supported_face_count, 2);
+        assert_eq!(evidence.cad.derivative_supported_face_count, 2);
+        assert_eq!(evidence.cad.curvature_supported_face_count, 1);
         assert_eq!(evidence.cad.evaluator_sample_count, 8);
         assert_eq!(evidence.cad.evaluator_rejected_sample_count, 9);
         assert_eq!(evidence.cad.projection_query_count, 12);

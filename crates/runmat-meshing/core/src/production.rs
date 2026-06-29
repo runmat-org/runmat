@@ -1007,6 +1007,21 @@ fn production_backend_summary(
         cad_evaluation_exact_query_face_count: preparation
             .cad_evaluation_report
             .exact_query_face_count,
+        cad_evaluation_point_supported_face_count: preparation
+            .cad_evaluation_report
+            .point_evaluation_supported_face_count,
+        cad_evaluation_projection_supported_face_count: preparation
+            .cad_evaluation_report
+            .projection_supported_face_count,
+        cad_evaluation_normal_supported_face_count: preparation
+            .cad_evaluation_report
+            .normal_supported_face_count,
+        cad_evaluation_derivative_supported_face_count: preparation
+            .cad_evaluation_report
+            .derivative_supported_face_count,
+        cad_evaluation_curvature_supported_face_count: preparation
+            .cad_evaluation_report
+            .curvature_supported_face_count,
         cad_evaluation_missing_exact_query_face_count: preparation
             .cad_evaluation_report
             .missing_exact_query_face_count,
@@ -2088,6 +2103,30 @@ mod tests {
         assert_eq!(
             preparation
                 .cad_evaluation_report
+                .projection_supported_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
+                .normal_supported_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
+                .derivative_supported_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
+                .curvature_supported_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
                 .missing_exact_query_face_count,
             0
         );
@@ -2107,6 +2146,18 @@ mod tests {
         assert_eq!(
             mesh.backend.cad_evaluation_live_query_face_count,
             preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            mesh.backend.cad_evaluation_projection_supported_face_count,
+            preparation
+                .cad_evaluation_report
+                .projection_supported_face_count
+        );
+        assert_eq!(
+            mesh.backend.cad_evaluation_curvature_supported_face_count,
+            preparation
+                .cad_evaluation_report
+                .curvature_supported_face_count
         );
         assert_eq!(
             mesh.backend.cad_evaluation_missing_exact_query_face_count,

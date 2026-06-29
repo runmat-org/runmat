@@ -98,6 +98,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub cad_evaluation_exact_query_face_count: usize,
     #[serde(default)]
+    pub cad_evaluation_point_supported_face_count: usize,
+    #[serde(default)]
+    pub cad_evaluation_projection_supported_face_count: usize,
+    #[serde(default)]
+    pub cad_evaluation_normal_supported_face_count: usize,
+    #[serde(default)]
+    pub cad_evaluation_derivative_supported_face_count: usize,
+    #[serde(default)]
+    pub cad_evaluation_curvature_supported_face_count: usize,
+    #[serde(default)]
     pub cad_evaluation_missing_exact_query_face_count: usize,
     #[serde(default)]
     pub cad_evaluation_sample_count: usize,
@@ -275,6 +285,11 @@ impl Default for MeshBackendSummary {
             cad_evaluation_evaluator_face_count: 0,
             cad_evaluation_live_query_face_count: 0,
             cad_evaluation_exact_query_face_count: 0,
+            cad_evaluation_point_supported_face_count: 0,
+            cad_evaluation_projection_supported_face_count: 0,
+            cad_evaluation_normal_supported_face_count: 0,
+            cad_evaluation_derivative_supported_face_count: 0,
+            cad_evaluation_curvature_supported_face_count: 0,
             cad_evaluation_missing_exact_query_face_count: 0,
             cad_evaluation_sample_count: 0,
             cad_evaluation_rejected_sample_count: 0,
