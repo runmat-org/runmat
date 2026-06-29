@@ -15254,6 +15254,8 @@ fn append_solved_adaptive_mesh_summary(
                 completed_iterations: mesh.adaptive_iterations.len(),
                 element_budget_reached,
                 field_change: (stress_gradient_used
+                    || load_regions_used
+                    || constraint_regions_used
                     || temperature_gradient_used
                     || heat_flux_gradient_used
                     || electromagnetic_flux_density_used

@@ -6088,6 +6088,59 @@ fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_converges_boundary_region_context() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-region-convergence");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("converged")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in ["load_regions", "constraint_regions"] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("structural")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_honors_boundary_focus_levels() {
     let root = temp_artifact_root("append-solved-adaptive-boundary-focus-summary");
     let _ = fs::remove_dir_all(&root);
