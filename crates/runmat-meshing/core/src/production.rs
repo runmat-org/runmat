@@ -2203,6 +2203,103 @@ mod tests {
         );
     }
 
+    #[test]
+    fn production_boundary_patch_refinement_uses_inward_surrogates() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(1.0);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [1.0, 0.5, 0.5],
+                    target_size_m: 0.25,
+                    reason: Some("structural.load_regions".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.5, 0.0, 0.5],
+                    target_size_m: 0.25,
+                    reason: Some("structural.constraint_regions".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh =
+            generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
+                .expect("production mesh should generate with boundary patch sizing");
+        let validation = AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+            required_material_region_ids: vec!["root".to_string(), "tip".to_string()],
+            min_boundary_face_recovery_ratio: 1.0,
+            min_boundary_edge_recovery_ratio: 1.0,
+            require_no_fan_fallback: true,
+            require_no_unrepaired_exact_quality: true,
+            ..AnalysisMeshValidationOptions::default()
+        };
+        crate::validate_analysis_mesh_with_options(&mesh, validation.clone())
+            .expect("boundary patch refinement should preserve required regions");
+        let evidence = crate::build_mesh_evidence_artifact(&mesh, &validation);
+
+        assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
+        assert_eq!(
+            mesh.backend.tet_accepted_requested_refinement_point_count,
+            2
+        );
+        assert_eq!(
+            mesh.backend
+                .tet_accepted_requested_refinement_surrogate_point_count,
+            2,
+            "exact boundary samples should be represented by retained inward surrogate Tet seeds"
+        );
+        assert!(mesh
+            .backend
+            .tet_requested_refinement_rejected_by_reason
+            .is_empty());
+        assert!(mesh
+            .backend
+            .tet_requested_refinement_dropped_by_reason
+            .is_empty());
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("structural.load_regions")
+                && sample.inserted_breakpoint_count > 0
+        }));
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("structural.constraint_regions")
+                && sample.inserted_breakpoint_count > 0
+        }));
+        assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_surrogate_point_count,
+            2
+        );
+        assert!(evidence
+            .sizing
+            .requested_tet_refinement_rejected_by_reason
+            .is_empty());
+        assert!(evidence
+            .sizing
+            .requested_tet_refinement_dropped_by_reason
+            .is_empty());
+        assert_eq!(
+            evidence
+                .sizing
+                .applied_by_reason
+                .get("structural.load_regions"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .applied_by_reason
+                .get("structural.constraint_regions"),
+            Some(&1)
+        );
+    }
+
     fn volume_element_centroid_count_within(
         mesh: &AnalysisMeshArtifact,
         point_m: [f64; 3],

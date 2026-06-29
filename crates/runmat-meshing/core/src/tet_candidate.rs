@@ -2035,13 +2035,17 @@ fn requested_refinement_candidate_points(
     target_size_m: f64,
     tolerance: MeshingTolerance,
 ) -> Vec<[f64; 3]> {
-    let mut candidates = vec![requested_point];
+    let mut candidates = Vec::<[f64; 3]>::new();
     if seed_points.is_empty() {
+        candidates.push(requested_point);
         return candidates;
     }
     let clearance = classifier.nearest_surface_distance(requested_point);
     let safe_clearance = target_size_m.min(1.0) * 0.01;
     let near_boundary = clearance <= safe_clearance.max(tolerance.absolute_m * 10.0);
+    if !near_boundary {
+        candidates.push(requested_point);
+    }
     let anchor = seed_points
         .iter()
         .copied()

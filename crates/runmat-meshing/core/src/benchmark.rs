@@ -1569,12 +1569,12 @@ fn boundary_load_patch_benchmark_case() -> MeshBenchmarkCase {
     case.sizing = Some(MeshSizingField {
         samples: vec![
             SizingSample {
-                position_m: [0.75, 0.75, 0.75],
+                position_m: [1.0, 0.5, 0.5],
                 target_size_m: 0.25,
                 reason: Some("structural.load_regions".to_string()),
             },
             SizingSample {
-                position_m: [0.25, 0.25, 0.25],
+                position_m: [0.5, 0.0, 0.5],
                 target_size_m: 0.25,
                 reason: Some("structural.constraint_regions".to_string()),
             },
@@ -2219,6 +2219,16 @@ mod tests {
             .samples
             .iter()
             .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
+        assert!(load_patch_sizing
+            .samples
+            .iter()
+            .any(|sample| sample.position_m[0] == 1.0
+                && sample.reason.as_deref() == Some("structural.load_regions")));
+        assert!(load_patch_sizing
+            .samples
+            .iter()
+            .any(|sample| sample.position_m[1] == 0.0
+                && sample.reason.as_deref() == Some("structural.constraint_regions")));
         assert_eq!(cases[6].benchmark_id, "adaptive_refinement_marker");
         assert_eq!(cases[6].tier, MeshBenchmarkTier::AdaptiveRefinement);
         let adaptive_sizing = cases[6]
@@ -2365,6 +2375,13 @@ mod tests {
         assert!(
             report.sizing.accepted_requested_tet_refinement_point_count > 0,
             "boundary patch sizing should survive into retained production Tet topology"
+        );
+        assert!(
+            report
+                .sizing
+                .accepted_requested_tet_refinement_surrogate_point_count
+                > 0,
+            "boundary patch sizing should use quality-safe inward surrogate points when exact boundary samples would degrade Tet quality"
         );
         assert!(
             report
