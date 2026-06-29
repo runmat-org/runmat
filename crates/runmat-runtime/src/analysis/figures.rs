@@ -397,6 +397,7 @@ fn boundary_region_figure(
                 }
             }
         }
+        attach_authored_load_vectors(mesh, &regions, &mut warnings);
     }
 
     for region in &regions {
@@ -427,6 +428,7 @@ struct AuthoredBoundaryRegion {
     region_id: String,
     role: &'static str,
     highlight_color: Vec4,
+    load_vector: Option<Vec3>,
 }
 
 fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
@@ -440,6 +442,7 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             &load.region_id,
             "load",
             Vec4::new(0.98, 0.30, 0.54, 1.0),
+            load_vector_for_kind(&load.kind),
         );
     }
     for boundary_condition in &model.boundary_conditions {
@@ -451,6 +454,7 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             &boundary_condition.region_id,
             "constraint",
             Vec4::new(0.18, 0.78, 0.48, 1.0),
+            None,
         );
     }
     regions
@@ -461,6 +465,7 @@ fn push_authored_boundary_region(
     region_id: &str,
     role: &'static str,
     highlight_color: Vec4,
+    load_vector: Option<Vec3>,
 ) {
     if region_id.trim().is_empty()
         || regions
@@ -473,6 +478,7 @@ fn push_authored_boundary_region(
         region_id: region_id.to_string(),
         role,
         highlight_color,
+        load_vector,
     });
 }
 
@@ -488,6 +494,65 @@ fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
 
 fn boundary_condition_kind_uses_boundary_region(_kind: &BoundaryConditionKind) -> bool {
     true
+}
+
+fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
+    let vector = match kind {
+        LoadKind::Force { fx, fy, fz } => {
+            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        }
+        LoadKind::Wrench { fx, fy, fz, .. } => {
+            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        }
+        _ => return None,
+    };
+    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
+        Some(vector.normalize())
+    } else {
+        None
+    }
+}
+
+fn attach_authored_load_vectors(
+    mesh: &mut MeshPlot,
+    regions: &[AuthoredBoundaryRegion],
+    warnings: &mut Vec<String>,
+) {
+    let mut vectors = vec![Vec3::ZERO; mesh.triangles().len()];
+    let mut has_vector = false;
+    for region in regions {
+        let Some(load_vector) = region.load_vector else {
+            continue;
+        };
+        let Some(mesh_region) = mesh
+            .regions()
+            .iter()
+            .find(|mesh_region| mesh_region.region_id == region.region_id)
+        else {
+            continue;
+        };
+        for triangle_index in 0..vectors.len() {
+            if mesh_region.contains_triangle(triangle_index as u32) {
+                vectors[triangle_index] = load_vector;
+                has_vector = true;
+            }
+        }
+    }
+    if !has_vector {
+        return;
+    }
+    let mut field = MeshVectorField::new(
+        "authored.boundary_load_direction",
+        MeshFieldLocation::Triangle,
+        vectors,
+    );
+    field.label = Some("Authored boundary load direction".to_string());
+    field.scale = vector_scale(&field.vectors);
+    if let Err(err) = mesh.set_vector_field(Some(field)) {
+        warnings.push(format!(
+            "failed to attach authored boundary load vectors: {err}"
+        ));
+    }
 }
 
 fn summary_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
@@ -2624,6 +2689,15 @@ mod tests {
             plot.region_for_triangle(1)
                 .map(|region| region.region_id.as_str()),
             Some("loaded")
+        );
+        let vector_field = plot
+            .vector_field()
+            .expect("authored load direction should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(vector_field.field_id, "authored.boundary_load_direction");
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO]
         );
     }
 
