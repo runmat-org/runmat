@@ -1992,6 +1992,12 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     model.geometry_id = spec.geometry.geometry_id.clone();
     model.geometry_revision = spec.geometry.revision;
     model.units = spec.geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
     spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetFallback;
@@ -2048,8 +2054,13 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
             .iter()
             .filter_map(|value| value.as_str())
             .collect::<Vec<_>>(),
-        Vec::<&str>::new()
+        vec!["body"]
     );
+    assert!(payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .iter()
+        .all(|element| element["material_region_id"].as_str() == Some("body")));
     let evidence_payload: serde_json::Value =
         serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
             .expect("parse mesh evidence artifact");
@@ -2065,6 +2076,15 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
             .filter_map(|value| value.as_str())
             .collect::<Vec<_>>(),
         vec!["root", "tip"]
+    );
+    assert_eq!(
+        evidence_payload["mesh_validation_options"]["required_material_region_ids"]
+            .as_array()
+            .expect("evidence required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
     );
     assert_eq!(
         evidence_payload["mesh_evidence"]["schema_version"].as_str(),
@@ -5814,6 +5834,61 @@ fn study_analysis_mesh_attaches_requested_boundary_regions_from_source_geometry(
         .boundary_faces
         .iter()
         .any(|face| { face.region_ids.iter().any(|region| region == "root") }));
+}
+
+#[test]
+fn study_analysis_mesh_stamps_single_material_assignment_region() {
+    let mut spec = sample_linear_static_study_spec();
+    let mut model = sample_model();
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    spec.model = Some(model);
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 4],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
+
+    assert!(mesh
+        .volume_elements
+        .iter()
+        .all(|element| element.material_region_id == "body"));
+}
+
+#[test]
+fn study_analysis_mesh_does_not_guess_multiple_material_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    let mut model = sample_model();
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "core".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "skin".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    spec.model = Some(model);
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements[0].material_region_id = "solid".to_string();
+
+    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
+
+    assert_eq!(mesh.volume_elements[0].material_region_id, "solid");
 }
 
 #[test]

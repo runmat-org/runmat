@@ -13630,6 +13630,7 @@ fn generate_and_persist_study_analysis_mesh(
         )
     })?;
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
     let validation_options =
         analysis_mesh_validation_options_for_generated_mesh(spec, &options, &mesh);
@@ -14007,6 +14008,35 @@ fn analysis_mesh_has_boundary_region(mesh: &AnalysisMeshArtifact, region_id: &st
         .any(|face| face.region_ids.iter().any(|existing| existing == region_id))
 }
 
+fn attach_single_material_assignment_to_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let Some(model) = spec.model.as_ref() else {
+        return;
+    };
+    let mut assigned_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.clone())
+        .collect::<Vec<_>>();
+    assigned_region_ids.sort();
+    assigned_region_ids.dedup();
+    let [region_id] = assigned_region_ids.as_slice() else {
+        return;
+    };
+    if mesh
+        .volume_elements
+        .iter()
+        .any(|element| element.material_region_id == *region_id)
+    {
+        return;
+    }
+    for element in &mut mesh.volume_elements {
+        element.material_region_id = region_id.clone();
+    }
+}
+
 fn source_region_surface_centroid(geometry: &GeometryAsset, region_id: &str) -> Option<[f64; 3]> {
     let mut weighted = [0.0_f64; 3];
     let mut total_area = 0.0_f64;
@@ -14280,6 +14310,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
         mesh.adaptive_iterations.len()
     );
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut refined_mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut refined_mesh);
     refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
     let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
     let refinement_convergence = runmat_meshing_core::evaluate_adaptive_convergence(
