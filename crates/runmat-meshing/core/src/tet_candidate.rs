@@ -7548,6 +7548,7 @@ fn diagnostic_cavity_group_reconnection_rejection_reason(
     let mut saw_oversized_group = false;
     let mut saw_star_sized_group = false;
     let mut saw_invalid_candidate = false;
+    let mut invalid_candidate_reason = None::<&'static str>;
     let mut saw_non_improving_candidate = false;
     for group in candidate_groups {
         if group.len() < 3 {
@@ -7566,12 +7567,23 @@ fn diagnostic_cavity_group_reconnection_rejection_reason(
             options.min_scaled_jacobian,
         );
         let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
-        let Some(candidates) =
-            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        let Some((candidates, candidate_reason)) =
+            diagnostic_face_neighbor_cavity_reconnection_candidates(
+                &group,
+                tets,
+                node_points,
+                options,
+            )?
         else {
             saw_invalid_candidate = true;
+            invalid_candidate_reason.get_or_insert("empty_candidate");
             continue;
         };
+        if let Some(reason) = candidate_reason {
+            saw_invalid_candidate = true;
+            invalid_candidate_reason.get_or_insert(reason);
+            continue;
+        }
         let candidate_below_count =
             count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
         let min_exact = min_exact_scaled_jacobian(candidates.iter());
@@ -7598,19 +7610,59 @@ fn diagnostic_cavity_group_reconnection_rejection_reason(
             saw_group,
         ) {
             ("boundary_cavity", true, _, _, _, _) => "boundary_cavity_no_improving_reconnection",
-            ("boundary_cavity", _, true, _, _, _) => "boundary_cavity_candidate_invalid",
+            ("boundary_cavity", _, true, _, _, _) => diagnostic_cavity_candidate_invalid_bucket(
+                "boundary_cavity",
+                invalid_candidate_reason,
+            ),
             ("boundary_cavity", _, _, true, _, _) => "boundary_cavity_over_star_insertion_limit",
             ("boundary_cavity", _, _, _, true, _) => "boundary_cavity_over_reconnection_limit",
             ("boundary_cavity", _, _, _, _, true) => "boundary_cavity_no_candidate",
             ("boundary_cavity", _, _, _, _, _) => "boundary_cavity_too_small",
             (_, true, _, _, _, _) => "node_cavity_no_improving_reconnection",
-            (_, _, true, _, _, _) => "node_cavity_candidate_invalid",
+            (_, _, true, _, _, _) => {
+                diagnostic_cavity_candidate_invalid_bucket("node_cavity", invalid_candidate_reason)
+            }
             (_, _, _, true, _, _) => "node_cavity_over_star_insertion_limit",
             (_, _, _, _, true, _) => "node_cavity_over_reconnection_limit",
             (_, _, _, _, _, true) => "node_cavity_no_candidate",
             _ => "node_cavity_too_small",
         },
     )
+}
+
+#[cfg(test)]
+fn diagnostic_cavity_candidate_invalid_bucket(
+    prefix: &'static str,
+    reason: Option<&'static str>,
+) -> &'static str {
+    match (prefix, reason) {
+        ("boundary_cavity", Some("component_mismatch")) => "boundary_cavity_component_mismatch",
+        ("boundary_cavity", Some("too_few_boundary_faces")) => {
+            "boundary_cavity_too_few_boundary_faces"
+        }
+        ("boundary_cavity", Some("boundary_node_count")) => "boundary_cavity_boundary_node_count",
+        ("boundary_cavity", Some("raw_candidate_rejected")) => {
+            "boundary_cavity_raw_candidate_rejected"
+        }
+        ("boundary_cavity", Some("empty_tetrahedralization")) => {
+            "boundary_cavity_empty_tetrahedralization"
+        }
+        ("boundary_cavity", Some("boundary_face_mismatch")) => {
+            "boundary_cavity_boundary_face_mismatch"
+        }
+        ("boundary_cavity", Some("volume_mismatch")) => "boundary_cavity_volume_mismatch",
+        ("boundary_cavity", Some("empty_candidate")) => "boundary_cavity_empty_candidate",
+        ("boundary_cavity", _) => "boundary_cavity_candidate_invalid",
+        (_, Some("component_mismatch")) => "node_cavity_component_mismatch",
+        (_, Some("too_few_boundary_faces")) => "node_cavity_too_few_boundary_faces",
+        (_, Some("boundary_node_count")) => "node_cavity_boundary_node_count",
+        (_, Some("raw_candidate_rejected")) => "node_cavity_raw_candidate_rejected",
+        (_, Some("empty_tetrahedralization")) => "node_cavity_empty_tetrahedralization",
+        (_, Some("boundary_face_mismatch")) => "node_cavity_boundary_face_mismatch",
+        (_, Some("volume_mismatch")) => "node_cavity_volume_mismatch",
+        (_, Some("empty_candidate")) => "node_cavity_empty_candidate",
+        _ => "node_cavity_candidate_invalid",
+    }
 }
 
 fn bounded_node_cavity_extra_indices(mut extra: Vec<usize>, tets: &[TetCandidate]) -> Vec<usize> {
