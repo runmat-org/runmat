@@ -1776,6 +1776,128 @@ mod tests {
     }
 
     #[test]
+    fn production_mesh_evidence_preserves_recovery_and_untangling_summary() {
+        let options = VolumeMeshingOptions::default();
+        let mut preparation = prepare_production_mesh(&cube_geometry(), &options)
+            .expect("production preparation should generate");
+        preparation.tet_candidates.recovery.untangling_pass_count = 2;
+        preparation
+            .tet_candidates
+            .recovery
+            .untangling_initial_near_singular_count = 6;
+        preparation
+            .tet_candidates
+            .recovery
+            .untangling_final_near_singular_count = 1;
+        preparation
+            .tet_candidates
+            .recovery
+            .untangling_relocated_seed_count = 3;
+        preparation
+            .tet_candidates
+            .recovery
+            .untangling_reconnected_edge_star_count = 4;
+        preparation
+            .tet_candidates
+            .recovery
+            .untangling_reconnected_boundary_adjacent_cavity_count = 5;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_repair_pass_count = 1;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_reconnected_cavity_count = 2;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_reconnection_quality_gain_count = 1;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_boundary_adjacent_reconnected_cavity_count = 3;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_seed_star_relocation_count = 4;
+
+        let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect("production mesh should generate with recovery summary evidence");
+        let evidence = crate::build_mesh_evidence_artifact(
+            &mesh,
+            &production_validation_options(&preparation, &options),
+        );
+
+        assert_eq!(mesh.backend.tet_untangling_pass_count, 2);
+        assert_eq!(mesh.backend.tet_untangling_initial_near_singular_count, 6);
+        assert_eq!(mesh.backend.tet_untangling_final_near_singular_count, 1);
+        assert_eq!(mesh.backend.tet_untangling_relocated_seed_count, 3);
+        assert_eq!(mesh.backend.tet_untangling_reconnected_edge_star_count, 4);
+        assert_eq!(
+            mesh.backend
+                .tet_untangling_reconnected_boundary_adjacent_cavity_count,
+            5
+        );
+        assert_eq!(mesh.backend.tet_exact_quality_repair_pass_count, 1);
+        assert_eq!(mesh.backend.tet_exact_quality_reconnected_cavity_count, 2);
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_reconnection_quality_gain_count,
+            1
+        );
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_boundary_adjacent_reconnected_cavity_count,
+            3
+        );
+        assert_eq!(mesh.backend.tet_exact_quality_seed_star_relocation_count, 4);
+        assert_eq!(evidence.tet_recovery.untangling_pass_count, 2);
+        assert_eq!(
+            evidence.tet_recovery.untangling_initial_near_singular_count,
+            6
+        );
+        assert_eq!(
+            evidence.tet_recovery.untangling_final_near_singular_count,
+            1
+        );
+        assert_eq!(evidence.tet_recovery.untangling_relocated_seed_count, 3);
+        assert_eq!(
+            evidence.tet_recovery.untangling_reconnected_edge_star_count,
+            4
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .untangling_reconnected_boundary_adjacent_cavity_count,
+            5
+        );
+        assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
+        assert_eq!(
+            evidence.tet_recovery.exact_quality_reconnected_cavity_count,
+            2
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_reconnection_quality_gain_count,
+            1
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_boundary_adjacent_reconnected_cavity_count,
+            3
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_seed_star_relocation_count,
+            4
+        );
+    }
+
+    #[test]
     fn production_mesh_preserves_boundary_and_material_region_provenance() {
         let options = VolumeMeshingOptions::default();
         let preparation = prepare_production_mesh(&cube_geometry(), &options)
