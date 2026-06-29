@@ -2976,32 +2976,27 @@ mod tests {
                 assert!(request.supports_projection);
                 assert!(request.supports_derivatives);
                 assert!(request.supports_curvature);
-                vec![
-                    CadFaceEvaluationSample {
+                let points = if request.source_face_id == 2 {
+                    [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0]]
+                } else {
+                    [[0.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]]
+                };
+                points
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, point)| CadFaceEvaluationSample {
                         source: CadFaceEvaluationSampleSource::BackendQuery,
-                        point_m: [0.0, 0.0, 1.0],
-                        uv: Some([0.0, 0.0]),
-                        projected_point_m: Some([0.0, 0.0, 1.0]),
-                        unit_normal: Some([0.0, 0.0, 1.0]),
+                        point_m: point,
+                        uv: Some([point[0], point[1]]),
+                        projected_point_m: Some(point),
+                        unit_normal: Some(match index {
+                            0 => [0.0, 0.0, 1.0],
+                            1 => [0.0, 0.8, 0.6],
+                            _ => [0.8, 0.0, 0.6],
+                        }),
                         projection_error_m: Some(0.0),
-                    },
-                    CadFaceEvaluationSample {
-                        source: CadFaceEvaluationSampleSource::TessellationEstimate,
-                        point_m: [0.75, 0.25, 1.0],
-                        uv: Some([0.75, 0.25]),
-                        projected_point_m: Some([0.75, 0.25, 1.0]),
-                        unit_normal: Some([0.0, 0.8, 0.6]),
-                        projection_error_m: Some(0.0),
-                    },
-                    CadFaceEvaluationSample {
-                        source: CadFaceEvaluationSampleSource::TessellationEstimate,
-                        point_m: [0.90, 0.70, 1.0],
-                        uv: Some([0.90, 0.70]),
-                        projected_point_m: Some([0.90, 0.70, 1.0]),
-                        unit_normal: Some([0.8, 0.0, 0.6]),
-                        projection_error_m: Some(0.0),
-                    },
-                ]
+                    })
+                    .collect()
             }
         }
 

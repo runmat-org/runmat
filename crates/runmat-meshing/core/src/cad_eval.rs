@@ -233,7 +233,7 @@ pub fn build_cad_evaluation_model_with_provider(
                 fallback_unit_normal,
             );
             let live_query_backed = !live_samples.samples.is_empty();
-            let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples);
+            let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples, points);
             let exact_sample = exact_backend_sample(&evaluator_samples.samples);
             let evaluator_max_projection_error_m =
                 evaluator_max_projection_error(&evaluator_samples.samples);
@@ -780,6 +780,7 @@ fn live_evaluator_samples(
 fn merged_bounded_evaluator_samples(
     face: &CadFace,
     live_samples: BoundedCadFaceEvaluationSamples,
+    source_points: Triangle3,
 ) -> BoundedCadFaceEvaluationSamples {
     let imported = bounded_cad_face_evaluation_samples(face.evaluator_samples.clone());
     let mut samples = live_samples
@@ -790,12 +791,25 @@ fn merged_bounded_evaluator_samples(
     let rejected_count = live_samples
         .rejected_count
         .saturating_add(imported.rejected_count)
+        .saturating_add(filter_samples_to_source_face(&mut samples, source_points))
         .saturating_add(samples.len().saturating_sub(8));
     samples.truncate(8);
     BoundedCadFaceEvaluationSamples {
         samples,
         rejected_count,
     }
+}
+
+fn filter_samples_to_source_face(
+    samples: &mut Vec<CadFaceEvaluationSample>,
+    source_points: Triangle3,
+) -> usize {
+    let original_len = samples.len();
+    samples.retain(|sample| {
+        let sample_point = exact_backend_sample_point(sample);
+        point_in_source_triangle(sample_point, source_points)
+    });
+    original_len.saturating_sub(samples.len())
 }
 
 fn bounded_cad_face_evaluation_samples(
@@ -937,6 +951,31 @@ fn max_optional_curvature(values: impl Iterator<Item = f64>) -> Option<f64> {
 
 fn finite_point(point: Point3) -> bool {
     point.iter().all(|coordinate| coordinate.is_finite())
+}
+
+fn point_in_source_triangle(point: Point3, triangle: Triangle3) -> bool {
+    let v0 = sub(triangle[1], triangle[0]);
+    let v1 = sub(triangle[2], triangle[0]);
+    let v2 = sub(point, triangle[0]);
+    let dot00 = dot(v0, v0);
+    let dot01 = dot(v0, v1);
+    let dot02 = dot(v0, v2);
+    let dot11 = dot(v1, v1);
+    let dot12 = dot(v1, v2);
+    let denominator = dot00 * dot11 - dot01 * dot01;
+    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
+        return false;
+    }
+    let inv_denominator = 1.0 / denominator;
+    let u = (dot11 * dot02 - dot01 * dot12) * inv_denominator;
+    let v = (dot00 * dot12 - dot01 * dot02) * inv_denominator;
+    let normal = crate::predicate::cross(v0, v1);
+    let normal_length = norm(normal);
+    if !normal_length.is_finite() || normal_length <= f64::EPSILON {
+        return false;
+    }
+    let plane_distance = dot(v2, scale(normal, 1.0 / normal_length)).abs();
+    plane_distance <= 1.0e-8 && u >= -1.0e-10 && v >= -1.0e-10 && u + v <= 1.0 + 1.0e-10
 }
 
 fn compare_points_lexicographically(left: Point3, right: Point3) -> std::cmp::Ordering {
@@ -1176,9 +1215,9 @@ mod tests {
             },
             CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
-                point_m: [0.0, 1.0, 1.0],
-                uv: Some([2.0, 7.0]),
-                projected_point_m: Some([0.0, 1.0, 1.0]),
+                point_m: [1.0, 1.0, 1.0],
+                uv: Some([5.0, 7.0]),
+                projected_point_m: Some([1.0, 1.0, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
                 projection_error_m: Some(0.0),
             },
@@ -1331,6 +1370,51 @@ mod tests {
     }
 
     #[test]
+    fn merged_cad_face_samples_are_filtered_to_source_triangle_frames() {
+        let topology = cube_topology();
+        let mut geometry = geometry_with_face_evaluator();
+        geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.75, 0.25, 1.0],
+                uv: Some([0.75, 0.25]),
+                projected_point_m: Some([0.75, 0.25, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [0.25, 0.75, 1.0],
+                uv: Some([0.25, 0.75]),
+                projected_point_m: Some([0.25, 0.75, 1.0]),
+                unit_normal: Some([0.0, 0.0, 1.0]),
+                projection_error_m: Some(0.0),
+            },
+        ];
+        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+
+        let model = build_cad_evaluation_model(&cad_topology, &topology).expect("evaluation model");
+        let lower_triangle_frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.source_face_id == 2)
+            .expect("lower source triangle frame");
+        let upper_triangle_frame = model
+            .face_frames
+            .iter()
+            .find(|frame| frame.source_face_id == 3)
+            .expect("upper source triangle frame");
+
+        assert_eq!(model.report.exact_query_face_count, 2);
+        assert_eq!(model.report.evaluator_sample_count, 2);
+        assert_eq!(model.report.evaluator_rejected_sample_count, 2);
+        assert_eq!(lower_triangle_frame.evaluator_samples.len(), 1);
+        assert_eq!(upper_triangle_frame.evaluator_samples.len(), 1);
+        assert_eq!(lower_triangle_frame.origin_m, [0.75, 0.25, 1.0]);
+        assert_eq!(upper_triangle_frame.origin_m, [0.25, 0.75, 1.0]);
+    }
+
+    #[test]
     fn exact_backend_query_prefers_lowest_projection_error_sample() {
         let topology = cube_topology();
         let mut geometry = geometry_with_face_evaluator();
@@ -1345,9 +1429,9 @@ mod tests {
             },
             CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
-                point_m: [0.3, 0.5, 1.001],
-                uv: Some([0.3, 0.5]),
-                projected_point_m: Some([0.3, 0.5, 1.0]),
+                point_m: [0.8, 0.5, 1.001],
+                uv: Some([0.8, 0.5]),
+                projected_point_m: Some([0.8, 0.5, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
                 projection_error_m: Some(0.001),
             },
@@ -1361,7 +1445,7 @@ mod tests {
             .find(|frame| frame.exact_query_backed)
             .expect("one frame should be exact-query backed");
 
-        assert_eq!(frame.origin_m, [0.3, 0.5, 1.0]);
+        assert_eq!(frame.origin_m, [0.8, 0.5, 1.0]);
         assert_eq!(frame.unit_normal, [0.0, 0.0, 1.0]);
         assert_eq!(frame.evaluator_max_projection_error_m, 0.01);
         assert_eq!(frame.evaluator_samples.len(), 2);
@@ -1374,9 +1458,9 @@ mod tests {
         geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = vec![
             CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
-                point_m: [0.2, 0.5, 1.0],
-                uv: Some([0.2, 0.5]),
-                projected_point_m: Some([0.2, 0.5, 1.0]),
+                point_m: [0.6, 0.5, 1.0],
+                uv: Some([0.6, 0.5]),
+                projected_point_m: Some([0.6, 0.5, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
                 projection_error_m: None,
             },
@@ -1410,9 +1494,9 @@ mod tests {
         geometry.source_geometry.cad_evaluators[0].faces[0].evaluation_samples = (0..10)
             .map(|index| CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
-                point_m: [index as f64 * 0.01, 0.5, 1.0],
-                uv: Some([index as f64 * 0.01, 0.5]),
-                projected_point_m: Some([index as f64 * 0.01, 0.5, 1.0]),
+                point_m: [index as f64 * 0.01, index as f64 * 0.01, 1.0],
+                uv: Some([index as f64 * 0.01, index as f64 * 0.01]),
+                projected_point_m: Some([index as f64 * 0.01, index as f64 * 0.01, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
                 projection_error_m: Some(0.0),
             })
@@ -1463,10 +1547,18 @@ mod tests {
             },
             CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
+                point_m: [1.0, 1.0, 1.0],
+                uv: Some([1.0, 1.0]),
+                projected_point_m: Some([1.0, 1.0, 1.0]),
+                unit_normal: Some([0.04, 0.0, 0.9991996797437437]),
+                projection_error_m: Some(0.0),
+            },
+            CadFaceEvaluationSample {
+                source: CadFaceEvaluationSampleSource::BackendQuery,
                 point_m: [0.0, 1.0, 1.0],
                 uv: Some([0.0, 1.0]),
                 projected_point_m: Some([0.0, 1.0, 1.0]),
-                unit_normal: Some([0.04, 0.0, 0.9991996797437437]),
+                unit_normal: Some([0.0, 0.04, 0.9991996797437437]),
                 projection_error_m: Some(0.0),
             },
         ];
@@ -1518,9 +1610,9 @@ mod tests {
             },
             CadFaceEvaluationSample {
                 source: CadFaceEvaluationSampleSource::BackendQuery,
-                point_m: [0.0, 1.0, 0.6],
-                uv: Some([0.0, 1.0]),
-                projected_point_m: Some([0.0, 1.0, 1.0]),
+                point_m: [1.0, 1.0, 0.6],
+                uv: Some([1.0, 1.0]),
+                projected_point_m: Some([1.0, 1.0, 1.0]),
                 unit_normal: Some([0.0, 0.0, 1.0]),
                 projection_error_m: Some(0.4),
             },
