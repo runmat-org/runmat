@@ -259,6 +259,10 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_no_missing_cad_curvature_queries: bool,
     #[serde(default)]
+    pub require_no_rejected_requested_refinement_points: bool,
+    #[serde(default)]
+    pub require_no_dropped_requested_refinement_points: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -280,6 +284,8 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
             require_no_missing_cad_exact_queries: true,
             require_no_missing_cad_derivative_queries: true,
             require_no_missing_cad_curvature_queries: true,
+            require_no_rejected_requested_refinement_points: true,
+            require_no_dropped_requested_refinement_points: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -633,6 +639,36 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 "cad_curvature_queries_missing",
                 format!(
                     "{missing_curvature_query_count} CAD evaluator faces are missing curvature queries in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_rejected_requested_refinement_points {
+        let rejected_requested_refinement_count = suite
+            .reports
+            .iter()
+            .map(|report| report.sizing.rejected_requested_tet_refinement_point_count)
+            .sum::<usize>();
+        if rejected_requested_refinement_count > 0 {
+            violations.push(gate_violation(
+                "requested_refinement_points_rejected",
+                format!(
+                    "{rejected_requested_refinement_count} requested refinement points were rejected in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_dropped_requested_refinement_points {
+        let dropped_requested_refinement_count = suite
+            .reports
+            .iter()
+            .map(|report| report.sizing.dropped_requested_tet_refinement_point_count)
+            .sum::<usize>();
+        if dropped_requested_refinement_count > 0 {
+            violations.push(gate_violation(
+                "requested_refinement_points_dropped",
+                format!(
+                    "{dropped_requested_refinement_count} requested refinement points were dropped after recovery in benchmark reports"
                 ),
             ));
         }
@@ -2361,6 +2397,12 @@ mod tests {
         over_budget.cad.missing_exact_query_face_count = 3;
         over_budget.cad.missing_derivative_query_face_count = 4;
         over_budget.cad.missing_curvature_query_face_count = 5;
+        over_budget
+            .sizing
+            .rejected_requested_tet_refinement_point_count = 6;
+        over_budget
+            .sizing
+            .dropped_requested_tet_refinement_point_count = 7;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
             vec![over_budget],
@@ -2398,6 +2440,8 @@ mod tests {
         assert!(codes.contains(&"cad_exact_queries_missing"));
         assert!(codes.contains(&"cad_derivative_queries_missing"));
         assert!(codes.contains(&"cad_curvature_queries_missing"));
+        assert!(codes.contains(&"requested_refinement_points_rejected"));
+        assert!(codes.contains(&"requested_refinement_points_dropped"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
