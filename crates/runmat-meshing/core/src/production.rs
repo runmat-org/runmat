@@ -145,10 +145,7 @@ fn prepare_production_mesh_internal(
         &topology,
         &cad_evaluation,
         &curves,
-        SurfaceDiscretizationOptions {
-            max_curve_segments_per_edge: 8,
-            ..SurfaceDiscretizationOptions::default()
-        },
+        surface_options_for_mesh(&topology),
     )
     .map_err(ProductionMeshError::Surface)?;
     let surface_validation =
@@ -287,7 +284,7 @@ fn tet_candidate_options_for_mesh(
         min_scaled_jacobian: quality.min_scaled_jacobian,
         max_optimization_passes: 2,
         smoothing_relaxation: 0.30,
-        sliver_aspect_ratio: 1.0 / quality.min_scaled_jacobian,
+        sliver_aspect_ratio: sliver_aspect_ratio_for_mesh(topology, quality),
         ..TetCandidateOptions::default()
     }
 }
@@ -308,6 +305,9 @@ fn global_insertion_point_limit_for_mesh(
     options: &VolumeMeshingOptions,
 ) -> usize {
     let default_limit = options.max_elements.max(1).min(4096);
+    if thin_low_face_topology(topology) {
+        return default_limit.min(16);
+    }
     if constrained_recovery_topology(topology) {
         default_limit.min(128)
     } else {
@@ -316,10 +316,32 @@ fn global_insertion_point_limit_for_mesh(
 }
 
 fn dense_recovery_layer_count_for_mesh(topology: &SourceTopologyModel) -> usize {
+    if thin_low_face_topology(topology) {
+        return 2;
+    }
     if constrained_recovery_topology(topology) {
         3
     } else {
         8
+    }
+}
+
+fn surface_options_for_mesh(topology: &SourceTopologyModel) -> SurfaceDiscretizationOptions {
+    SurfaceDiscretizationOptions {
+        max_curve_segments_per_edge: if thin_low_face_topology(topology) {
+            2
+        } else {
+            8
+        },
+        ..SurfaceDiscretizationOptions::default()
+    }
+}
+
+fn sliver_aspect_ratio_for_mesh(topology: &SourceTopologyModel, quality: QualityThresholds) -> f64 {
+    if thin_low_face_topology(topology) {
+        quality.max_aspect_ratio
+    } else {
+        1.0 / quality.min_scaled_jacobian
     }
 }
 
@@ -347,6 +369,10 @@ fn constrained_recovery_topology(topology: &SourceTopologyModel) -> bool {
     topology_span_aspect_ratio(topology) >= 6.0
         || topology.vertices.len() > 96
         || topology.faces.len() > 48
+}
+
+fn thin_low_face_topology(topology: &SourceTopologyModel) -> bool {
+    topology_span_aspect_ratio(topology) >= 6.0 && topology.faces.len() <= 48
 }
 
 fn topology_span_aspect_ratio(topology: &SourceTopologyModel) -> f64 {
@@ -2504,6 +2530,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn thin_low_face_topology_uses_bounded_recovery_options() {
+        let geometry = thin_box_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        let options = VolumeMeshingOptions {
+            max_elements: 50_000,
+            ..VolumeMeshingOptions::default()
+        };
+        let quality = QualityThresholds::default();
+
+        assert!(thin_low_face_topology(&topology));
+        assert_eq!(
+            surface_options_for_mesh(&topology).max_curve_segments_per_edge,
+            2
+        );
+        assert_eq!(
+            global_insertion_point_limit_for_mesh(&topology, &options),
+            16
+        );
+        assert_eq!(dense_recovery_layer_count_for_mesh(&topology), 2);
+        assert_eq!(
+            sliver_aspect_ratio_for_mesh(&topology, quality),
+            quality.max_aspect_ratio
+        );
+    }
+
     fn volume_element_centroid_count_within(
         mesh: &AnalysisMeshArtifact,
         point_m: [f64; 3],
@@ -3139,10 +3191,7 @@ mod tests {
             &topology,
             &cad_evaluation,
             &curves,
-            SurfaceDiscretizationOptions {
-                max_curve_segments_per_edge: 8,
-                ..SurfaceDiscretizationOptions::default()
-            },
+            surface_options_for_mesh(&topology),
         )
         .expect("surface");
         eprintln!(

@@ -1015,9 +1015,13 @@ fn dense_recovery_component_exceeds_budget(
     options: TetCandidateOptions,
 ) -> bool {
     options.dense_recovery_layer_count <= 3
-        && (component.node_ids.len() > options.max_global_insertion_points
+        && ((component.node_ids.len() > options.max_global_insertion_points
+            && component.node_ids.len() > 64)
             || component.surface_element_ids.len()
-                > options.max_global_insertion_points.saturating_mul(2))
+                > options
+                    .max_global_insertion_points
+                    .saturating_mul(2)
+                    .max(96))
 }
 
 fn quality_recovery_star_tets(
