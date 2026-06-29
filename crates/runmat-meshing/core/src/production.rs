@@ -1729,7 +1729,10 @@ fn quality_report(
 mod tests {
     use super::*;
     use crate::{
-        field_mapping::map_volume_scalar_field_to_boundary_faces,
+        field_mapping::{
+            map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
+            map_volume_scalar_field_to_boundary_faces,
+        },
         validation::volume_component_count,
     };
     use runmat_geometry_core::{
@@ -2625,9 +2628,12 @@ mod tests {
 
     #[test]
     fn production_boundary_faces_map_element_scalars_for_visualization() {
-        let mesh =
-            generate_production_analysis_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
-                .expect("production mesh should generate");
+        let options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(0.5),
+            ..VolumeMeshingOptions::default()
+        };
+        let mesh = generate_production_analysis_mesh(&cube_geometry(), &options)
+            .expect("production mesh should generate");
         let element_values = (0..mesh.volume_elements.len())
             .map(|index| index as f64 + 1.0)
             .collect::<Vec<_>>();
@@ -2641,6 +2647,53 @@ mod tests {
             .iter()
             .zip(mesh.boundary_faces.iter())
             .all(|(value, face)| value.face_id == face.face_id));
+    }
+
+    #[test]
+    fn production_boundary_topology_maps_nodal_vectors_for_visualization() {
+        let options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(0.5),
+            ..VolumeMeshingOptions::default()
+        };
+        let mesh = generate_production_analysis_mesh(&cube_geometry(), &options)
+            .expect("production mesh should generate");
+        let node_values = mesh
+            .nodes
+            .iter()
+            .map(|node| {
+                [
+                    node.coordinates_m[0] * 1.0e-3,
+                    node.coordinates_m[1] * 2.0e-3,
+                    node.coordinates_m[2] * 3.0e-3,
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        let boundary_node_values = map_nodal_vector_field_to_boundary_nodes(&mesh, &node_values)
+            .expect("boundary nodes should map nodal vectors");
+        let boundary_face_values = map_nodal_vector_field_to_boundary_faces(&mesh, &node_values)
+            .expect("boundary faces should map nodal vectors");
+
+        let boundary_node_count = mesh
+            .boundary_faces
+            .iter()
+            .flat_map(|face| face.node_ids.iter().copied())
+            .collect::<BTreeSet<_>>()
+            .len();
+        assert_eq!(boundary_node_values.len(), boundary_node_count);
+        assert_eq!(boundary_face_values.len(), mesh.boundary_faces.len());
+        assert!(boundary_node_values
+            .iter()
+            .flat_map(|value| value.value)
+            .all(f64::is_finite));
+        assert!(boundary_face_values
+            .iter()
+            .zip(mesh.boundary_faces.iter())
+            .all(|(value, face)| value.face_id == face.face_id));
+        assert!(boundary_face_values
+            .iter()
+            .flat_map(|value| value.value)
+            .all(f64::is_finite));
     }
 
     fn volume_element_centroid_count_within(

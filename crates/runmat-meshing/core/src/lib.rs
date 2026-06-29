@@ -79,7 +79,9 @@ pub use evidence::{
 #[cfg(feature = "dev-evidence")]
 pub use evidence::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
 pub use field_mapping::{
-    map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, FieldMappingError,
+    map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
+    map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,
+    BoundaryNodeVectorValue, FieldMappingError,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
