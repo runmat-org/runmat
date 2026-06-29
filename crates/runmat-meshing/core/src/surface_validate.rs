@@ -287,25 +287,104 @@ fn count_closed_source_edge_loops(
     edges: &[SourceTopologyEdge],
 ) -> Result<(usize, usize), SurfaceValidationError> {
     let mut endpoint_incidence = BTreeMap::<u32, usize>::new();
+    let mut endpoint_edges = BTreeMap::<u32, Vec<u32>>::new();
+    let mut edges_by_id = BTreeMap::<u32, &SourceTopologyEdge>::new();
     for edge in edges {
+        edges_by_id.insert(edge.edge_id, edge);
         *endpoint_incidence.entry(edge.node_ids[0]).or_default() += 1;
         *endpoint_incidence.entry(edge.node_ids[1]).or_default() += 1;
+        endpoint_edges
+            .entry(edge.node_ids[0])
+            .or_default()
+            .push(edge.edge_id);
+        endpoint_edges
+            .entry(edge.node_ids[1])
+            .or_default()
+            .push(edge.edge_id);
     }
+
+    let mut visited_edges = BTreeSet::<u32>::new();
+    let mut component_count = 0_usize;
     let mut closed_count = 0_usize;
     for edge in edges {
-        for endpoint_id in edge.node_ids {
-            let incidence_count = endpoint_incidence.get(&endpoint_id).copied().unwrap_or(0);
-            if incidence_count < 2 {
-                return Err(SurfaceValidationError::OpenSourceLoop {
-                    source_edge_id: edge.edge_id,
-                    endpoint_id,
-                    incidence_count,
-                });
+        if !visited_edges.insert(edge.edge_id) {
+            continue;
+        }
+
+        component_count += 1;
+        let mut closed = true;
+        let mut component_edge_ids = Vec::<u32>::new();
+        let mut stack = vec![edge.edge_id];
+        while let Some(edge_id) = stack.pop() {
+            component_edge_ids.push(edge_id);
+            let component_edge =
+                edges_by_id
+                    .get(&edge_id)
+                    .ok_or(SurfaceValidationError::MissingSourceEdge {
+                        source_edge_id: edge_id,
+                    })?;
+            for endpoint_id in component_edge.node_ids {
+                let incidence_count = endpoint_incidence.get(&endpoint_id).copied().unwrap_or(0);
+                if incidence_count < 2 {
+                    closed = false;
+                }
+                if let Some(adjacent_edges) = endpoint_edges.get(&endpoint_id) {
+                    for adjacent_edge_id in adjacent_edges {
+                        if visited_edges.insert(*adjacent_edge_id) {
+                            stack.push(*adjacent_edge_id);
+                        }
+                    }
+                }
             }
         }
-        closed_count += 1;
+
+        if closed {
+            closed_count += 1;
+        } else {
+            for endpoint_id in edge.node_ids {
+                let incidence_count = endpoint_incidence.get(&endpoint_id).copied().unwrap_or(0);
+                if incidence_count < 2 {
+                    return Err(SurfaceValidationError::OpenSourceLoop {
+                        source_edge_id: edge.edge_id,
+                        endpoint_id,
+                        incidence_count,
+                    });
+                }
+            }
+            for edge_id in component_edge_ids {
+                let component_edge =
+                    edges_by_id
+                        .get(&edge_id)
+                        .ok_or(SurfaceValidationError::MissingSourceEdge {
+                            source_edge_id: edge_id,
+                        })?;
+                for endpoint_id in component_edge.node_ids {
+                    let incidence_count =
+                        endpoint_incidence.get(&endpoint_id).copied().unwrap_or(0);
+                    if incidence_count < 2 {
+                        return Err(SurfaceValidationError::OpenSourceLoop {
+                            source_edge_id: edge_id,
+                            endpoint_id,
+                            incidence_count,
+                        });
+                    }
+                }
+            }
+        }
     }
-    Ok((edges.len(), closed_count))
+
+    Ok((component_count, closed_count))
+}
+
+#[cfg(test)]
+fn source_edge(edge_id: u32, node_ids: [u32; 2]) -> SourceTopologyEdge {
+    SourceTopologyEdge {
+        edge_id,
+        node_ids,
+        adjacent_face_ids: Vec::new(),
+        region_ids: Vec::new(),
+        length_m: 1.0,
+    }
 }
 
 fn surface_edge_source_ids(surface: &SurfaceDiscretization) -> BTreeMap<u32, Vec<[u32; 2]>> {
@@ -447,8 +526,8 @@ mod tests {
 
         assert_eq!(report.source_face_count, 12);
         assert_eq!(report.surface_element_count, 12);
-        assert_eq!(report.source_edge_loop_count, 18);
-        assert_eq!(report.closed_source_edge_loop_count, 18);
+        assert_eq!(report.source_edge_loop_count, 1);
+        assert_eq!(report.closed_source_edge_loop_count, 1);
         assert_eq!(report.conforming_source_edge_count, 18);
         assert_eq!(report.missing_source_edge_count, 0);
         assert_eq!(report.max_projection_error_m, 0.0);
@@ -498,6 +577,45 @@ mod tests {
         .expect_err("open source loop should fail");
 
         assert!(matches!(err, SurfaceValidationError::OpenSourceLoop { .. }));
+    }
+
+    #[test]
+    fn counts_disconnected_closed_source_edge_loop_components() {
+        let edges = vec![
+            source_edge(0, [0, 1]),
+            source_edge(1, [1, 2]),
+            source_edge(2, [2, 0]),
+            source_edge(3, [3, 4]),
+            source_edge(4, [4, 5]),
+            source_edge(5, [5, 3]),
+        ];
+
+        let (loop_count, closed_loop_count) =
+            count_closed_source_edge_loops(&edges).expect("closed loops should count");
+
+        assert_eq!(loop_count, 2);
+        assert_eq!(closed_loop_count, 2);
+    }
+
+    #[test]
+    fn rejects_disconnected_open_source_edge_component() {
+        let edges = vec![
+            source_edge(0, [0, 1]),
+            source_edge(1, [1, 2]),
+            source_edge(2, [2, 0]),
+            source_edge(3, [3, 4]),
+        ];
+
+        let err =
+            count_closed_source_edge_loops(&edges).expect_err("open component should fail closed");
+
+        assert!(matches!(
+            err,
+            SurfaceValidationError::OpenSourceLoop {
+                source_edge_id: 3,
+                ..
+            }
+        ));
     }
 
     fn cube_topology() -> SourceTopologyModel {

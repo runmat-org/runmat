@@ -1604,10 +1604,10 @@ mod tests {
             .elements
             .iter()
             .all(|element| element.cad_face_id.is_some()));
-        assert_eq!(preparation.surface_validation.source_edge_loop_count, 18);
+        assert_eq!(preparation.surface_validation.source_edge_loop_count, 1);
         assert_eq!(
             preparation.surface_validation.closed_source_edge_loop_count,
-            18
+            1
         );
         assert_eq!(preparation.surface_validation.face_coverage_ratio, 1.0);
         assert_eq!(preparation.surface_recovery.surface_element_count, 768);
@@ -1680,8 +1680,8 @@ mod tests {
         assert_eq!(mesh.backend.cad_projection_query_count, 36);
         assert_eq!(mesh.backend.cad_max_projection_error_m, 0.0);
         assert_eq!(mesh.backend.surface_element_count, 768);
-        assert_eq!(mesh.backend.surface_source_edge_loop_count, 18);
-        assert_eq!(mesh.backend.surface_closed_edge_loop_count, 18);
+        assert_eq!(mesh.backend.surface_source_edge_loop_count, 1);
+        assert_eq!(mesh.backend.surface_closed_edge_loop_count, 1);
         assert_eq!(mesh.backend.surface_face_coverage_ratio, 1.0);
         assert_eq!(mesh.backend.surface_cad_face_count, 12);
         assert_eq!(mesh.backend.surface_exact_cad_sample_node_count, 0);
