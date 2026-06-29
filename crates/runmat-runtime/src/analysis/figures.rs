@@ -429,6 +429,7 @@ struct AuthoredBoundaryRegion {
     role: &'static str,
     highlight_color: Vec4,
     load_vector: Option<Vec3>,
+    pressure_sign: Option<f32>,
 }
 
 fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
@@ -443,6 +444,7 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             "load",
             Vec4::new(0.98, 0.30, 0.54, 1.0),
             load_vector_for_kind(&load.kind),
+            pressure_sign_for_kind(&load.kind),
         );
     }
     for boundary_condition in &model.boundary_conditions {
@@ -455,6 +457,7 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             "constraint",
             Vec4::new(0.18, 0.78, 0.48, 1.0),
             None,
+            None,
         );
     }
     regions
@@ -466,6 +469,7 @@ fn push_authored_boundary_region(
     role: &'static str,
     highlight_color: Vec4,
     load_vector: Option<Vec3>,
+    pressure_sign: Option<f32>,
 ) {
     if region_id.trim().is_empty()
         || regions
@@ -479,6 +483,7 @@ fn push_authored_boundary_region(
         role,
         highlight_color,
         load_vector,
+        pressure_sign,
     });
 }
 
@@ -513,6 +518,20 @@ fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
     }
 }
 
+fn pressure_sign_for_kind(kind: &LoadKind) -> Option<f32> {
+    match kind {
+        LoadKind::Pressure { magnitude_pa } => {
+            let magnitude = f64_to_f32(*magnitude_pa)?;
+            if magnitude.is_finite() && magnitude.abs() > f32::EPSILON {
+                Some(-magnitude.signum())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 fn attach_authored_load_vectors(
     mesh: &mut MeshPlot,
     regions: &[AuthoredBoundaryRegion],
@@ -521,9 +540,9 @@ fn attach_authored_load_vectors(
     let mut vectors = vec![Vec3::ZERO; mesh.triangles().len()];
     let mut has_vector = false;
     for region in regions {
-        let Some(load_vector) = region.load_vector else {
+        if region.load_vector.is_none() && region.pressure_sign.is_none() {
             continue;
-        };
+        }
         let Some(mesh_region) = mesh
             .regions()
             .iter()
@@ -533,7 +552,14 @@ fn attach_authored_load_vectors(
         };
         for triangle_index in 0..vectors.len() {
             if mesh_region.contains_triangle(triangle_index as u32) {
-                vectors[triangle_index] = load_vector;
+                let Some(vector) = region.load_vector.or_else(|| {
+                    region.pressure_sign.and_then(|sign| {
+                        triangle_unit_normal(mesh, triangle_index).map(|normal| normal * sign)
+                    })
+                }) else {
+                    continue;
+                };
+                vectors[triangle_index] = vector;
                 has_vector = true;
             }
         }
@@ -552,6 +578,19 @@ fn attach_authored_load_vectors(
         warnings.push(format!(
             "failed to attach authored boundary load vectors: {err}"
         ));
+    }
+}
+
+fn triangle_unit_normal(mesh: &MeshPlot, triangle_index: usize) -> Option<Vec3> {
+    let triangle = *mesh.triangles().get(triangle_index)?;
+    let a = *mesh.vertices().get(triangle[0] as usize)?;
+    let b = *mesh.vertices().get(triangle[1] as usize)?;
+    let c = *mesh.vertices().get(triangle[2] as usize)?;
+    let normal = (b - a).cross(c - a);
+    if normal.length_squared().is_finite() && normal.length_squared() > f32::EPSILON {
+        Some(normal.normalize())
+    } else {
+        None
     }
 }
 
@@ -2250,6 +2289,17 @@ mod tests {
         }
     }
 
+    fn simple_pressure_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "pressure_load".to_string(),
+            region_id: "pressurized".to_string(),
+            kind: LoadKind::Pressure { magnitude_pa: 5.0 },
+        }];
+        model
+    }
+
     fn simple_render_topology() -> AnalysisRenderTopology {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
@@ -2698,6 +2748,45 @@ mod tests {
         assert_eq!(
             vector_field.vectors,
             vec![Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_pressure_load_direction_from_triangle_normal() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "pressurized".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 0,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_pressure_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("pressure load direction should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO, Vec3::ZERO]
         );
     }
 
