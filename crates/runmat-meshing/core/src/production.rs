@@ -878,13 +878,14 @@ fn production_mesh_sizing(
     }
     if let Some(sizing) = sizing {
         let mut seen_positions = Vec::<[f64; 3]>::new();
-        let accepted_requested_sample_indices = preparation
+        let requested_sample_ids = requested_sizing_sample_ids(sizing);
+        let accepted_requested_ids = preparation
             .tet_candidates
             .accepted_requested_refinement_sample_indices
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        let dropped_requested_sample_indices = preparation
+        let dropped_requested_ids = preparation
             .tet_candidates
             .dropped_requested_refinement_sample_indices
             .iter()
@@ -926,31 +927,79 @@ fn production_mesh_sizing(
                 continue;
             }
             seen_positions.push(sample.position_m);
-            let inserted_breakpoint_count = usize::from(
-                preparation
-                    .tet_candidates
-                    .accepted_requested_refinement_points
-                    .iter()
-                    .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
-                    || accepted_requested_sample_indices.contains(&sample_index),
-            );
-            let detail = if inserted_breakpoint_count > 0 {
-                "production_requested_tet_seed_accepted"
-            } else if dropped_requested_sample_indices.contains(&sample_index) {
-                "production_requested_tet_seed_removed_by_repair"
+            let requested_id = requested_sample_ids.get(&sample_index).copied();
+            let inserted_breakpoint_count = usize::from(requested_id.is_some_and(|requested_id| {
+                accepted_requested_ids.contains(&requested_id)
+                    || preparation
+                        .tet_candidates
+                        .accepted_requested_refinement_points
+                        .iter()
+                        .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+            }));
+            if inserted_breakpoint_count > 0 {
+                mesh_sizing.applied_samples.push(SizingSampleApplication {
+                    position_m: sample.position_m,
+                    target_size_m,
+                    inserted_breakpoint_count,
+                    reason: sample.reason.clone(),
+                    detail: Some("production_requested_tet_seed_accepted".to_string()),
+                });
+            } else if requested_id
+                .is_some_and(|requested_id| dropped_requested_ids.contains(&requested_id))
+            {
+                mesh_sizing.rejected_samples.push(SizingSampleRejection {
+                    position_m: sample.position_m,
+                    target_size_m,
+                    status: "dropped_after_repair".to_string(),
+                    reason: sample.reason.clone(),
+                    detail: Some("production requested Tet seed was removed by repair".to_string()),
+                });
+            } else if requested_id.is_some() {
+                mesh_sizing.rejected_samples.push(SizingSampleRejection {
+                    position_m: sample.position_m,
+                    target_size_m,
+                    status: "rejected_by_recovery".to_string(),
+                    reason: sample.reason.clone(),
+                    detail: Some(
+                        "production requested Tet seed was not accepted by recovery".to_string(),
+                    ),
+                });
             } else {
-                "production_requested_tet_seed_rejected_by_recovery"
-            };
-            mesh_sizing.applied_samples.push(SizingSampleApplication {
-                position_m: sample.position_m,
-                target_size_m,
-                inserted_breakpoint_count,
-                reason: sample.reason.clone(),
-                detail: Some(detail.to_string()),
-            });
+                mesh_sizing.rejected_samples.push(SizingSampleRejection {
+                    position_m: sample.position_m,
+                    target_size_m,
+                    status: "skipped_budget".to_string(),
+                    reason: sample.reason.clone(),
+                    detail: Some("requested Tet seed budget was exhausted".to_string()),
+                });
+            }
         }
     }
     mesh_sizing
+}
+
+fn requested_sizing_sample_ids(sizing: &MeshSizingField) -> BTreeMap<usize, usize> {
+    let mut requested_sample_ids = BTreeMap::<usize, usize>::new();
+    let mut requested_points = [[0.0; 3]; 16];
+    let mut requested_count = 0_usize;
+    for (sample_index, sample) in sizing.samples.iter().enumerate() {
+        if !sample.target_size_m.is_finite()
+            || sample.target_size_m <= 0.0
+            || sample.position_m.iter().any(|value| !value.is_finite())
+            || requested_points[..requested_count]
+                .iter()
+                .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+        {
+            continue;
+        }
+        requested_sample_ids.insert(sample_index, requested_count);
+        requested_points[requested_count] = sample.position_m;
+        requested_count += 1;
+        if requested_count >= requested_points.len() {
+            break;
+        }
+    }
+    requested_sample_ids
 }
 
 fn production_sample_target_size(
@@ -2003,6 +2052,104 @@ mod tests {
             centroid[1] * scale,
             centroid[2] * scale,
         ])
+    }
+
+    #[test]
+    fn production_sizing_maps_requested_ids_after_skipped_samples() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.75);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [0.10, 0.10, 0.10],
+                    target_size_m: f64::NAN,
+                    reason: Some("invalid".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.25, 0.25, 0.25],
+                    target_size_m: 0.25,
+                    reason: Some("structural.load_regions".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh =
+            generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
+                .expect("production mesh should generate with a skipped sample");
+
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("structural.load_regions")
+                && sample.inserted_breakpoint_count > 0
+        }));
+        assert!(mesh.sizing.rejected_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("invalid") && sample.status == "skipped_invalid"
+        }));
+    }
+
+    #[test]
+    fn production_sizing_reports_unaccepted_requested_samples_as_rejections() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.75);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [0.25, 0.25, 0.25],
+                    target_size_m: 0.25,
+                    reason: Some("structural.load_regions".to_string()),
+                },
+                SizingSample {
+                    position_m: [2.0, 2.0, 2.0],
+                    target_size_m: 0.25,
+                    reason: Some("structural.constraint_regions".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh =
+            generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
+                .expect("production mesh should generate with a rejected requested sample");
+        let evidence =
+            crate::build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
+
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("structural.load_regions")
+                && sample.inserted_breakpoint_count > 0
+        }));
+        assert!(mesh.sizing.rejected_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("structural.constraint_regions")
+                && sample.status == "rejected_by_recovery"
+        }));
+        assert_eq!(
+            evidence
+                .sizing
+                .rejected_by_reason
+                .get("structural.constraint_regions"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .rejected_by_status
+                .get("rejected_by_recovery"),
+            Some(&1)
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .requested_tet_refinement_rejected_by_reason
+                .get("outside_volume"),
+            Some(&1)
+        );
     }
 
     #[test]
