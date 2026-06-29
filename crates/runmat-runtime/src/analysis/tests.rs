@@ -6205,6 +6205,63 @@ fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
 }
 
 #[test]
+fn initial_boundary_focus_sizing_field_uses_load_and_constraint_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let options = runmat_meshing_core::VolumeMeshingOptions::default();
+
+    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
+        .expect("boundary load and constraint regions should seed initial sizing");
+
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .all(|sample| sample.target_size_m.is_finite() && sample.target_size_m > 0.0));
+}
+
+#[test]
+fn initial_boundary_focus_sizing_field_honors_focus_off() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
+    options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
+    options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+
+    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
+        .expect("constraint focus should still seed initial sizing");
+
+    assert!(!sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
+}
+
+#[test]
+fn initial_boundary_focus_sizing_field_skips_disabled_refinement() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
+    options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+
+    assert!(initial_boundary_focus_sizing_field(&spec, &options, &mesh).is_none());
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
     let root = temp_artifact_root("append-solved-adaptive-energy-summary");
     let _ = fs::remove_dir_all(&root);

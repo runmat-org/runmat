@@ -39,9 +39,10 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{
-    build_refinement_markers_from_samples, generate_analysis_mesh, plan_refinement_indicators,
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, AnalysisMeshArtifact,
-    AnalysisMeshValidationOptions, ElementFamilyHint, MeshConnectivityClass, MeshTargetSize,
+    build_refinement_markers_from_samples, generate_analysis_mesh,
+    generate_analysis_mesh_with_sizing, plan_refinement_indicators, AdaptiveConvergenceStatus,
+    AdaptiveIterationSummary, AnalysisMeshArtifact, AnalysisMeshValidationOptions,
+    ElementFamilyHint, MeshConnectivityClass, MeshSizingField, MeshTargetSize,
     RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
     RefinementStrategy, SizingFieldUpdate, SourceEntityKind, VolumeMeshingOptions,
 };
@@ -13611,24 +13612,8 @@ fn generate_and_persist_study_analysis_mesh(
         return Ok(None);
     };
     let options = mesh_options_in_si_units(options, spec.geometry.units);
-    let mut mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to generate analysis mesh: {err}"),
-            BTreeMap::from([
-                ("study_id".to_string(), spec.study_id.clone()),
-                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
-            ]),
-        )
-    })?;
+    let mut mesh =
+        generate_study_analysis_mesh_with_initial_boundary_focus(spec, &options, context)?;
     attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
     attach_single_material_assignment_to_analysis_mesh(spec, &mut mesh);
     attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
@@ -13736,6 +13721,60 @@ fn generate_and_persist_study_analysis_mesh(
         path: mesh_path,
         evidence_path,
     }))
+}
+
+fn generate_study_analysis_mesh_with_initial_boundary_focus(
+    spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
+    context: &OperationContext,
+) -> Result<AnalysisMeshArtifact, OperationErrorEnvelope> {
+    let mut mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
+        analysis_mesh_generation_error(
+            spec,
+            context,
+            "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
+            format!("failed to generate analysis mesh: {err}"),
+        )
+    })?;
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut mesh);
+    let Some(sizing) = initial_boundary_focus_sizing_field(spec, options, &mesh) else {
+        return Ok(mesh);
+    };
+    let focused_mesh = generate_analysis_mesh_with_sizing(&spec.geometry, options.clone(), &sizing)
+        .map_err(|err| {
+            analysis_mesh_generation_error(
+                spec,
+                context,
+                "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
+                format!("failed to generate analysis mesh with boundary focus sizing: {err}"),
+            )
+        })?;
+    Ok(focused_mesh)
+}
+
+fn analysis_mesh_generation_error(
+    spec: &AnalysisStudySpec,
+    context: &OperationContext,
+    error_code: &'static str,
+    message: String,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code,
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        message,
+        BTreeMap::from([
+            ("study_id".to_string(), spec.study_id.clone()),
+            ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+        ]),
+    )
 }
 
 fn mesh_options_in_si_units(
@@ -14545,6 +14584,106 @@ fn attach_initial_adaptive_mesh_summary(
         markers: Vec::new(),
         sizing_update: SizingFieldUpdate::default(),
     });
+}
+
+fn initial_boundary_focus_sizing_field(
+    spec: &AnalysisStudySpec,
+    options: &runmat_meshing_core::VolumeMeshingOptions,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<MeshSizingField> {
+    if matches!(options.refinement.strategy, RefinementStrategy::None)
+        || options.refinement.max_iterations == 0
+    {
+        return None;
+    }
+    if runmat_meshing_core::select_volume_backend(options).selected
+        != runmat_meshing_core::MeshBackendKind::Production
+    {
+        return None;
+    }
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        default_refinement_indicators_for_context(
+            analysis_refinement_profile_label(spec.create_model_intent.profile),
+            analysis_refinement_run_kind_label(spec.run_kind),
+        )
+    };
+    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+        return None;
+    }
+    let context = serde_json::json!({
+        "refinement_context": analysis_refinement_context(spec),
+    });
+    let boundary_load_region_ids =
+        refinement_context_region_ids(&context, "boundary_load_region_ids");
+    let boundary_constraint_region_ids =
+        refinement_context_region_ids(&context, "boundary_constraint_region_ids");
+    let load_focus_options = refinement_marker_options_for_focus(options.refinement.focus.loads);
+    let constraint_focus_options =
+        refinement_marker_options_for_focus(options.refinement.focus.constraints);
+    let has_boundary_load_regions = load_focus_options.is_some()
+        && has_boundary_faces_for_regions(mesh, boundary_load_region_ids.as_slice());
+    let has_boundary_constraint_regions = constraint_focus_options.is_some()
+        && has_boundary_faces_for_regions(mesh, boundary_constraint_region_ids.as_slice());
+    if !has_boundary_load_regions && !has_boundary_constraint_regions {
+        return None;
+    }
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| {
+            let applicable = key.namespace != "structural"
+                || (key.name != "load_regions" || load_focus_options.is_some())
+                    && (key.name != "constraint_regions" || constraint_focus_options.is_some());
+            let field_available = key.namespace == "structural"
+                && ((key.name == "load_regions" && has_boundary_load_regions)
+                    || (key.name == "constraint_regions" && has_boundary_constraint_regions));
+            RefinementIndicatorAvailability {
+                key,
+                applicable,
+                field_available,
+            }
+        })
+        .collect::<Vec<_>>();
+    let indicators =
+        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+    let mut sizing_update = SizingFieldUpdate::default();
+    if indicator_was_used(&indicators, "structural", "load_regions") {
+        if let Some(marker_options) = load_focus_options {
+            let samples =
+                structural_boundary_region_samples(mesh, boundary_load_region_ids.as_slice());
+            if let Ok((_, update)) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.load_regions",
+                marker_options,
+            ) {
+                merge_sizing_update(&mut sizing_update, update);
+            }
+        }
+    }
+    if indicator_was_used(&indicators, "structural", "constraint_regions") {
+        if let Some(marker_options) = constraint_focus_options {
+            let samples =
+                structural_boundary_region_samples(mesh, boundary_constraint_region_ids.as_slice());
+            if let Ok((_, update)) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.constraint_regions",
+                marker_options,
+            ) {
+                merge_sizing_update(&mut sizing_update, update);
+            }
+        }
+    }
+    if sizing_update.samples.is_empty()
+        && sizing_update.min_size_m.is_none()
+        && sizing_update.max_size_m.is_none()
+    {
+        return None;
+    }
+    let mut sizing = MeshSizingField::default();
+    sizing_update.apply_to(&mut sizing);
+    Some(sizing)
 }
 
 fn default_refinement_indicators_for_context(
