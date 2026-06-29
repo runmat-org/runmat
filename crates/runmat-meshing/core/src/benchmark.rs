@@ -265,6 +265,12 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_no_unrepaired_exact_quality_cavities: bool,
     #[serde(default)]
+    pub require_no_fan_fallback_components: bool,
+    #[serde(default)]
+    pub require_full_boundary_face_recovery: bool,
+    #[serde(default)]
+    pub require_full_boundary_edge_recovery: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -289,6 +295,9 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
             require_no_rejected_requested_refinement_points: true,
             require_no_dropped_requested_refinement_points: true,
             require_no_unrepaired_exact_quality_cavities: true,
+            require_no_fan_fallback_components: true,
+            require_full_boundary_face_recovery: true,
+            require_full_boundary_edge_recovery: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -687,6 +696,51 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 "unrepaired_exact_quality_cavities",
                 format!(
                     "{unrepaired_exact_quality_count} exact-quality recovery cavities remain unrepaired in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_fan_fallback_components {
+        let fan_fallback_component_count = suite
+            .reports
+            .iter()
+            .map(|report| report.solve_readiness.fan_fallback_component_count)
+            .sum::<usize>();
+        if fan_fallback_component_count > 0 {
+            violations.push(gate_violation(
+                "fan_fallback_components_present",
+                format!(
+                    "{fan_fallback_component_count} fan fallback components are present in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_full_boundary_face_recovery {
+        let incomplete_face_recovery_count = suite
+            .reports
+            .iter()
+            .filter(|report| report.coverage.boundary_face_recovery_ratio + 1.0e-9 < 1.0)
+            .count();
+        if incomplete_face_recovery_count > 0 {
+            violations.push(gate_violation(
+                "boundary_face_recovery_incomplete",
+                format!(
+                    "{incomplete_face_recovery_count} benchmark reports have incomplete boundary face recovery"
+                ),
+            ));
+        }
+    }
+    if policy.require_full_boundary_edge_recovery {
+        let incomplete_edge_recovery_count = suite
+            .reports
+            .iter()
+            .filter(|report| report.coverage.boundary_edge_recovery_ratio + 1.0e-9 < 1.0)
+            .count();
+        if incomplete_edge_recovery_count > 0 {
+            violations.push(gate_violation(
+                "boundary_edge_recovery_incomplete",
+                format!(
+                    "{incomplete_edge_recovery_count} benchmark reports have incomplete boundary edge recovery"
                 ),
             ));
         }
@@ -2424,6 +2478,9 @@ mod tests {
         over_budget
             .solve_readiness
             .unrepaired_exact_quality_total_count = 8;
+        over_budget.solve_readiness.fan_fallback_component_count = 9;
+        over_budget.coverage.boundary_face_recovery_ratio = 0.75;
+        over_budget.coverage.boundary_edge_recovery_ratio = 0.5;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
             vec![over_budget],
@@ -2464,6 +2521,9 @@ mod tests {
         assert!(codes.contains(&"requested_refinement_points_rejected"));
         assert!(codes.contains(&"requested_refinement_points_dropped"));
         assert!(codes.contains(&"unrepaired_exact_quality_cavities"));
+        assert!(codes.contains(&"fan_fallback_components_present"));
+        assert!(codes.contains(&"boundary_face_recovery_incomplete"));
+        assert!(codes.contains(&"boundary_edge_recovery_incomplete"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
