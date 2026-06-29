@@ -977,7 +977,7 @@ fn boundary_node_refill_candidate(
             Ok(tet) => refill_tets.push(tet),
             Err(reason) => {
                 if first_rejection.is_none() {
-                    first_rejection = Some(reason);
+                    first_rejection = Some(boundary_node_refill_rejection_reason(reason));
                 }
             }
         }
@@ -1002,12 +1002,40 @@ fn boundary_node_refill_candidate(
                 options,
             )?
             else {
-                return Err(err);
+                return Ok(Err(boundary_node_refill_validation_reason(&err)));
             };
             let refill =
-                refill_from_tets(cavity, completed_tets, options.volume_relative_tolerance)?;
+                match refill_from_tets(cavity, completed_tets, options.volume_relative_tolerance) {
+                    Ok(refill) => refill,
+                    Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
+                };
             Ok(Ok(refill))
         }
+    }
+}
+
+fn boundary_node_refill_rejection_reason(reason: &'static str) -> &'static str {
+    match reason {
+        "star_tet_min_volume" => "boundary_node_tet_min_volume",
+        "star_tet_aspect_ratio" => "boundary_node_tet_aspect_ratio",
+        "star_tet_scaled_jacobian" => "boundary_node_tet_scaled_jacobian",
+        other => other,
+    }
+}
+
+fn boundary_node_refill_validation_reason(
+    error: &ConstrainedCavityValidationError,
+) -> &'static str {
+    match refill_validation_reason(error) {
+        "boundary_face_count_mismatch" => "boundary_node_boundary_face_count_mismatch",
+        "missing_boundary_face" => "boundary_node_missing_boundary_face",
+        "unexpected_boundary_face" => "boundary_node_unexpected_boundary_face",
+        "volume_mismatch" => "boundary_node_volume_mismatch",
+        "boundary_source_face_mismatch" => "boundary_node_boundary_source_face_mismatch",
+        "boundary_source_edge_mismatch" => "boundary_node_boundary_source_edge_mismatch",
+        "boundary_region_mismatch" => "boundary_node_boundary_region_mismatch",
+        "invalid_cavity" => "boundary_node_invalid_cavity",
+        other => other,
     }
 }
 
@@ -1853,6 +1881,30 @@ mod tests {
         assert_eq!(
             evaluation.rejected_by_reason,
             BTreeMap::from([("star_tet_scaled_jacobian".to_string(), 1)])
+        );
+    }
+
+    #[test]
+    fn boundary_node_refill_evaluation_reports_contextual_scaled_jacobian_rejections() {
+        let cavity = octahedron_cavity();
+        let nodes = octahedron_nodes();
+
+        let evaluation = evaluate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &[],
+            ConstrainedCavityRefillOptions {
+                min_scaled_jacobian: 0.95,
+                volume_relative_tolerance: 1.0e-12,
+                ..ConstrainedCavityRefillOptions::default()
+            },
+        )
+        .expect("boundary-node evaluation should classify low-quality candidates");
+
+        assert!(evaluation.refill.is_none());
+        assert_eq!(
+            evaluation.rejected_by_reason,
+            BTreeMap::from([("boundary_node_tet_scaled_jacobian".to_string(), 1)])
         );
     }
 
