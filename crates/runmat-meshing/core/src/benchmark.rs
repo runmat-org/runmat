@@ -10,10 +10,11 @@ use runmat_geometry_core::{
 use crate::{
     artifact::AnalysisMeshArtifact,
     constrained_cavity::{
-        constrained_cavity_from_selected_tets, evaluate_constrained_cavity_refill_candidates,
-        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
-        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
-        ConstrainedCavityValidationError,
+        constrained_cavity_from_selected_tets,
+        constrained_cavity_from_selected_tets_with_anchor_trim,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3107,6 +3108,10 @@ mod tests {
         let mut seed_star_component_non_manifold_boundary_edge_face_histogram =
             BTreeMap::<usize, usize>::new();
         let mut bad_seed_surface_distance_histogram = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_cavity_count = 0_usize;
+        let mut trimmed_seed_star_refill_success_count = 0_usize;
+        let mut trimmed_seed_star_boundary_face_histogram = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_refill_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3140,6 +3145,79 @@ mod tests {
                     *seed_star_non_manifold_boundary_edge_face_histogram
                         .entry(face_count)
                         .or_default() += 1;
+                }
+                let anchor_tet_index = adjacent
+                    .iter()
+                    .copied()
+                    .find(|tet_index| {
+                        preparation.tet_candidates.tets[*tet_index].exact_scaled_jacobian
+                            < case.options.validation.quality.min_scaled_jacobian
+                    })
+                    .unwrap_or(adjacent[0]);
+                if let Ok(Some(trimmed_cavity)) =
+                    constrained_cavity_from_selected_tets_with_anchor_trim(
+                        &preparation.tet_candidates.tets,
+                        adjacent,
+                        anchor_tet_index,
+                        vec![],
+                    )
+                {
+                    trimmed_seed_star_cavity_count += 1;
+                    *trimmed_seed_star_boundary_face_histogram
+                        .entry(trimmed_cavity.boundary_faces.len())
+                        .or_default() += 1;
+                    let boundary_node_ids = diagnostic_cavity_node_ids(&trimmed_cavity);
+                    let boundary_nodes = boundary_node_ids
+                        .iter()
+                        .map(|node_id| {
+                            Ok(ConstrainedCavityNode {
+                                node_id: *node_id,
+                                coordinates_m: *node_points
+                                    .get(node_id)
+                                    .ok_or_else(|| format!("missing node {node_id}"))?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                        .expect("diagnostic boundary nodes should exist");
+                    let mut interior_candidates = Vec::<ConstrainedCavityNode>::new();
+                    if !boundary_node_ids.contains(seed_node_id) {
+                        if let Some(current_point) = node_points.get(seed_node_id).copied() {
+                            interior_candidates.push(ConstrainedCavityNode {
+                                node_id: *seed_node_id,
+                                coordinates_m: current_point,
+                            });
+                        }
+                    }
+                    if let Some(centroid) = diagnostic_boundary_centroid(&boundary_nodes) {
+                        interior_candidates.push(ConstrainedCavityNode {
+                            node_id: next_diagnostic_node_id,
+                            coordinates_m: centroid,
+                        });
+                        next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                    }
+                    match evaluate_constrained_cavity_refill_candidates(
+                        &trimmed_cavity,
+                        &boundary_nodes,
+                        &interior_candidates,
+                        refill_options,
+                    ) {
+                        Ok(evaluation) => {
+                            if evaluation.refill.is_some() {
+                                trimmed_seed_star_refill_success_count += 1;
+                            } else {
+                                for (reason, count) in evaluation.rejected_by_reason {
+                                    *trimmed_seed_star_refill_rejected_by_reason
+                                        .entry(reason)
+                                        .or_default() += count;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            *trimmed_seed_star_refill_rejected_by_reason
+                                .entry(diagnostic_refill_error_reason(&err).to_string())
+                                .or_default() += 1;
+                        }
+                    }
                 }
             }
             let components = diagnostic_seed_star_components(
@@ -3199,11 +3277,13 @@ mod tests {
                 .collect::<Result<Vec<_>, String>>()
                 .expect("diagnostic boundary nodes should exist");
             let mut interior_candidates = Vec::<ConstrainedCavityNode>::new();
-            if let Some(current_point) = node_points.get(seed_node_id).copied() {
-                interior_candidates.push(ConstrainedCavityNode {
-                    node_id: *seed_node_id,
-                    coordinates_m: current_point,
-                });
+            if !boundary_node_ids.contains(seed_node_id) {
+                if let Some(current_point) = node_points.get(seed_node_id).copied() {
+                    interior_candidates.push(ConstrainedCavityNode {
+                        node_id: *seed_node_id,
+                        coordinates_m: current_point,
+                    });
+                }
             }
             if let Some(centroid) = diagnostic_boundary_centroid(&boundary_nodes) {
                 interior_candidates.push(ConstrainedCavityNode {
@@ -3266,6 +3346,13 @@ mod tests {
             "annular recovery bad_seed_star_non_manifold whole_edge_face_count={:?} component_edge_face_count={:?}",
             seed_star_non_manifold_boundary_edge_face_histogram,
             seed_star_component_non_manifold_boundary_edge_face_histogram
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_cavities valid={} refill_success={} boundary_faces={:?} refill_rejected_by_reason={:?}",
+            trimmed_seed_star_cavity_count,
+            trimmed_seed_star_refill_success_count,
+            trimmed_seed_star_boundary_face_histogram,
+            trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",

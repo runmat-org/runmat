@@ -180,6 +180,58 @@ pub fn constrained_cavity_from_selected_tets(
     selected_tet_indices: &[usize],
     protected_node_ids: Vec<u32>,
 ) -> Result<ConstrainedCavity, ConstrainedCavityExtractionError> {
+    let selected = selected_tet_index_set(tets, selected_tet_indices)?;
+    let cavity = build_constrained_cavity_from_index_set(tets, &selected, protected_node_ids);
+    validate_constrained_cavity(&cavity).map_err(ConstrainedCavityExtractionError::Validation)?;
+    Ok(cavity)
+}
+
+pub fn constrained_cavity_from_selected_tets_with_anchor_trim(
+    tets: &[TetCandidate],
+    selected_tet_indices: &[usize],
+    anchor_tet_index: usize,
+    protected_node_ids: Vec<u32>,
+) -> Result<Option<ConstrainedCavity>, ConstrainedCavityExtractionError> {
+    if anchor_tet_index >= tets.len() {
+        return Err(
+            ConstrainedCavityExtractionError::SelectedTetIndexOutOfBounds {
+                tet_index: anchor_tet_index,
+                tet_count: tets.len(),
+            },
+        );
+    }
+    let mut selected = selected_tet_index_set(tets, selected_tet_indices)?;
+    if !selected.contains(&anchor_tet_index) {
+        return Ok(None);
+    }
+
+    for _ in 0..selected.len() {
+        let cavity =
+            build_constrained_cavity_from_index_set(tets, &selected, protected_node_ids.clone());
+        match validate_constrained_cavity(&cavity) {
+            Ok(_) => return Ok(Some(cavity)),
+            Err(ConstrainedCavityValidationError::NonManifoldBoundaryEdge { node_ids, .. }) => {
+                let Some(trimmed) = trim_one_non_manifold_boundary_edge_tet(
+                    tets,
+                    &selected,
+                    anchor_tet_index,
+                    node_ids,
+                ) else {
+                    return Ok(None);
+                };
+                selected = trimmed;
+            }
+            Err(ConstrainedCavityValidationError::TooFewBoundaryFaces { .. }) => return Ok(None),
+            Err(err) => return Err(ConstrainedCavityExtractionError::Validation(err)),
+        }
+    }
+    Ok(None)
+}
+
+fn selected_tet_index_set(
+    tets: &[TetCandidate],
+    selected_tet_indices: &[usize],
+) -> Result<BTreeSet<usize>, ConstrainedCavityExtractionError> {
     if selected_tet_indices.is_empty() {
         return Err(ConstrainedCavityExtractionError::EmptySelection);
     }
@@ -202,10 +254,17 @@ pub fn constrained_cavity_from_selected_tets(
             );
         }
     }
+    Ok(selected)
+}
 
+fn build_constrained_cavity_from_index_set(
+    tets: &[TetCandidate],
+    selected: &BTreeSet<usize>,
+    protected_node_ids: Vec<u32>,
+) -> ConstrainedCavity {
     let mut target_volume_m3 = 0.0_f64;
     let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
-    for tet_index in &selected {
+    for tet_index in selected {
         let tet = &tets[*tet_index];
         target_volume_m3 += tet.volume_m3;
         for face in tet_faces(tet.node_ids) {
@@ -230,7 +289,7 @@ pub fn constrained_cavity_from_selected_tets(
         });
     }
 
-    let cavity = ConstrainedCavity {
+    ConstrainedCavity {
         removed_tet_ids: selected
             .iter()
             .map(|tet_index| tets[*tet_index].tet_id)
@@ -238,9 +297,114 @@ pub fn constrained_cavity_from_selected_tets(
         boundary_faces,
         protected_node_ids,
         target_volume_m3,
-    };
-    validate_constrained_cavity(&cavity).map_err(ConstrainedCavityExtractionError::Validation)?;
-    Ok(cavity)
+    }
+}
+
+fn trim_one_non_manifold_boundary_edge_tet(
+    tets: &[TetCandidate],
+    selected: &BTreeSet<usize>,
+    anchor_tet_index: usize,
+    edge: [u32; 2],
+) -> Option<BTreeSet<usize>> {
+    let current_score = boundary_edge_defect_score(tets, selected);
+    boundary_face_owner_indices_for_edge(tets, selected, edge)
+        .into_iter()
+        .filter(|owner| *owner != anchor_tet_index)
+        .filter_map(|owner| {
+            let mut candidate = selected.clone();
+            candidate.remove(&owner);
+            let connected = anchor_connected_tet_subset(tets, &candidate, anchor_tet_index)?;
+            let score = boundary_edge_defect_score(tets, &connected);
+            (score < current_score).then_some((connected, score))
+        })
+        .min_by_key(|(candidate, score)| (*score, candidate.len()))
+        .map(|(candidate, _)| candidate)
+}
+
+fn boundary_face_owner_indices_for_edge(
+    tets: &[TetCandidate],
+    selected: &BTreeSet<usize>,
+    edge: [u32; 2],
+) -> Vec<usize> {
+    let target_edge = sorted_edge(edge);
+    boundary_face_owners(tets, selected)
+        .into_iter()
+        .filter_map(|(_, owners)| (owners.len() == 1).then_some(owners[0]))
+        .filter_map(|(tet_index, face)| {
+            face_edges(face)
+                .into_iter()
+                .any(|face_edge| sorted_edge(face_edge) == target_edge)
+                .then_some(tet_index)
+        })
+        .collect()
+}
+
+fn boundary_edge_defect_score(tets: &[TetCandidate], selected: &BTreeSet<usize>) -> usize {
+    let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+    for (_, owners) in boundary_face_owners(tets, selected) {
+        if owners.len() != 1 {
+            continue;
+        }
+        for edge in face_edges(owners[0].1) {
+            *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
+        }
+    }
+    edge_counts
+        .values()
+        .map(|count| count.abs_diff(2))
+        .sum::<usize>()
+}
+
+fn boundary_face_owners(
+    tets: &[TetCandidate],
+    selected: &BTreeSet<usize>,
+) -> BTreeMap<[u32; 3], Vec<(usize, [u32; 3])>> {
+    let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
+    for tet_index in selected {
+        for face in tet_faces(tets[*tet_index].node_ids) {
+            face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push((*tet_index, face));
+        }
+    }
+    face_owners
+}
+
+fn anchor_connected_tet_subset(
+    tets: &[TetCandidate],
+    selected: &BTreeSet<usize>,
+    anchor_tet_index: usize,
+) -> Option<BTreeSet<usize>> {
+    if !selected.contains(&anchor_tet_index) {
+        return None;
+    }
+    let mut face_to_tets = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for tet_index in selected {
+        for face in tet_faces(tets[*tet_index].node_ids) {
+            face_to_tets
+                .entry(sorted_face(face))
+                .or_default()
+                .push(*tet_index);
+        }
+    }
+    let mut connected = BTreeSet::<usize>::new();
+    let mut pending = vec![anchor_tet_index];
+    while let Some(tet_index) = pending.pop() {
+        if !connected.insert(tet_index) {
+            continue;
+        }
+        for face in tet_faces(tets[tet_index].node_ids) {
+            if let Some(neighbors) = face_to_tets.get(&sorted_face(face)) {
+                for neighbor in neighbors {
+                    if selected.contains(neighbor) && !connected.contains(neighbor) {
+                        pending.push(*neighbor);
+                    }
+                }
+            }
+        }
+    }
+    Some(connected)
 }
 
 pub fn generate_constrained_cavity_refill_candidates(
@@ -958,6 +1122,63 @@ mod tests {
                 }
             )
         );
+    }
+
+    #[test]
+    fn anchor_trim_removes_non_manifold_dangling_tet() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &["anchor"]),
+            candidate_tet(9, [0, 1, 4, 5], 0.35, &["dangling"]),
+        ];
+
+        let cavity =
+            constrained_cavity_from_selected_tets_with_anchor_trim(&tets, &[0, 1], 0, vec![0, 1])
+                .expect("trim should evaluate")
+                .expect("trim should recover the anchor tet cavity");
+
+        assert_eq!(cavity.removed_tet_ids, vec![4]);
+        assert_eq!(cavity.target_volume_m3, 0.25);
+        assert_eq!(cavity.protected_node_ids, vec![0, 1]);
+        assert!(cavity
+            .boundary_faces
+            .iter()
+            .all(|face| face.region_ids == ["anchor"]));
+        validate_constrained_cavity(&cavity).expect("trimmed cavity should be manifold");
+    }
+
+    #[test]
+    fn anchor_trim_preserves_requested_anchor() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &["left"]),
+            candidate_tet(9, [0, 1, 4, 5], 0.35, &["right"]),
+        ];
+
+        let cavity =
+            constrained_cavity_from_selected_tets_with_anchor_trim(&tets, &[0, 1], 1, vec![])
+                .expect("trim should evaluate")
+                .expect("trim should keep the requested anchor tet");
+
+        assert_eq!(cavity.removed_tet_ids, vec![9]);
+        assert_eq!(cavity.target_volume_m3, 0.35);
+        assert!(cavity
+            .boundary_faces
+            .iter()
+            .all(|face| face.region_ids == ["right"]));
+        validate_constrained_cavity(&cavity).expect("trimmed cavity should be manifold");
+    }
+
+    #[test]
+    fn anchor_trim_returns_none_when_anchor_not_selected() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &[]),
+            candidate_tet(9, [0, 1, 4, 5], 0.35, &[]),
+        ];
+
+        let cavity =
+            constrained_cavity_from_selected_tets_with_anchor_trim(&tets, &[0], 1, Vec::new())
+                .expect("trim should evaluate");
+
+        assert!(cavity.is_none());
     }
 
     #[test]
