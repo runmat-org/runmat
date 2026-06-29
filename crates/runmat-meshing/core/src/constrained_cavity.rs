@@ -144,6 +144,13 @@ pub enum ConstrainedCavityValidationError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstrainedCavityBoundarySplitError {
+    SplitNodeReusesFaceNode { node_id: u32 },
+    MissingBoundaryFace { node_ids: [u32; 3] },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityExtractionError {
@@ -707,6 +714,70 @@ pub fn validate_constrained_cavity_boundary_preserved(
     }
 
     Ok(())
+}
+
+pub fn split_constrained_cavity_boundary_face(
+    face: &ConstrainedCavityBoundaryFace,
+    split_node_id: u32,
+) -> Result<[ConstrainedCavityBoundaryFace; 3], ConstrainedCavityBoundarySplitError> {
+    if face.node_ids.contains(&split_node_id) {
+        return Err(
+            ConstrainedCavityBoundarySplitError::SplitNodeReusesFaceNode {
+                node_id: split_node_id,
+            },
+        );
+    }
+    let perimeter_source_edges = boundary_face_source_edges(face).map_err(|_| {
+        ConstrainedCavityBoundarySplitError::MissingBoundaryFace {
+            node_ids: sorted_face(face.node_ids),
+        }
+    })?;
+    let [a, b, c] = face.node_ids;
+    Ok([
+        split_child_boundary_face(face, [a, b, split_node_id], &perimeter_source_edges),
+        split_child_boundary_face(face, [b, c, split_node_id], &perimeter_source_edges),
+        split_child_boundary_face(face, [c, a, split_node_id], &perimeter_source_edges),
+    ])
+}
+
+pub fn split_constrained_cavity_boundary_faces(
+    faces: &[ConstrainedCavityBoundaryFace],
+    face_node_ids: [u32; 3],
+    split_node_id: u32,
+) -> Result<Vec<ConstrainedCavityBoundaryFace>, ConstrainedCavityBoundarySplitError> {
+    let target = sorted_face(face_node_ids);
+    let mut split_faces = Vec::<ConstrainedCavityBoundaryFace>::with_capacity(faces.len() + 2);
+    let mut found = false;
+    for face in faces {
+        if sorted_face(face.node_ids) == target {
+            found = true;
+            split_faces.extend(split_constrained_cavity_boundary_face(face, split_node_id)?);
+        } else {
+            split_faces.push(face.clone());
+        }
+    }
+    if !found {
+        return Err(ConstrainedCavityBoundarySplitError::MissingBoundaryFace { node_ids: target });
+    }
+    Ok(split_faces)
+}
+
+fn split_child_boundary_face(
+    parent: &ConstrainedCavityBoundaryFace,
+    node_ids: [u32; 3],
+    perimeter_source_edges: &BTreeMap<[u32; 2], Option<u32>>,
+) -> ConstrainedCavityBoundaryFace {
+    ConstrainedCavityBoundaryFace {
+        node_ids,
+        source_face_id: parent.source_face_id,
+        source_edge_ids: face_edges(node_ids).map(|edge| {
+            perimeter_source_edges
+                .get(&sorted_edge(edge))
+                .copied()
+                .flatten()
+        }),
+        region_ids: parent.region_ids.clone(),
+    }
 }
 
 fn validate_refill_options(
@@ -1477,6 +1548,84 @@ mod tests {
                 node_ids: [0, 1, 2],
                 expected_region_ids: vec!["fixed".to_string(), "loaded".to_string()],
                 candidate_region_ids: vec!["other".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn boundary_face_split_preserves_source_face_regions_and_perimeter_edges() {
+        let face = face_with_provenance(
+            [0, 1, 2],
+            10,
+            [Some(100), Some(101), Some(102)],
+            &["fixed", "loaded"],
+        );
+
+        let children = split_constrained_cavity_boundary_face(&face, 9).expect("face should split");
+
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].node_ids, [0, 1, 9]);
+        assert_eq!(children[1].node_ids, [1, 2, 9]);
+        assert_eq!(children[2].node_ids, [2, 0, 9]);
+        for child in &children {
+            assert_eq!(child.source_face_id, Some(10));
+            assert_eq!(
+                sorted_region_ids(&child.region_ids),
+                vec!["fixed".to_string(), "loaded".to_string()]
+            );
+        }
+        assert_eq!(children[0].source_edge_ids, [Some(100), None, None]);
+        assert_eq!(children[1].source_edge_ids, [Some(101), None, None]);
+        assert_eq!(children[2].source_edge_ids, [Some(102), None, None]);
+    }
+
+    #[test]
+    fn boundary_face_list_split_replaces_only_target_face() {
+        let cavity = provenance_cavity();
+
+        let split_faces =
+            split_constrained_cavity_boundary_faces(&cavity.boundary_faces, [2, 1, 0], 9)
+                .expect("target face should split");
+
+        assert_eq!(split_faces.len(), cavity.boundary_faces.len() + 2);
+        assert!(!split_faces
+            .iter()
+            .any(|face| sorted_face(face.node_ids) == [0, 1, 2]));
+        assert_eq!(
+            split_faces
+                .iter()
+                .filter(|face| face.node_ids.contains(&9))
+                .count(),
+            3
+        );
+        for untouched in cavity.boundary_faces.iter().skip(1) {
+            assert!(split_faces
+                .iter()
+                .any(|face| sorted_face(face.node_ids) == sorted_face(untouched.node_ids)));
+        }
+    }
+
+    #[test]
+    fn boundary_face_split_rejects_reused_or_missing_split_targets() {
+        let cavity = provenance_cavity();
+        let face = &cavity.boundary_faces[0];
+
+        let reused = split_constrained_cavity_boundary_face(face, face.node_ids[0])
+            .expect_err("split node cannot reuse an existing face node");
+        assert_eq!(
+            reused,
+            ConstrainedCavityBoundarySplitError::SplitNodeReusesFaceNode {
+                node_id: face.node_ids[0]
+            }
+        );
+
+        let missing =
+            split_constrained_cavity_boundary_faces(&cavity.boundary_faces, [10, 11, 12], 9)
+                .expect_err("missing target face should fail");
+        assert_eq!(
+            missing,
+            ConstrainedCavityBoundarySplitError::MissingBoundaryFace {
+                node_ids: [10, 11, 12]
             }
         );
     }

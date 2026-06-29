@@ -77,12 +77,14 @@ pub use cad_topology::{
 };
 pub use constrained_cavity::{
     constrained_cavity_from_selected_tets, evaluate_constrained_cavity_refill_candidates,
-    generate_constrained_cavity_refill_candidates, validate_constrained_cavity,
+    generate_constrained_cavity_refill_candidates, split_constrained_cavity_boundary_face,
+    split_constrained_cavity_boundary_faces, validate_constrained_cavity,
     validate_constrained_cavity_boundary_preserved, validate_constrained_cavity_refill_volume,
-    ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityExtractionError,
-    ConstrainedCavityNode, ConstrainedCavityRefill, ConstrainedCavityRefillError,
-    ConstrainedCavityRefillEvaluation, ConstrainedCavityRefillOptions, ConstrainedCavityRefillTet,
-    ConstrainedCavityValidationError, ConstrainedCavityValidationReport,
+    ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityBoundarySplitError,
+    ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefill,
+    ConstrainedCavityRefillError, ConstrainedCavityRefillEvaluation,
+    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTet, ConstrainedCavityValidationError,
+    ConstrainedCavityValidationReport,
 };
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
