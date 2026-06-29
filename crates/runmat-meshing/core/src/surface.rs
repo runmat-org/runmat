@@ -340,7 +340,7 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut nodes,
             &mut curve_node_to_surface_node,
         )?;
-        validate_face_curve_loop_topology(face.face_id, &segments)?;
+        let segments = single_face_curve_segment_loop(face.face_id, &segments)?;
         let sample_report =
             append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
         exact_cad_sample_node_count += sample_report.accepted_count;
@@ -440,24 +440,38 @@ fn oriented_face_curve_segments(
     Ok(segments)
 }
 
-fn validate_face_curve_loop_topology(
+fn single_face_curve_segment_loop(
     face_id: u32,
     segments: &[FaceCurveSegment],
-) -> Result<(), SurfaceDiscretizationError> {
+) -> Result<Vec<FaceCurveSegment>, SurfaceDiscretizationError> {
+    let loops = face_curve_segment_loops(face_id, segments)?;
+    if loops.len() != 1 {
+        return Err(SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
+            face_id,
+            loop_count: loops.len(),
+        });
+    }
+    Ok(loops.into_iter().next().unwrap_or_default())
+}
+
+fn face_curve_segment_loops(
+    face_id: u32,
+    segments: &[FaceCurveSegment],
+) -> Result<Vec<Vec<FaceCurveSegment>>, SurfaceDiscretizationError> {
     if segments.is_empty() {
         return Err(SurfaceDiscretizationError::EmptyFaceLoop { face_id });
     }
 
-    let mut adjacency = BTreeMap::<u32, Vec<u32>>::new();
+    let mut adjacency = BTreeMap::<u32, Vec<(u32, FaceCurveSegment)>>::new();
     for segment in segments {
         adjacency
             .entry(segment.node_ids[0])
             .or_default()
-            .push(segment.node_ids[1]);
+            .push((segment.node_ids[1], *segment));
         adjacency
             .entry(segment.node_ids[1])
             .or_default()
-            .push(segment.node_ids[0]);
+            .push((segment.node_ids[0], *segment));
     }
 
     for (node_id, adjacent_nodes) in &adjacency {
@@ -471,32 +485,76 @@ fn validate_face_curve_loop_topology(
     }
 
     let mut visited = BTreeSet::<u32>::new();
-    let mut loop_count = 0_usize;
+    let mut loops = Vec::<Vec<FaceCurveSegment>>::new();
     for node_id in adjacency.keys() {
         if !visited.insert(*node_id) {
             continue;
         }
-        loop_count += 1;
-        let mut stack = vec![*node_id];
-        while let Some(current) = stack.pop() {
-            if let Some(adjacent_nodes) = adjacency.get(&current) {
-                for adjacent_node in adjacent_nodes {
-                    if visited.insert(*adjacent_node) {
-                        stack.push(*adjacent_node);
-                    }
+        let start = *node_id;
+        let mut current = start;
+        let mut previous = None::<u32>;
+        let mut loop_segments = Vec::<FaceCurveSegment>::new();
+        loop {
+            let adjacent_nodes = adjacency.get(&current).ok_or(
+                SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                    face_id,
+                    node_id: current,
+                    incident_segment_count: 0,
+                },
+            )?;
+            let next = adjacent_nodes
+                .iter()
+                .copied()
+                .filter(|(neighbor, _)| Some(*neighbor) != previous)
+                .min_by_key(|(neighbor, _)| *neighbor)
+                .ok_or(SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                    face_id,
+                    node_id: current,
+                    incident_segment_count: adjacent_nodes.len(),
+                })?;
+            let oriented_segment = FaceCurveSegment {
+                node_ids: [current, next.0],
+                source_edge_id: next.1.source_edge_id,
+            };
+            loop_segments.push(oriented_segment);
+            previous = Some(current);
+            current = next.0;
+            if current == start {
+                break;
+            }
+            if !visited.insert(current) {
+                return Err(SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                    face_id,
+                    node_id: current,
+                    incident_segment_count: adjacent_nodes.len(),
+                });
+            }
+            if loop_segments.len() > segments.len() {
+                return Err(SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                    face_id,
+                    node_id: current,
+                    incident_segment_count: adjacent_nodes.len(),
+                });
+            }
+        }
+        if loop_segments.len() < 3 {
+            return Err(SurfaceDiscretizationError::InvalidFaceLoopTopology {
+                face_id,
+                node_id: start,
+                incident_segment_count: loop_segments.len(),
+            });
+        }
+        for segment in &loop_segments {
+            for node_id in segment.node_ids {
+                if !visited.contains(&node_id) {
+                    visited.insert(node_id);
                 }
             }
         }
+        loops.push(loop_segments);
     }
 
-    if loop_count != 1 {
-        return Err(SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
-            face_id,
-            loop_count,
-        });
-    }
-
-    Ok(())
+    Ok(loops)
 }
 
 fn face_edge_for_nodes<'a>(
@@ -1823,7 +1881,7 @@ mod tests {
             },
         ];
 
-        let err = validate_face_curve_loop_topology(7, &segments)
+        let err = single_face_curve_segment_loop(7, &segments)
             .expect_err("multi-loop face topology should fail closed");
 
         assert_eq!(
@@ -1832,6 +1890,53 @@ mod tests {
                 face_id: 7,
                 loop_count: 2,
             }
+        );
+    }
+
+    #[test]
+    fn face_curve_segment_loops_order_shuffled_single_loop_deterministically() {
+        let segments = vec![
+            FaceCurveSegment {
+                node_ids: [3, 0],
+                source_edge_id: 13,
+            },
+            FaceCurveSegment {
+                node_ids: [1, 2],
+                source_edge_id: 11,
+            },
+            FaceCurveSegment {
+                node_ids: [2, 3],
+                source_edge_id: 12,
+            },
+            FaceCurveSegment {
+                node_ids: [0, 1],
+                source_edge_id: 10,
+            },
+        ];
+
+        let loops = face_curve_segment_loops(7, &segments).expect("loop should be valid");
+
+        assert_eq!(loops.len(), 1);
+        assert_eq!(
+            loops[0],
+            vec![
+                FaceCurveSegment {
+                    node_ids: [0, 1],
+                    source_edge_id: 10,
+                },
+                FaceCurveSegment {
+                    node_ids: [1, 2],
+                    source_edge_id: 11,
+                },
+                FaceCurveSegment {
+                    node_ids: [2, 3],
+                    source_edge_id: 12,
+                },
+                FaceCurveSegment {
+                    node_ids: [3, 0],
+                    source_edge_id: 13,
+                },
+            ]
         );
     }
 
@@ -1848,7 +1953,7 @@ mod tests {
             },
         ];
 
-        let err = validate_face_curve_loop_topology(7, &segments)
+        let err = single_face_curve_segment_loop(7, &segments)
             .expect_err("open face loop should fail closed");
 
         assert_eq!(
