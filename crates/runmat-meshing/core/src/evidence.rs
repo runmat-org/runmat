@@ -117,6 +117,14 @@ pub struct MeshCadEvidence {
     pub max_curvature_estimate_1_per_m: f64,
     pub surface_cad_face_count: usize,
     #[serde(default)]
+    pub surface_source_edge_loop_count: usize,
+    #[serde(default)]
+    pub surface_closed_edge_loop_count: usize,
+    #[serde(default)]
+    pub surface_conforming_source_edge_count: usize,
+    #[serde(default)]
+    pub surface_missing_source_edge_count: usize,
+    #[serde(default)]
     pub surface_exact_cad_sample_node_count: usize,
     #[serde(default)]
     pub surface_rejected_exact_cad_sample_count: usize,
@@ -533,6 +541,10 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
         max_normal_deviation: mesh.backend.cad_max_normal_deviation,
         max_curvature_estimate_1_per_m: mesh.backend.cad_max_curvature_estimate_1_per_m,
         surface_cad_face_count: mesh.backend.surface_cad_face_count,
+        surface_source_edge_loop_count: mesh.backend.surface_source_edge_loop_count,
+        surface_closed_edge_loop_count: mesh.backend.surface_closed_edge_loop_count,
+        surface_conforming_source_edge_count: mesh.backend.surface_conforming_source_edge_count,
+        surface_missing_source_edge_count: mesh.backend.surface_missing_source_edge_count,
         surface_exact_cad_sample_node_count: mesh.backend.surface_exact_cad_sample_node_count,
         surface_rejected_exact_cad_sample_count: mesh
             .backend
@@ -1427,6 +1439,10 @@ mod tests {
                 cad_max_normal_deviation: 1.0e-5,
                 cad_max_curvature_estimate_1_per_m: 0.125,
                 surface_cad_face_count: 3,
+                surface_source_edge_loop_count: 2,
+                surface_closed_edge_loop_count: 1,
+                surface_conforming_source_edge_count: 5,
+                surface_missing_source_edge_count: 1,
                 surface_exact_cad_sample_node_count: 4,
                 surface_rejected_exact_cad_sample_count: 5,
                 surface_max_cad_projection_error_m: 3.0e-6,
@@ -1532,6 +1548,10 @@ mod tests {
         assert_eq!(evidence.cad.max_projection_error_m, 2.0e-6);
         assert_eq!(evidence.cad.max_normal_deviation, 1.0e-5);
         assert_eq!(evidence.cad.max_curvature_estimate_1_per_m, 0.125);
+        assert_eq!(evidence.cad.surface_source_edge_loop_count, 2);
+        assert_eq!(evidence.cad.surface_closed_edge_loop_count, 1);
+        assert_eq!(evidence.cad.surface_conforming_source_edge_count, 5);
+        assert_eq!(evidence.cad.surface_missing_source_edge_count, 1);
         assert_eq!(evidence.cad.surface_max_projection_error_m, 3.0e-6);
         assert_eq!(evidence.cad.surface_exact_cad_sample_node_count, 4);
         assert_eq!(evidence.cad.surface_rejected_exact_cad_sample_count, 5);
