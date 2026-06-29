@@ -1863,6 +1863,8 @@ mod tests {
             ..MeshSizingField::default()
         };
 
+        let coarse = generate_production_analysis_mesh(&cube_geometry(), &options)
+            .expect("baseline production mesh should generate");
         let mesh =
             generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
                 .expect("production mesh should generate with requested refinement");
@@ -1881,6 +1883,24 @@ mod tests {
 
         assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
         assert!(mesh.backend.tet_accepted_requested_refinement_point_count > 0);
+        for sample in &sizing.samples {
+            let reason = sample.reason.as_deref().expect("reasoned sizing sample");
+            let coarse_near_count =
+                volume_element_centroid_count_within(&coarse, sample.position_m, 0.30);
+            let refined_near_count =
+                volume_element_centroid_count_within(&mesh, sample.position_m, 0.30);
+            assert!(
+                refined_near_count > coarse_near_count,
+                "{reason} should create denser retained Tet topology near the requested patch; coarse={coarse_near_count}, refined={refined_near_count}"
+            );
+            assert!(
+                mesh.sizing.applied_samples.iter().any(|applied| {
+                    applied.reason.as_deref() == Some(reason)
+                        && applied.inserted_breakpoint_count > 0
+                }),
+                "{reason} should have an accepted requested Tet seed"
+            );
+        }
         assert!(
             mesh.sizing.applied_samples.iter().any(|sample| {
                 sample.reason.as_deref() == Some("structural.load_regions")
@@ -1944,6 +1964,45 @@ mod tests {
                 .unwrap_or_default()
                 > 0
         );
+    }
+
+    fn volume_element_centroid_count_within(
+        mesh: &AnalysisMeshArtifact,
+        point_m: [f64; 3],
+        radius_m: f64,
+    ) -> usize {
+        let radius_squared_m = radius_m * radius_m;
+        mesh.volume_elements
+            .iter()
+            .filter(|element| {
+                let Some(centroid) = analysis_volume_element_centroid(mesh, element) else {
+                    return false;
+                };
+                distance_squared(centroid, point_m) <= radius_squared_m
+            })
+            .count()
+    }
+
+    fn analysis_volume_element_centroid(
+        mesh: &AnalysisMeshArtifact,
+        element: &AnalysisVolumeElement,
+    ) -> Option<[f64; 3]> {
+        if element.node_ids.is_empty() {
+            return None;
+        }
+        let mut centroid = [0.0; 3];
+        for node_id in &element.node_ids {
+            let node = mesh.nodes.iter().find(|node| node.node_id == *node_id)?;
+            centroid[0] += node.coordinates_m[0];
+            centroid[1] += node.coordinates_m[1];
+            centroid[2] += node.coordinates_m[2];
+        }
+        let scale = 1.0 / element.node_ids.len() as f64;
+        Some([
+            centroid[0] * scale,
+            centroid[1] * scale,
+            centroid[2] * scale,
+        ])
     }
 
     #[test]
