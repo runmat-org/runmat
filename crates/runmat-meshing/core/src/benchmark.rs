@@ -168,12 +168,23 @@ pub struct MeshBenchmarkSuiteReport {
     pub schema_version: String,
     pub suite_id: String,
     pub summary: MeshBenchmarkSuiteSummary,
+    #[serde(default)]
+    pub generation_failures: Vec<MeshBenchmarkGenerationFailure>,
     pub reports: Vec<MeshBenchmarkReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshBenchmarkGenerationFailure {
+    pub benchmark_id: String,
+    pub tier: MeshBenchmarkTier,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBenchmarkSuiteSummary {
     pub report_count: usize,
+    #[serde(default)]
+    pub generation_failure_count: usize,
     pub solve_ready_count: usize,
     pub failed_count: usize,
     #[serde(default)]
@@ -195,6 +206,8 @@ pub struct MeshBenchmarkSuiteSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBenchmarkTierSummary {
     pub report_count: usize,
+    #[serde(default)]
+    pub generation_failure_count: usize,
     pub solve_ready_count: usize,
     pub failed_count: usize,
     #[serde(default)]
@@ -369,11 +382,20 @@ pub fn build_mesh_benchmark_suite_report(
     suite_id: impl Into<String>,
     reports: Vec<MeshBenchmarkReport>,
 ) -> MeshBenchmarkSuiteReport {
-    let summary = mesh_benchmark_suite_summary(&reports);
+    build_mesh_benchmark_suite_report_with_failures(suite_id, reports, Vec::new())
+}
+
+pub fn build_mesh_benchmark_suite_report_with_failures(
+    suite_id: impl Into<String>,
+    reports: Vec<MeshBenchmarkReport>,
+    generation_failures: Vec<MeshBenchmarkGenerationFailure>,
+) -> MeshBenchmarkSuiteReport {
+    let summary = mesh_benchmark_suite_summary(&reports, &generation_failures);
     MeshBenchmarkSuiteReport {
         schema_version: MESH_BENCHMARK_SUITE_SCHEMA_VERSION.to_string(),
         suite_id: suite_id.into(),
         summary,
+        generation_failures,
         reports,
     }
 }
@@ -409,11 +431,29 @@ pub fn run_generic_mesh_benchmark_suite() -> Result<MeshBenchmarkSuiteReport, Me
     run_mesh_benchmark_cases("generic-production", generic_mesh_benchmark_cases())
 }
 
+pub fn run_generic_mesh_benchmark_suite_collecting_failures() -> MeshBenchmarkSuiteReport {
+    run_mesh_benchmark_cases_collecting_failures(
+        "generic-production",
+        generic_mesh_benchmark_cases(),
+    )
+}
+
 pub fn run_mesh_benchmark_cases(
     suite_id: impl Into<String>,
     cases: Vec<MeshBenchmarkCase>,
 ) -> Result<MeshBenchmarkSuiteReport, MeshBenchmarkRunError> {
     run_mesh_benchmark_cases_with(suite_id, cases, generate_mesh_for_benchmark_case)
+}
+
+pub fn run_mesh_benchmark_cases_collecting_failures(
+    suite_id: impl Into<String>,
+    cases: Vec<MeshBenchmarkCase>,
+) -> MeshBenchmarkSuiteReport {
+    run_mesh_benchmark_cases_collecting_failures_with(
+        suite_id,
+        cases,
+        generate_mesh_for_benchmark_case,
+    )
 }
 
 pub fn run_mesh_benchmark_cases_with(
@@ -433,6 +473,31 @@ pub fn run_mesh_benchmark_cases_with(
         reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
     }
     Ok(build_mesh_benchmark_suite_report(suite_id, reports))
+}
+
+pub fn run_mesh_benchmark_cases_collecting_failures_with(
+    suite_id: impl Into<String>,
+    cases: Vec<MeshBenchmarkCase>,
+    mut mesh_case: impl FnMut(&MeshBenchmarkCase) -> Result<AnalysisMeshArtifact, String>,
+) -> MeshBenchmarkSuiteReport {
+    let mut reports = Vec::with_capacity(cases.len());
+    let mut generation_failures = Vec::new();
+    for case in cases {
+        let started = std::time::Instant::now();
+        match mesh_case(&case) {
+            Ok(mesh) => {
+                let mut input = MeshBenchmarkInput::new(case.benchmark_id, case.tier);
+                input.timing.total_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+                reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
+            }
+            Err(message) => generation_failures.push(MeshBenchmarkGenerationFailure {
+                benchmark_id: case.benchmark_id,
+                tier: case.tier,
+                message,
+            }),
+        }
+    }
+    build_mesh_benchmark_suite_report_with_failures(suite_id, reports, generation_failures)
 }
 
 fn generate_mesh_for_benchmark_case(
@@ -721,7 +786,10 @@ fn comparison_case_has_regression(case: &MeshBenchmarkCaseComparison) -> bool {
         || !case.candidate_present
 }
 
-fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmarkSuiteSummary {
+fn mesh_benchmark_suite_summary(
+    reports: &[MeshBenchmarkReport],
+    generation_failures: &[MeshBenchmarkGenerationFailure],
+) -> MeshBenchmarkSuiteSummary {
     let solve_ready_count = reports
         .iter()
         .filter(|report| report.solve_readiness.solve_ready)
@@ -738,10 +806,17 @@ fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmar
             .unwrap_or_else(|| "unknown".to_string());
         *failure_counts_by_code.entry(code).or_default() += 1;
     }
+    if !generation_failures.is_empty() {
+        failure_counts_by_code.insert(
+            "mesh_generation_failed".to_string(),
+            generation_failures.len(),
+        );
+    }
     MeshBenchmarkSuiteSummary {
         report_count: reports.len(),
+        generation_failure_count: generation_failures.len(),
         solve_ready_count,
-        failed_count: reports.len().saturating_sub(solve_ready_count),
+        failed_count: reports.len().saturating_sub(solve_ready_count) + generation_failures.len(),
         budget_exceeded_count: reports
             .iter()
             .filter(|report| report.budget.volume_element_budget_exceeded)
@@ -783,12 +858,13 @@ fn mesh_benchmark_suite_summary(reports: &[MeshBenchmarkReport]) -> MeshBenchmar
         })),
         total_ms: finite_sum(reports.iter().filter_map(|report| report.timing.total_ms)),
         failure_counts_by_code,
-        summary_by_tier: mesh_benchmark_tier_summaries(reports),
+        summary_by_tier: mesh_benchmark_tier_summaries(reports, generation_failures),
     }
 }
 
 fn mesh_benchmark_tier_summaries(
     reports: &[MeshBenchmarkReport],
+    generation_failures: &[MeshBenchmarkGenerationFailure],
 ) -> BTreeMap<String, MeshBenchmarkTierSummary> {
     let mut reports_by_tier = BTreeMap::<String, Vec<&MeshBenchmarkReport>>::new();
     for report in reports {
@@ -797,9 +873,26 @@ fn mesh_benchmark_tier_summaries(
             .or_default()
             .push(report);
     }
-    reports_by_tier
+    let mut failures_by_tier = BTreeMap::<String, Vec<&MeshBenchmarkGenerationFailure>>::new();
+    for failure in generation_failures {
+        failures_by_tier
+            .entry(mesh_benchmark_tier_key(failure.tier).to_string())
+            .or_default()
+            .push(failure);
+    }
+    let mut tier_keys = reports_by_tier
+        .keys()
+        .chain(failures_by_tier.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    tier_keys.sort();
+    tier_keys.dedup();
+
+    tier_keys
         .into_iter()
-        .map(|(tier, reports)| {
+        .map(|tier| {
+            let reports = reports_by_tier.remove(&tier).unwrap_or_default();
+            let generation_failures = failures_by_tier.remove(&tier).unwrap_or_default();
             let solve_ready_count = reports
                 .iter()
                 .filter(|report| report.solve_readiness.solve_ready)
@@ -816,12 +909,20 @@ fn mesh_benchmark_tier_summaries(
                     .unwrap_or_else(|| "unknown".to_string());
                 *failure_counts_by_code.entry(code).or_default() += 1;
             }
+            if !generation_failures.is_empty() {
+                failure_counts_by_code.insert(
+                    "mesh_generation_failed".to_string(),
+                    generation_failures.len(),
+                );
+            }
             (
                 tier,
                 MeshBenchmarkTierSummary {
                     report_count: reports.len(),
+                    generation_failure_count: generation_failures.len(),
                     solve_ready_count,
-                    failed_count: reports.len().saturating_sub(solve_ready_count),
+                    failed_count: reports.len().saturating_sub(solve_ready_count)
+                        + generation_failures.len(),
                     budget_exceeded_count: reports
                         .iter()
                         .filter(|report| report.budget.volume_element_budget_exceeded)
@@ -1737,6 +1838,62 @@ mod tests {
         assert!(suite.summary.total_ms.is_some());
         assert_eq!(suite.reports[0].benchmark_id, "solid_cube");
         assert_eq!(suite.reports[1].benchmark_id, "thin_slab");
+    }
+
+    #[test]
+    fn benchmark_case_runner_can_collect_generation_failures() {
+        let cases = generic_mesh_benchmark_cases()
+            .into_iter()
+            .take(2)
+            .collect::<Vec<_>>();
+
+        let suite =
+            run_mesh_benchmark_cases_collecting_failures_with("collecting", cases, |case| {
+                if case.benchmark_id == "thin_slab" {
+                    Err("synthetic generation failure".to_string())
+                } else {
+                    Ok(fixture_mesh())
+                }
+            });
+
+        assert_eq!(suite.suite_id, "collecting");
+        assert_eq!(suite.summary.report_count, 1);
+        assert_eq!(suite.summary.generation_failure_count, 1);
+        assert_eq!(suite.summary.solve_ready_count, 0);
+        assert_eq!(suite.summary.failed_count, 2);
+        assert_eq!(suite.reports[0].benchmark_id, "solid_cube");
+        assert_eq!(suite.generation_failures.len(), 1);
+        assert_eq!(suite.generation_failures[0].benchmark_id, "thin_slab");
+        assert_eq!(
+            suite.generation_failures[0].message,
+            "synthetic generation failure"
+        );
+        assert_eq!(
+            suite
+                .summary
+                .failure_counts_by_code
+                .get("volume_coverage_failed"),
+            Some(&1)
+        );
+        assert_eq!(
+            suite
+                .summary
+                .failure_counts_by_code
+                .get("mesh_generation_failed"),
+            Some(&1)
+        );
+        let thin = suite
+            .summary
+            .summary_by_tier
+            .get("thin_feature")
+            .expect("generation failure should create a tier summary");
+        assert_eq!(thin.report_count, 0);
+        assert_eq!(thin.generation_failure_count, 1);
+        assert_eq!(thin.failed_count, 1);
+        assert_eq!(
+            thin.failure_counts_by_code.get("mesh_generation_failed"),
+            Some(&1)
+        );
     }
 
     #[test]

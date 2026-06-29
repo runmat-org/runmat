@@ -40,11 +40,15 @@ pub use artifact::{
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use benchmark::{
-    build_mesh_benchmark_report, build_mesh_benchmark_suite_report, compare_mesh_benchmark_suites,
-    generic_mesh_benchmark_cases, run_generic_mesh_benchmark_suite, run_mesh_benchmark_cases,
-    run_mesh_benchmark_cases_with, MeshBenchmarkCase, MeshBenchmarkCaseComparison,
-    MeshBenchmarkComparisonReport, MeshBenchmarkComparisonSummary,
-    MeshBenchmarkComparisonThresholds, MeshBenchmarkCoverageMetrics, MeshBenchmarkInput,
+    build_mesh_benchmark_report, build_mesh_benchmark_suite_report,
+    build_mesh_benchmark_suite_report_with_failures, compare_mesh_benchmark_suites,
+    generic_mesh_benchmark_cases, run_generic_mesh_benchmark_suite,
+    run_generic_mesh_benchmark_suite_collecting_failures, run_mesh_benchmark_cases,
+    run_mesh_benchmark_cases_collecting_failures,
+    run_mesh_benchmark_cases_collecting_failures_with, run_mesh_benchmark_cases_with,
+    MeshBenchmarkCase, MeshBenchmarkCaseComparison, MeshBenchmarkComparisonReport,
+    MeshBenchmarkComparisonSummary, MeshBenchmarkComparisonThresholds,
+    MeshBenchmarkCoverageMetrics, MeshBenchmarkGenerationFailure, MeshBenchmarkInput,
     MeshBenchmarkReport, MeshBenchmarkRunError, MeshBenchmarkSolveReadiness,
     MeshBenchmarkSuiteReport, MeshBenchmarkSuiteSummary, MeshBenchmarkTier, MeshBenchmarkTiming,
     MeshBenchmarkTopologyMetrics, MESH_BENCHMARK_COMPARISON_SCHEMA_VERSION,
