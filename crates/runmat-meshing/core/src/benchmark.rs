@@ -249,6 +249,8 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_no_budget_exceeded: bool,
     #[serde(default)]
+    pub require_no_missing_surface_source_edges: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -265,6 +267,7 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
         Self {
             require_all_solve_ready: true,
             require_no_budget_exceeded: true,
+            require_no_missing_surface_source_edges: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -541,6 +544,21 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 suite.summary.budget_exceeded_count
             ),
         ));
+    }
+    if policy.require_no_missing_surface_source_edges {
+        let missing_source_edge_count = suite
+            .reports
+            .iter()
+            .map(|report| report.cad.surface_missing_source_edge_count)
+            .sum::<usize>();
+        if missing_source_edge_count > 0 {
+            violations.push(gate_violation(
+                "surface_source_edges_missing",
+                format!(
+                    "{missing_source_edge_count} surface source edges are missing from benchmark reports"
+                ),
+            ));
+        }
     }
     if let (Some(total_ms), Some(max_total_ms)) = (suite.summary.total_ms, policy.max_total_ms) {
         if total_ms > max_total_ms {
@@ -2260,6 +2278,7 @@ mod tests {
         over_budget.timing.total_ms = Some(8.0);
         over_budget.artifacts.analysis_mesh_json_bytes = Some(1500);
         over_budget.artifacts.mesh_evidence_json_bytes = Some(1700);
+        over_budget.cad.surface_missing_source_edge_count = 2;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
             vec![over_budget],
@@ -2292,6 +2311,7 @@ mod tests {
         assert!(codes.contains(&"failed_count_exceeded"));
         assert!(codes.contains(&"not_all_reports_solve_ready"));
         assert!(codes.contains(&"element_budget_exceeded"));
+        assert!(codes.contains(&"surface_source_edges_missing"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
