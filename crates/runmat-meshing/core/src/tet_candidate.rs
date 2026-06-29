@@ -4146,7 +4146,7 @@ fn best_node_adjacent_cavity_untangling(
         node_adjacency,
         options,
     );
-    if adjacent.len() < 4 || adjacent.len() > 24 {
+    if adjacent.len() < 3 || adjacent.len() > 24 {
         return Ok(None);
     }
     let face_closure =
@@ -4178,7 +4178,7 @@ fn best_node_adjacent_cavity_untangling(
 
     let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
     for group in candidate_groups {
-        if group.len() < 4 || group.len() > 24 {
+        if group.len() < 3 || group.len() > 24 {
             continue;
         }
         let original_near_singular_count =
@@ -5037,7 +5037,7 @@ fn best_node_adjacent_cavity_reconnection(
         node_adjacency,
         options,
     );
-    if adjacent.len() < 4 || adjacent.len() > 24 {
+    if adjacent.len() < 3 || adjacent.len() > 24 {
         return Ok(None);
     }
     let face_closure =
@@ -5069,7 +5069,7 @@ fn best_node_adjacent_cavity_reconnection(
 
     let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
     for group in candidate_groups {
-        if group.len() < 4 || group.len() > 24 {
+        if group.len() < 3 || group.len() > 24 {
             continue;
         }
         let original_below_count = count_exact_quality_violations(
@@ -8648,7 +8648,6 @@ mod tests {
             ([0, 1, 2, 3], 0.05),
             ([0, 1, 2, 4], 0.8),
             ([0, 5, 6, 7], 0.05),
-            ([0, 8, 9, 10], 0.05),
         ]
         .into_iter()
         .enumerate()
@@ -8672,14 +8671,20 @@ mod tests {
             (5, [2.0, 0.0, 0.0]),
             (6, [0.0, 2.0, 0.0]),
             (7, [0.0, 0.0, 2.0]),
-            (8, [-2.0, 0.0, 0.0]),
-            (9, [0.0, -2.0, 0.0]),
-            (10, [0.0, 0.0, -2.0]),
         ]);
         let face_adjacency = tet_face_adjacency(&tets);
         let node_adjacency = tet_node_adjacency(&tets);
         let threshold = untangling_exact_quality_threshold(options);
 
+        let repair_result = best_node_adjacent_cavity_reconnection(
+            0,
+            &tets,
+            &face_adjacency,
+            &node_adjacency,
+            &node_points,
+            options,
+        )
+        .expect("node-adjacent repair should evaluate");
         let result = best_node_adjacent_cavity_untangling(
             0,
             &tets,
@@ -8691,6 +8696,10 @@ mod tests {
         )
         .expect("node-adjacent untangling should evaluate");
 
+        assert!(
+            repair_result.is_none(),
+            "small node-touching groups that do not form a closed remeshable cavity must stay fail-closed"
+        );
         assert!(
             result.is_none(),
             "node-touching groups that do not form a closed remeshable cavity must stay fail-closed"
