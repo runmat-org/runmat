@@ -6014,6 +6014,83 @@ fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
 }
 
 #[test]
+fn append_solved_adaptive_mesh_summary_refreshes_adaptive_evidence() {
+    let root = temp_artifact_root("append-solved-adaptive-evidence-refresh");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_evidence": {
+                "schema_version": "mesh-evidence/v1"
+            }
+        }))
+        .expect("encode stale evidence"),
+    )
+    .expect("write stale evidence");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tet_2".to_string(),
+        kind: VolumeElementKind::Tet4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        vec![2],
+        vec![10.0, 1000.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let refreshed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
+            .expect("parse refreshed evidence");
+    let adaptive = &refreshed["mesh_evidence"]["adaptive"];
+    assert_eq!(adaptive["iteration_count"].as_u64(), Some(1));
+    assert_eq!(
+        adaptive["latest_convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert_eq!(adaptive["latest_indicator_count"].as_u64(), Some(4));
+    assert_eq!(adaptive["latest_used_indicator_count"].as_u64(), Some(1));
+    assert_eq!(adaptive["latest_marker_count"].as_u64(), Some(2));
+    assert_eq!(
+        adaptive["latest_marker_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        adaptive["latest_sizing_update_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        adaptive["latest_indicator_status_counts"]["used"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        adaptive["latest_indicator_status_counts"]["skipped_missing_field"].as_u64(),
+        Some(3)
+    );
+}
+
+#[test]
 fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
     let root = temp_artifact_root("append-solved-adaptive-boundary-region-summary");
     let _ = fs::remove_dir_all(&root);

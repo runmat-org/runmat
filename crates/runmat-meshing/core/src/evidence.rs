@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
+    adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus},
     artifact::{AnalysisMeshArtifact, AnalysisVolumeElement, MeshBackendSummary},
     quality::QualityThresholds,
     topology::VolumeElementKind,
@@ -565,7 +566,7 @@ fn adaptive_evidence(mesh: &AnalysisMeshArtifact) -> MeshAdaptiveEvidence {
     let mut latest_indicator_status_counts = BTreeMap::<String, usize>::new();
     for indicator in &latest.indicators {
         *latest_indicator_status_counts
-            .entry(serde_label(&indicator.status))
+            .entry(indicator_status_label(indicator.status))
             .or_default() += 1;
     }
     let mut latest_marker_by_reason = BTreeMap::<String, usize>::new();
@@ -586,12 +587,12 @@ fn adaptive_evidence(mesh: &AnalysisMeshArtifact) -> MeshAdaptiveEvidence {
     MeshAdaptiveEvidence {
         iteration_count: mesh.adaptive_iterations.len(),
         latest_iteration_index: Some(latest.iteration_index),
-        latest_convergence_status: Some(serde_label(&latest.convergence_status)),
+        latest_convergence_status: Some(convergence_status_label(latest.convergence_status)),
         latest_indicator_count: latest.indicators.len(),
         latest_used_indicator_count: latest
             .indicators
             .iter()
-            .filter(|indicator| serde_label(&indicator.status) == "used")
+            .filter(|indicator| indicator.status == RefinementIndicatorStatus::Used)
             .count(),
         latest_marker_count: latest.markers.len(),
         latest_sizing_update_sample_count: latest.sizing_update.samples.len(),
@@ -605,11 +606,27 @@ fn adaptive_evidence(mesh: &AnalysisMeshArtifact) -> MeshAdaptiveEvidence {
     }
 }
 
-fn serde_label<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "unknown".to_string())
+fn convergence_status_label(status: AdaptiveConvergenceStatus) -> String {
+    match status {
+        AdaptiveConvergenceStatus::NotStarted => "not_started",
+        AdaptiveConvergenceStatus::Disabled => "disabled",
+        AdaptiveConvergenceStatus::Pending => "pending",
+        AdaptiveConvergenceStatus::Converged => "converged",
+        AdaptiveConvergenceStatus::MaxIterationsReached => "max_iterations_reached",
+        AdaptiveConvergenceStatus::ElementBudgetReached => "element_budget_reached",
+    }
+    .to_string()
+}
+
+fn indicator_status_label(status: RefinementIndicatorStatus) -> String {
+    match status {
+        RefinementIndicatorStatus::Used => "used",
+        RefinementIndicatorStatus::SkippedMissingField => "skipped_missing_field",
+        RefinementIndicatorStatus::SkippedNotApplicable => "skipped_not_applicable",
+        RefinementIndicatorStatus::SkippedBudget => "skipped_budget",
+        RefinementIndicatorStatus::SkippedQuality => "skipped_quality",
+    }
+    .to_string()
 }
 
 fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
