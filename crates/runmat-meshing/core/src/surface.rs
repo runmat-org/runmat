@@ -344,9 +344,14 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut nodes,
             &mut curve_node_to_surface_node,
         )?;
-        let segments = single_face_curve_segment_loop(face.face_id, &segments)?;
-        let sample_report =
-            append_curve_driven_face_elements(face, frame, &segments, &mut nodes, &mut elements);
+        let segment_loops = face_curve_segment_loops(face.face_id, &segments)?;
+        let sample_report = append_curve_driven_face_elements(
+            face,
+            frame,
+            &segment_loops,
+            &mut nodes,
+            &mut elements,
+        );
         exact_cad_sample_node_count += sample_report.accepted_count;
         rejected_exact_cad_sample_count += sample_report.rejected_count;
     }
@@ -666,38 +671,49 @@ fn face_centroid_from_segments(nodes: &[SurfaceNode], segments: &[FaceCurveSegme
 fn append_curve_driven_face_elements(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
-    segments: &[FaceCurveSegment],
+    segment_loops: &[Vec<FaceCurveSegment>],
     nodes: &mut Vec<SurfaceNode>,
     elements: &mut Vec<SurfaceElement>,
 ) -> ExactCadSampleSurfaceReport {
+    let segments = segment_loops
+        .iter()
+        .flat_map(|loop_segments| loop_segments.iter().copied())
+        .collect::<Vec<_>>();
     if segments.len() <= 3 && !has_exact_face_domain_samples(frame) {
-        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
         return ExactCadSampleSurfaceReport::default();
     }
 
     let node_start = nodes.len();
     let element_start = elements.len();
     let mut boundary_edge_ids = BTreeMap::<[u32; 2], u32>::new();
-    for segment in segments {
+    for segment in &segments {
         boundary_edge_ids.insert(
             sorted_node_pair(segment.node_ids[0], segment.node_ids[1]),
             segment.source_edge_id,
         );
     }
 
-    let mut points = boundary_triangulation_points(frame, segments, nodes);
+    let mut points = boundary_triangulation_points(frame, &segments, nodes);
     let boundary_point_count = points.len();
-    let boundary_polygon = boundary_loop_polygon(&points[..boundary_point_count]);
+    let boundary_polygons = boundary_loop_polygons(frame, segment_loops, nodes);
     let sample_report =
-        append_exact_face_domain_sample_points(face, frame, &boundary_polygon, nodes, &mut points);
-    append_face_lattice_points(face, frame, &boundary_polygon, segments, nodes, &mut points);
-    let triangles = if boundary_point_count == 3 {
+        append_exact_face_domain_sample_points(face, frame, &boundary_polygons, nodes, &mut points);
+    append_face_lattice_points(
+        face,
+        frame,
+        &boundary_polygons,
+        &segments,
+        nodes,
+        &mut points,
+    );
+    let triangles = if segment_loops.len() == 1 && boundary_point_count == 3 {
         triangulate_triangle_points_by_insertion(&points, boundary_point_count)
     } else {
-        triangulate_face_points(&points, &boundary_polygon)
+        triangulate_face_points(&points, &boundary_polygons)
     };
     if triangles.is_empty() {
-        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
         return sample_report;
     }
 
@@ -761,7 +777,7 @@ fn append_curve_driven_face_elements(
     {
         nodes.truncate(node_start);
         elements.truncate(element_start);
-        append_curve_fan_face_elements(face, frame, segments, nodes, elements);
+        append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
         return sample_report.rejected_after_area_guard();
     }
     sample_report
@@ -894,7 +910,7 @@ fn face_edges_are_recovered(
 fn append_exact_face_domain_sample_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
-    boundary_polygon: &[[f64; 2]],
+    boundary_polygons: &[Vec<[f64; 2]>],
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
 ) -> ExactCadSampleSurfaceReport {
@@ -917,7 +933,7 @@ fn append_exact_face_domain_sample_points(
             continue;
         }
         let local_uv = frame_local_uv(frame, projection.point_m);
-        if !point_in_polygon_2d(local_uv, boundary_polygon) {
+        if !point_in_trimmed_domain_2d(local_uv, boundary_polygons) {
             report.rejected_count += 1;
             continue;
         }
@@ -967,7 +983,7 @@ fn is_usable_exact_face_domain_sample(
 fn append_face_lattice_points(
     face: &SourceTopologyFace,
     frame: &crate::CadFaceEvaluationFrame,
-    boundary_polygon: &[[f64; 2]],
+    boundary_polygons: &[Vec<[f64; 2]>],
     segments: &[FaceCurveSegment],
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
@@ -1000,7 +1016,7 @@ fn append_face_lattice_points(
             if !projection.uv_in_bounds {
                 continue;
             }
-            if !point_in_polygon_2d(projection.uv, boundary_polygon) {
+            if !point_in_trimmed_domain_2d(projection.uv, boundary_polygons) {
                 continue;
             }
             if points
@@ -1033,7 +1049,7 @@ fn segments_per_source_edge(segments: &[FaceCurveSegment]) -> BTreeMap<u32, usiz
 
 fn triangulate_face_points(
     points: &[FaceTriangulationPoint],
-    boundary_polygon: &[[f64; 2]],
+    boundary_polygons: &[Vec<[f64; 2]>],
 ) -> Vec<FaceTriangle> {
     if points.len() < 3 {
         return Vec::new();
@@ -1119,7 +1135,7 @@ fn triangulate_face_points(
         .filter(|triangle| {
             let centroid =
                 triangle_centroid_2d(triangle.point_indices.map(|index| points[index].uv));
-            point_in_polygon_2d(centroid, boundary_polygon)
+            point_in_trimmed_domain_2d(centroid, boundary_polygons)
         })
         .collect()
 }
@@ -1337,6 +1353,59 @@ fn boundary_loop_polygon(points: &[FaceTriangulationPoint]) -> Vec<[f64; 2]> {
         polygon.pop();
     }
     polygon
+}
+
+fn boundary_loop_polygons(
+    frame: &crate::CadFaceEvaluationFrame,
+    segment_loops: &[Vec<FaceCurveSegment>],
+    nodes: &[SurfaceNode],
+) -> Vec<Vec<[f64; 2]>> {
+    segment_loops
+        .iter()
+        .map(|segments| {
+            boundary_loop_polygon(&boundary_triangulation_points(frame, segments, nodes))
+        })
+        .filter(|polygon| polygon.len() >= 3 && polygon_area_2d(polygon).abs() > f64::EPSILON)
+        .collect()
+}
+
+fn point_in_trimmed_domain_2d(point: [f64; 2], polygons: &[Vec<[f64; 2]>]) -> bool {
+    let Some(outer_index) = outer_boundary_polygon_index(polygons) else {
+        return false;
+    };
+    if !point_in_polygon_2d(point, &polygons[outer_index]) {
+        return false;
+    }
+    polygons
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != outer_index)
+        .all(|(_, hole)| !point_in_polygon_2d(point, hole))
+}
+
+fn outer_boundary_polygon_index(polygons: &[Vec<[f64; 2]>]) -> Option<usize> {
+    polygons
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| {
+            polygon_area_2d(left)
+                .abs()
+                .total_cmp(&polygon_area_2d(right).abs())
+        })
+        .map(|(index, _)| index)
+}
+
+fn polygon_area_2d(polygon: &[[f64; 2]]) -> f64 {
+    if polygon.len() < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0_f64;
+    let mut previous = polygon[polygon.len() - 1];
+    for current in polygon {
+        area += previous[0] * current[1] - current[0] * previous[1];
+        previous = *current;
+    }
+    0.5 * area
 }
 
 fn point_in_polygon_2d(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
@@ -1870,7 +1939,100 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multiple_face_curve_loops_before_triangulation() {
+    fn curve_driven_face_elements_triangulate_holed_loop_domain() {
+        let face = SourceTopologyFace {
+            face_id: 7,
+            source_triangle_id: 11,
+            node_ids: [0, 1, 2],
+            edge_ids: [0, 1, 2],
+            region_ids: vec!["face_a".to_string()],
+            area_m2: 0.96,
+            unit_normal: [0.0, 0.0, 1.0],
+        };
+        let frame = planar_test_frame(7);
+        let mut nodes = square_with_square_hole_surface_nodes();
+        let segment_loops = vec![
+            vec![
+                FaceCurveSegment {
+                    node_ids: [0, 1],
+                    source_edge_id: 0,
+                },
+                FaceCurveSegment {
+                    node_ids: [1, 2],
+                    source_edge_id: 1,
+                },
+                FaceCurveSegment {
+                    node_ids: [2, 3],
+                    source_edge_id: 2,
+                },
+                FaceCurveSegment {
+                    node_ids: [3, 0],
+                    source_edge_id: 3,
+                },
+            ],
+            vec![
+                FaceCurveSegment {
+                    node_ids: [4, 5],
+                    source_edge_id: 4,
+                },
+                FaceCurveSegment {
+                    node_ids: [5, 6],
+                    source_edge_id: 5,
+                },
+                FaceCurveSegment {
+                    node_ids: [6, 7],
+                    source_edge_id: 6,
+                },
+                FaceCurveSegment {
+                    node_ids: [7, 4],
+                    source_edge_id: 7,
+                },
+            ],
+        ];
+        let mut elements = Vec::<SurfaceElement>::new();
+
+        let report = append_curve_driven_face_elements(
+            &face,
+            &frame,
+            &segment_loops,
+            &mut nodes,
+            &mut elements,
+        );
+        let recovered_area = elements.iter().map(|element| element.area_m2).sum::<f64>();
+        let hole = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]];
+
+        assert_eq!(report, ExactCadSampleSurfaceReport::default());
+        assert!(!elements.is_empty());
+        assert!(
+            (recovered_area - face.area_m2).abs() <= 1.0e-12,
+            "recovered_area={recovered_area} expected_area={} element_count={}",
+            face.area_m2,
+            elements.len()
+        );
+        assert!(elements.iter().all(|element| {
+            let centroid = triangle_centroid_2d(element.node_ids.map(|node_id| {
+                let point = nodes[node_id as usize].coordinates_m;
+                [point[0], point[1]]
+            }));
+            !point_in_polygon_2d(centroid, &hole)
+        }));
+        assert_surface_edges_are_recovered(
+            &elements,
+            &[
+                [0, 1],
+                [1, 2],
+                [2, 3],
+                [0, 3],
+                [4, 5],
+                [5, 6],
+                [6, 7],
+                [4, 7],
+            ],
+        );
+    }
+
+    #[test]
+    fn single_loop_extractor_reports_multiple_face_curve_loops() {
         let segments = vec![
             FaceCurveSegment {
                 node_ids: [0, 1],
@@ -2064,6 +2226,52 @@ mod tests {
             bounds_max_m: [1.0, 1.0, 0.0],
             region_ids: vec!["face_a".to_string()],
         }
+    }
+
+    fn planar_test_frame(source_face_id: u32) -> crate::CadFaceEvaluationFrame {
+        crate::CadFaceEvaluationFrame {
+            face_id: "face_a".to_string(),
+            source_face_id,
+            origin_m: [0.0, 0.0, 0.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+            unit_normal: [0.0, 0.0, 1.0],
+            area_m2: 1.0,
+            evaluator_backed: false,
+            exact_query_backed: false,
+            live_query_backed: false,
+            evaluator_sample_count: 0,
+            evaluator_rejected_sample_count: 0,
+            evaluator_max_projection_error_m: 0.0,
+            evaluator_samples: Vec::new(),
+            u_derivative_m_per_uv: None,
+            v_derivative_m_per_uv: None,
+            max_curvature_estimate_1_per_m: None,
+            uv_bounds: Some([[0.0, 0.0], [1.0, 1.0]]),
+            uv_bounds_sample_count: 4,
+            uv_domain_source: Some("test_domain".to_string()),
+        }
+    }
+
+    fn square_with_square_hole_surface_nodes() -> Vec<SurfaceNode> {
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.4, 0.4, 0.0],
+            [0.6, 0.4, 0.0],
+            [0.6, 0.6, 0.0],
+            [0.4, 0.6, 0.0],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(node_id, coordinates_m)| SurfaceNode {
+            node_id: node_id as u32,
+            source_vertex_id: node_id as u32,
+            coordinates_m,
+        })
+        .collect()
     }
 
     fn geometry_for_topology() -> runmat_geometry_core::GeometryAsset {
