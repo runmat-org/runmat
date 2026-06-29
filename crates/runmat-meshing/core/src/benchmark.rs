@@ -609,6 +609,7 @@ pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {
         ),
         through_hole_block_benchmark_case(),
         faceted_cylinder_benchmark_case(),
+        tapered_arm_benchmark_case(),
         disconnected_boxes_benchmark_case(),
         boundary_load_patch_benchmark_case(),
         adaptive_refinement_benchmark_case(),
@@ -1526,6 +1527,25 @@ fn faceted_cylinder_benchmark_case() -> MeshBenchmarkCase {
     )
 }
 
+fn tapered_arm_benchmark_case() -> MeshBenchmarkCase {
+    let (vertices, triangles) = tapered_rectangular_prism_surface([0.8, 0.5], [0.55, 0.35], 0.8);
+    let expected_volume_m3 = closed_surface_volume_m3(&vertices, &triangles);
+    let expected_boundary_area_m2 = closed_surface_area_m2(&vertices, &triangles);
+    benchmark_case(
+        "tapered_arm",
+        MeshBenchmarkTier::Solid3d,
+        geometry_from_surface(
+            "tapered_arm",
+            "generic_tapered_arm_surface",
+            vertices,
+            triangles,
+        ),
+        expected_volume_m3,
+        expected_boundary_area_m2,
+        1,
+    )
+}
+
 fn adaptive_refinement_benchmark_case() -> MeshBenchmarkCase {
     let mut case = benchmark_case(
         "adaptive_refinement_marker",
@@ -1739,6 +1759,86 @@ fn box_surface(
     })
     .collect();
     (vertices, triangles)
+}
+
+fn tapered_rectangular_prism_surface(
+    base_size_m: [f64; 2],
+    tip_size_m: [f64; 2],
+    length_m: f64,
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let [base_y, base_z] = base_size_m;
+    let [tip_y, tip_z] = tip_size_m;
+    let vertices = vec![
+        [0.0, -base_y / 2.0, -base_z / 2.0],
+        [0.0, base_y / 2.0, -base_z / 2.0],
+        [0.0, base_y / 2.0, base_z / 2.0],
+        [0.0, -base_y / 2.0, base_z / 2.0],
+        [length_m, -tip_y / 2.0, -tip_z / 2.0],
+        [length_m, tip_y / 2.0, -tip_z / 2.0],
+        [length_m, tip_y / 2.0, tip_z / 2.0],
+        [length_m, -tip_y / 2.0, tip_z / 2.0],
+    ];
+    let mut triangles = Vec::<[u32; 3]>::new();
+    for quad in [
+        [0, 1, 2, 3],
+        [4, 7, 6, 5],
+        [0, 4, 5, 1],
+        [1, 5, 6, 2],
+        [2, 6, 7, 3],
+        [3, 7, 4, 0],
+    ] {
+        push_quad(&mut triangles, quad);
+    }
+    (vertices, triangles)
+}
+
+fn closed_surface_area_m2(vertices: &[[f64; 3]], triangles: &[[u32; 3]]) -> f64 {
+    triangles
+        .iter()
+        .map(|triangle| triangle_area_m2(vertices, *triangle))
+        .sum()
+}
+
+fn closed_surface_volume_m3(vertices: &[[f64; 3]], triangles: &[[u32; 3]]) -> f64 {
+    triangles
+        .iter()
+        .map(|triangle| {
+            let a = vertices[triangle[0] as usize];
+            let b = vertices[triangle[1] as usize];
+            let c = vertices[triangle[2] as usize];
+            dot3(a, cross3(b, c)) / 6.0
+        })
+        .sum::<f64>()
+        .abs()
+}
+
+fn triangle_area_m2(vertices: &[[f64; 3]], triangle: [u32; 3]) -> f64 {
+    let a = vertices[triangle[0] as usize];
+    let b = vertices[triangle[1] as usize];
+    let c = vertices[triangle[2] as usize];
+    let ab = sub3(b, a);
+    let ac = sub3(c, a);
+    0.5 * norm3(cross3(ab, ac))
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn norm3(a: [f64; 3]) -> f64 {
+    dot3(a, a).sqrt()
 }
 
 fn through_hole_block_surface(
@@ -2201,25 +2301,27 @@ mod tests {
     fn generic_benchmark_cases_are_valid_closed_geometry() {
         let cases = generic_mesh_benchmark_cases();
 
-        assert_eq!(cases.len(), 7);
+        assert_eq!(cases.len(), 8);
         assert_eq!(cases[0].benchmark_id, "solid_cube");
         assert_eq!(cases[1].tier, MeshBenchmarkTier::ThinFeature);
         assert_eq!(cases[2].benchmark_id, "through_hole_block");
         assert_eq!(cases[2].tier, MeshBenchmarkTier::HoleFeature);
         assert_eq!(cases[3].benchmark_id, "faceted_cylinder");
         assert_eq!(cases[3].tier, MeshBenchmarkTier::CurvedSurface);
-        assert_eq!(cases[4].tier, MeshBenchmarkTier::MultiBody);
-        assert_eq!(cases[5].benchmark_id, "boundary_load_patch");
-        assert_eq!(cases[5].tier, MeshBenchmarkTier::SizingField);
+        assert_eq!(cases[4].benchmark_id, "tapered_arm");
+        assert_eq!(cases[4].tier, MeshBenchmarkTier::Solid3d);
+        assert_eq!(cases[5].tier, MeshBenchmarkTier::MultiBody);
+        assert_eq!(cases[6].benchmark_id, "boundary_load_patch");
+        assert_eq!(cases[6].tier, MeshBenchmarkTier::SizingField);
         assert_eq!(
-            cases[5].validation.required_boundary_region_ids,
+            cases[6].validation.required_boundary_region_ids,
             vec!["benchmark_root".to_string(), "benchmark_tip".to_string()]
         );
         assert_eq!(
-            cases[5].validation.required_material_region_ids,
+            cases[6].validation.required_material_region_ids,
             vec!["benchmark_root".to_string(), "benchmark_tip".to_string()]
         );
-        let load_patch_sizing = cases[5]
+        let load_patch_sizing = cases[6]
             .sizing
             .as_ref()
             .expect("load patch benchmark should carry sizing markers");
@@ -2242,9 +2344,9 @@ mod tests {
             .iter()
             .any(|sample| sample.position_m[1] == 0.0
                 && sample.reason.as_deref() == Some("structural.constraint_regions")));
-        assert_eq!(cases[6].benchmark_id, "adaptive_refinement_marker");
-        assert_eq!(cases[6].tier, MeshBenchmarkTier::AdaptiveRefinement);
-        let adaptive_sizing = cases[6]
+        assert_eq!(cases[7].benchmark_id, "adaptive_refinement_marker");
+        assert_eq!(cases[7].tier, MeshBenchmarkTier::AdaptiveRefinement);
+        let adaptive_sizing = cases[7]
             .sizing
             .as_ref()
             .expect("adaptive benchmark should carry sizing markers");
@@ -2432,6 +2534,34 @@ mod tests {
                 .unwrap_or_default()
                 > 0
         );
+    }
+
+    #[test]
+    fn tapered_arm_benchmark_generates_solve_ready_mesh() {
+        let case = tapered_arm_benchmark_case();
+        let mesh =
+            generate_mesh_for_benchmark_case(&case).expect("tapered arm benchmark should generate");
+        let report = build_mesh_benchmark_report(
+            &mesh,
+            &case.validation,
+            MeshBenchmarkInput::new(case.benchmark_id.clone(), case.tier),
+        );
+
+        assert_eq!(report.benchmark_id, "tapered_arm");
+        assert_eq!(report.tier, MeshBenchmarkTier::Solid3d);
+        assert!(
+            report.solve_readiness.solve_ready,
+            "tapered arm benchmark should be solve-ready: {:?}",
+            report.solve_readiness.validation_error_code
+        );
+        assert_eq!(report.topology.volume_component_count, 1);
+        assert_eq!(report.solve_readiness.fan_fallback_component_count, 0);
+        assert_eq!(
+            report.solve_readiness.unrepaired_exact_quality_total_count,
+            0
+        );
+        assert!(report.coverage.boundary_edge_recovery_ratio >= 1.0);
+        assert!(report.coverage.boundary_face_recovery_ratio >= 1.0);
     }
 
     #[test]
