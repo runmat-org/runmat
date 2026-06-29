@@ -3271,6 +3271,46 @@ mod tests {
             "annular recovery bad_seed_surface_distance={:?}",
             bad_seed_surface_distance_histogram
         );
+
+        let mut unrepaired_options = case.options.clone();
+        unrepaired_options.validation.quality.min_scaled_jacobian = 0.0;
+        let unrepaired_preparation = prepare_production_mesh(&case.geometry, &unrepaired_options)
+            .expect("annular relaxed preparation should complete for seed origin diagnostics");
+        let unrepaired_seed_surface_distance_histogram = unrepaired_preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.source, TetCandidateNodeSource::InteriorSeed))
+            .map(|node| {
+                diagnostic_distance_bin(diagnostic_surface_distance(
+                    node.coordinates_m,
+                    &unrepaired_preparation.surface,
+                ))
+            })
+            .fold(BTreeMap::<String, usize>::new(), |mut histogram, bin| {
+                *histogram.entry(bin).or_default() += 1;
+                histogram
+            });
+        let unrepaired_seed_bound_plane_histogram = unrepaired_preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.source, TetCandidateNodeSource::InteriorSeed))
+            .map(|node| {
+                diagnostic_bound_plane_bin(node.coordinates_m, &unrepaired_preparation.surface)
+            })
+            .fold(BTreeMap::<String, usize>::new(), |mut histogram, bin| {
+                *histogram.entry(bin).or_default() += 1;
+                histogram
+            });
+        eprintln!(
+            "annular recovery unrepaired_seed_surface_distance={:?}",
+            unrepaired_seed_surface_distance_histogram
+        );
+        eprintln!(
+            "annular recovery unrepaired_seed_bound_planes={:?}",
+            unrepaired_seed_bound_plane_histogram
+        );
     }
 
     fn diagnostic_tet_edges(node_ids: [u32; 4]) -> [[u32; 2]; 6] {
@@ -3409,6 +3449,43 @@ mod tests {
         } else {
             "gte_5e-2".to_string()
         }
+    }
+
+    fn diagnostic_bound_plane_bin(
+        point: [f64; 3],
+        surface: &crate::surface::SurfaceDiscretization,
+    ) -> String {
+        let (bounds_min, bounds_max) = diagnostic_surface_bounds(surface);
+        let tolerance = crate::MeshingTolerance::from_bounds(bounds_min, bounds_max);
+        let mut axes = Vec::<String>::new();
+        for axis in 0..3 {
+            if tolerance.nearly_equal(point[axis], bounds_min[axis], 1.0) {
+                axes.push(format!("{axis}:min"));
+            }
+            if tolerance.nearly_equal(point[axis], bounds_max[axis], 1.0) {
+                axes.push(format!("{axis}:max"));
+            }
+        }
+        if axes.is_empty() {
+            "interior".to_string()
+        } else {
+            axes.join(",")
+        }
+    }
+
+    fn diagnostic_surface_bounds(
+        surface: &crate::surface::SurfaceDiscretization,
+    ) -> ([f64; 3], [f64; 3]) {
+        surface.nodes.iter().fold(
+            ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |(mut bounds_min, mut bounds_max), node| {
+                for axis in 0..3 {
+                    bounds_min[axis] = bounds_min[axis].min(node.coordinates_m[axis]);
+                    bounds_max[axis] = bounds_max[axis].max(node.coordinates_m[axis]);
+                }
+                (bounds_min, bounds_max)
+            },
+        )
     }
 
     fn diagnostic_cavity_node_ids(cavity: &ConstrainedCavity) -> BTreeSet<u32> {

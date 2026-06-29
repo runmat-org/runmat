@@ -6789,7 +6789,14 @@ fn sample_component_interior_points(
     let center = component_interior_point(component);
     let classifier =
         ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
-    if classifier.contains_interior_point(center) {
+    let center_clearance_size = options.interior_target_size_m.unwrap_or_else(|| {
+        (0..3)
+            .map(|axis| component.bounds_max_m[axis] - component.bounds_min_m[axis])
+            .filter(|span| span.is_finite())
+            .fold(0.0_f64, f64::max)
+            .max(1.0)
+    });
+    if classifier.contains_protected_interior_point(center, center_clearance_size, tolerance) {
         points.push(center);
     }
 
@@ -6814,7 +6821,8 @@ fn sample_component_interior_points(
                     if contains_point(&points, point, tolerance) {
                         continue;
                     }
-                    if classifier.contains_interior_point(point) {
+                    if classifier.contains_protected_interior_point(point, target_size_m, tolerance)
+                    {
                         points.push(point);
                     }
                 }
@@ -6822,7 +6830,7 @@ fn sample_component_interior_points(
         }
     }
 
-    if points.is_empty() {
+    if points.is_empty() && classifier.contains_interior_point(center) {
         points.push(center);
     }
     Ok(points)
@@ -6906,6 +6914,17 @@ impl ComponentSurfaceClassifier {
         !self.point_is_on_boundary(point) && self.point_is_inside_by_votes(point)
     }
 
+    fn contains_protected_interior_point(
+        &self,
+        point: [f64; 3],
+        target_size_m: f64,
+        tolerance: MeshingTolerance,
+    ) -> bool {
+        self.contains_interior_point(point)
+            && self.nearest_surface_distance(point)
+                > protected_interior_seed_clearance(target_size_m, tolerance)
+    }
+
     fn point_is_inside_by_votes(&self, point: [f64; 3]) -> bool {
         let epsilon = self.tolerance.absolute_m;
         let probes = [
@@ -6960,6 +6979,15 @@ impl ComponentSurfaceClassifier {
         intersections.dedup_by(|left, right| (*left - *right).abs() <= self.tolerance.absolute_m);
         intersections.len() % 2 == 1
     }
+}
+
+fn protected_interior_seed_clearance(target_size_m: f64, tolerance: MeshingTolerance) -> f64 {
+    let target_size_m = if target_size_m.is_finite() && target_size_m > 0.0 {
+        target_size_m
+    } else {
+        1.0
+    };
+    (target_size_m.min(1.0) * 0.01).max(tolerance.absolute_m * 10.0)
 }
 
 fn surface_element_points(
@@ -7119,6 +7147,12 @@ mod tests {
         assert!(classifier.contains_point([0.0, 0.5, 0.5]));
         assert!(!classifier.contains_interior_point([0.0, 0.5, 0.5]));
         assert!(classifier.contains_interior_point([0.5, 0.5, 0.5]));
+        assert!(classifier.contains_interior_point([0.001, 0.5, 0.5]));
+        assert!(!classifier.contains_protected_interior_point(
+            [0.001, 0.5, 0.5],
+            0.4,
+            MeshingTolerance::default(),
+        ));
         assert!(!classifier.contains_point([1.5, 0.5, 0.5]));
         assert!(!classifier.contains_interior_point([1.5, 0.5, 0.5]));
     }
