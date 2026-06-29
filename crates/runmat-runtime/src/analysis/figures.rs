@@ -1,5 +1,7 @@
 use glam::{Vec3, Vec4};
-use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_analysis_core::{
+    AnalysisField, AnalysisFieldValues, AnalysisModel, BoundaryConditionKind, LoadKind,
+};
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
@@ -120,7 +122,8 @@ pub fn analysis_generate_study_run_figures(
 ) -> Result<Vec<AnalysisGeneratedFigure>, String> {
     let current = storage::load_run_result(run_id)?
         .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
-    let mut figures = generate_run_figures(&study.geometry, &current, options);
+    let mut figures =
+        generate_run_figures(&study.geometry, study.model.as_ref(), &current, options);
 
     if options.include_comparison {
         if let Some(previous) = previous_run_of_kind(&current)? {
@@ -152,11 +155,12 @@ pub fn analysis_generate_study_run_figures(
 
 fn generate_run_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
     run: &AnalysisRunResult,
     options: AnalysisFigureGenerationOptions,
 ) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
-    figures.extend(mesh_result_figures(geometry, run, options));
+    figures.extend(mesh_result_figures(geometry, model, run, options));
     figures.extend(summary_figures(run));
     figures.extend(convergence_figures(run));
     figures
@@ -164,6 +168,7 @@ fn generate_run_figures(
 
 fn mesh_result_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
     run: &AnalysisRunResult,
     options: AnalysisFigureGenerationOptions,
 ) -> Vec<AnalysisGeneratedFigure> {
@@ -311,6 +316,18 @@ fn mesh_result_figures(
         });
     }
 
+    if figures.len() < per_run_mesh_figure_limit {
+        if let Some(figure) = boundary_region_figure(
+            geometry,
+            render_topology,
+            model,
+            options,
+            shared_warnings.clone(),
+        ) {
+            figures.push(figure);
+        }
+    }
+
     if figures.is_empty() {
         if let Some(warning) = topology_warnings.first() {
             figures.push(warning_line_figure(
@@ -338,6 +355,139 @@ fn mesh_result_figures(
     }
 
     figures
+}
+
+fn boundary_region_figure(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
+    model: Option<&AnalysisModel>,
+    options: AnalysisFigureGenerationOptions,
+    mut warnings: Vec<String>,
+) -> Option<AnalysisGeneratedFigure> {
+    let model = model?;
+    let regions = authored_boundary_regions(model);
+    if regions.is_empty() {
+        return None;
+    }
+
+    let mut figure = base_mesh_figure(
+        geometry,
+        render_topology,
+        "FEA boundary regions".to_string(),
+        options,
+    )?;
+
+    let mut present = Vec::<String>::new();
+    for index in 0..figure.plots().count() {
+        let Some(PlotElement::Mesh(mesh)) = figure.get_plot_mut(index) else {
+            continue;
+        };
+        for region in &regions {
+            if mesh
+                .regions()
+                .iter()
+                .any(|mesh_region| mesh_region.region_id == region.region_id)
+            {
+                if !present.iter().any(|existing| existing == &region.region_id) {
+                    present.push(region.region_id.clone());
+                }
+                if mesh.highlighted_region_id().is_none() {
+                    mesh.set_highlighted_region_id(Some(region.region_id.clone()));
+                    mesh.set_highlight_color(region.highlight_color);
+                }
+            }
+        }
+    }
+
+    for region in &regions {
+        if !present.iter().any(|existing| existing == &region.region_id) {
+            warnings.push(format!(
+                "authored {} region '{}' is not present in solver render topology",
+                region.role, region.region_id
+            ));
+        }
+    }
+
+    if present.is_empty() && warnings.is_empty() {
+        return None;
+    }
+
+    Some(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::MeshResult,
+        title: "FEA boundary regions".to_string(),
+        field_ids: Vec::new(),
+        topology_ids: vec!["analysis_mesh".to_string()],
+        warnings,
+        figure,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct AuthoredBoundaryRegion {
+    region_id: String,
+    role: &'static str,
+    highlight_color: Vec4,
+}
+
+fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
+    let mut regions = Vec::<AuthoredBoundaryRegion>::new();
+    for load in &model.loads {
+        if !load_kind_requires_boundary_region(&load.kind) {
+            continue;
+        }
+        push_authored_boundary_region(
+            &mut regions,
+            &load.region_id,
+            "load",
+            Vec4::new(0.98, 0.30, 0.54, 1.0),
+        );
+    }
+    for boundary_condition in &model.boundary_conditions {
+        if !boundary_condition_kind_uses_boundary_region(&boundary_condition.kind) {
+            continue;
+        }
+        push_authored_boundary_region(
+            &mut regions,
+            &boundary_condition.region_id,
+            "constraint",
+            Vec4::new(0.18, 0.78, 0.48, 1.0),
+        );
+    }
+    regions
+}
+
+fn push_authored_boundary_region(
+    regions: &mut Vec<AuthoredBoundaryRegion>,
+    region_id: &str,
+    role: &'static str,
+    highlight_color: Vec4,
+) {
+    if region_id.trim().is_empty()
+        || regions
+            .iter()
+            .any(|existing| existing.region_id == region_id && existing.role == role)
+    {
+        return;
+    }
+    regions.push(AuthoredBoundaryRegion {
+        region_id: region_id.to_string(),
+        role,
+        highlight_color,
+    });
+}
+
+fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
+    matches!(
+        kind,
+        LoadKind::Force { .. }
+            | LoadKind::Moment { .. }
+            | LoadKind::Wrench { .. }
+            | LoadKind::Pressure { .. }
+    )
+}
+
+fn boundary_condition_kind_uses_boundary_region(_kind: &BoundaryConditionKind) -> bool {
+    true
 }
 
 fn summary_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
@@ -1900,6 +2050,10 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_core::{
+        AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, LoadCase,
+        ReferenceFrame,
+    };
 
     fn simple_run_result(
         fields: Vec<AnalysisField>,
@@ -1981,6 +2135,53 @@ mod tests {
             regions: Vec::new(),
             region_entity_mappings: Vec::new(),
             diagnostics: Vec::new(),
+        }
+    }
+
+    fn simple_boundary_region_model() -> AnalysisModel {
+        AnalysisModel {
+            model_id: AnalysisModelId("model".to_string()),
+            geometry_id: "geometry".to_string(),
+            geometry_revision: 1,
+            units: runmat_geometry_core::UnitSystem::Meter,
+            frame: ReferenceFrame::Global,
+            materials: Vec::new(),
+            material_assignments: Vec::new(),
+            structural: None,
+            thermo_mechanical: None,
+            electro_thermal: None,
+            electromagnetic: None,
+            cfd: None,
+            interfaces: Vec::new(),
+            boundary_conditions: vec![BoundaryCondition {
+                bc_id: "fixed_bc".to_string(),
+                region_id: "fixed".to_string(),
+                kind: BoundaryConditionKind::Fixed,
+            }],
+            loads: vec![
+                LoadCase {
+                    load_id: "force_load".to_string(),
+                    region_id: "loaded".to_string(),
+                    kind: LoadKind::Force {
+                        fx: 0.0,
+                        fy: 0.0,
+                        fz: -1.0,
+                    },
+                },
+                LoadCase {
+                    load_id: "body_force".to_string(),
+                    region_id: "volume_only".to_string(),
+                    kind: LoadKind::BodyForce {
+                        gx: 0.0,
+                        gy: 0.0,
+                        gz: -9.81,
+                    },
+                },
+            ],
+            steps: vec![AnalysisStep {
+                step_id: "static_step".to_string(),
+                kind: AnalysisStepKind::Static,
+            }],
         }
     }
 
@@ -2264,7 +2465,7 @@ mod tests {
             ..AnalysisFigureGenerationOptions::default()
         };
 
-        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
 
         assert_eq!(figures.len(), 1);
         assert_eq!(figures[0].title, "FEA scalar field: structural.von_mises");
@@ -2303,7 +2504,7 @@ mod tests {
             ..AnalysisFigureGenerationOptions::default()
         };
 
-        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
 
         let deformed = figures
             .iter()
@@ -2367,7 +2568,7 @@ mod tests {
             ..AnalysisFigureGenerationOptions::default()
         };
 
-        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
 
         assert_eq!(figures.len(), 1);
         assert_eq!(figures[0].title, "FEA field topology mismatch");
@@ -2379,6 +2580,51 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("render_triangle_count=3")));
+    }
+
+    #[test]
+    fn mesh_result_figures_include_authored_boundary_region_figure() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "loaded".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_boundary_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("authored constraint region 'fixed'")));
+        assert!(!figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("volume_only")));
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        assert_eq!(plot.highlighted_region_id(), Some("loaded"));
+        assert_eq!(
+            plot.region_for_triangle(1)
+                .map(|region| region.region_id.as_str()),
+            Some("loaded")
+        );
     }
 
     #[test]
