@@ -69,8 +69,9 @@ pub use cad_topology::{
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
 };
 pub use constrained_cavity::{
-    validate_constrained_cavity, validate_constrained_cavity_refill_volume, ConstrainedCavity,
-    ConstrainedCavityBoundaryFace, ConstrainedCavityValidationError,
+    constrained_cavity_from_selected_tets, validate_constrained_cavity,
+    validate_constrained_cavity_refill_volume, ConstrainedCavity, ConstrainedCavityBoundaryFace,
+    ConstrainedCavityExtractionError, ConstrainedCavityValidationError,
     ConstrainedCavityValidationReport,
 };
 pub use curve::{

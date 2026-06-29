@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::tet_candidate::TetCandidate;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavity {
     pub removed_tet_ids: Vec<u32>,
@@ -59,6 +61,83 @@ pub enum ConstrainedCavityValidationError {
         candidate_volume_m3: f64,
         tolerance_m3: f64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstrainedCavityExtractionError {
+    EmptySelection,
+    SelectedTetIndexOutOfBounds { tet_index: usize, tet_count: usize },
+    DuplicateSelectedTetIndex { tet_index: usize },
+    Validation(ConstrainedCavityValidationError),
+}
+
+pub fn constrained_cavity_from_selected_tets(
+    tets: &[TetCandidate],
+    selected_tet_indices: &[usize],
+    protected_node_ids: Vec<u32>,
+) -> Result<ConstrainedCavity, ConstrainedCavityExtractionError> {
+    if selected_tet_indices.is_empty() {
+        return Err(ConstrainedCavityExtractionError::EmptySelection);
+    }
+
+    let mut selected = BTreeSet::<usize>::new();
+    for tet_index in selected_tet_indices {
+        if *tet_index >= tets.len() {
+            return Err(
+                ConstrainedCavityExtractionError::SelectedTetIndexOutOfBounds {
+                    tet_index: *tet_index,
+                    tet_count: tets.len(),
+                },
+            );
+        }
+        if !selected.insert(*tet_index) {
+            return Err(
+                ConstrainedCavityExtractionError::DuplicateSelectedTetIndex {
+                    tet_index: *tet_index,
+                },
+            );
+        }
+    }
+
+    let mut target_volume_m3 = 0.0_f64;
+    let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
+    for tet_index in &selected {
+        let tet = &tets[*tet_index];
+        target_volume_m3 += tet.volume_m3;
+        for face in tet_faces(tet.node_ids) {
+            face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push((*tet_index, face));
+        }
+    }
+
+    let mut boundary_faces = Vec::<ConstrainedCavityBoundaryFace>::new();
+    for owners in face_owners.values() {
+        if owners.len() != 1 {
+            continue;
+        }
+        let (tet_index, oriented_face) = owners[0];
+        boundary_faces.push(ConstrainedCavityBoundaryFace {
+            node_ids: oriented_face,
+            source_face_id: None,
+            source_edge_ids: [None, None, None],
+            region_ids: tets[tet_index].region_ids.clone(),
+        });
+    }
+
+    let cavity = ConstrainedCavity {
+        removed_tet_ids: selected
+            .iter()
+            .map(|tet_index| tets[*tet_index].tet_id)
+            .collect(),
+        boundary_faces,
+        protected_node_ids,
+        target_volume_m3,
+    };
+    validate_constrained_cavity(&cavity).map_err(ConstrainedCavityExtractionError::Validation)?;
+    Ok(cavity)
 }
 
 pub fn validate_constrained_cavity(
@@ -173,9 +252,108 @@ fn face_edges(node_ids: [u32; 3]) -> [[u32; 2]; 3] {
     ]
 }
 
+fn tet_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {
+    [
+        [node_ids[0], node_ids[2], node_ids[1]],
+        [node_ids[0], node_ids[1], node_ids[3]],
+        [node_ids[1], node_ids[2], node_ids[3]],
+        [node_ids[2], node_ids[0], node_ids[3]],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_single_tet_cavity_from_selected_tets() {
+        let tets = vec![candidate_tet(7, [0, 1, 2, 3], 0.25, &["body"])];
+
+        let cavity = constrained_cavity_from_selected_tets(&tets, &[0], vec![0, 1])
+            .expect("single tet cavity should extract");
+
+        assert_eq!(cavity.removed_tet_ids, vec![7]);
+        assert_eq!(cavity.boundary_faces.len(), 4);
+        assert_eq!(cavity.protected_node_ids, vec![0, 1]);
+        assert_eq!(cavity.target_volume_m3, 0.25);
+        assert!(cavity
+            .boundary_faces
+            .iter()
+            .all(|face| face.region_ids == ["body"]));
+    }
+
+    #[test]
+    fn extracts_boundary_faces_from_two_tet_cavity() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &["left"]),
+            candidate_tet(9, [0, 2, 1, 4], 0.35, &["right"]),
+        ];
+
+        let cavity = constrained_cavity_from_selected_tets(&tets, &[1, 0], vec![])
+            .expect("two tet cavity should extract");
+
+        let boundary_faces = cavity
+            .boundary_faces
+            .iter()
+            .map(|face| sorted_face(face.node_ids))
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(cavity.removed_tet_ids, vec![4, 9]);
+        assert_eq!(cavity.boundary_faces.len(), 6);
+        assert!(!boundary_faces.contains(&[0, 1, 2]));
+        assert_eq!(cavity.target_volume_m3, 0.60);
+        validate_constrained_cavity(&cavity).expect("extracted cavity should validate");
+    }
+
+    #[test]
+    fn rejects_duplicate_selected_tet_indices() {
+        let tets = vec![candidate_tet(7, [0, 1, 2, 3], 0.25, &[])];
+
+        let err = constrained_cavity_from_selected_tets(&tets, &[0, 0], vec![])
+            .expect_err("duplicate selection should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityExtractionError::DuplicateSelectedTetIndex { tet_index: 0 }
+        );
+    }
+
+    #[test]
+    fn rejects_selected_tet_indices_out_of_bounds() {
+        let tets = vec![candidate_tet(7, [0, 1, 2, 3], 0.25, &[])];
+
+        let err = constrained_cavity_from_selected_tets(&tets, &[1], vec![])
+            .expect_err("out of bounds selection should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityExtractionError::SelectedTetIndexOutOfBounds {
+                tet_index: 1,
+                tet_count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_selected_tets_with_open_boundary() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &[]),
+            candidate_tet(9, [0, 1, 4, 5], 0.35, &[]),
+        ];
+
+        let err = constrained_cavity_from_selected_tets(&tets, &[0, 1], vec![])
+            .expect_err("nonmanifold selected cavity should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityExtractionError::Validation(
+                ConstrainedCavityValidationError::NonManifoldBoundaryEdge {
+                    node_ids: [0, 1],
+                    face_count: 4
+                }
+            )
+        );
+    }
 
     #[test]
     fn validates_closed_tet_cavity_boundary() {
@@ -270,6 +448,24 @@ mod tests {
             source_face_id: None,
             source_edge_ids: [None, None, None],
             region_ids: Vec::new(),
+        }
+    }
+
+    fn candidate_tet(
+        tet_id: u32,
+        node_ids: [u32; 4],
+        volume_m3: f64,
+        region_ids: &[&str],
+    ) -> TetCandidate {
+        TetCandidate {
+            tet_id,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: region_ids.iter().map(|region| region.to_string()).collect(),
+            volume_m3,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 1.0,
         }
     }
 }
