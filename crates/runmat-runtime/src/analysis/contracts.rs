@@ -974,9 +974,28 @@ pub struct AnalysisRenderMesh {
     pub vertices: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<AnalysisRenderRegion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vertex_volume_node_indices: Vec<Option<usize>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triangle_volume_element_indices: Vec<Option<usize>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisRenderRegion {
+    pub region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_ranges: Vec<AnalysisRenderTriangleRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisRenderTriangleRange {
+    pub start: u32,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

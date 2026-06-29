@@ -7,7 +7,7 @@ use runmat_analysis_fea::contracts::{
 use runmat_geometry_core::UnitSystem;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
-    MeshScalarField, MeshVectorField, PlotElement,
+    MeshRegion, MeshScalarField, MeshTriangleRange, MeshVectorField, PlotElement,
 };
 
 use super::contracts::{
@@ -850,6 +850,7 @@ fn render_topology_figure(
             .collect::<Result<Vec<_>, String>>()?;
         let mut plot = MeshPlot::new(vertices, mesh.triangles.clone())?;
         plot.set_mesh_id(Some(mesh.mesh_id.clone()));
+        plot.set_regions(render_mesh_regions(&mesh.regions));
         plot.set_label(Some(format!(
             "{}: {} solver triangles",
             mesh.mesh_id,
@@ -875,6 +876,29 @@ fn render_topology_figure(
     } else {
         Ok(figure)
     }
+}
+
+fn render_mesh_regions(regions: &[super::contracts::AnalysisRenderRegion]) -> Vec<MeshRegion> {
+    regions
+        .iter()
+        .filter_map(|region| {
+            let ranges = region
+                .triangle_ranges
+                .iter()
+                .filter(|range| range.count > 0)
+                .map(|range| MeshTriangleRange::new(range.start, range.count))
+                .collect::<Vec<_>>();
+            if ranges.is_empty() {
+                return None;
+            }
+            Some(MeshRegion::new(
+                region.region_id.clone(),
+                region.label.clone(),
+                region.tag.clone(),
+                ranges,
+            ))
+        })
+        .collect()
 }
 
 fn collect_mesh_counts(figure: &Figure) -> Vec<MeshCounts> {
@@ -1968,6 +1992,7 @@ mod tests {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 triangles: vec![[0, 1, 2]],
+                regions: Vec::new(),
                 vertex_volume_node_indices: vec![Some(0), Some(1), Some(2)],
                 triangle_volume_element_indices: Vec::new(),
             }],
@@ -1990,6 +2015,7 @@ mod tests {
                     [0.0, 0.0, 1.0],
                 ],
                 triangles: vec![[0, 1, 2], [0, 2, 3], [0, 3, 1]],
+                regions: Vec::new(),
                 vertex_volume_node_indices,
                 triangle_volume_element_indices,
             }],
@@ -2042,6 +2068,58 @@ mod tests {
         let plot = first_mesh_plot(&figure);
         assert_eq!(plot.edge_mode(), MeshEdgeMode::None);
         assert_eq!(plot.edge_width(), 0.0);
+    }
+
+    #[test]
+    fn render_topology_figure_attaches_boundary_regions_to_solver_mesh() {
+        let mut topology = mapped_render_topology(
+            vec![Some(0), Some(1), Some(2), Some(3)],
+            vec![Some(0), Some(0), Some(0)],
+        );
+        topology.meshes[0].regions = vec![
+            crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "fixed".to_string(),
+                label: Some("Fixed".to_string()),
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![
+                    crate::analysis::contracts::AnalysisRenderTriangleRange { start: 0, count: 1 },
+                    crate::analysis::contracts::AnalysisRenderTriangleRange { start: 2, count: 1 },
+                ],
+            },
+            crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "loaded".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            },
+        ];
+
+        let figure = render_topology_figure(
+            &topology,
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+        let plot = analysis_mesh_plot(&figure);
+
+        let fixed = plot
+            .regions()
+            .iter()
+            .find(|region| region.region_id == "fixed")
+            .expect("fixed region should be attached to mesh plot");
+        assert_eq!(fixed.label.as_deref(), Some("Fixed"));
+        assert_eq!(fixed.tag.as_deref(), Some("boundary"));
+        assert!(fixed.contains_triangle(0));
+        assert!(!fixed.contains_triangle(1));
+        assert!(fixed.contains_triangle(2));
+        assert_eq!(
+            plot.region_for_triangle(1)
+                .map(|region| region.region_id.as_str()),
+            Some("loaded")
+        );
     }
 
     #[test]

@@ -162,23 +162,23 @@ pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
     AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisRenderMesh, AnalysisRenderTopology,
-    AnalysisRenderTopologySource, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
-    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
-    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData,
+    AnalysisNonlinearRunOptions, AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology,
+    AnalysisRenderTopologySource, AnalysisRenderTriangleRange, AnalysisResultsCompareData,
+    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
+    AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
+    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
+    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -16192,6 +16192,7 @@ fn render_topology_from_prep_context(
             mesh_id: "solver_surface".to_string(),
             vertices: prep.element_topology_node_coordinates_m.clone(),
             triangles,
+            regions: Vec::new(),
             vertex_volume_node_indices: (0..prep.element_topology_node_coordinates_m.len())
                 .map(Some)
                 .collect(),
@@ -16239,14 +16240,28 @@ fn render_topology_from_analysis_mesh(
                 .adjacent_volume_element_ids
                 .iter()
                 .find_map(|element_id| volume_index_by_id.get(element_id.as_str()).copied());
-            Some((triangle, volume_element_index))
+            Some((triangle, volume_element_index, face.region_ids.clone()))
         })
         .collect::<Vec<_>>();
-    let (triangles, triangle_volume_element_indices): (Vec<_>, Vec<_>) =
-        face_entries.into_iter().unzip();
+    let mut triangles = Vec::with_capacity(face_entries.len());
+    let mut triangle_volume_element_indices = Vec::with_capacity(face_entries.len());
+    let mut region_triangles = BTreeMap::<String, Vec<u32>>::new();
+    for (triangle_index, (triangle, volume_element_index, region_ids)) in
+        face_entries.into_iter().enumerate()
+    {
+        triangles.push(triangle);
+        triangle_volume_element_indices.push(volume_element_index);
+        for region_id in region_ids {
+            region_triangles
+                .entry(region_id)
+                .or_default()
+                .push(triangle_index as u32);
+        }
+    }
     if triangles.is_empty() {
         return None;
     }
+    let regions = render_regions_from_triangle_indices(region_triangles);
 
     Some(AnalysisRenderTopology {
         schema_version: "analysis_render_topology/v1".to_string(),
@@ -16255,10 +16270,45 @@ fn render_topology_from_analysis_mesh(
             mesh_id: "analysis_mesh_boundary".to_string(),
             vertices: mesh.nodes.iter().map(|node| node.coordinates_m).collect(),
             triangles,
+            regions,
             vertex_volume_node_indices: (0..mesh.nodes.len()).map(Some).collect(),
             triangle_volume_element_indices,
         }],
     })
+}
+
+fn render_regions_from_triangle_indices(
+    region_triangles: BTreeMap<String, Vec<u32>>,
+) -> Vec<AnalysisRenderRegion> {
+    region_triangles
+        .into_iter()
+        .filter_map(|(region_id, mut triangle_indices)| {
+            triangle_indices.sort_unstable();
+            triangle_indices.dedup();
+            let mut ranges = Vec::<AnalysisRenderTriangleRange>::new();
+            for triangle_index in triangle_indices {
+                if let Some(last) = ranges.last_mut() {
+                    if last.start.saturating_add(last.count) == triangle_index {
+                        last.count = last.count.saturating_add(1);
+                        continue;
+                    }
+                }
+                ranges.push(AnalysisRenderTriangleRange {
+                    start: triangle_index,
+                    count: 1,
+                });
+            }
+            if ranges.is_empty() {
+                return None;
+            }
+            Some(AnalysisRenderRegion {
+                region_id,
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: ranges,
+            })
+        })
+        .collect()
 }
 
 fn triangle_from_element_edges(

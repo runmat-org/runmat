@@ -5749,6 +5749,44 @@ fn analysis_mesh_render_topology_requires_solver_field_mapping() {
 }
 
 #[test]
+fn analysis_mesh_render_topology_preserves_boundary_regions() {
+    let mut mesh = analysis_mesh_with_boundary_regions(&["fixed", "shared"], &["loaded", "shared"]);
+    mesh.boundary_faces.push(analysis_boundary_face(
+        "face_fixed_2",
+        vec![2, 3, 4],
+        &["fixed"],
+    ));
+
+    let topology = render_topology_from_analysis_mesh(Some(&mesh))
+        .expect("mapped analysis mesh should produce render topology");
+    let render_mesh = topology
+        .meshes
+        .first()
+        .expect("render topology should contain boundary mesh");
+
+    let fixed = render_mesh
+        .regions
+        .iter()
+        .find(|region| region.region_id == "fixed")
+        .expect("fixed boundary region should be preserved");
+    assert_eq!(fixed.tag.as_deref(), Some("boundary"));
+    assert_eq!(fixed.triangle_ranges.len(), 2);
+    assert_eq!(fixed.triangle_ranges[0].start, 0);
+    assert_eq!(fixed.triangle_ranges[0].count, 1);
+    assert_eq!(fixed.triangle_ranges[1].start, 2);
+    assert_eq!(fixed.triangle_ranges[1].count, 1);
+
+    let shared = render_mesh
+        .regions
+        .iter()
+        .find(|region| region.region_id == "shared")
+        .expect("shared boundary region should be preserved");
+    assert_eq!(shared.triangle_ranges.len(), 1);
+    assert_eq!(shared.triangle_ranges[0].start, 0);
+    assert_eq!(shared.triangle_ranges[0].count, 2);
+}
+
+#[test]
 fn solid_mesh_material_coverage_uses_region_assignments() {
     let mesh = minimal_analysis_mesh();
     let mut single_material = sample_model();
