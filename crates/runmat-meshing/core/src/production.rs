@@ -1248,6 +1248,10 @@ fn production_backend_summary(
         surface_closed_edge_loop_count: preparation
             .surface_validation
             .closed_source_edge_loop_count,
+        surface_conforming_source_edge_count: preparation
+            .surface_validation
+            .conforming_source_edge_count,
+        surface_missing_source_edge_count: preparation.surface_validation.missing_source_edge_count,
         surface_projection_error_m: preparation.surface_validation.max_projection_error_m,
         surface_face_coverage_ratio: preparation.surface_validation.face_coverage_ratio,
         surface_cad_face_count: surface_cad_face_count(&preparation.surface),
@@ -1849,6 +1853,8 @@ mod tests {
         assert_eq!(mesh.backend.surface_element_count, 768);
         assert_eq!(mesh.backend.surface_source_edge_loop_count, 1);
         assert_eq!(mesh.backend.surface_closed_edge_loop_count, 1);
+        assert_eq!(mesh.backend.surface_conforming_source_edge_count, 18);
+        assert_eq!(mesh.backend.surface_missing_source_edge_count, 0);
         assert_eq!(mesh.backend.surface_face_coverage_ratio, 1.0);
         assert_eq!(mesh.backend.surface_cad_face_count, 12);
         assert_eq!(mesh.backend.surface_exact_cad_sample_node_count, 0);
