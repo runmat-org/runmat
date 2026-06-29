@@ -17,6 +17,7 @@ pub mod production;
 pub mod provenance;
 pub mod quality;
 pub mod sizing;
+pub mod sliver_recovery;
 pub mod source_topology;
 pub mod spatial_index;
 pub mod surface;
@@ -127,6 +128,11 @@ pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
 pub use sizing::{
     AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
     SizingSampleRejection,
+};
+pub use sliver_recovery::{
+    classify_sliver_tets, evaluate_sliver_removal, SliverClassification,
+    SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
+    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetQuality,
 };
 pub use source_topology::{
     extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
