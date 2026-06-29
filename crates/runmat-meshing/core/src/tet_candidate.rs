@@ -4300,6 +4300,82 @@ fn best_constrained_interior_seed_star_refill(
     Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
 }
 
+#[cfg(test)]
+pub(crate) fn diagnostic_constrained_seed_star_refill_rejection_reason(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    interior_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut saw_seed = false;
+    let mut saw_group = false;
+    let mut saw_candidate = false;
+    let mut saw_non_improving_candidate = false;
+    for interior_node_id in tet
+        .node_ids
+        .into_iter()
+        .filter(|node_id| interior_node_ids.contains(node_id))
+    {
+        saw_seed = true;
+        let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
+            continue;
+        };
+        if !adjacent.contains(&tet_index) || adjacent.len() < 5 {
+            continue;
+        }
+        let mut candidate_groups = vec![adjacent.clone()];
+        candidate_groups.extend(
+            interior_seed_star_face_components(interior_node_id, adjacent, tets)
+                .into_iter()
+                .filter(|component| component.len() != adjacent.len()),
+        );
+        let mut seen_groups = BTreeSet::<Vec<usize>>::new();
+        for group in candidate_groups {
+            if !seen_groups.insert(group.clone()) || !group.contains(&tet_index) || group.len() < 5
+            {
+                continue;
+            }
+            saw_group = true;
+            let Some((neighbor_indices, candidates)) =
+                constrained_interior_seed_star_refill_candidates(
+                    tet_index,
+                    tets,
+                    &group,
+                    node_points,
+                    options,
+                )?
+            else {
+                continue;
+            };
+            saw_candidate = true;
+            let original_below_count = count_exact_quality_violations(
+                neighbor_indices.iter().map(|index| &tets[*index]),
+                options.min_scaled_jacobian,
+            );
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            if candidate_below_count < original_below_count {
+                return Ok("constrained_seed_star_refill_reconnectable");
+            }
+            saw_non_improving_candidate = true;
+        }
+    }
+    if saw_non_improving_candidate {
+        Ok("constrained_seed_star_refill_no_improvement")
+    } else if saw_candidate {
+        Ok("constrained_seed_star_refill_candidate_unclassified")
+    } else if saw_group {
+        Ok("constrained_seed_star_refill_no_candidate")
+    } else if saw_seed {
+        Ok("constrained_seed_star_refill_no_valid_group")
+    } else {
+        Ok("constrained_seed_star_refill_no_interior_seed")
+    }
+}
+
 fn interior_seed_star_face_components(
     seed_node_id: u32,
     adjacent: &[usize],
@@ -11234,6 +11310,16 @@ mod tests {
             .collect::<Vec<_>>();
         let node_adjacency = tet_node_adjacency(&tets);
         let interior_node_ids = BTreeSet::from([6]);
+        let reason = diagnostic_constrained_seed_star_refill_rejection_reason(
+            0,
+            &tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+        assert_eq!(reason, "constrained_seed_star_refill_reconnectable");
 
         let (indices, candidates) = best_constrained_interior_seed_star_refill(
             0,

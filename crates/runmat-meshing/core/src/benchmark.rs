@@ -2315,6 +2315,7 @@ mod tests {
         sizing::{MeshSizingField, SizingSample, SizingSampleApplication},
         tet_candidate::{
             diagnostic_bad_cavity_sizes, diagnostic_boundary_cavity_reconnection_rejection_reason,
+            diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
             diagnostic_node_cavity_reconnection_rejection_reason,
             diagnostic_small_cavity_boundary_mismatch_shapes,
@@ -3111,6 +3112,8 @@ mod tests {
         let mut bad_face_star_insert_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_one_ring_boundary_split_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_face_boundary_split_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_constrained_seed_star_refill_rejected_by_reason =
+            BTreeMap::<String, usize>::new();
         let mut bad_one_ring_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut bad_face_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut bad_one_ring_missing_face_topology =
@@ -3288,6 +3291,19 @@ mod tests {
             *bad_face_boundary_split_rejected_by_reason
                 .entry(face_boundary_split_reason.to_string())
                 .or_default() += 1;
+            let constrained_seed_star_reason =
+                diagnostic_constrained_seed_star_refill_rejection_reason(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &node_index_adjacency,
+                    &interior_node_ids,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("constrained seed-star refill diagnostic should evaluate");
+            *bad_constrained_seed_star_refill_rejected_by_reason
+                .entry(constrained_seed_star_reason.to_string())
+                .or_default() += 1;
             let (one_ring_missing_class, face_missing_class) =
                 diagnostic_small_cavity_missing_face_classes(
                     tet_index,
@@ -3368,6 +3384,10 @@ mod tests {
             "annular recovery bad_small_cavity_boundary_split_rejected_by_reason one_ring={:?} face_closure={:?}",
             bad_one_ring_boundary_split_rejected_by_reason,
             bad_face_boundary_split_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery bad_constrained_seed_star_refill_rejected_by_reason={:?}",
+            bad_constrained_seed_star_refill_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_small_cavity_missing_face_class one_ring={:?} face_closure={:?}",
