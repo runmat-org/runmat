@@ -3,7 +3,7 @@ use runmat_meshing_core::AnalysisMeshArtifact;
 
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
-    WrenchLoweringSummary,
+    AnalysisMeshRegionMappingError, WrenchLoweringSummary,
 };
 
 pub(super) fn apply_analysis_mesh_structural_regions(
@@ -12,7 +12,8 @@ pub(super) fn apply_analysis_mesh_structural_regions(
     layout: &StructuralDofLayout,
     constrained: &mut [bool],
     rhs: &mut [f64],
-) -> Vec<WrenchLoweringSummary> {
+    strict_region_mapping: bool,
+) -> Result<Vec<WrenchLoweringSummary>, AnalysisMeshRegionMappingError> {
     rhs.fill(0.0);
     constrained.fill(false);
 
@@ -22,6 +23,13 @@ pub(super) fn apply_analysis_mesh_structural_regions(
         match load.kind {
             LoadKind::Force { fx, fy, fz } => {
                 if target_nodes.is_empty() {
+                    if strict_region_mapping {
+                        return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                            load_id: load.load_id.clone(),
+                            region_id: load.region_id.clone(),
+                            load_kind: "force",
+                        });
+                    }
                     continue;
                 }
                 let scale = 1.0 / target_nodes.len() as f64;
@@ -43,6 +51,13 @@ pub(super) fn apply_analysis_mesh_structural_regions(
                 pz,
             } => {
                 if target_nodes.is_empty() {
+                    if strict_region_mapping {
+                        return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                            load_id: load.load_id.clone(),
+                            region_id: load.region_id.clone(),
+                            load_kind: "wrench",
+                        });
+                    }
                     continue;
                 }
                 let summary = add_analysis_mesh_wrench_rhs(
@@ -61,6 +76,20 @@ pub(super) fn apply_analysis_mesh_structural_regions(
                 });
             }
             LoadKind::Pressure { magnitude_pa } => {
+                if strict_region_mapping
+                    && !mesh.boundary_faces.iter().any(|face| {
+                        face.region_ids
+                            .iter()
+                            .any(|region| region == &load.region_id)
+                            && face.node_ids.len() == 3
+                    })
+                {
+                    return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                        load_id: load.load_id.clone(),
+                        region_id: load.region_id.clone(),
+                        load_kind: "pressure",
+                    });
+                }
                 apply_analysis_mesh_pressure(mesh, layout, rhs, &load.region_id, magnitude_pa);
             }
             LoadKind::BodyForce { gx, gy, gz } => {
@@ -78,6 +107,25 @@ pub(super) fn apply_analysis_mesh_structural_regions(
 
     for bc in &model.boundary_conditions {
         let target_nodes = analysis_mesh_region_node_indices(mesh, &bc.region_id);
+        if strict_region_mapping
+            && target_nodes.is_empty()
+            && matches!(
+                bc.kind,
+                BoundaryConditionKind::Fixed | BoundaryConditionKind::PrescribedDisplacement
+            )
+        {
+            return Err(
+                AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion {
+                    bc_id: bc.bc_id.clone(),
+                    region_id: bc.region_id.clone(),
+                    boundary_condition_kind: match bc.kind {
+                        BoundaryConditionKind::Fixed => "fixed",
+                        BoundaryConditionKind::PrescribedDisplacement => "prescribed_displacement",
+                        _ => "unsupported",
+                    },
+                },
+            );
+        }
         for node_index in target_nodes {
             match bc.kind {
                 BoundaryConditionKind::Fixed | BoundaryConditionKind::PrescribedDisplacement => {
@@ -93,7 +141,7 @@ pub(super) fn apply_analysis_mesh_structural_regions(
             }
         }
     }
-    wrench_lowering
+    Ok(wrench_lowering)
 }
 
 fn analysis_mesh_region_node_indices(mesh: &AnalysisMeshArtifact, region_id: &str) -> Vec<usize> {

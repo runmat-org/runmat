@@ -89,6 +89,7 @@ pub struct AssemblySummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearAssemblyError {
     SolidStiffness(SolidAssemblyError),
+    AnalysisMeshRegionMapping(AnalysisMeshRegionMappingError),
 }
 
 impl fmt::Display for LinearAssemblyError {
@@ -97,11 +98,51 @@ impl fmt::Display for LinearAssemblyError {
             LinearAssemblyError::SolidStiffness(err) => {
                 write!(f, "solid stiffness assembly failed: {err:?}")
             }
+            LinearAssemblyError::AnalysisMeshRegionMapping(err) => {
+                write!(f, "{err}")
+            }
         }
     }
 }
 
 impl std::error::Error for LinearAssemblyError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnalysisMeshRegionMappingError {
+    UnmappedLoadRegion {
+        load_id: String,
+        region_id: String,
+        load_kind: &'static str,
+    },
+    UnmappedBoundaryConditionRegion {
+        bc_id: String,
+        region_id: String,
+        boundary_condition_kind: &'static str,
+    },
+}
+
+impl fmt::Display for AnalysisMeshRegionMappingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                load_id,
+                region_id,
+                load_kind,
+            } => write!(
+                f,
+                "analysis mesh load region did not resolve to solver boundary entities: load_id={load_id} region_id={region_id} load_kind={load_kind}"
+            ),
+            AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion {
+                bc_id,
+                region_id,
+                boundary_condition_kind,
+            } => write!(
+                f,
+                "analysis mesh boundary condition region did not resolve to solver boundary entities: bc_id={bc_id} region_id={region_id} boundary_condition_kind={boundary_condition_kind}"
+            ),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StructuralMaterialSummary {
@@ -550,7 +591,9 @@ fn assemble_linear_system_impl(
             &structural_dof_layout,
             &mut constrained,
             &mut rhs,
-        );
+            strict_analysis_mesh_stiffness,
+        )
+        .map_err(LinearAssemblyError::AnalysisMeshRegionMapping)?;
     }
 
     let mut prep_load_bonus = 0usize;
@@ -3182,6 +3225,10 @@ mod tests {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let mut mesh = tet4_mesh();
         mesh.volume_elements[0].node_ids = vec![1, 3, 2, 4];
+        mesh.boundary_faces = vec![
+            boundary_face("root_face", vec![1, 2, 3], &["root"]),
+            boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
+        ];
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
             .expect_err("strict analysis mesh assembly should reject inverted Tet4 stiffness");
@@ -3222,6 +3269,74 @@ mod tests {
         assert!(summary.operator.constrained[1]);
         assert!(summary.operator.constrained[2]);
         assert_eq!(summary.operator.rhs[10], -4.0);
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_unmapped_load_region() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+            bc_id: "fixed_root".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "missing_tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -12.0,
+                fz: 0.0,
+            },
+        }];
+        let mut mesh = tet4_mesh();
+        mesh.boundary_faces = vec![boundary_face("root_face", vec![1, 2, 3], &["root"])];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
+            .expect_err("strict analysis mesh assembly should reject unmapped loads");
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::AnalysisMeshRegionMapping(
+                AnalysisMeshRegionMappingError::UnmappedLoadRegion { .. }
+            )
+        ));
+        let message = err.to_string();
+        assert!(message.contains("load_id=load_tip"));
+        assert!(message.contains("region_id=missing_tip"));
+    }
+
+    #[test]
+    fn strict_analysis_mesh_assembly_rejects_unmapped_constraint_region() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+            bc_id: "fixed_root".to_string(),
+            region_id: "missing_root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -12.0,
+                fz: 0.0,
+            },
+        }];
+        let mut mesh = tet4_mesh();
+        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
+            .expect_err("strict analysis mesh assembly should reject unmapped constraints");
+
+        assert!(matches!(
+            err,
+            LinearAssemblyError::AnalysisMeshRegionMapping(
+                AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion { .. }
+            )
+        ));
+        let message = err.to_string();
+        assert!(message.contains("bc_id=fixed_root"));
+        assert!(message.contains("region_id=missing_root"));
     }
 
     #[test]
