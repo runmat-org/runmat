@@ -5705,6 +5705,225 @@ pub(crate) fn diagnostic_small_cavity_exact_cover_rejection_reasons(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_star_insertion_rejection_reasons(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    split_node_id: u32,
+    options: TetCandidateOptions,
+) -> Result<(&'static str, &'static str), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_star_insertion_rejection_reason(
+            tet_index,
+            &one_ring,
+            tets,
+            node_points,
+            split_node_id,
+            options,
+            "one_ring",
+        )?,
+        diagnostic_face_cavity_star_insertion_rejection_reason(
+            tet_index,
+            &face_closure,
+            tets,
+            node_points,
+            split_node_id,
+            options,
+            "face_closure",
+        )?,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_star_insertion_rejection_reason(
+    tet_index: usize,
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    split_node_id: u32,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+) -> Result<&'static str, TetCandidateError> {
+    if adjacent.len() < 3 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_star_insert_too_small",
+            _ => "face_closure_star_insert_too_small",
+        });
+    }
+    if adjacent.len() > 8 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_star_insert_over_limit",
+            _ => "face_closure_star_insert_over_limit",
+        });
+    }
+    let Some((boundary_faces, _, original_volume, reference)) =
+        diagnostic_face_cavity_boundary_data(adjacent, tets)
+    else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_star_insert_component_mismatch",
+            _ => "face_closure_star_insert_component_mismatch",
+        });
+    };
+    if boundary_faces.len() < 4 || boundary_faces.len() > 24 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_star_insert_boundary_limit",
+            _ => "face_closure_star_insert_boundary_limit",
+        });
+    }
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let mut saw_invalid = false;
+    let mut saw_boundary_mismatch = false;
+    let mut saw_volume_mismatch = false;
+    let mut saw_no_improvement = false;
+    for split_point in diagnostic_star_insertion_points(tet_index, adjacent, tets, node_points)? {
+        let Some(candidates) = diagnostic_star_boundary_face_candidates(
+            reference,
+            &boundary_faces,
+            node_points,
+            split_node_id,
+            split_point,
+            options,
+        )?
+        else {
+            saw_invalid = true;
+            continue;
+        };
+        if boundary_faces_from_tets(&candidates) != boundary_faces {
+            saw_boundary_mismatch = true;
+            continue;
+        }
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+            saw_volume_mismatch = true;
+            continue;
+        }
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if cavity_reconnection_improves_quality(
+            candidate_below_count,
+            candidate_min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            return Ok(match prefix {
+                "one_ring" => "one_ring_star_insert_reconnectable",
+                _ => "face_closure_star_insert_reconnectable",
+            });
+        }
+        saw_no_improvement = true;
+    }
+    Ok(
+        match (
+            prefix,
+            saw_no_improvement,
+            saw_volume_mismatch,
+            saw_boundary_mismatch,
+            saw_invalid,
+        ) {
+            ("one_ring", true, _, _, _) => "one_ring_star_insert_no_improvement",
+            ("one_ring", _, true, _, _) => "one_ring_star_insert_volume_mismatch",
+            ("one_ring", _, _, true, _) => "one_ring_star_insert_boundary_mismatch",
+            ("one_ring", _, _, _, true) => "one_ring_star_insert_invalid",
+            ("one_ring", _, _, _, _) => "one_ring_star_insert_no_candidate",
+            (_, true, _, _, _) => "face_closure_star_insert_no_improvement",
+            (_, _, true, _, _) => "face_closure_star_insert_volume_mismatch",
+            (_, _, _, true, _) => "face_closure_star_insert_boundary_mismatch",
+            (_, _, _, _, true) => "face_closure_star_insert_invalid",
+            _ => "face_closure_star_insert_no_candidate",
+        },
+    )
+}
+
+#[cfg(test)]
+fn diagnostic_star_insertion_points(
+    tet_index: usize,
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+) -> Result<Vec<[f64; 3]>, TetCandidateError> {
+    let target_centroid = tet_centroid(candidate_tet_points(&tets[tet_index], node_points)?);
+    let mut weighted = [0.0; 3];
+    let mut total_volume = 0.0;
+    for index in adjacent {
+        let tet = &tets[*index];
+        let centroid = tet_centroid(candidate_tet_points(tet, node_points)?);
+        let weight = tet.volume_m3.max(0.0);
+        weighted[0] += centroid[0] * weight;
+        weighted[1] += centroid[1] * weight;
+        weighted[2] += centroid[2] * weight;
+        total_volume += weight;
+    }
+    let cavity_centroid = if total_volume > 0.0 {
+        [
+            weighted[0] / total_volume,
+            weighted[1] / total_volume,
+            weighted[2] / total_volume,
+        ]
+    } else {
+        target_centroid
+    };
+    let mut points = vec![
+        target_centroid,
+        cavity_centroid,
+        [
+            0.5 * (target_centroid[0] + cavity_centroid[0]),
+            0.5 * (target_centroid[1] + cavity_centroid[1]),
+            0.5 * (target_centroid[2] + cavity_centroid[2]),
+        ],
+    ];
+    points.dedup_by(|left, right| distance_squared(*left, *right) <= 1.0e-24);
+    Ok(points)
+}
+
+#[cfg(test)]
+fn diagnostic_star_boundary_face_candidates(
+    reference: &TetCandidate,
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    split_node_id: u32,
+    split_point: [f64; 3],
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let mut candidates = Vec::<TetCandidate>::with_capacity(boundary_faces.len());
+    for face in boundary_faces {
+        let node_ids = [split_node_id, face[0], face[1], face[2]];
+        let points = [
+            split_point,
+            *node_points
+                .get(&face[0])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[0] })?,
+            *node_points
+                .get(&face[1])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[1] })?,
+            *node_points
+                .get(&face[2])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[2] })?,
+        ];
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            points,
+            options,
+        ) else {
+            return Ok(None);
+        };
+        candidates.push(candidate);
+    }
+    Ok(Some(candidates))
+}
+
+#[cfg(test)]
 fn diagnostic_face_cavity_exact_cover_rejection_reason(
     adjacent: &[usize],
     tets: &[TetCandidate],
