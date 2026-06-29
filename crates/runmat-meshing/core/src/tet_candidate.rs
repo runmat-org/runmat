@@ -4348,7 +4348,13 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_rejection_reason(
                     options,
                 )?
             else {
-                continue;
+                return diagnostic_constrained_seed_star_refill_no_candidate_reason(
+                    tet_index,
+                    tets,
+                    &group,
+                    node_points,
+                    options,
+                );
             };
             saw_candidate = true;
             let original_below_count = count_exact_quality_violations(
@@ -4373,6 +4379,115 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_rejection_reason(
         Ok("constrained_seed_star_refill_no_valid_group")
     } else {
         Ok("constrained_seed_star_refill_no_interior_seed")
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_seed_star_refill_no_candidate_reason(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    adjacent: &[usize],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let Some(cavity) =
+        constrained_cavity_from_selected_tets_with_anchor_trim(tets, adjacent, tet_index, vec![])
+            .map_err(|_| TetCandidateError::InvalidOptions)?
+    else {
+        return Ok("constrained_seed_star_refill_invalid_cavity");
+    };
+    let boundary_node_ids = cavity
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.node_ids)
+        .collect::<BTreeSet<_>>();
+    let boundary_nodes = boundary_node_ids
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let interior_candidates = constrained_seed_star_refill_interior_candidates(
+        tets,
+        tet_index,
+        adjacent,
+        &boundary_node_ids,
+        node_points,
+    )?;
+    let evaluation = evaluate_constrained_cavity_refill_candidates(
+        &cavity,
+        &boundary_nodes,
+        &interior_candidates,
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    )
+    .map_err(|_| TetCandidateError::InvalidOptions)?;
+    if evaluation.refill.is_some() {
+        return Ok("constrained_seed_star_refill_candidate_unclassified");
+    }
+    Ok(diagnostic_constrained_seed_star_refill_reason_bucket(
+        &evaluation.rejected_by_reason,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_seed_star_refill_reason_bucket(
+    rejected_by_reason: &BTreeMap<String, usize>,
+) -> &'static str {
+    for reason in [
+        "star_tet_scaled_jacobian",
+        "missing_boundary_face",
+        "unexpected_boundary_face",
+        "boundary_face_count_mismatch",
+        "volume_mismatch",
+        "interior_point_outside_cavity",
+        "protected_boundary_distance",
+        "boundary_node_delaunay_empty",
+        "star_tet_aspect_ratio",
+        "star_tet_min_volume",
+    ] {
+        if rejected_by_reason.contains_key(reason) {
+            return match reason {
+                "star_tet_scaled_jacobian" => {
+                    "constrained_seed_star_refill_star_tet_scaled_jacobian"
+                }
+                "missing_boundary_face" => "constrained_seed_star_refill_missing_boundary_face",
+                "unexpected_boundary_face" => {
+                    "constrained_seed_star_refill_unexpected_boundary_face"
+                }
+                "boundary_face_count_mismatch" => {
+                    "constrained_seed_star_refill_boundary_face_count_mismatch"
+                }
+                "volume_mismatch" => "constrained_seed_star_refill_volume_mismatch",
+                "interior_point_outside_cavity" => {
+                    "constrained_seed_star_refill_interior_point_outside_cavity"
+                }
+                "protected_boundary_distance" => {
+                    "constrained_seed_star_refill_protected_boundary_distance"
+                }
+                "boundary_node_delaunay_empty" => {
+                    "constrained_seed_star_refill_boundary_node_delaunay_empty"
+                }
+                "star_tet_aspect_ratio" => "constrained_seed_star_refill_star_tet_aspect_ratio",
+                "star_tet_min_volume" => "constrained_seed_star_refill_star_tet_min_volume",
+                _ => "constrained_seed_star_refill_no_candidate",
+            };
+        }
+    }
+    if rejected_by_reason.is_empty() {
+        "constrained_seed_star_refill_no_rejection_reason"
+    } else {
+        "constrained_seed_star_refill_other_rejection"
     }
 }
 
