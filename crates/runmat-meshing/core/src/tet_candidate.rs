@@ -31,6 +31,7 @@ pub struct TetCandidateOptions {
     pub sizing_compliance_tolerance: f64,
     pub min_scaled_jacobian: f64,
     pub max_quality_recovery_seed_candidates: usize,
+    pub max_exact_quality_repair_targets: usize,
     pub max_optimization_passes: usize,
     pub smoothing_relaxation: f64,
     pub sliver_aspect_ratio: f64,
@@ -54,6 +55,7 @@ impl Default for TetCandidateOptions {
             sizing_compliance_tolerance: 0.25,
             min_scaled_jacobian: 0.15,
             max_quality_recovery_seed_candidates: 16,
+            max_exact_quality_repair_targets: 512,
             max_optimization_passes: 0,
             smoothing_relaxation: 0.35,
             sliver_aspect_ratio: 20.0,
@@ -669,6 +671,7 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
         || options.dense_recovery_layer_count < 2
         || options.max_dense_recovery_nodes == 0
         || options.max_quality_recovery_seed_candidates == 0
+        || options.max_exact_quality_repair_targets == 0
         || !options.max_radius_edge_ratio.is_finite()
         || options.max_radius_edge_ratio <= 0.0
         || !options.sizing_compliance_tolerance.is_finite()
@@ -802,6 +805,9 @@ fn add_dense_recovery_layer_points(
     if options.dense_recovery_layer_count < 2 || seed_points.is_empty() {
         return Ok(());
     }
+    if dense_recovery_component_exceeds_budget(component, options) {
+        return Ok(());
+    }
     let fan_seed_point = select_component_fan_seed_point(
         component,
         seed_points,
@@ -907,6 +913,9 @@ fn append_component_insertion_tets(
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
     if dense_component_for_global_insertion(component, seed_node_ids.len(), options) {
+        if dense_recovery_component_exceeds_budget(component, options) {
+            return Ok(InsertionStatus::rejected(0.0, f64::INFINITY));
+        }
         if let Some(layered_tets) = quality_recovery_layered_star_tets(
             component,
             seed_node_ids,
@@ -996,6 +1005,16 @@ fn append_component_insertion_tets(
         });
     }
     Ok(status)
+}
+
+fn dense_recovery_component_exceeds_budget(
+    component: &VolumeCandidateComponent,
+    options: TetCandidateOptions,
+) -> bool {
+    options.dense_recovery_layer_count <= 3
+        && (component.node_ids.len() > options.max_global_insertion_points
+            || component.surface_element_ids.len()
+                > options.max_global_insertion_points.saturating_mul(2))
 }
 
 fn quality_recovery_star_tets(
@@ -2922,6 +2941,11 @@ fn repair_exact_quality_tets(
     options: TetCandidateOptions,
 ) -> Result<TetQualityRepairSummary, TetCandidateError> {
     let mut summary = TetQualityRepairSummary::default();
+    if count_exact_quality_violations(tets.iter(), options.min_scaled_jacobian)
+        > options.max_exact_quality_repair_targets
+    {
+        return Ok(summary);
+    }
     let pass_limit = options.max_refinement_passes.max(1);
     for _ in 0..pass_limit {
         if !tets

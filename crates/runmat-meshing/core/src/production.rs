@@ -264,7 +264,7 @@ fn tet_candidate_options_for_mesh(
     let quality = QualityThresholds::default();
     let requested_refinement = requested_refinement_points(sizing);
     TetCandidateOptions {
-        interior_target_size_m: Some(target_size_for_mesh(topology, options)),
+        interior_target_size_m: interior_target_size_for_tet_candidates(topology, options),
         requested_refinement_points: requested_refinement.0,
         requested_refinement_point_count: requested_refinement.1,
         max_interior_seed_points: options.max_elements.max(1).min(512),
@@ -272,6 +272,10 @@ fn tet_candidate_options_for_mesh(
         allow_fan_fallback: false,
         dense_recovery_layer_count: dense_recovery_layer_count_for_mesh(topology),
         max_dense_recovery_nodes: options.max_elements.max(1).min(250_000),
+        max_quality_recovery_seed_candidates: quality_recovery_seed_candidate_limit_for_mesh(
+            topology,
+        ),
+        max_exact_quality_repair_targets: exact_quality_repair_target_limit_for_mesh(topology),
         max_refinement_passes: match options.refinement.strategy {
             crate::options::RefinementStrategy::None => 0,
             _ => 3,
@@ -286,12 +290,23 @@ fn tet_candidate_options_for_mesh(
     }
 }
 
+fn interior_target_size_for_tet_candidates(
+    topology: &SourceTopologyModel,
+    options: &VolumeMeshingOptions,
+) -> Option<f64> {
+    if constrained_recovery_topology(topology) {
+        None
+    } else {
+        Some(target_size_for_mesh(topology, options))
+    }
+}
+
 fn global_insertion_point_limit_for_mesh(
     topology: &SourceTopologyModel,
     options: &VolumeMeshingOptions,
 ) -> usize {
     let default_limit = options.max_elements.max(1).min(4096);
-    if topology_span_aspect_ratio(topology) >= 6.0 {
+    if constrained_recovery_topology(topology) {
         default_limit.min(128)
     } else {
         default_limit
@@ -299,11 +314,33 @@ fn global_insertion_point_limit_for_mesh(
 }
 
 fn dense_recovery_layer_count_for_mesh(topology: &SourceTopologyModel) -> usize {
-    if topology_span_aspect_ratio(topology) >= 6.0 {
+    if constrained_recovery_topology(topology) {
         3
     } else {
         8
     }
+}
+
+fn exact_quality_repair_target_limit_for_mesh(topology: &SourceTopologyModel) -> usize {
+    if constrained_recovery_topology(topology) {
+        64
+    } else {
+        512
+    }
+}
+
+fn quality_recovery_seed_candidate_limit_for_mesh(topology: &SourceTopologyModel) -> usize {
+    if constrained_recovery_topology(topology) {
+        4
+    } else {
+        16
+    }
+}
+
+fn constrained_recovery_topology(topology: &SourceTopologyModel) -> bool {
+    topology_span_aspect_ratio(topology) >= 6.0
+        || topology.vertices.len() > 96
+        || topology.faces.len() > 48
 }
 
 fn topology_span_aspect_ratio(topology: &SourceTopologyModel) -> f64 {
@@ -2914,18 +2951,61 @@ mod tests {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.1_f64.cbrt() / 2.0);
         options.max_elements = 50_000;
+        log_preparation_stage_timings("thin_box", &geometry, &options);
+    }
 
+    #[test]
+    #[ignore = "expensive faceted fixture stage timing diagnostic"]
+    fn faceted_cylinder_preparation_stage_timings_are_observable() {
+        let geometry = faceted_cylinder_geometry();
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.459_259_458_684_314_6);
+        options.max_elements = 50_000;
+        log_preparation_stage_timings("faceted_cylinder", &geometry, &options);
+    }
+
+    #[test]
+    #[ignore = "expensive faceted fixture generation timing diagnostic"]
+    fn faceted_cylinder_generation_timing_is_observable() {
+        let geometry = faceted_cylinder_geometry();
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.459_259_458_684_314_6);
+        options.max_elements = 50_000;
         let started = std::time::Instant::now();
-        let topology = extract_source_topology(&geometry).expect("topology");
+        match generate_production_analysis_mesh(&geometry, &options) {
+            Ok(mesh) => eprintln!(
+                "faceted_cylinder generation elapsed_ms={:.1} nodes={} elements={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                mesh.nodes.len(),
+                mesh.volume_elements.len()
+            ),
+            Err(err) => eprintln!(
+                "faceted_cylinder generation_failed elapsed_ms={:.1}: {err}",
+                started.elapsed().as_secs_f64() * 1000.0
+            ),
+        }
+    }
+
+    fn log_preparation_stage_timings(
+        label: &str,
+        geometry: &GeometryAsset,
+        options: &VolumeMeshingOptions,
+    ) {
+        let started = std::time::Instant::now();
+        let topology = extract_source_topology(geometry).expect("topology");
         eprintln!(
-            "thin_box topology elapsed_ms={:.1}",
-            started.elapsed().as_secs_f64() * 1000.0
+            "{label} topology elapsed_ms={:.1} vertices={} edges={} faces={} constrained={}",
+            started.elapsed().as_secs_f64() * 1000.0,
+            topology.vertices.len(),
+            topology.edges.len(),
+            topology.faces.len(),
+            constrained_recovery_topology(&topology)
         );
 
         let stage = std::time::Instant::now();
-        let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+        let cad_topology = build_cad_topology(geometry, &topology).expect("cad topology");
         eprintln!(
-            "thin_box cad_topology elapsed_ms={:.1}",
+            "{label} cad_topology elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
         );
 
@@ -2933,24 +3013,24 @@ mod tests {
         let cad_evaluation = crate::cad_eval::build_cad_evaluation_model(&cad_topology, &topology)
             .expect("cad evaluation");
         eprintln!(
-            "thin_box cad_evaluation elapsed_ms={:.1}",
+            "{label} cad_evaluation elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
         );
 
         let stage = std::time::Instant::now();
         let effective_sizing =
-            production_effective_sizing(&topology, &cad_evaluation, &options, None);
+            production_effective_sizing(&topology, &cad_evaluation, options, None);
         eprintln!(
-            "thin_box sizing elapsed_ms={:.1}",
+            "{label} sizing elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
         );
 
         let stage = std::time::Instant::now();
         let curves =
-            discretize_topology_curves(&topology, curve_options_for_mesh(&topology, &options))
+            discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
                 .expect("curves");
         eprintln!(
-            "thin_box curves elapsed_ms={:.1}",
+            "{label} curves elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
         );
 
@@ -2966,7 +3046,7 @@ mod tests {
         )
         .expect("surface");
         eprintln!(
-            "thin_box surface elapsed_ms={:.1}",
+            "{label} surface elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
         );
 
@@ -2975,7 +3055,7 @@ mod tests {
             prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
                 .expect("volume candidates");
         eprintln!(
-            "thin_box volume_candidates elapsed_ms={:.1} components={} nodes={} surface_elements={}",
+            "{label} volume_candidates elapsed_ms={:.1} components={} nodes={} surface_elements={}",
             stage.elapsed().as_secs_f64() * 1000.0,
             volume_candidates.components.len(),
             volume_candidates
@@ -2991,19 +3071,24 @@ mod tests {
         );
 
         let stage = std::time::Instant::now();
-        match form_tet_candidates(
-            &surface,
-            &volume_candidates,
-            tet_candidate_options_for_mesh(&topology, &options, effective_sizing.as_ref()),
-        ) {
+        let tet_options =
+            tet_candidate_options_for_mesh(&topology, options, effective_sizing.as_ref());
+        eprintln!(
+            "{label} tet_options max_global={} dense_layers={} quality_seed_limit={} repair_target_limit={}",
+            tet_options.max_global_insertion_points,
+            tet_options.dense_recovery_layer_count,
+            tet_options.max_quality_recovery_seed_candidates,
+            tet_options.max_exact_quality_repair_targets
+        );
+        match form_tet_candidates(&surface, &volume_candidates, tet_options) {
             Ok(tet_candidates) => eprintln!(
-                "thin_box tet_candidates elapsed_ms={:.1} nodes={} tets={}",
+                "{label} tet_candidates elapsed_ms={:.1} nodes={} tets={}",
                 stage.elapsed().as_secs_f64() * 1000.0,
                 tet_candidates.nodes.len(),
                 tet_candidates.tets.len()
             ),
             Err(err) => eprintln!(
-                "thin_box tet_candidates_failed elapsed_ms={:.1}: {err}",
+                "{label} tet_candidates_failed elapsed_ms={:.1}: {err}",
                 stage.elapsed().as_secs_f64() * 1000.0
             ),
         }
@@ -3308,5 +3393,93 @@ mod tests {
             }
         }
         geometry
+    }
+
+    fn faceted_cylinder_geometry() -> GeometryAsset {
+        let segment_count = 16_usize;
+        let radius_m = 0.5_f64;
+        let height_m = 1.0_f64;
+        let mut vertices = Vec::<[f64; 3]>::with_capacity(segment_count * 2 + 2);
+        for z in [0.0, height_m] {
+            for index in 0..segment_count {
+                let theta = std::f64::consts::TAU * index as f64 / segment_count as f64;
+                vertices.push([radius_m * theta.cos(), radius_m * theta.sin(), z]);
+            }
+        }
+        let bottom_center = vertices.len() as u32;
+        vertices.push([0.0, 0.0, 0.0]);
+        let top_center = vertices.len() as u32;
+        vertices.push([0.0, 0.0, height_m]);
+
+        let mut triangles = Vec::<[u32; 3]>::with_capacity(segment_count * 4);
+        let top_offset = segment_count as u32;
+        for index in 0..segment_count as u32 {
+            let next = (index + 1) % segment_count as u32;
+            triangles.push([index, next, top_offset + next]);
+            triangles.push([index, top_offset + next, top_offset + index]);
+            triangles.push([bottom_center, next, index]);
+            triangles.push([top_center, top_offset + index, top_offset + next]);
+        }
+        let face_count = triangles.len() as u64;
+        GeometryAsset {
+            geometry_id: "geo_production_faceted_cylinder".to_string(),
+            source: GeometrySource {
+                path: "/fixtures/generic_faceted_cylinder.step".to_string(),
+                sha256: "generic-faceted-cylinder".to_string(),
+                importer_version: "test".to_string(),
+            },
+            source_geometry: SourceGeometry {
+                kind: SourceGeometryKind::Cad,
+                assembly: None,
+                material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
+            },
+            tessellation_profile: TessellationProfile::default(),
+            units: UnitSystem::Meter,
+            revision: 1,
+            meshes: vec![MeshDescriptor {
+                mesh_id: "faceted_cylinder_surface".to_string(),
+                kind: MeshKind::Surface,
+                vertex_count: vertices.len() as u64,
+                element_count: face_count,
+            }],
+            surface_meshes: vec![SurfaceMesh::new(
+                "faceted_cylinder_surface",
+                vertices,
+                triangles,
+            )],
+            regions: vec![
+                Region {
+                    region_id: "root".to_string(),
+                    name: "root".to_string(),
+                    tag: None,
+                    cad_ownership: None,
+                },
+                Region {
+                    region_id: "tip".to_string(),
+                    name: "tip".to_string(),
+                    tag: None,
+                    cad_ownership: None,
+                },
+            ],
+            region_entity_mappings: vec![
+                RegionEntityMapping::new(
+                    "root",
+                    "faceted_cylinder_surface",
+                    EntityKind::Face,
+                    vec![EntityIdRange::new(0, face_count / 2)],
+                ),
+                RegionEntityMapping::new(
+                    "tip",
+                    "faceted_cylinder_surface",
+                    EntityKind::Face,
+                    vec![EntityIdRange::new(
+                        face_count / 2,
+                        face_count - face_count / 2,
+                    )],
+                ),
+            ],
+            diagnostics: Vec::new(),
+        }
     }
 }

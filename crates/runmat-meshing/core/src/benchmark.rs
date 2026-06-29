@@ -2502,6 +2502,25 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "expensive faceted fixture benchmark timing diagnostic"]
+    fn faceted_benchmark_case_generation_timing_is_observable() {
+        let case = faceted_cylinder_benchmark_case();
+        let started = std::time::Instant::now();
+        match generate_mesh_for_benchmark_case(&case) {
+            Ok(mesh) => eprintln!(
+                "faceted_benchmark finished elapsed_ms={:.1} nodes={} elements={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                mesh.nodes.len(),
+                mesh.volume_elements.len()
+            ),
+            Err(message) => eprintln!(
+                "faceted_benchmark failed elapsed_ms={:.1}: {message}",
+                started.elapsed().as_secs_f64() * 1000.0
+            ),
+        }
+    }
+
+    #[test]
     fn benchmark_case_runner_reports_mesh_generation_failure() {
         let case = generic_mesh_benchmark_cases()
             .into_iter()
