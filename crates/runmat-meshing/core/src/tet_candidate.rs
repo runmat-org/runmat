@@ -5739,6 +5739,54 @@ pub(crate) fn diagnostic_small_cavity_star_insertion_rejection_reasons(
 }
 
 #[cfg(test)]
+struct BoundarySplitDiagnosticInput<'a> {
+    tet_index: usize,
+    adjacent: &'a [usize],
+    tets: &'a [TetCandidate],
+    face_adjacency: &'a BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &'a BTreeMap<u32, [f64; 3]>,
+    split_node_id: u32,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_boundary_split_rejection_reasons(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    split_node_id: u32,
+    options: TetCandidateOptions,
+) -> Result<(&'static str, &'static str), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_boundary_split_rejection_reason(BoundarySplitDiagnosticInput {
+            tet_index,
+            adjacent: &one_ring,
+            tets,
+            face_adjacency,
+            node_points,
+            split_node_id,
+            options,
+            prefix: "one_ring",
+        })?,
+        diagnostic_face_cavity_boundary_split_rejection_reason(BoundarySplitDiagnosticInput {
+            tet_index,
+            adjacent: &face_closure,
+            tets,
+            face_adjacency,
+            node_points,
+            split_node_id,
+            options,
+            prefix: "face_closure",
+        })?,
+    ))
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_small_cavity_missing_face_classes(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -6216,6 +6264,204 @@ fn diagnostic_star_boundary_face_candidates(
         candidates.push(candidate);
     }
     Ok(Some(candidates))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_boundary_split_rejection_reason(
+    input: BoundarySplitDiagnosticInput<'_>,
+) -> Result<&'static str, TetCandidateError> {
+    let BoundarySplitDiagnosticInput {
+        tet_index,
+        adjacent,
+        tets,
+        face_adjacency,
+        node_points,
+        split_node_id,
+        options,
+        prefix,
+    } = input;
+    if adjacent.len() < 3 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_boundary_split_too_small",
+            _ => "face_closure_boundary_split_too_small",
+        });
+    }
+    if adjacent.len() > 12 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_boundary_split_over_limit",
+            _ => "face_closure_boundary_split_over_limit",
+        });
+    }
+    let Some(cavity) =
+        constrained_cavity_from_selected_tets_with_anchor_trim(tets, adjacent, tet_index, vec![])
+            .map_err(|_| TetCandidateError::InvalidOptions)?
+    else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_boundary_split_invalid_cavity",
+            _ => "face_closure_boundary_split_invalid_cavity",
+        });
+    };
+    if cavity.boundary_faces.len() < 4 || cavity.boundary_faces.len() > 24 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_boundary_split_boundary_limit",
+            _ => "face_closure_boundary_split_boundary_limit",
+        });
+    }
+    let index_by_tet_id = tets
+        .iter()
+        .enumerate()
+        .map(|(index, tet)| (tet.tet_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let selected_indices = cavity
+        .removed_tet_ids
+        .iter()
+        .map(|tet_id| {
+            index_by_tet_id
+                .get(tet_id)
+                .copied()
+                .ok_or(TetCandidateError::InvalidOptions)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some(reference) = selected_indices.first().map(|index| &tets[*index]) else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_boundary_split_invalid_cavity",
+            _ => "face_closure_boundary_split_invalid_cavity",
+        });
+    };
+    let original_below_count = count_exact_quality_violations(
+        selected_indices.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact =
+        min_exact_scaled_jacobian(selected_indices.iter().map(|index| &tets[*index]));
+
+    let mut saw_global_face = false;
+    let mut saw_invalid_split = false;
+    let mut saw_no_refill = false;
+    let mut saw_no_improvement = false;
+    let mut saw_boundary_refill_error = false;
+    for face in &cavity.boundary_faces {
+        let face_key = sorted_node_face(face.node_ids);
+        if face_adjacency.get(&face_key).map_or(0, Vec::len) != 1 {
+            continue;
+        }
+        saw_global_face = true;
+        let [Some(first), Some(second), Some(third)] = face
+            .node_ids
+            .map(|node_id| node_points.get(&node_id).copied())
+        else {
+            saw_invalid_split = true;
+            continue;
+        };
+        let split_point = triangle_centroid([first, second, third]);
+        let mut split_cavity = cavity.clone();
+        split_cavity.boundary_faces =
+            match crate::constrained_cavity::split_constrained_cavity_boundary_faces(
+                &cavity.boundary_faces,
+                face.node_ids,
+                split_node_id,
+            ) {
+                Ok(faces) => faces,
+                Err(_) => {
+                    saw_invalid_split = true;
+                    continue;
+                }
+            };
+        let boundary_node_ids = split_cavity
+            .boundary_faces
+            .iter()
+            .flat_map(|boundary_face| boundary_face.node_ids)
+            .collect::<BTreeSet<_>>();
+        let mut boundary_nodes =
+            Vec::<ConstrainedCavityNode>::with_capacity(boundary_node_ids.len());
+        for node_id in boundary_node_ids {
+            let coordinates_m = if node_id == split_node_id {
+                split_point
+            } else {
+                *node_points
+                    .get(&node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?
+            };
+            boundary_nodes.push(ConstrainedCavityNode {
+                node_id,
+                coordinates_m,
+            });
+        }
+        let evaluation = evaluate_constrained_cavity_refill_candidates(
+            &split_cavity,
+            &boundary_nodes,
+            &[],
+            ConstrainedCavityRefillOptions {
+                min_volume_m3: options.min_volume_m3,
+                max_aspect_ratio: options.max_aspect_ratio,
+                min_scaled_jacobian: options.min_scaled_jacobian,
+                volume_relative_tolerance: 1.0e-9,
+                min_protected_node_distance_m: 0.0,
+            },
+        );
+        let Some(refill) = (match evaluation {
+            Ok(evaluation) => evaluation.refill,
+            Err(_) => {
+                saw_boundary_refill_error = true;
+                continue;
+            }
+        }) else {
+            saw_no_refill = true;
+            continue;
+        };
+        let candidates = refill
+            .tets
+            .into_iter()
+            .map(|tet| TetCandidate {
+                tet_id: 0,
+                component_id: reference.component_id,
+                node_ids: tet.node_ids,
+                source_surface_element_id: reference.source_surface_element_id,
+                region_ids: reference.region_ids.clone(),
+                volume_m3: tet.volume_m3,
+                aspect_ratio: tet.aspect_ratio,
+                exact_scaled_jacobian: tet.exact_scaled_jacobian,
+            })
+            .collect::<Vec<_>>();
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if cavity_reconnection_improves_quality(
+            candidate_below_count,
+            candidate_min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            return Ok(match prefix {
+                "one_ring" => "one_ring_boundary_split_reconnectable",
+                _ => "face_closure_boundary_split_reconnectable",
+            });
+        }
+        saw_no_improvement = true;
+    }
+    Ok(
+        match (
+            prefix,
+            saw_no_improvement,
+            saw_no_refill,
+            saw_boundary_refill_error,
+            saw_invalid_split,
+            saw_global_face,
+        ) {
+            ("one_ring", true, _, _, _, _) => "one_ring_boundary_split_no_improvement",
+            ("one_ring", _, true, _, _, _) => "one_ring_boundary_split_no_refill",
+            ("one_ring", _, _, true, _, _) => "one_ring_boundary_split_refill_error",
+            ("one_ring", _, _, _, true, _) => "one_ring_boundary_split_invalid",
+            ("one_ring", _, _, _, _, false) => "one_ring_boundary_split_no_global_face",
+            ("one_ring", _, _, _, _, _) => "one_ring_boundary_split_no_candidate",
+            (_, true, _, _, _, _) => "face_closure_boundary_split_no_improvement",
+            (_, _, true, _, _, _) => "face_closure_boundary_split_no_refill",
+            (_, _, _, true, _, _) => "face_closure_boundary_split_refill_error",
+            (_, _, _, _, true, _) => "face_closure_boundary_split_invalid",
+            (_, _, _, _, _, false) => "face_closure_boundary_split_no_global_face",
+            _ => "face_closure_boundary_split_no_candidate",
+        },
+    )
 }
 
 #[cfg(test)]
@@ -10568,6 +10814,51 @@ mod tests {
         let topology = diagnostic_missing_face_topology(&missing_faces, &face_adjacency, 4);
 
         assert_eq!(topology, (1, 2, 2, 2, 2, 1, 4));
+    }
+
+    #[test]
+    fn boundary_split_diagnostic_classifies_unfillable_split_cavity() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.4,
+            ..TetCandidateOptions::default()
+        };
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let outer_tet = raw_candidate_tet(0, 0, &[], [0, 1, 2, 3], points, options)
+            .expect("outer tet should be valid");
+        let split_point = [0.04, 0.04, 0.04];
+        let split_tets = centroid_split_tets(&outer_tet, 4, split_point, points, options);
+        let node_points = BTreeMap::from([
+            (0, points[0]),
+            (1, points[1]),
+            (2, points[2]),
+            (3, points[3]),
+            (4, split_point),
+        ]);
+        let face_adjacency = tet_face_adjacency(&split_tets);
+
+        let reasons = diagnostic_small_cavity_boundary_split_rejection_reasons(
+            0,
+            &split_tets,
+            &face_adjacency,
+            &node_points,
+            5,
+            options,
+        )
+        .expect("boundary split diagnostic should evaluate");
+
+        assert_eq!(
+            reasons,
+            (
+                "one_ring_boundary_split_no_improvement",
+                "face_closure_boundary_split_no_improvement"
+            )
+        );
     }
 
     #[test]
