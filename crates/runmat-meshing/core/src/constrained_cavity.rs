@@ -61,6 +61,31 @@ pub enum ConstrainedCavityValidationError {
         candidate_volume_m3: f64,
         tolerance_m3: f64,
     },
+    BoundaryFaceCountMismatch {
+        expected_count: usize,
+        candidate_count: usize,
+    },
+    MissingBoundaryFace {
+        node_ids: [u32; 3],
+    },
+    UnexpectedBoundaryFace {
+        node_ids: [u32; 3],
+    },
+    BoundarySourceFaceMismatch {
+        node_ids: [u32; 3],
+        expected_source_face_id: Option<u32>,
+        candidate_source_face_id: Option<u32>,
+    },
+    BoundarySourceEdgeMismatch {
+        node_ids: [u32; 2],
+        expected_source_edge_id: Option<u32>,
+        candidate_source_edge_id: Option<u32>,
+    },
+    BoundaryRegionMismatch {
+        node_ids: [u32; 3],
+        expected_region_ids: Vec<String>,
+        candidate_region_ids: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -234,6 +259,78 @@ pub fn validate_constrained_cavity_refill_volume(
     Ok(())
 }
 
+pub fn validate_constrained_cavity_boundary_preserved(
+    cavity: &ConstrainedCavity,
+    candidate_boundary_faces: &[ConstrainedCavityBoundaryFace],
+) -> Result<(), ConstrainedCavityValidationError> {
+    if cavity.boundary_faces.len() != candidate_boundary_faces.len() {
+        return Err(
+            ConstrainedCavityValidationError::BoundaryFaceCountMismatch {
+                expected_count: cavity.boundary_faces.len(),
+                candidate_count: candidate_boundary_faces.len(),
+            },
+        );
+    }
+
+    let expected_faces = boundary_face_map(&cavity.boundary_faces)?;
+    let candidate_faces = boundary_face_map(candidate_boundary_faces)?;
+
+    for expected_face in expected_faces.keys() {
+        if !candidate_faces.contains_key(expected_face) {
+            return Err(ConstrainedCavityValidationError::MissingBoundaryFace {
+                node_ids: *expected_face,
+            });
+        }
+    }
+    for candidate_face in candidate_faces.keys() {
+        if !expected_faces.contains_key(candidate_face) {
+            return Err(ConstrainedCavityValidationError::UnexpectedBoundaryFace {
+                node_ids: *candidate_face,
+            });
+        }
+    }
+
+    for (face_key, expected) in &expected_faces {
+        let candidate = candidate_faces
+            .get(face_key)
+            .expect("candidate face should exist after key comparison");
+        if expected.source_face_id != candidate.source_face_id {
+            return Err(
+                ConstrainedCavityValidationError::BoundarySourceFaceMismatch {
+                    node_ids: *face_key,
+                    expected_source_face_id: expected.source_face_id,
+                    candidate_source_face_id: candidate.source_face_id,
+                },
+            );
+        }
+        let expected_edges = boundary_face_source_edges(expected)?;
+        let candidate_edges = boundary_face_source_edges(candidate)?;
+        for (edge_key, expected_source_edge_id) in expected_edges {
+            let candidate_source_edge_id = candidate_edges.get(&edge_key).copied().flatten();
+            if expected_source_edge_id != candidate_source_edge_id {
+                return Err(
+                    ConstrainedCavityValidationError::BoundarySourceEdgeMismatch {
+                        node_ids: edge_key,
+                        expected_source_edge_id,
+                        candidate_source_edge_id,
+                    },
+                );
+            }
+        }
+        let expected_regions = sorted_region_ids(&expected.region_ids);
+        let candidate_regions = sorted_region_ids(&candidate.region_ids);
+        if expected_regions != candidate_regions {
+            return Err(ConstrainedCavityValidationError::BoundaryRegionMismatch {
+                node_ids: *face_key,
+                expected_region_ids: expected_regions,
+                candidate_region_ids: candidate_regions,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn sorted_face(mut node_ids: [u32; 3]) -> [u32; 3] {
     node_ids.sort();
     node_ids
@@ -250,6 +347,54 @@ fn face_edges(node_ids: [u32; 3]) -> [[u32; 2]; 3] {
         [node_ids[1], node_ids[2]],
         [node_ids[2], node_ids[0]],
     ]
+}
+
+fn boundary_face_map(
+    faces: &[ConstrainedCavityBoundaryFace],
+) -> Result<BTreeMap<[u32; 3], &ConstrainedCavityBoundaryFace>, ConstrainedCavityValidationError> {
+    let mut map = BTreeMap::<[u32; 3], &ConstrainedCavityBoundaryFace>::new();
+    for (face_index, face) in faces.iter().enumerate() {
+        if face.node_ids[0] == face.node_ids[1]
+            || face.node_ids[0] == face.node_ids[2]
+            || face.node_ids[1] == face.node_ids[2]
+        {
+            return Err(ConstrainedCavityValidationError::DegenerateBoundaryFace {
+                face_index,
+                node_ids: face.node_ids,
+            });
+        }
+        let key = sorted_face(face.node_ids);
+        if map.insert(key, face).is_some() {
+            return Err(ConstrainedCavityValidationError::DuplicateBoundaryFace { node_ids: key });
+        }
+    }
+    Ok(map)
+}
+
+fn boundary_face_source_edges(
+    face: &ConstrainedCavityBoundaryFace,
+) -> Result<BTreeMap<[u32; 2], Option<u32>>, ConstrainedCavityValidationError> {
+    let mut edge_sources = BTreeMap::<[u32; 2], Option<u32>>::new();
+    for (edge, source_edge_id) in face_edges(face.node_ids)
+        .into_iter()
+        .zip(face.source_edge_ids)
+    {
+        let key = sorted_edge(edge);
+        if edge_sources.insert(key, source_edge_id).is_some() {
+            return Err(ConstrainedCavityValidationError::DegenerateBoundaryFace {
+                face_index: 0,
+                node_ids: face.node_ids,
+            });
+        }
+    }
+    Ok(edge_sources)
+}
+
+fn sorted_region_ids(region_ids: &[String]) -> Vec<String> {
+    let mut sorted = region_ids.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    sorted
 }
 
 fn tet_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {
@@ -356,6 +501,103 @@ mod tests {
     }
 
     #[test]
+    fn boundary_preservation_accepts_reoriented_faces_with_same_provenance() {
+        let cavity = provenance_cavity();
+        let candidate_faces = cavity
+            .boundary_faces
+            .iter()
+            .map(|face| {
+                let mut reoriented = face.clone();
+                reoriented.node_ids = [face.node_ids[2], face.node_ids[1], face.node_ids[0]];
+                reoriented.source_edge_ids = [
+                    source_edge_for(face, [reoriented.node_ids[0], reoriented.node_ids[1]]),
+                    source_edge_for(face, [reoriented.node_ids[1], reoriented.node_ids[2]]),
+                    source_edge_for(face, [reoriented.node_ids[2], reoriented.node_ids[0]]),
+                ];
+                reoriented.region_ids.reverse();
+                reoriented
+            })
+            .collect::<Vec<_>>();
+
+        validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect("same boundary and provenance should validate");
+    }
+
+    #[test]
+    fn boundary_preservation_rejects_missing_boundary_face() {
+        let cavity = provenance_cavity();
+        let mut candidate_faces = cavity.boundary_faces.clone();
+        candidate_faces[0].node_ids = [10, 11, 12];
+
+        let err = validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect_err("missing boundary face should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityValidationError::MissingBoundaryFace {
+                node_ids: [0, 1, 2]
+            }
+        );
+    }
+
+    #[test]
+    fn boundary_preservation_rejects_source_face_mismatch() {
+        let cavity = provenance_cavity();
+        let mut candidate_faces = cavity.boundary_faces.clone();
+        candidate_faces[0].source_face_id = Some(99);
+
+        let err = validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect_err("source face mismatch should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityValidationError::BoundarySourceFaceMismatch {
+                node_ids: [0, 1, 2],
+                expected_source_face_id: Some(10),
+                candidate_source_face_id: Some(99)
+            }
+        );
+    }
+
+    #[test]
+    fn boundary_preservation_rejects_source_edge_mismatch() {
+        let cavity = provenance_cavity();
+        let mut candidate_faces = cavity.boundary_faces.clone();
+        candidate_faces[0].source_edge_ids[0] = Some(99);
+
+        let err = validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect_err("source edge mismatch should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityValidationError::BoundarySourceEdgeMismatch {
+                node_ids: [0, 1],
+                expected_source_edge_id: Some(100),
+                candidate_source_edge_id: Some(99)
+            }
+        );
+    }
+
+    #[test]
+    fn boundary_preservation_rejects_region_mismatch() {
+        let cavity = provenance_cavity();
+        let mut candidate_faces = cavity.boundary_faces.clone();
+        candidate_faces[0].region_ids = vec!["other".to_string()];
+
+        let err = validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect_err("region mismatch should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityValidationError::BoundaryRegionMismatch {
+                node_ids: [0, 1, 2],
+                expected_region_ids: vec!["fixed".to_string(), "loaded".to_string()],
+                candidate_region_ids: vec!["other".to_string()]
+            }
+        );
+    }
+
+    #[test]
     fn validates_closed_tet_cavity_boundary() {
         let cavity = tet_cavity();
 
@@ -449,6 +691,49 @@ mod tests {
             source_edge_ids: [None, None, None],
             region_ids: Vec::new(),
         }
+    }
+
+    fn provenance_cavity() -> ConstrainedCavity {
+        ConstrainedCavity {
+            removed_tet_ids: vec![7],
+            boundary_faces: vec![
+                face_with_provenance(
+                    [0, 1, 2],
+                    10,
+                    [Some(100), Some(101), Some(102)],
+                    &["loaded", "fixed"],
+                ),
+                face_with_provenance([0, 3, 1], 11, [Some(103), Some(104), Some(100)], &["fixed"]),
+                face_with_provenance([1, 3, 2], 12, [Some(104), Some(105), Some(101)], &["solid"]),
+                face_with_provenance([2, 3, 0], 13, [Some(105), Some(103), Some(102)], &["solid"]),
+            ],
+            protected_node_ids: vec![0, 1],
+            target_volume_m3: 1.0,
+        }
+    }
+
+    fn face_with_provenance(
+        node_ids: [u32; 3],
+        source_face_id: u32,
+        source_edge_ids: [Option<u32>; 3],
+        region_ids: &[&str],
+    ) -> ConstrainedCavityBoundaryFace {
+        ConstrainedCavityBoundaryFace {
+            node_ids,
+            source_face_id: Some(source_face_id),
+            source_edge_ids,
+            region_ids: region_ids.iter().map(|region| region.to_string()).collect(),
+        }
+    }
+
+    fn source_edge_for(face: &ConstrainedCavityBoundaryFace, edge: [u32; 2]) -> Option<u32> {
+        face_edges(face.node_ids)
+            .into_iter()
+            .zip(face.source_edge_ids)
+            .find_map(|(candidate_edge, source_edge_id)| {
+                (sorted_edge(candidate_edge) == sorted_edge(edge)).then_some(source_edge_id)
+            })
+            .flatten()
     }
 
     fn candidate_tet(

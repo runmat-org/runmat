@@ -70,9 +70,9 @@ pub use cad_topology::{
 };
 pub use constrained_cavity::{
     constrained_cavity_from_selected_tets, validate_constrained_cavity,
-    validate_constrained_cavity_refill_volume, ConstrainedCavity, ConstrainedCavityBoundaryFace,
-    ConstrainedCavityExtractionError, ConstrainedCavityValidationError,
-    ConstrainedCavityValidationReport,
+    validate_constrained_cavity_boundary_preserved, validate_constrained_cavity_refill_volume,
+    ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityExtractionError,
+    ConstrainedCavityValidationError, ConstrainedCavityValidationReport,
 };
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
