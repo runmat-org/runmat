@@ -105,6 +105,8 @@ pub struct MeshBenchmarkReport {
     pub timing: MeshBenchmarkTiming,
     #[serde(default)]
     pub budget: MeshBenchmarkBudgetMetrics,
+    #[serde(default)]
+    pub artifacts: MeshBenchmarkArtifactMetrics,
     pub topology: MeshBenchmarkTopologyMetrics,
     pub cad: MeshCadEvidence,
     pub sizing: MeshSizingEvidence,
@@ -129,6 +131,12 @@ pub struct MeshBenchmarkBudgetMetrics {
     pub max_volume_element_count: Option<usize>,
     pub volume_element_budget_used_ratio: Option<f64>,
     pub volume_element_budget_exceeded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MeshBenchmarkArtifactMetrics {
+    pub analysis_mesh_json_bytes: Option<usize>,
+    pub mesh_evidence_json_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,6 +204,10 @@ pub struct MeshBenchmarkSuiteSummary {
     pub worst_max_aspect_ratio: Option<f64>,
     #[serde(default)]
     pub worst_volume_element_budget_used_ratio: Option<f64>,
+    #[serde(default)]
+    pub largest_analysis_mesh_json_bytes: Option<usize>,
+    #[serde(default)]
+    pub largest_mesh_evidence_json_bytes: Option<usize>,
     pub worst_boundary_projection_error_m: Option<f64>,
     pub worst_volume_coverage_error: Option<f64>,
     pub worst_boundary_area_error: Option<f64>,
@@ -218,6 +230,10 @@ pub struct MeshBenchmarkTierSummary {
     pub worst_max_aspect_ratio: Option<f64>,
     #[serde(default)]
     pub worst_volume_element_budget_used_ratio: Option<f64>,
+    #[serde(default)]
+    pub largest_analysis_mesh_json_bytes: Option<usize>,
+    #[serde(default)]
+    pub largest_mesh_evidence_json_bytes: Option<usize>,
     pub worst_volume_coverage_error: Option<f64>,
     pub worst_boundary_area_error: Option<f64>,
     pub total_ms: Option<f64>,
@@ -316,6 +332,7 @@ pub fn build_mesh_benchmark_report(
     input: MeshBenchmarkInput,
 ) -> MeshBenchmarkReport {
     let evidence = build_mesh_evidence_artifact(mesh, validation);
+    let artifacts = benchmark_artifact_metrics(mesh, &evidence);
     let actual_volume_m3 = mesh_volume_m3(mesh);
     let actual_boundary_area_m2 = mesh_boundary_area_m2(mesh);
 
@@ -328,6 +345,7 @@ pub fn build_mesh_benchmark_report(
         algorithm: mesh.backend.algorithm.clone(),
         timing: input.timing,
         budget: benchmark_budget_metrics(mesh, validation),
+        artifacts,
         topology: MeshBenchmarkTopologyMetrics {
             node_count: mesh.nodes.len(),
             volume_element_count: mesh.volume_elements.len(),
@@ -532,6 +550,16 @@ fn benchmark_budget_metrics(
             volume_element_count as f64 / max_volume_element_count.max(1) as f64,
         ),
         volume_element_budget_exceeded: volume_element_count > max_volume_element_count,
+    }
+}
+
+fn benchmark_artifact_metrics(
+    mesh: &AnalysisMeshArtifact,
+    evidence: &crate::evidence::MeshEvidenceArtifact,
+) -> MeshBenchmarkArtifactMetrics {
+    MeshBenchmarkArtifactMetrics {
+        analysis_mesh_json_bytes: serde_json::to_vec(mesh).ok().map(|bytes| bytes.len()),
+        mesh_evidence_json_bytes: serde_json::to_vec(evidence).ok().map(|bytes| bytes.len()),
     }
 }
 
@@ -880,6 +908,16 @@ fn mesh_benchmark_suite_summary(
                 .iter()
                 .filter_map(|report| report.budget.volume_element_budget_used_ratio),
         ),
+        largest_analysis_mesh_json_bytes: max_usize(
+            reports
+                .iter()
+                .filter_map(|report| report.artifacts.analysis_mesh_json_bytes),
+        ),
+        largest_mesh_evidence_json_bytes: max_usize(
+            reports
+                .iter()
+                .filter_map(|report| report.artifacts.mesh_evidence_json_bytes),
+        ),
         worst_boundary_projection_error_m: finite_max(
             reports
                 .iter()
@@ -990,6 +1028,16 @@ fn mesh_benchmark_tier_summaries(
                             .iter()
                             .filter_map(|report| report.budget.volume_element_budget_used_ratio),
                     ),
+                    largest_analysis_mesh_json_bytes: max_usize(
+                        reports
+                            .iter()
+                            .filter_map(|report| report.artifacts.analysis_mesh_json_bytes),
+                    ),
+                    largest_mesh_evidence_json_bytes: max_usize(
+                        reports
+                            .iter()
+                            .filter_map(|report| report.artifacts.mesh_evidence_json_bytes),
+                    ),
                     worst_volume_coverage_error: finite_max(reports.iter().filter_map(|report| {
                         report
                             .coverage
@@ -1055,6 +1103,10 @@ fn finite_sum(values: impl IntoIterator<Item = f64>) -> Option<f64> {
         sum += value;
     }
     (count > 0).then_some(sum)
+}
+
+fn max_usize(values: impl IntoIterator<Item = usize>) -> Option<usize> {
+    values.into_iter().max()
 }
 
 fn finite_delta(baseline: Option<f64>, candidate: Option<f64>) -> Option<f64> {
@@ -1621,6 +1673,20 @@ mod tests {
         assert_eq!(report.budget.max_volume_element_count, Some(4));
         assert_eq!(report.budget.volume_element_budget_used_ratio, Some(0.25));
         assert!(!report.budget.volume_element_budget_exceeded);
+        assert!(
+            report
+                .artifacts
+                .analysis_mesh_json_bytes
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            report
+                .artifacts
+                .mesh_evidence_json_bytes
+                .unwrap_or_default()
+                > 0
+        );
         assert_eq!(report.coverage.volume_coverage_ratio, Some(1.0));
         assert_eq!(report.coverage.boundary_area_ratio, Some(1.0));
         assert_eq!(report.coverage.coverage_sample_ratio, Some(1.0));
@@ -1737,6 +1803,20 @@ mod tests {
         assert_eq!(suite.summary.worst_min_exact_scaled_jacobian, Some(0.45));
         assert_eq!(suite.summary.worst_max_aspect_ratio, Some(2.0));
         assert_eq!(suite.summary.worst_volume_element_budget_used_ratio, None);
+        assert!(
+            suite
+                .summary
+                .largest_analysis_mesh_json_bytes
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            suite
+                .summary
+                .largest_mesh_evidence_json_bytes
+                .unwrap_or_default()
+                > 0
+        );
         assert_eq!(
             suite.summary.worst_volume_coverage_error,
             Some(1.0 - 1.0 / 6.0)
@@ -1752,6 +1832,7 @@ mod tests {
         assert_eq!(solid.failed_count, 0);
         assert_eq!(solid.budget_exceeded_count, 0);
         assert_eq!(solid.total_ms, Some(4.0));
+        assert!(solid.largest_analysis_mesh_json_bytes.unwrap_or_default() > 0);
         let hole = suite
             .summary
             .summary_by_tier
