@@ -7384,6 +7384,15 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             ("one_ring", "raw_candidate_rejected") => "one_ring_raw_candidate_rejected",
             ("one_ring", "empty_tetrahedralization") => "one_ring_empty_tetrahedralization",
             ("one_ring", "boundary_face_mismatch") => "one_ring_boundary_face_mismatch",
+            ("one_ring", "boundary_face_mismatch_constrained_available") => {
+                "one_ring_boundary_face_mismatch_constrained_available"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_no_refill") => {
+                "one_ring_boundary_face_mismatch_constrained_no_refill"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_invalid") => {
+                "one_ring_boundary_face_mismatch_constrained_invalid"
+            }
             ("one_ring", "volume_mismatch") => "one_ring_volume_mismatch",
             (_, "component_mismatch") => "face_closure_component_mismatch",
             (_, "too_few_boundary_faces") => "face_closure_too_few_boundary_faces",
@@ -7391,6 +7400,15 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             (_, "raw_candidate_rejected") => "face_closure_raw_candidate_rejected",
             (_, "empty_tetrahedralization") => "face_closure_empty_tetrahedralization",
             (_, "boundary_face_mismatch") => "face_closure_boundary_face_mismatch",
+            (_, "boundary_face_mismatch_constrained_available") => {
+                "face_closure_boundary_face_mismatch_constrained_available"
+            }
+            (_, "boundary_face_mismatch_constrained_no_refill") => {
+                "face_closure_boundary_face_mismatch_constrained_no_refill"
+            }
+            (_, "boundary_face_mismatch_constrained_invalid") => {
+                "face_closure_boundary_face_mismatch_constrained_invalid"
+            }
             (_, "volume_mismatch") => "face_closure_volume_mismatch",
             _ => "face_closure_candidate_rejected",
         });
@@ -7484,7 +7502,15 @@ fn diagnostic_face_neighbor_cavity_reconnection_candidates(
     }
     let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
     if candidate_boundary_faces != boundary_faces {
-        return Ok(Some((candidates, Some("boundary_face_mismatch"))));
+        let reason = diagnostic_constrained_boundary_mismatch_reason(
+            adjacent,
+            &boundary_faces,
+            &boundary_nodes,
+            original_volume,
+            node_points,
+            options,
+        )?;
+        return Ok(Some((candidates, Some(reason))));
     }
     let candidate_volume = candidates
         .iter()
@@ -7494,6 +7520,62 @@ fn diagnostic_face_neighbor_cavity_reconnection_candidates(
         return Ok(Some((candidates, Some("volume_mismatch"))));
     }
     Ok(Some((candidates, None)))
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_boundary_mismatch_reason(
+    adjacent: &[usize],
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    boundary_nodes: &BTreeSet<u32>,
+    original_volume: f64,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let cavity = crate::constrained_cavity::ConstrainedCavity {
+        removed_tet_ids: adjacent.iter().map(|index| *index as u32).collect(),
+        boundary_faces: boundary_faces
+            .iter()
+            .map(
+                |face| crate::constrained_cavity::ConstrainedCavityBoundaryFace {
+                    node_ids: *face,
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: Vec::new(),
+                },
+            )
+            .collect(),
+        protected_node_ids: Vec::new(),
+        target_volume_m3: original_volume,
+    };
+    let boundary_nodes = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    match evaluate_constrained_cavity_refill_candidates(
+        &cavity,
+        &boundary_nodes,
+        &[],
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    ) {
+        Ok(evaluation) if evaluation.refill.is_some() => {
+            Ok("boundary_face_mismatch_constrained_available")
+        }
+        Ok(_) => Ok("boundary_face_mismatch_constrained_no_refill"),
+        Err(_) => Ok("boundary_face_mismatch_constrained_invalid"),
+    }
 }
 
 #[cfg(test)]
@@ -7650,6 +7732,15 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         ("boundary_cavity", Some("boundary_face_mismatch")) => {
             "boundary_cavity_boundary_face_mismatch"
         }
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_available")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_available"
+        }
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_no_refill")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_no_refill"
+        }
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_invalid")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_invalid"
+        }
         ("boundary_cavity", Some("volume_mismatch")) => "boundary_cavity_volume_mismatch",
         ("boundary_cavity", Some("empty_candidate")) => "boundary_cavity_empty_candidate",
         ("boundary_cavity", _) => "boundary_cavity_candidate_invalid",
@@ -7659,6 +7750,15 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         (_, Some("raw_candidate_rejected")) => "node_cavity_raw_candidate_rejected",
         (_, Some("empty_tetrahedralization")) => "node_cavity_empty_tetrahedralization",
         (_, Some("boundary_face_mismatch")) => "node_cavity_boundary_face_mismatch",
+        (_, Some("boundary_face_mismatch_constrained_available")) => {
+            "node_cavity_boundary_face_mismatch_constrained_available"
+        }
+        (_, Some("boundary_face_mismatch_constrained_no_refill")) => {
+            "node_cavity_boundary_face_mismatch_constrained_no_refill"
+        }
+        (_, Some("boundary_face_mismatch_constrained_invalid")) => {
+            "node_cavity_boundary_face_mismatch_constrained_invalid"
+        }
         (_, Some("volume_mismatch")) => "node_cavity_volume_mismatch",
         (_, Some("empty_candidate")) => "node_cavity_empty_candidate",
         _ => "node_cavity_candidate_invalid",
