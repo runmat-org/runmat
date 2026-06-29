@@ -86,6 +86,10 @@ pub struct MeshCadEvidence {
     #[serde(default)]
     pub missing_exact_query_face_count: usize,
     #[serde(default)]
+    pub missing_derivative_query_face_count: usize,
+    #[serde(default)]
+    pub missing_curvature_query_face_count: usize,
+    #[serde(default)]
     pub point_evaluation_supported_face_count: usize,
     #[serde(default)]
     pub projection_supported_face_count: usize,
@@ -493,6 +497,12 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
         live_query_face_count: mesh.backend.cad_evaluation_live_query_face_count,
         exact_query_face_count: mesh.backend.cad_evaluation_exact_query_face_count,
         missing_exact_query_face_count: mesh.backend.cad_evaluation_missing_exact_query_face_count,
+        missing_derivative_query_face_count: mesh
+            .backend
+            .cad_evaluation_missing_derivative_query_face_count,
+        missing_curvature_query_face_count: mesh
+            .backend
+            .cad_evaluation_missing_curvature_query_face_count,
         point_evaluation_supported_face_count: mesh
             .backend
             .cad_evaluation_point_supported_face_count,
@@ -1379,6 +1389,8 @@ mod tests {
                 cad_evaluation_live_query_face_count: 0,
                 cad_evaluation_exact_query_face_count: 1,
                 cad_evaluation_missing_exact_query_face_count: 1,
+                cad_evaluation_missing_derivative_query_face_count: 2,
+                cad_evaluation_missing_curvature_query_face_count: 1,
                 cad_evaluation_point_supported_face_count: 2,
                 cad_evaluation_projection_supported_face_count: 2,
                 cad_evaluation_normal_supported_face_count: 2,
@@ -1480,6 +1492,8 @@ mod tests {
         assert_eq!(evidence.cad.imported_face_count, 3);
         assert_eq!(evidence.cad.exact_query_face_count, 1);
         assert_eq!(evidence.cad.missing_exact_query_face_count, 1);
+        assert_eq!(evidence.cad.missing_derivative_query_face_count, 2);
+        assert_eq!(evidence.cad.missing_curvature_query_face_count, 1);
         assert_eq!(evidence.cad.point_evaluation_supported_face_count, 2);
         assert_eq!(evidence.cad.projection_supported_face_count, 2);
         assert_eq!(evidence.cad.normal_supported_face_count, 2);

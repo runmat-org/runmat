@@ -1074,6 +1074,12 @@ fn production_backend_summary(
         cad_evaluation_missing_exact_query_face_count: preparation
             .cad_evaluation_report
             .missing_exact_query_face_count,
+        cad_evaluation_missing_derivative_query_face_count: preparation
+            .cad_evaluation_report
+            .missing_derivative_query_face_count,
+        cad_evaluation_missing_curvature_query_face_count: preparation
+            .cad_evaluation_report
+            .missing_curvature_query_face_count,
         cad_evaluation_sample_count: preparation.cad_evaluation_report.evaluator_sample_count,
         cad_evaluation_rejected_sample_count: preparation
             .cad_evaluation_report
@@ -2549,6 +2555,18 @@ mod tests {
                 .missing_exact_query_face_count,
             0
         );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
+                .missing_derivative_query_face_count,
+            0
+        );
+        assert_eq!(
+            preparation
+                .cad_evaluation_report
+                .missing_curvature_query_face_count,
+            0
+        );
         assert!(preparation.cad_evaluation_report.derivative_query_count > 0);
         assert!(preparation.cad_evaluation_report.curvature_query_count > 0);
         assert!(preparation.cad_evaluation_report.uv_domain_face_count > 0);
@@ -2580,6 +2598,16 @@ mod tests {
         );
         assert_eq!(
             mesh.backend.cad_evaluation_missing_exact_query_face_count,
+            0
+        );
+        assert_eq!(
+            mesh.backend
+                .cad_evaluation_missing_derivative_query_face_count,
+            0
+        );
+        assert_eq!(
+            mesh.backend
+                .cad_evaluation_missing_curvature_query_face_count,
             0
         );
         assert_eq!(
@@ -2619,6 +2647,18 @@ mod tests {
         assert_eq!(
             evidence.cad.exact_query_face_count,
             preparation.cad_evaluation_report.exact_query_face_count
+        );
+        assert_eq!(
+            evidence.cad.missing_derivative_query_face_count,
+            preparation
+                .cad_evaluation_report
+                .missing_derivative_query_face_count
+        );
+        assert_eq!(
+            evidence.cad.missing_curvature_query_face_count,
+            preparation
+                .cad_evaluation_report
+                .missing_curvature_query_face_count
         );
         assert_eq!(
             evidence.cad.projection_supported_face_count,
