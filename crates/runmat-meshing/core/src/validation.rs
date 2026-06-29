@@ -528,15 +528,20 @@ fn validate_no_unrepaired_exact_quality(
         .backend
         .tet_exact_quality_unrepaired_node_adjacent_count;
     let edge_star_count = mesh.backend.tet_exact_quality_unrepaired_edge_star_count;
-    let categorized_count = boundary_adjacent_count
-        .saturating_add(node_adjacent_count)
-        .saturating_add(interior_seed_count)
-        .saturating_add(edge_star_count)
-        .saturating_add(general_cavity_count);
+    let categorized_lower_bound = [
+        boundary_adjacent_count,
+        node_adjacent_count,
+        interior_seed_count,
+        edge_star_count,
+        general_cavity_count,
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or_default();
     let total_count = mesh
         .backend
         .tet_exact_quality_unrepaired_total_count
-        .max(categorized_count);
+        .max(categorized_lower_bound);
     if total_count > 0 {
         return Err(AnalysisMeshValidationError::UnrepairedExactQualityPresent {
             total_count,
@@ -1253,7 +1258,7 @@ mod tests {
         assert_eq!(
             err,
             AnalysisMeshValidationError::UnrepairedExactQualityPresent {
-                total_count: 14,
+                total_count: 5,
                 general_cavity_count: 0,
                 boundary_adjacent_count: 2,
                 node_adjacent_count: 4,
