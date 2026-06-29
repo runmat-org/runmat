@@ -1631,6 +1631,40 @@ mod tests {
     }
 
     #[test]
+    fn refill_candidates_preserve_split_boundary_face() {
+        let mut cavity = unit_tet_cavity();
+        cavity.boundary_faces =
+            split_constrained_cavity_boundary_faces(&cavity.boundary_faces, [0, 1, 2], 4)
+                .expect("fixture face should split");
+        let mut nodes = unit_tet_nodes();
+        nodes.push(ConstrainedCavityNode {
+            node_id: 4,
+            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+        });
+
+        let refill =
+            generate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], refill_options())
+                .expect("split boundary cavity should refill");
+
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("refill should preserve split boundary faces");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            1.0e-12,
+        )
+        .expect("split boundary refill should preserve volume");
+        assert!(
+            refill
+                .boundary_faces
+                .iter()
+                .filter(|face| face.node_ids.contains(&4))
+                .count()
+                >= 3
+        );
+    }
+
+    #[test]
     fn refill_candidates_preserve_single_tet_cavity_boundary_and_volume() {
         let cavity = unit_tet_cavity();
         let nodes = unit_tet_nodes();
