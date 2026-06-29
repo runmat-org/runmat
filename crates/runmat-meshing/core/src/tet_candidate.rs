@@ -161,6 +161,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub untangling_reconnected_edge_star_count: usize,
     #[serde(default)]
+    pub untangling_reconnected_boundary_adjacent_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_repair_pass_count: usize,
     #[serde(default)]
     pub exact_quality_reconnected_cavity_count: usize,
@@ -506,6 +508,8 @@ pub fn form_tet_candidates(
             untangling_final_near_singular_count: untangling.final_near_singular_count,
             untangling_relocated_seed_count: untangling.relocated_seed_count,
             untangling_reconnected_edge_star_count: untangling.reconnected_edge_star_count,
+            untangling_reconnected_boundary_adjacent_cavity_count: untangling
+                .reconnected_boundary_adjacent_cavity_count,
             exact_quality_repair_pass_count: repair.pass_count,
             exact_quality_reconnected_cavity_count: repair.reconnected_cavity_count,
             exact_quality_reconnection_quality_gain_count: repair.reconnection_quality_gain_count,
@@ -3279,6 +3283,7 @@ struct UntanglingSummary {
     final_near_singular_count: usize,
     relocated_seed_count: usize,
     reconnected_edge_star_count: usize,
+    reconnected_boundary_adjacent_cavity_count: usize,
 }
 
 fn untangle_near_singular_tets(
@@ -3304,6 +3309,7 @@ fn untangle_near_singular_tets(
             .collect::<BTreeMap<_, _>>();
         let node_adjacency = tet_node_adjacency(tets);
         let edge_adjacency = tet_edge_adjacency(tets);
+        let face_adjacency = tet_face_adjacency(tets);
         let interior_node_ids = nodes
             .iter()
             .filter_map(|node| {
@@ -3355,6 +3361,21 @@ fn untangle_near_singular_tets(
                 applied = true;
                 summary.pass_count += 1;
                 summary.reconnected_edge_star_count += 1;
+                break;
+            }
+            if let Some((indices, candidates)) = best_boundary_adjacent_cavity_untangling(
+                tet_index,
+                tets,
+                &face_adjacency,
+                &node_adjacency,
+                &node_points,
+                threshold,
+                options,
+            )? {
+                replace_tet_indices(tets, &indices, candidates);
+                applied = true;
+                summary.pass_count += 1;
+                summary.reconnected_boundary_adjacent_cavity_count += 1;
                 break;
             }
         }
@@ -3892,6 +3913,92 @@ fn best_edge_star_untangling(
             ));
         }
     }
+    Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
+}
+
+fn best_boundary_adjacent_cavity_untangling(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    threshold: f64,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, Vec<TetCandidate>)>, TetCandidateError> {
+    let adjacent = boundary_adjacent_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    let expanded = boundary_adjacent_bad_tet_cavity_with_node_closure_layers(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+        2,
+    );
+    let mut candidate_groups = vec![adjacent];
+    if candidate_groups
+        .first()
+        .is_some_and(|group| group.as_slice() != expanded.as_slice())
+    {
+        candidate_groups.push(expanded);
+    }
+
+    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64)>;
+    for group in candidate_groups {
+        if group.len() < 4 || group.len() > 24 {
+            continue;
+        }
+        let original_near_singular_count =
+            count_tets_below_exact_quality(group.iter().map(|index| &tets[*index]), threshold);
+        if original_near_singular_count == 0 {
+            continue;
+        }
+        let original_full_bad_count = count_exact_quality_violations(
+            group.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_full_bad_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        if candidate_full_bad_count > original_full_bad_count {
+            continue;
+        }
+        let candidate_near_singular_count =
+            count_tets_below_exact_quality(candidates.iter(), threshold);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+        let improves = candidate_near_singular_count < original_near_singular_count
+            || (candidate_near_singular_count == original_near_singular_count
+                && candidate_min_exact > original_min_exact + 1.0e-12);
+        if !improves {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_count, best_min_exact)| {
+                candidate_near_singular_count < *best_count
+                    || (candidate_near_singular_count == *best_count
+                        && candidate_min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                group,
+                candidates,
+                candidate_near_singular_count,
+                candidate_min_exact,
+            ));
+        }
+    }
+
     Ok(best.map(|(indices, candidates, _, _)| (indices, candidates)))
 }
 
@@ -8080,6 +8187,73 @@ mod tests {
         assert_eq!(repair.boundary_adjacent_reconnected_cavity_count, 1);
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
+    }
+
+    #[test]
+    fn boundary_adjacent_cavity_untangling_reconnects_near_singular_split_cavity() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 2.0,
+            max_refinement_passes: 1,
+            ..TetCandidateOptions::default()
+        };
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let outer_tet = raw_candidate_tet(0, 0, &[], [0, 1, 2, 3], points, options)
+            .expect("outer tet should be valid");
+        let split_point = [0.04, 0.04, 0.04];
+        let split_tets = centroid_split_tets(&outer_tet, 4, split_point, points, options);
+        assert_eq!(split_tets.len(), 4);
+        let node_points = BTreeMap::from([
+            (0, points[0]),
+            (1, points[1]),
+            (2, points[2]),
+            (3, points[3]),
+            (4, split_point),
+        ]);
+        let threshold = untangling_exact_quality_threshold(options);
+        let initial_near_singular_count =
+            count_tets_below_exact_quality(split_tets.iter(), threshold);
+        assert!(
+            initial_near_singular_count > 0,
+            "split cavity should contain near-singular boundary-adjacent Tets"
+        );
+        let original_full_bad_count =
+            count_exact_quality_violations(split_tets.iter(), options.min_scaled_jacobian);
+        let face_adjacency = tet_face_adjacency(&split_tets);
+        let node_adjacency = tet_node_adjacency(&split_tets);
+
+        let (indices, candidates) = best_boundary_adjacent_cavity_untangling(
+            0,
+            &split_tets,
+            &face_adjacency,
+            &node_adjacency,
+            &node_points,
+            threshold,
+            options,
+        )
+        .expect("boundary-cavity untangling should evaluate")
+        .expect("boundary-cavity untangling should be available");
+
+        assert_eq!(indices.len(), split_tets.len());
+        assert_eq!(
+            boundary_faces_from_tets(&candidates),
+            boundary_faces_from_tets(&split_tets)
+        );
+        assert!(
+            count_tets_below_exact_quality(candidates.iter(), threshold)
+                < initial_near_singular_count,
+            "boundary-cavity untangling should reduce near-singular Tets"
+        );
+        assert!(
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian)
+                <= original_full_bad_count,
+            "untangling must not increase full exact-quality violations"
+        );
     }
 
     #[test]

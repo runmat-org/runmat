@@ -1142,6 +1142,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .untangling_reconnected_edge_star_count,
+        tet_untangling_reconnected_boundary_adjacent_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .untangling_reconnected_boundary_adjacent_cavity_count,
         tet_exact_quality_repair_pass_count: preparation
             .tet_candidates
             .recovery
