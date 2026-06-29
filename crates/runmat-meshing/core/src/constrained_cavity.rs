@@ -493,11 +493,15 @@ pub fn evaluate_constrained_cavity_refill_candidates(
             record_refill_rejection(&mut rejected_by_reason, "interior_point_outside_cavity");
             continue;
         }
-        let refill = match star_refill_candidate(cavity, &boundary_node_map, node.clone(), options)
-        {
-            Ok(Some(refill)) => refill,
-            Ok(None) => {
-                record_refill_rejection(&mut rejected_by_reason, "star_candidate_rejected");
+        let refill = match star_refill_candidate_with_rejection_reason(
+            cavity,
+            &boundary_node_map,
+            node.clone(),
+            options,
+        ) {
+            Ok(Ok(refill)) => refill,
+            Ok(Err(reason)) => {
+                record_refill_rejection(&mut rejected_by_reason, reason);
                 continue;
             }
             Err(err) => {
@@ -804,12 +808,12 @@ fn single_tet_refill_candidate(
     Ok(Some(refill))
 }
 
-fn star_refill_candidate(
+fn star_refill_candidate_with_rejection_reason(
     cavity: &ConstrainedCavity,
     boundary_nodes: &BTreeMap<u32, Point3>,
     interior_node: ConstrainedCavityNode,
     options: ConstrainedCavityRefillOptions,
-) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
+) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
     let mut tets = Vec::<ConstrainedCavityRefillTet>::with_capacity(cavity.boundary_faces.len());
     for face in &cavity.boundary_faces {
         let node_ids = [
@@ -824,20 +828,29 @@ fn star_refill_candidate(
             boundary_nodes[&face.node_ids[2]],
             interior_node.coordinates_m,
         ];
-        let Some(tet) = raw_refill_tet(node_ids, points, options) else {
-            return Ok(None);
+        let tet = match raw_refill_tet_with_rejection_reason(node_ids, points, options) {
+            Ok(tet) => tet,
+            Err(reason) => return Ok(Err(reason)),
         };
         tets.push(tet);
     }
     let refill = refill_from_tets(cavity, tets, options.volume_relative_tolerance)?;
-    Ok(Some(refill))
+    Ok(Ok(refill))
 }
 
 fn raw_refill_tet(
-    mut node_ids: [u32; 4],
+    node_ids: [u32; 4],
     points: [Point3; 4],
     options: ConstrainedCavityRefillOptions,
 ) -> Option<ConstrainedCavityRefillTet> {
+    raw_refill_tet_with_rejection_reason(node_ids, points, options).ok()
+}
+
+fn raw_refill_tet_with_rejection_reason(
+    mut node_ids: [u32; 4],
+    points: [Point3; 4],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<ConstrainedCavityRefillTet, &'static str> {
     let mut signed_volume_m3 = tet_signed_volume(points);
     if signed_volume_m3 < 0.0 {
         node_ids.swap(1, 2);
@@ -845,17 +858,17 @@ fn raw_refill_tet(
     }
     let volume_m3 = signed_volume_m3.abs();
     if volume_m3 < options.min_volume_m3 {
-        return None;
+        return Err("star_tet_min_volume");
     }
     let aspect_ratio = tet_edge_aspect_ratio(points);
     if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
-        return None;
+        return Err("star_tet_aspect_ratio");
     }
     let exact_scaled_jacobian = tet_scaled_jacobian(points);
     if !exact_scaled_jacobian.is_finite() || exact_scaled_jacobian < options.min_scaled_jacobian {
-        return None;
+        return Err("star_tet_scaled_jacobian");
     }
-    Some(ConstrainedCavityRefillTet {
+    Ok(ConstrainedCavityRefillTet {
         node_ids,
         volume_m3,
         aspect_ratio,
@@ -1379,6 +1392,34 @@ mod tests {
                     1
                 )])
             }
+        );
+    }
+
+    #[test]
+    fn star_refill_evaluation_reports_scaled_jacobian_rejections() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let near_corner = [ConstrainedCavityNode {
+            node_id: 10,
+            coordinates_m: [1.0e-4, 1.0e-4, 1.0e-4],
+        }];
+
+        let evaluation = evaluate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &near_corner,
+            ConstrainedCavityRefillOptions {
+                min_scaled_jacobian: 0.5,
+                volume_relative_tolerance: 1.0e-12,
+                ..ConstrainedCavityRefillOptions::default()
+            },
+        )
+        .expect("evaluation should classify a low-quality star candidate");
+
+        assert!(evaluation.refill.is_none());
+        assert_eq!(
+            evaluation.rejected_by_reason,
+            BTreeMap::from([("star_tet_scaled_jacobian".to_string(), 1)])
         );
     }
 

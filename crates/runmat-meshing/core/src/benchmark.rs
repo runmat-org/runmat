@@ -21,7 +21,7 @@ use crate::{
         MeshSizingEvidence, MeshTetRecoveryEvidence,
     },
     generate_analysis_mesh, generate_analysis_mesh_with_sizing,
-    predicate::{point_triangle_distance, tet_volume, triangle_area, Triangle3},
+    predicate::{point_triangle_distance, tet_centroid, tet_volume, triangle_area, Triangle3},
     prepare_production_mesh,
     sizing::{MeshSizingField, SizingSample},
     tet_candidate::TetCandidateNodeSource,
@@ -3195,6 +3195,14 @@ mod tests {
                         });
                         next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
                     }
+                    interior_candidates.push(ConstrainedCavityNode {
+                        node_id: next_diagnostic_node_id,
+                        coordinates_m: diagnostic_tet_centroid(
+                            &preparation.tet_candidates.tets[anchor_tet_index],
+                            &node_points,
+                        ),
+                    });
+                    next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
                     match evaluate_constrained_cavity_refill_candidates(
                         &trimmed_cavity,
                         &boundary_nodes,
@@ -3597,6 +3605,17 @@ mod tests {
             *value /= nodes.len() as f64;
         }
         Some(centroid)
+    }
+
+    fn diagnostic_tet_centroid(
+        tet: &crate::tet_candidate::TetCandidate,
+        node_points: &BTreeMap<u32, [f64; 3]>,
+    ) -> [f64; 3] {
+        tet_centroid(tet.node_ids.map(|node_id| {
+            *node_points
+                .get(&node_id)
+                .expect("diagnostic tet node should exist")
+        }))
     }
 
     fn diagnostic_refill_options(case: &MeshBenchmarkCase) -> ConstrainedCavityRefillOptions {
