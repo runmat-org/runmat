@@ -15254,6 +15254,8 @@ fn append_solved_adaptive_mesh_summary(
                 completed_iterations: mesh.adaptive_iterations.len(),
                 element_budget_reached,
                 field_change: (stress_gradient_used
+                    || temperature_gradient_used
+                    || heat_flux_gradient_used
                     || electromagnetic_flux_density_used
                     || electromagnetic_electric_field_used
                     || electromagnetic_current_density_used
@@ -15267,10 +15269,7 @@ fn append_solved_adaptive_mesh_summary(
                     || cht_interface_temperature_jump_used
                     || cht_fluid_boundary_layer_used)
                     .then_some(marker_change),
-                energy_change: (strain_energy_density_used
-                    || temperature_gradient_used
-                    || heat_flux_gradient_used
-                    || electromagnetic_energy_density_used)
+                energy_change: (strain_energy_density_used || electromagnetic_energy_density_used)
                     .then_some(marker_change),
                 residual: None,
                 ..runmat_meshing_core::AdaptiveConvergenceMetrics::default()
