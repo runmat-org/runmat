@@ -915,6 +915,17 @@ fn append_component_insertion_tets(
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
+    if let Some(status) = append_thin_sweep_tets(
+        component,
+        surface_nodes,
+        surface_elements,
+        options,
+        tolerance,
+        tets,
+    )? {
+        return Ok(status);
+    }
+
     if dense_component_for_global_insertion(component, seed_node_ids.len(), options) {
         if dense_recovery_component_exceeds_budget(component, options) {
             return Ok(InsertionStatus::rejected(0.0, f64::INFINITY));
@@ -1008,6 +1019,180 @@ fn append_component_insertion_tets(
         });
     }
     Ok(status)
+}
+
+fn append_thin_sweep_tets(
+    component: &VolumeCandidateComponent,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+    tets: &mut Vec<TetCandidate>,
+) -> Result<Option<InsertionStatus>, TetCandidateError> {
+    let Some(axis) = thin_sweep_axis(component, tolerance) else {
+        return Ok(None);
+    };
+    let mut lower_elements = Vec::<&SurfaceElement>::new();
+    let mut upper_node_by_key = BTreeMap::<[i64; 2], (u32, [f64; 3])>::new();
+
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let node_points = element_node_points(element, surface_nodes)?;
+        if points_on_axis_plane(&node_points, axis, component.bounds_min_m[axis], tolerance) {
+            lower_elements.push(element);
+        } else if points_on_axis_plane(&node_points, axis, component.bounds_max_m[axis], tolerance)
+        {
+            for (node_id, point) in element.node_ids.iter().zip(node_points) {
+                upper_node_by_key
+                    .entry(projected_key(point, axis, tolerance))
+                    .or_insert((*node_id, point));
+            }
+        }
+    }
+
+    if lower_elements.is_empty() || upper_node_by_key.is_empty() {
+        return Ok(None);
+    }
+
+    let start_len = tets.len();
+    for lower in lower_elements {
+        let lower_keys = element_projected_keys(lower, surface_nodes, axis, tolerance)?;
+        let mut upper_ids = [0_u32; 3];
+        let mut upper_points = [[0.0; 3]; 3];
+        for (index, key) in lower_keys.iter().enumerate() {
+            let Some((node_id, point)) = upper_node_by_key.get(key).copied() else {
+                tets.truncate(start_len);
+                return Ok(None);
+            };
+            upper_ids[index] = node_id;
+            upper_points[index] = point;
+        }
+        let lower_points = element_node_points(lower, surface_nodes)?;
+        append_consistent_sweep_frustum_tets(
+            component,
+            lower,
+            lower.node_ids,
+            upper_ids,
+            lower_points,
+            upper_points,
+            options,
+            tets,
+        );
+    }
+
+    let status = insertion_tet_status(component, &tets[start_len..], options);
+    if status.accepted {
+        for (offset, tet) in tets[start_len..].iter_mut().enumerate() {
+            tet.tet_id = (start_len + offset) as u32;
+        }
+        Ok(Some(status))
+    } else {
+        tets.truncate(start_len);
+        Ok(None)
+    }
+}
+
+fn append_consistent_sweep_frustum_tets(
+    component: &VolumeCandidateComponent,
+    element: &SurfaceElement,
+    outer_ids: [u32; 3],
+    inner_ids: [u32; 3],
+    outer_points: [[f64; 3]; 3],
+    inner_points: [[f64; 3]; 3],
+    options: TetCandidateOptions,
+    tets: &mut Vec<TetCandidate>,
+) {
+    if let Some(split) = layered_frustum_split(
+        component,
+        element,
+        outer_ids,
+        inner_ids,
+        outer_points,
+        inner_points,
+        0,
+        options,
+    ) {
+        tets.extend(split.tets);
+    }
+}
+
+fn thin_sweep_axis(
+    component: &VolumeCandidateComponent,
+    tolerance: MeshingTolerance,
+) -> Option<usize> {
+    let spans = [
+        component.bounds_max_m[0] - component.bounds_min_m[0],
+        component.bounds_max_m[1] - component.bounds_min_m[1],
+        component.bounds_max_m[2] - component.bounds_min_m[2],
+    ];
+    let min_axis = (0..3)
+        .filter(|axis| spans[*axis].is_finite() && spans[*axis] > tolerance.absolute_m)
+        .min_by(|left, right| spans[*left].total_cmp(&spans[*right]))?;
+    let max_span = spans.iter().copied().fold(0.0_f64, f64::max);
+    (max_span / spans[min_axis] >= 6.0).then_some(min_axis)
+}
+
+fn element_node_points(
+    element: &SurfaceElement,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+) -> Result<[[f64; 3]; 3], TetCandidateError> {
+    Ok([
+        *surface_nodes
+            .get(&element.node_ids[0])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[0],
+            })?,
+        *surface_nodes
+            .get(&element.node_ids[1])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[1],
+            })?,
+        *surface_nodes
+            .get(&element.node_ids[2])
+            .ok_or(TetCandidateError::MissingSurfaceNode {
+                node_id: element.node_ids[2],
+            })?,
+    ])
+}
+
+fn points_on_axis_plane(
+    points: &[[f64; 3]; 3],
+    axis: usize,
+    coordinate_m: f64,
+    tolerance: MeshingTolerance,
+) -> bool {
+    points
+        .iter()
+        .all(|point| tolerance.nearly_equal(point[axis], coordinate_m, 1.0))
+}
+
+fn element_projected_keys(
+    element: &SurfaceElement,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    axis: usize,
+    tolerance: MeshingTolerance,
+) -> Result<[[i64; 2]; 3], TetCandidateError> {
+    let points = element_node_points(element, surface_nodes)?;
+    Ok(points.map(|point| projected_key(point, axis, tolerance)))
+}
+
+fn projected_key(point: [f64; 3], axis: usize, tolerance: MeshingTolerance) -> [i64; 2] {
+    let scale_m = tolerance.absolute_m.max(1.0e-12);
+    let mut key = [0_i64; 2];
+    let mut out = 0_usize;
+    for coordinate_axis in 0..3 {
+        if coordinate_axis == axis {
+            continue;
+        }
+        key[out] = (point[coordinate_axis] / scale_m).round() as i64;
+        out += 1;
+    }
+    key
 }
 
 fn dense_recovery_component_exceeds_budget(
@@ -7402,6 +7587,57 @@ mod tests {
     }
 
     #[test]
+    fn thin_sweep_pairs_cap_triangles_into_prisms() {
+        let topology =
+            extract_source_topology(&thin_cube_geometry()).expect("topology should extract");
+        let surface = discretize_topology_surfaces(
+            &topology,
+            SurfaceDiscretizationOptions {
+                max_curve_segments_per_edge: 8,
+                ..SurfaceDiscretizationOptions::default()
+            },
+        )
+        .expect("surface should discretize");
+        let volume_candidates =
+            prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
+                .expect("volume candidates should prepare");
+        let component = &volume_candidates.components[0];
+        let surface_nodes = surface
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance =
+            MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
+        let options = TetCandidateOptions::default();
+        let mut tets = Vec::new();
+
+        let status = append_thin_sweep_tets(
+            component,
+            &surface_nodes,
+            &surface_elements,
+            options,
+            tolerance,
+            &mut tets,
+        )
+        .expect("sweep should evaluate");
+
+        assert!(
+            status.is_some(),
+            "thin sweep should match paired cap triangles"
+        );
+        assert!(!tets.is_empty());
+        assert!(tets.iter().all(|tet| tet.exact_scaled_jacobian > 0.0));
+        let total_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((total_volume - component.volume_m3).abs() <= component.volume_m3 * 1.0e-9);
+    }
+
+    #[test]
     fn quality_recovery_seed_candidates_are_bounded_and_deterministic() {
         let seed_points = (0..10)
             .map(|index| [index as f64, 0.0, 0.0])
@@ -8882,6 +9118,20 @@ mod tests {
             prepare_volume_candidates(&surface, VolumeCandidateOptions::default())
                 .expect("volume candidates should prepare");
         (surface, volume_candidates)
+    }
+
+    fn thin_cube_geometry() -> GeometryAsset {
+        let mut geometry = cube_geometry();
+        geometry.geometry_id = "geo_tet_candidate_thin_cube".to_string();
+        geometry.source.sha256 = "generic-thin-cube".to_string();
+        if let Some(surface) = geometry.surface_meshes.first_mut() {
+            for vertex in &mut surface.vertices {
+                if vertex[2] > 0.0 {
+                    vertex[2] = 0.1;
+                }
+            }
+        }
+        geometry
     }
 
     fn cube_geometry() -> GeometryAsset {

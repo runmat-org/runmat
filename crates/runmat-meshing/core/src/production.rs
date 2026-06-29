@@ -245,7 +245,12 @@ fn curve_options_for_mesh(
     topology: &SourceTopologyModel,
     options: &VolumeMeshingOptions,
 ) -> CurveDiscretizationOptions {
-    let target_size_m = target_size_for_mesh(topology, options);
+    let mut target_size_m = target_size_for_mesh(topology, options);
+    if thin_low_face_topology(topology) {
+        if let Some(min_span_m) = topology_min_span(topology) {
+            target_size_m = target_size_m.min(min_span_m.max(1.0e-6));
+        }
+    }
     CurveDiscretizationOptions {
         target_size_m,
         min_segments_per_edge: 1,
@@ -329,7 +334,7 @@ fn dense_recovery_layer_count_for_mesh(topology: &SourceTopologyModel) -> usize 
 fn surface_options_for_mesh(topology: &SourceTopologyModel) -> SurfaceDiscretizationOptions {
     SurfaceDiscretizationOptions {
         max_curve_segments_per_edge: if thin_low_face_topology(topology) {
-            2
+            20
         } else {
             8
         },
@@ -390,6 +395,13 @@ fn topology_span_aspect_ratio(topology: &SourceTopologyModel) -> f64 {
     } else {
         1.0
     }
+}
+
+fn topology_min_span(topology: &SourceTopologyModel) -> Option<f64> {
+    (0..3)
+        .map(|axis| topology.bounds_max_m[axis] - topology.bounds_min_m[axis])
+        .filter(|span| span.is_finite() && *span > MeshingTolerance::default().absolute_m)
+        .min_by(|left, right| left.total_cmp(right))
 }
 
 fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 16], usize) {
@@ -2543,7 +2555,7 @@ mod tests {
         assert!(thin_low_face_topology(&topology));
         assert_eq!(
             surface_options_for_mesh(&topology).max_curve_segments_per_edge,
-            2
+            20
         );
         assert_eq!(
             global_insertion_point_limit_for_mesh(&topology, &options),
@@ -2553,6 +2565,48 @@ mod tests {
         assert_eq!(
             sliver_aspect_ratio_for_mesh(&topology, quality),
             quality.max_aspect_ratio
+        );
+    }
+
+    #[test]
+    fn thin_low_face_topology_uses_strict_sweep_recovery() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.1_f64.cbrt() / 2.0);
+
+        let preparation =
+            prepare_production_mesh(&thin_box_geometry(), &options).expect("thin mesh prepares");
+
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .insertion_component_count,
+            1
+        );
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .fan_fallback_component_count,
+            0
+        );
+        assert!(
+            preparation
+                .tet_candidates
+                .recovery
+                .min_exact_scaled_jacobian
+                >= QualityThresholds::default().min_scaled_jacobian
+        );
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .exact_scaled_jacobian_below_threshold_count,
+            0
+        );
+        assert!(
+            preparation.tet_candidates.tets.len() > 1_000,
+            "thin sweep recovery should retain a production-scale solver topology"
         );
     }
 
@@ -3182,8 +3236,10 @@ mod tests {
             discretize_topology_curves(&topology, curve_options_for_mesh(&topology, options))
                 .expect("curves");
         eprintln!(
-            "{label} curves elapsed_ms={:.1}",
-            stage.elapsed().as_secs_f64() * 1000.0
+            "{label} curves elapsed_ms={:.1} nodes={} elements={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            curves.nodes.len(),
+            curves.elements.len()
         );
 
         let stage = std::time::Instant::now();
@@ -3195,8 +3251,11 @@ mod tests {
         )
         .expect("surface");
         eprintln!(
-            "{label} surface elapsed_ms={:.1}",
-            stage.elapsed().as_secs_f64() * 1000.0
+            "{label} surface elapsed_ms={:.1} nodes={} elements={} cap_elements={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            surface.nodes.len(),
+            surface.elements.len(),
+            thin_axis_cap_element_count(&surface)
         );
 
         let stage = std::time::Instant::now();
@@ -3242,24 +3301,6 @@ mod tests {
                     "{label} tet_candidates_failed elapsed_ms={:.1}: {err}",
                     stage.elapsed().as_secs_f64() * 1000.0
                 );
-                let mut fallback_options = tet_options;
-                fallback_options.allow_fan_fallback = true;
-                let fallback_stage = std::time::Instant::now();
-                match form_tet_candidates(&surface, &volume_candidates, fallback_options) {
-                    Ok(tet_candidates) => eprintln!(
-                        "{label} fallback_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6} below={} fan_fallback={}",
-                        fallback_stage.elapsed().as_secs_f64() * 1000.0,
-                        tet_candidates.nodes.len(),
-                        tet_candidates.tets.len(),
-                        tet_candidates.recovery.min_exact_scaled_jacobian,
-                        tet_candidates.recovery.exact_scaled_jacobian_below_threshold_count,
-                        tet_candidates.recovery.fan_fallback_component_count
-                    ),
-                    Err(fallback_err) => eprintln!(
-                        "{label} fallback_tet_candidates_failed elapsed_ms={:.1}: {fallback_err}",
-                        fallback_stage.elapsed().as_secs_f64() * 1000.0
-                    ),
-                }
                 let mut relaxed_options = tet_options;
                 relaxed_options.sliver_aspect_ratio = 1.0e6;
                 relaxed_options.min_scaled_jacobian = 0.0;
@@ -3297,6 +3338,31 @@ mod tests {
                         "{label} repair_tet_candidates_failed elapsed_ms={:.1}: {repair_err}",
                         repair_stage.elapsed().as_secs_f64() * 1000.0
                     ),
+                }
+                if surface.elements.len() <= 512 {
+                    let mut fallback_options = tet_options;
+                    fallback_options.allow_fan_fallback = true;
+                    let fallback_stage = std::time::Instant::now();
+                    match form_tet_candidates(&surface, &volume_candidates, fallback_options) {
+                        Ok(tet_candidates) => eprintln!(
+                            "{label} fallback_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6} below={} fan_fallback={}",
+                            fallback_stage.elapsed().as_secs_f64() * 1000.0,
+                            tet_candidates.nodes.len(),
+                            tet_candidates.tets.len(),
+                            tet_candidates.recovery.min_exact_scaled_jacobian,
+                            tet_candidates.recovery.exact_scaled_jacobian_below_threshold_count,
+                            tet_candidates.recovery.fan_fallback_component_count
+                        ),
+                        Err(fallback_err) => eprintln!(
+                            "{label} fallback_tet_candidates_failed elapsed_ms={:.1}: {fallback_err}",
+                            fallback_stage.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    }
+                } else {
+                    eprintln!(
+                        "{label} fallback_tet_candidates_skipped surface_elements={} reason=bounded_diagnostic",
+                        surface.elements.len()
+                    );
                 }
                 if thin_low_face_topology(&topology) {
                     for alternate_segments in [8_usize] {
@@ -3376,6 +3442,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn thin_axis_cap_element_count(surface: &SurfaceDiscretization) -> usize {
+        if surface.nodes.is_empty() {
+            return 0;
+        }
+        let mut bounds_min = [f64::INFINITY; 3];
+        let mut bounds_max = [f64::NEG_INFINITY; 3];
+        for node in &surface.nodes {
+            for axis in 0..3 {
+                bounds_min[axis] = bounds_min[axis].min(node.coordinates_m[axis]);
+                bounds_max[axis] = bounds_max[axis].max(node.coordinates_m[axis]);
+            }
+        }
+        let Some(thin_axis) = (0..3)
+            .filter(|axis| (bounds_max[*axis] - bounds_min[*axis]).is_finite())
+            .min_by(|left, right| {
+                (bounds_max[*left] - bounds_min[*left])
+                    .total_cmp(&(bounds_max[*right] - bounds_min[*right]))
+            })
+        else {
+            return 0;
+        };
+        surface
+            .elements
+            .iter()
+            .filter(|element| {
+                element.node_ids.iter().all(|node_id| {
+                    let coordinate = surface.nodes[*node_id as usize].coordinates_m[thin_axis];
+                    (coordinate - bounds_min[thin_axis]).abs() <= 1.0e-9
+                        || (coordinate - bounds_max[thin_axis]).abs() <= 1.0e-9
+                })
+            })
+            .count()
     }
 
     #[test]
