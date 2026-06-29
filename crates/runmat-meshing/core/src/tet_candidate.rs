@@ -6,7 +6,7 @@ use crate::{
     predicate::{
         add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
         tet_centroid, tet_circumsphere, tet_circumsphere_contains_point, tet_edge_aspect_ratio,
-        tet_scaled_jacobian, tet_signed_volume, triangle_centroid, PointInClosedSurface, Triangle3,
+        tet_scaled_jacobian, tet_signed_volume, triangle_centroid, Triangle3,
     },
     spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex},
     surface::{SurfaceDiscretization, SurfaceElement},
@@ -2691,7 +2691,7 @@ fn push_requested_refinement_candidate(
     classifier: &ComponentSurfaceClassifier,
     tolerance: MeshingTolerance,
 ) {
-    if classifier.contains_point(candidate)
+    if classifier.contains_interior_point(candidate)
         && !contains_point(candidates, candidate, tolerance)
         && !contains_point(seed_points, candidate, tolerance)
     {
@@ -3231,7 +3231,7 @@ fn push_local_seed_smoothing_candidate(
     tolerance: MeshingTolerance,
 ) {
     if tolerance.point_nearly_equal(candidate, current, 1.0)
-        || !classifier.contains_point(candidate)
+        || !classifier.contains_interior_point(candidate)
         || candidates
             .iter()
             .any(|existing| tolerance.point_nearly_equal(*existing, candidate, 1.0))
@@ -4853,6 +4853,16 @@ fn interior_seed_node_relocation_candidates(
     options: TetCandidateOptions,
 ) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
     let reference = &tets[adjacent[0]];
+    if !relocated_seed_point_has_star_boundary_clearance(
+        adjacent,
+        interior_node_id,
+        relocated_point,
+        tets,
+        node_points,
+        MeshingTolerance::default(),
+    )? {
+        return Ok(None);
+    }
     let original_volume = adjacent
         .iter()
         .map(|index| tets[*index].volume_m3)
@@ -4893,6 +4903,52 @@ fn interior_seed_node_relocation_candidates(
         return Ok(None);
     }
     Ok(Some(candidates))
+}
+
+fn relocated_seed_point_has_star_boundary_clearance(
+    adjacent: &[usize],
+    interior_node_id: u32,
+    relocated_point: [f64; 3],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    tolerance: MeshingTolerance,
+) -> Result<bool, TetCandidateError> {
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if !tet.node_ids.contains(&interior_node_id) {
+            return Ok(false);
+        }
+        for face in tet_node_faces(tet.node_ids) {
+            *face_counts.entry(sorted_node_face(face)).or_default() += 1;
+        }
+    }
+
+    let mut shell_face_count = 0_usize;
+    for (face, count) in face_counts {
+        if count != 1 {
+            continue;
+        }
+        if face.contains(&interior_node_id) {
+            return Ok(false);
+        }
+        shell_face_count += 1;
+        let triangle = [
+            *node_points
+                .get(&face[0])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[0] })?,
+            *node_points
+                .get(&face[1])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[1] })?,
+            *node_points
+                .get(&face[2])
+                .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[2] })?,
+        ];
+        if point_triangle_distance(relocated_point, triangle) <= tolerance.absolute_m {
+            return Ok(false);
+        }
+    }
+    Ok(shell_face_count >= 4)
 }
 
 fn best_three_tet_edge_reconnection(
@@ -6733,7 +6789,7 @@ fn sample_component_interior_points(
     let center = component_interior_point(component);
     let classifier =
         ComponentSurfaceClassifier::new(component, surface, surface_elements, tolerance)?;
-    if classifier.contains_point(center) {
+    if classifier.contains_interior_point(center) {
         points.push(center);
     }
 
@@ -6758,7 +6814,7 @@ fn sample_component_interior_points(
                     if contains_point(&points, point, tolerance) {
                         continue;
                     }
-                    if classifier.contains_point(point) {
+                    if classifier.contains_interior_point(point) {
                         points.push(point);
                     }
                 }
@@ -6843,6 +6899,14 @@ impl ComponentSurfaceClassifier {
         if self.point_is_on_boundary(point) {
             return true;
         }
+        self.point_is_inside_by_votes(point)
+    }
+
+    fn contains_interior_point(&self, point: [f64; 3]) -> bool {
+        !self.point_is_on_boundary(point) && self.point_is_inside_by_votes(point)
+    }
+
+    fn point_is_inside_by_votes(&self, point: [f64; 3]) -> bool {
         let epsilon = self.tolerance.absolute_m;
         let probes = [
             ([1.0, 0.0, 0.0], [-0.37, 0.19, 0.11]),
@@ -6858,14 +6922,7 @@ impl ComponentSurfaceClassifier {
                 )
             })
             .count();
-        matches!(
-            if inside_votes >= 2 {
-                PointInClosedSurface::Inside
-            } else {
-                PointInClosedSurface::Outside
-            },
-            PointInClosedSurface::Inside | PointInClosedSurface::OnBoundary
-        )
+        inside_votes >= 2
     }
 
     fn point_is_on_boundary(&self, point: [f64; 3]) -> bool {
@@ -7040,6 +7097,30 @@ mod tests {
             .tets
             .iter()
             .all(|tet| tet.volume_m3 > 0.0 && tet.aspect_ratio <= 1.0 / 0.15));
+    }
+
+    #[test]
+    fn classifier_distinguishes_boundary_containment_from_interior_seed_eligibility() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let classifier = ComponentSurfaceClassifier::new(
+            component,
+            &surface,
+            &surface_elements,
+            MeshingTolerance::default(),
+        )
+        .expect("classifier should build");
+
+        assert!(classifier.contains_point([0.0, 0.5, 0.5]));
+        assert!(!classifier.contains_interior_point([0.0, 0.5, 0.5]));
+        assert!(classifier.contains_interior_point([0.5, 0.5, 0.5]));
+        assert!(!classifier.contains_point([1.5, 0.5, 0.5]));
+        assert!(!classifier.contains_interior_point([1.5, 0.5, 0.5]));
     }
 
     #[test]
@@ -8681,6 +8762,52 @@ mod tests {
                 assert!(!tolerance.point_nearly_equal(*left, *right, 1.0));
             }
         }
+    }
+
+    #[test]
+    fn relocated_interior_seed_points_must_clear_star_boundary_shell() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.1,
+            ..TetCandidateOptions::default()
+        };
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let outer_tet = raw_candidate_tet(0, 0, &[], [0, 1, 2, 3], points, options)
+            .expect("outer tet should be valid");
+        let split_point = [0.25, 0.25, 0.25];
+        let split_tets = centroid_split_tets(&outer_tet, 4, split_point, points, options);
+        let node_points = BTreeMap::from([
+            (0, points[0]),
+            (1, points[1]),
+            (2, points[2]),
+            (3, points[3]),
+            (4, split_point),
+        ]);
+        let adjacent = (0..split_tets.len()).collect::<Vec<_>>();
+
+        assert!(relocated_seed_point_has_star_boundary_clearance(
+            &adjacent,
+            4,
+            split_point,
+            &split_tets,
+            &node_points,
+            MeshingTolerance::default(),
+        )
+        .expect("clearance should evaluate"));
+        assert!(!relocated_seed_point_has_star_boundary_clearance(
+            &adjacent,
+            4,
+            [0.25, 0.25, 0.0],
+            &split_tets,
+            &node_points,
+            MeshingTolerance::default(),
+        )
+        .expect("clearance should evaluate"));
     }
 
     #[test]

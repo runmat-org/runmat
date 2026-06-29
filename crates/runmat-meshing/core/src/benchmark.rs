@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
@@ -9,12 +9,18 @@ use runmat_geometry_core::{
 
 use crate::{
     artifact::AnalysisMeshArtifact,
+    constrained_cavity::{
+        constrained_cavity_from_selected_tets, evaluate_constrained_cavity_refill_candidates,
+        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
+        ConstrainedCavityValidationError,
+    },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
         MeshSizingEvidence, MeshTetRecoveryEvidence,
     },
     generate_analysis_mesh, generate_analysis_mesh_with_sizing,
-    predicate::{tet_volume, triangle_area},
+    predicate::{point_triangle_distance, tet_volume, triangle_area, Triangle3},
     prepare_production_mesh,
     sizing::{MeshSizingField, SizingSample},
     tet_candidate::TetCandidateNodeSource,
@@ -3037,11 +3043,22 @@ mod tests {
                 matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
             })
             .collect::<std::collections::BTreeSet<_>>();
+        let node_points = preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
         let mut node_adjacency = BTreeMap::<u32, usize>::new();
+        let mut node_index_adjacency = BTreeMap::<u32, Vec<usize>>::new();
         let mut edge_adjacency = BTreeMap::<[u32; 2], usize>::new();
-        for tet in &preparation.tet_candidates.tets {
+        for (tet_index, tet) in preparation.tet_candidates.tets.iter().enumerate() {
             for node_id in tet.node_ids {
                 *node_adjacency.entry(node_id).or_default() += 1;
+                node_index_adjacency
+                    .entry(node_id)
+                    .or_default()
+                    .push(tet_index);
             }
             for edge in diagnostic_tet_edges(tet.node_ids) {
                 *edge_adjacency.entry(edge).or_default() += 1;
@@ -3049,6 +3066,7 @@ mod tests {
         }
         let mut bad_interior_star_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_edge_star_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_interior_seed_ids = BTreeSet::<u32>::new();
         for tet in preparation.tet_candidates.tets.iter().filter(|tet| {
             tet.exact_scaled_jacobian < case.options.validation.quality.min_scaled_jacobian
         }) {
@@ -3060,6 +3078,7 @@ mod tests {
                 if let Some(star_size) = node_adjacency.get(&node_id).copied() {
                     *bad_interior_star_histogram.entry(star_size).or_default() += 1;
                 }
+                bad_interior_seed_ids.insert(node_id);
             }
             for edge in diagnostic_tet_edges(tet.node_ids) {
                 if let Some(star_size) = edge_adjacency.get(&edge).copied() {
@@ -3070,6 +3089,187 @@ mod tests {
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
             bad_interior_star_histogram, bad_edge_star_histogram
+        );
+
+        let mut valid_seed_star_cavity_count = 0_usize;
+        let mut refill_success_count = 0_usize;
+        let mut seed_star_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut seed_star_refill_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut seed_star_boundary_node_histogram = BTreeMap::<usize, usize>::new();
+        let mut seed_star_boundary_face_histogram = BTreeMap::<usize, usize>::new();
+        let mut seed_star_refill_tet_histogram = BTreeMap::<usize, usize>::new();
+        let mut seed_star_component_histogram = BTreeMap::<usize, usize>::new();
+        let mut seed_star_component_size_histogram = BTreeMap::<usize, usize>::new();
+        let mut valid_seed_star_component_count = 0_usize;
+        let mut seed_star_component_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut seed_star_non_manifold_boundary_edge_face_histogram =
+            BTreeMap::<usize, usize>::new();
+        let mut seed_star_component_non_manifold_boundary_edge_face_histogram =
+            BTreeMap::<usize, usize>::new();
+        let mut bad_seed_surface_distance_histogram = BTreeMap::<String, usize>::new();
+        let mut next_diagnostic_node_id = preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .map(|node| node.node_id)
+            .max()
+            .unwrap_or_default()
+            .saturating_add(1);
+        let refill_options = diagnostic_refill_options(&case);
+
+        for seed_node_id in &bad_interior_seed_ids {
+            let Some(adjacent) = node_index_adjacency.get(seed_node_id) else {
+                continue;
+            };
+            if let Some(point) = node_points.get(seed_node_id).copied() {
+                let distance = diagnostic_surface_distance(point, &preparation.surface);
+                *bad_seed_surface_distance_histogram
+                    .entry(diagnostic_distance_bin(distance))
+                    .or_default() += 1;
+            }
+            let cavity = constrained_cavity_from_selected_tets(
+                &preparation.tet_candidates.tets,
+                adjacent,
+                vec![],
+            );
+            if let Err(err) = &cavity {
+                *seed_star_cavity_rejected_by_reason
+                    .entry(diagnostic_cavity_extraction_reason(err).to_string())
+                    .or_default() += 1;
+                if let Some(face_count) = diagnostic_non_manifold_boundary_edge_face_count(err) {
+                    *seed_star_non_manifold_boundary_edge_face_histogram
+                        .entry(face_count)
+                        .or_default() += 1;
+                }
+            }
+            let components = diagnostic_seed_star_components(
+                *seed_node_id,
+                adjacent,
+                &preparation.tet_candidates.tets,
+            );
+            *seed_star_component_histogram
+                .entry(components.len())
+                .or_default() += 1;
+            for component in &components {
+                *seed_star_component_size_histogram
+                    .entry(component.len())
+                    .or_default() += 1;
+                match constrained_cavity_from_selected_tets(
+                    &preparation.tet_candidates.tets,
+                    component,
+                    vec![],
+                ) {
+                    Ok(_) => valid_seed_star_component_count += 1,
+                    Err(err) => {
+                        *seed_star_component_rejected_by_reason
+                            .entry(diagnostic_cavity_extraction_reason(&err).to_string())
+                            .or_default() += 1;
+                        if let Some(face_count) =
+                            diagnostic_non_manifold_boundary_edge_face_count(&err)
+                        {
+                            *seed_star_component_non_manifold_boundary_edge_face_histogram
+                                .entry(face_count)
+                                .or_default() += 1;
+                        }
+                    }
+                }
+            }
+            let Ok(cavity) = cavity else {
+                continue;
+            };
+            valid_seed_star_cavity_count += 1;
+            let boundary_node_ids = diagnostic_cavity_node_ids(&cavity);
+            *seed_star_boundary_node_histogram
+                .entry(boundary_node_ids.len())
+                .or_default() += 1;
+            *seed_star_boundary_face_histogram
+                .entry(cavity.boundary_faces.len())
+                .or_default() += 1;
+
+            let boundary_nodes = boundary_node_ids
+                .iter()
+                .map(|node_id| {
+                    Ok(ConstrainedCavityNode {
+                        node_id: *node_id,
+                        coordinates_m: *node_points
+                            .get(node_id)
+                            .ok_or_else(|| format!("missing node {node_id}"))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()
+                .expect("diagnostic boundary nodes should exist");
+            let mut interior_candidates = Vec::<ConstrainedCavityNode>::new();
+            if let Some(current_point) = node_points.get(seed_node_id).copied() {
+                interior_candidates.push(ConstrainedCavityNode {
+                    node_id: *seed_node_id,
+                    coordinates_m: current_point,
+                });
+            }
+            if let Some(centroid) = diagnostic_boundary_centroid(&boundary_nodes) {
+                interior_candidates.push(ConstrainedCavityNode {
+                    node_id: next_diagnostic_node_id,
+                    coordinates_m: centroid,
+                });
+                next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+            }
+
+            match evaluate_constrained_cavity_refill_candidates(
+                &cavity,
+                &boundary_nodes,
+                &interior_candidates,
+                refill_options,
+            ) {
+                Ok(evaluation) => {
+                    if let Some(refill) = evaluation.refill {
+                        refill_success_count += 1;
+                        *seed_star_refill_tet_histogram
+                            .entry(refill.tets.len())
+                            .or_default() += 1;
+                    } else {
+                        for (reason, count) in evaluation.rejected_by_reason {
+                            *seed_star_refill_rejected_by_reason
+                                .entry(reason)
+                                .or_default() += count;
+                        }
+                    }
+                }
+                Err(err) => {
+                    *seed_star_refill_rejected_by_reason
+                        .entry(diagnostic_refill_error_reason(&err).to_string())
+                        .or_default() += 1;
+                }
+            }
+        }
+
+        eprintln!(
+            "annular recovery bad_seed_star_cavities seeds={} valid={} refill_success={} cavity_rejected_by_reason={:?} refill_rejected_by_reason={:?}",
+            bad_interior_seed_ids.len(),
+            valid_seed_star_cavity_count,
+            refill_success_count,
+            seed_star_cavity_rejected_by_reason,
+            seed_star_refill_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_seed_star_shape boundary_nodes={:?} boundary_faces={:?} refill_tets={:?}",
+            seed_star_boundary_node_histogram,
+            seed_star_boundary_face_histogram,
+            seed_star_refill_tet_histogram
+        );
+        eprintln!(
+            "annular recovery bad_seed_star_components component_count={:?} component_size={:?} valid_components={} component_rejected_by_reason={:?}",
+            seed_star_component_histogram,
+            seed_star_component_size_histogram,
+            valid_seed_star_component_count,
+            seed_star_component_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_seed_star_non_manifold whole_edge_face_count={:?} component_edge_face_count={:?}",
+            seed_star_non_manifold_boundary_edge_face_histogram,
+            seed_star_component_non_manifold_boundary_edge_face_histogram
+        );
+        eprintln!(
+            "annular recovery bad_seed_surface_distance={:?}",
+            bad_seed_surface_distance_histogram
         );
     }
 
@@ -3087,6 +3287,245 @@ mod tests {
     fn diagnostic_sorted_edge(mut edge: [u32; 2]) -> [u32; 2] {
         edge.sort();
         edge
+    }
+
+    fn diagnostic_seed_star_components(
+        seed_node_id: u32,
+        adjacent: &[usize],
+        tets: &[crate::tet_candidate::TetCandidate],
+    ) -> Vec<Vec<usize>> {
+        let adjacent_set = adjacent.iter().copied().collect::<BTreeSet<_>>();
+        let mut face_owners = BTreeMap::<[u32; 3], Vec<usize>>::new();
+        for tet_index in adjacent {
+            for face in diagnostic_tet_faces(tets[*tet_index].node_ids) {
+                if face.contains(&seed_node_id) {
+                    face_owners
+                        .entry(diagnostic_sorted_face(face))
+                        .or_default()
+                        .push(*tet_index);
+                }
+            }
+        }
+        let mut graph = BTreeMap::<usize, BTreeSet<usize>>::new();
+        for tet_index in adjacent {
+            graph.entry(*tet_index).or_default();
+        }
+        for owners in face_owners.values() {
+            for left in owners {
+                for right in owners {
+                    if left != right && adjacent_set.contains(left) && adjacent_set.contains(right)
+                    {
+                        graph.entry(*left).or_default().insert(*right);
+                    }
+                }
+            }
+        }
+
+        let mut visited = BTreeSet::<usize>::new();
+        let mut components = Vec::<Vec<usize>>::new();
+        for start in adjacent {
+            if !visited.insert(*start) {
+                continue;
+            }
+            let mut component = Vec::<usize>::new();
+            let mut pending = vec![*start];
+            while let Some(index) = pending.pop() {
+                component.push(index);
+                if let Some(neighbors) = graph.get(&index) {
+                    for neighbor in neighbors {
+                        if visited.insert(*neighbor) {
+                            pending.push(*neighbor);
+                        }
+                    }
+                }
+            }
+            component.sort_unstable();
+            components.push(component);
+        }
+        components
+    }
+
+    fn diagnostic_tet_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {
+        [
+            [node_ids[0], node_ids[1], node_ids[2]],
+            [node_ids[0], node_ids[1], node_ids[3]],
+            [node_ids[0], node_ids[2], node_ids[3]],
+            [node_ids[1], node_ids[2], node_ids[3]],
+        ]
+    }
+
+    fn diagnostic_sorted_face(mut face: [u32; 3]) -> [u32; 3] {
+        face.sort();
+        face
+    }
+
+    fn diagnostic_surface_distance(
+        point: [f64; 3],
+        surface: &crate::surface::SurfaceDiscretization,
+    ) -> f64 {
+        surface
+            .elements
+            .iter()
+            .filter_map(|element| diagnostic_surface_triangle(surface, element))
+            .map(|triangle| point_triangle_distance(point, triangle))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    fn diagnostic_surface_triangle(
+        surface: &crate::surface::SurfaceDiscretization,
+        element: &crate::surface::SurfaceElement,
+    ) -> Option<Triangle3> {
+        Some([
+            surface
+                .nodes
+                .get(element.node_ids[0] as usize)?
+                .coordinates_m,
+            surface
+                .nodes
+                .get(element.node_ids[1] as usize)?
+                .coordinates_m,
+            surface
+                .nodes
+                .get(element.node_ids[2] as usize)?
+                .coordinates_m,
+        ])
+    }
+
+    fn diagnostic_distance_bin(distance: f64) -> String {
+        if !distance.is_finite() {
+            "non_finite".to_string()
+        } else if distance < 1.0e-9 {
+            "lt_1e-9".to_string()
+        } else if distance < 1.0e-6 {
+            "1e-9_to_1e-6".to_string()
+        } else if distance < 1.0e-4 {
+            "1e-6_to_1e-4".to_string()
+        } else if distance < 1.0e-3 {
+            "1e-4_to_1e-3".to_string()
+        } else if distance < 1.0e-2 {
+            "1e-3_to_1e-2".to_string()
+        } else if distance < 5.0e-2 {
+            "1e-2_to_5e-2".to_string()
+        } else {
+            "gte_5e-2".to_string()
+        }
+    }
+
+    fn diagnostic_cavity_node_ids(cavity: &ConstrainedCavity) -> BTreeSet<u32> {
+        cavity
+            .boundary_faces
+            .iter()
+            .flat_map(|face| face.node_ids)
+            .collect()
+    }
+
+    fn diagnostic_boundary_centroid(nodes: &[ConstrainedCavityNode]) -> Option<[f64; 3]> {
+        if nodes.is_empty() {
+            return None;
+        }
+        let mut centroid = [0.0_f64; 3];
+        for node in nodes {
+            for (axis, value) in centroid.iter_mut().enumerate() {
+                *value += node.coordinates_m[axis];
+            }
+        }
+        for value in &mut centroid {
+            *value /= nodes.len() as f64;
+        }
+        Some(centroid)
+    }
+
+    fn diagnostic_refill_options(case: &MeshBenchmarkCase) -> ConstrainedCavityRefillOptions {
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: 1.0e-18,
+            max_aspect_ratio: case.options.validation.quality.max_aspect_ratio,
+            min_scaled_jacobian: case.options.validation.quality.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        }
+    }
+
+    fn diagnostic_cavity_extraction_reason(err: &ConstrainedCavityExtractionError) -> &'static str {
+        match err {
+            ConstrainedCavityExtractionError::EmptySelection => "empty_selection",
+            ConstrainedCavityExtractionError::SelectedTetIndexOutOfBounds { .. } => {
+                "selected_tet_index_out_of_bounds"
+            }
+            ConstrainedCavityExtractionError::DuplicateSelectedTetIndex { .. } => {
+                "duplicate_selected_tet_index"
+            }
+            ConstrainedCavityExtractionError::Validation(err) => {
+                diagnostic_cavity_validation_reason(err)
+            }
+        }
+    }
+
+    fn diagnostic_non_manifold_boundary_edge_face_count(
+        err: &ConstrainedCavityExtractionError,
+    ) -> Option<usize> {
+        match err {
+            ConstrainedCavityExtractionError::Validation(
+                ConstrainedCavityValidationError::NonManifoldBoundaryEdge { face_count, .. },
+            ) => Some(*face_count),
+            _ => None,
+        }
+    }
+
+    fn diagnostic_refill_error_reason(err: &ConstrainedCavityRefillError) -> &'static str {
+        match err {
+            ConstrainedCavityRefillError::InvalidOptions => "invalid_options",
+            ConstrainedCavityRefillError::Validation(err) => {
+                diagnostic_cavity_validation_reason(err)
+            }
+            ConstrainedCavityRefillError::MissingBoundaryNode { .. } => "missing_boundary_node",
+            ConstrainedCavityRefillError::DuplicateInteriorNode { .. } => "duplicate_interior_node",
+            ConstrainedCavityRefillError::InteriorNodeReusesBoundaryNode { .. } => {
+                "interior_node_reuses_boundary_node"
+            }
+            ConstrainedCavityRefillError::InteriorPointOutsideCavity { .. } => {
+                "interior_point_outside_cavity"
+            }
+            ConstrainedCavityRefillError::NoValidCandidate { .. } => "no_valid_candidate",
+        }
+    }
+
+    fn diagnostic_cavity_validation_reason(err: &ConstrainedCavityValidationError) -> &'static str {
+        match err {
+            ConstrainedCavityValidationError::EmptyRemovedTetSet => "empty_removed_tet_set",
+            ConstrainedCavityValidationError::InvalidTargetVolume { .. } => "invalid_target_volume",
+            ConstrainedCavityValidationError::TooFewBoundaryFaces { .. } => {
+                "too_few_boundary_faces"
+            }
+            ConstrainedCavityValidationError::DegenerateBoundaryFace { .. } => {
+                "degenerate_boundary_face"
+            }
+            ConstrainedCavityValidationError::DuplicateBoundaryFace { .. } => {
+                "duplicate_boundary_face"
+            }
+            ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. } => {
+                "non_manifold_boundary_edge"
+            }
+            ConstrainedCavityValidationError::ProtectedNodeOutsideBoundary { .. } => {
+                "protected_node_outside_boundary"
+            }
+            ConstrainedCavityValidationError::InvalidRefillVolume { .. } => "invalid_refill_volume",
+            ConstrainedCavityValidationError::BoundaryFaceCountMismatch { .. } => {
+                "boundary_face_count_mismatch"
+            }
+            ConstrainedCavityValidationError::MissingBoundaryFace { .. } => "missing_boundary_face",
+            ConstrainedCavityValidationError::UnexpectedBoundaryFace { .. } => {
+                "unexpected_boundary_face"
+            }
+            ConstrainedCavityValidationError::BoundarySourceFaceMismatch { .. } => {
+                "boundary_source_face_mismatch"
+            }
+            ConstrainedCavityValidationError::BoundarySourceEdgeMismatch { .. } => {
+                "boundary_source_edge_mismatch"
+            }
+            ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
+                "boundary_region_mismatch"
+            }
+        }
     }
 
     #[test]
