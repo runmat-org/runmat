@@ -1027,12 +1027,22 @@ fn record_refill_rejection(rejected_by_reason: &mut BTreeMap<String, usize>, rea
 fn refill_validation_reason(error: &ConstrainedCavityValidationError) -> &'static str {
     match error {
         ConstrainedCavityValidationError::InvalidRefillVolume { .. } => "volume_mismatch",
-        ConstrainedCavityValidationError::BoundaryFaceCountMismatch { .. }
-        | ConstrainedCavityValidationError::MissingBoundaryFace { .. }
-        | ConstrainedCavityValidationError::UnexpectedBoundaryFace { .. }
-        | ConstrainedCavityValidationError::BoundarySourceFaceMismatch { .. }
-        | ConstrainedCavityValidationError::BoundarySourceEdgeMismatch { .. }
-        | ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => "boundary_mismatch",
+        ConstrainedCavityValidationError::BoundaryFaceCountMismatch { .. } => {
+            "boundary_face_count_mismatch"
+        }
+        ConstrainedCavityValidationError::MissingBoundaryFace { .. } => "missing_boundary_face",
+        ConstrainedCavityValidationError::UnexpectedBoundaryFace { .. } => {
+            "unexpected_boundary_face"
+        }
+        ConstrainedCavityValidationError::BoundarySourceFaceMismatch { .. } => {
+            "boundary_source_face_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundarySourceEdgeMismatch { .. } => {
+            "boundary_source_edge_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
+            "boundary_region_mismatch"
+        }
         ConstrainedCavityValidationError::EmptyRemovedTetSet
         | ConstrainedCavityValidationError::InvalidTargetVolume { .. }
         | ConstrainedCavityValidationError::TooFewBoundaryFaces { .. }
