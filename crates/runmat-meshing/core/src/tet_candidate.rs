@@ -4221,6 +4221,7 @@ enum InteriorSeedCollapseScope {
 
 const MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE: usize = 24;
 const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
+const MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES: usize = 8;
 
 fn interior_seed_collapse_scope_matches(
     scope: InteriorSeedCollapseScope,
@@ -5434,11 +5435,14 @@ fn best_node_adjacent_cavity_untangling(
     }
 
     let base = face_closure.into_iter().collect::<BTreeSet<_>>();
-    let extra = adjacent
-        .iter()
-        .copied()
-        .filter(|index| !base.contains(index))
-        .collect::<Vec<_>>();
+    let extra = bounded_node_cavity_extra_indices(
+        adjacent
+            .iter()
+            .copied()
+            .filter(|index| !base.contains(index))
+            .collect::<Vec<_>>(),
+        tets,
+    );
     let mut candidate_groups = vec![adjacent.clone()];
     for extra_index in &extra {
         let mut group = base.clone();
@@ -6084,12 +6088,6 @@ pub(crate) fn diagnostic_node_cavity_reconnection_rejection_reason(
     if adjacent.len() < 3 {
         return Ok("node_cavity_too_small");
     }
-    if adjacent.len() > 40 {
-        return Ok("node_cavity_over_star_insertion_limit");
-    }
-    if adjacent.len() > 24 {
-        return Ok("node_cavity_over_reconnection_limit");
-    }
     let face_closure =
         connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
     if adjacent.len() <= face_closure.len() {
@@ -6097,11 +6095,14 @@ pub(crate) fn diagnostic_node_cavity_reconnection_rejection_reason(
     }
 
     let base = face_closure.into_iter().collect::<BTreeSet<_>>();
-    let extra = adjacent
-        .iter()
-        .copied()
-        .filter(|index| !base.contains(index))
-        .collect::<Vec<_>>();
+    let extra = bounded_node_cavity_extra_indices(
+        adjacent
+            .iter()
+            .copied()
+            .filter(|index| !base.contains(index))
+            .collect::<Vec<_>>(),
+        tets,
+    );
     let mut candidate_groups = vec![adjacent.clone()];
     for extra_index in &extra {
         let mut group = base.clone();
@@ -7612,6 +7613,17 @@ fn diagnostic_cavity_group_reconnection_rejection_reason(
     )
 }
 
+fn bounded_node_cavity_extra_indices(mut extra: Vec<usize>, tets: &[TetCandidate]) -> Vec<usize> {
+    extra.sort_by(|left, right| {
+        tets[*left]
+            .exact_scaled_jacobian
+            .total_cmp(&tets[*right].exact_scaled_jacobian)
+            .then_with(|| left.cmp(right))
+    });
+    extra.truncate(MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES);
+    extra
+}
+
 fn edge_star_ring_components(
     adjacent: &[usize],
     edge: [u32; 2],
@@ -8334,7 +8346,7 @@ fn best_node_adjacent_cavity_reconnection(
         node_adjacency,
         options,
     );
-    if adjacent.len() < 3 || adjacent.len() > 24 {
+    if adjacent.len() < 3 {
         return Ok(None);
     }
     let face_closure =
@@ -8344,12 +8356,18 @@ fn best_node_adjacent_cavity_reconnection(
     }
 
     let base = face_closure.into_iter().collect::<BTreeSet<_>>();
-    let extra = adjacent
-        .iter()
-        .copied()
-        .filter(|index| !base.contains(index))
-        .collect::<Vec<_>>();
-    let mut candidate_groups = vec![adjacent.clone()];
+    let extra = bounded_node_cavity_extra_indices(
+        adjacent
+            .iter()
+            .copied()
+            .filter(|index| !base.contains(index))
+            .collect::<Vec<_>>(),
+        tets,
+    );
+    let mut candidate_groups = Vec::<Vec<usize>>::new();
+    if adjacent.len() <= 24 {
+        candidate_groups.push(adjacent.clone());
+    }
     for extra_index in &extra {
         let mut group = base.clone();
         group.insert(*extra_index);
