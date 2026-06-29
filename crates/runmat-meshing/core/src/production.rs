@@ -2437,6 +2437,10 @@ mod tests {
                 .expect("production preparation should consume live CAD provider");
         let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
             .expect("production mesh should preserve live CAD evidence");
+        let evidence = crate::build_mesh_evidence_artifact(
+            &mesh,
+            &production_validation_options(&preparation, &options),
+        );
         let curvature_samples = preparation
             .effective_sizing
             .as_ref()
@@ -2531,6 +2535,54 @@ mod tests {
         assert_eq!(
             mesh.backend.surface_cad_face_count,
             surface_cad_face_count(&preparation.surface)
+        );
+        assert_eq!(
+            mesh.backend.surface_exact_cad_sample_node_count,
+            preparation.surface.exact_cad_sample_node_count
+        );
+        assert_eq!(
+            mesh.backend.surface_rejected_exact_cad_sample_count,
+            preparation.surface.rejected_exact_cad_sample_count
+        );
+        assert_eq!(
+            mesh.backend.surface_max_cad_projection_error_m,
+            surface_max_cad_projection_error_m(&preparation.surface)
+        );
+        assert_eq!(
+            evidence.cad.evaluation_source,
+            mesh.backend.cad_evaluation_source
+        );
+        assert_eq!(
+            evidence.cad.live_query_face_count,
+            preparation.cad_evaluation_report.live_query_face_count
+        );
+        assert_eq!(
+            evidence.cad.exact_query_face_count,
+            preparation.cad_evaluation_report.exact_query_face_count
+        );
+        assert_eq!(
+            evidence.cad.projection_supported_face_count,
+            preparation
+                .cad_evaluation_report
+                .projection_supported_face_count
+        );
+        assert_eq!(
+            evidence.cad.curvature_supported_face_count,
+            preparation
+                .cad_evaluation_report
+                .curvature_supported_face_count
+        );
+        assert_eq!(
+            evidence.cad.surface_exact_cad_sample_node_count,
+            preparation.surface.exact_cad_sample_node_count
+        );
+        assert_eq!(
+            evidence.cad.surface_rejected_exact_cad_sample_count,
+            preparation.surface.rejected_exact_cad_sample_count
+        );
+        assert_eq!(
+            evidence.cad.surface_max_projection_error_m,
+            surface_max_cad_projection_error_m(&preparation.surface)
         );
         assert!(mesh
             .sizing
