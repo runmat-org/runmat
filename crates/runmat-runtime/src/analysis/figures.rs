@@ -506,6 +506,9 @@ fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
         LoadKind::Force { fx, fy, fz } => {
             Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
         }
+        LoadKind::Moment { mx, my, mz } => {
+            Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?)
+        }
         LoadKind::Wrench { fx, fy, fz, .. } => {
             Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
         }
@@ -513,6 +516,13 @@ fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
     };
     if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
         Some(vector.normalize())
+    } else if let LoadKind::Wrench { mx, my, mz, .. } = kind {
+        let moment = Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?);
+        if moment.length_squared().is_finite() && moment.length_squared() > f32::EPSILON {
+            Some(moment.normalize())
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -2300,6 +2310,42 @@ mod tests {
         model
     }
 
+    fn simple_moment_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "axis_load".to_string(),
+            region_id: "axis_region".to_string(),
+            kind: LoadKind::Moment {
+                mx: 0.0,
+                my: 2.0,
+                mz: 0.0,
+            },
+        }];
+        model
+    }
+
+    fn simple_wrench_moment_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "wrench_axis_load".to_string(),
+            region_id: "wrench_axis_region".to_string(),
+            kind: LoadKind::Wrench {
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.0,
+                mx: 0.0,
+                my: 0.0,
+                mz: 4.0,
+                px: 0.0,
+                py: 0.0,
+                pz: 0.0,
+            },
+        }];
+        model
+    }
+
     fn simple_render_topology() -> AnalysisRenderTopology {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
@@ -2748,6 +2794,84 @@ mod tests {
         assert_eq!(
             vector_field.vectors,
             vec![Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_moment_load_axis() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "axis_region".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 2,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_moment_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("moment load axis should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_wrench_moment_axis_when_force_is_zero() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "wrench_axis_region".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_wrench_moment_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("wrench moment axis should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO]
         );
     }
 
