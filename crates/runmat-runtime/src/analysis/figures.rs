@@ -1877,6 +1877,49 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
 mod tests {
     use super::*;
 
+    fn simple_run_result(
+        fields: Vec<AnalysisField>,
+        render_topology: AnalysisRenderTopology,
+    ) -> AnalysisRunResult {
+        AnalysisRunResult {
+            run_id: "run_test".to_string(),
+            run: runmat_analysis_fea::FeaRunResult {
+                backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                solver_backend: "cpu".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_method: "test_solver".to_string(),
+                preconditioner: "none".to_string(),
+                solver_host_sync_count: 0,
+                diagnostics: Vec::new(),
+                fields,
+            },
+            render_topology: Some(render_topology),
+            modal_results: None,
+            thermal_results: None,
+            transient_results: None,
+            nonlinear_results: None,
+            electromagnetic_results: None,
+            model_validity: crate::analysis::contracts::QualityGate::Pass,
+            solver_convergence: crate::analysis::contracts::QualityGate::Pass,
+            result_quality: crate::analysis::contracts::QualityGate::Pass,
+            run_status: crate::analysis::contracts::RunStatus::Publishable,
+            publishable: true,
+            quality_reasons: Vec::new(),
+            provenance: crate::analysis::contracts::RunProvenance {
+                backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                solver_backend: "cpu".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_host_sync_count: 0,
+                precision_mode: "double".to_string(),
+                deterministic_mode: true,
+                solver_method: "test_solver".to_string(),
+                preconditioner: "none".to_string(),
+                quality_policy: "strict".to_string(),
+                fallback_events: Vec::new(),
+            },
+        }
+    }
+
     fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
         simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Meter)
     }
@@ -1931,6 +1974,28 @@ mod tests {
         }
     }
 
+    fn mapped_render_topology(
+        vertex_volume_node_indices: Vec<Option<usize>>,
+        triangle_volume_element_indices: Vec<Option<usize>>,
+    ) -> AnalysisRenderTopology {
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: crate::analysis::contracts::AnalysisRenderTopologySource::AnalysisMesh,
+            meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
+                mesh_id: "analysis_mesh".to_string(),
+                vertices: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                triangles: vec![[0, 1, 2], [0, 2, 3], [0, 3, 1]],
+                vertex_volume_node_indices,
+                triangle_volume_element_indices,
+            }],
+        }
+    }
+
     fn first_mesh_plot(figure: &Figure) -> &MeshPlot {
         figure
             .plots()
@@ -1939,6 +2004,30 @@ mod tests {
                 _ => None,
             })
             .expect("figure should include a mesh plot")
+    }
+
+    fn analysis_mesh_plot(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("analysis_mesh") => Some(mesh),
+                _ => None,
+            })
+            .expect("figure should include an analysis mesh plot")
+    }
+
+    fn analysis_mesh_plot_with_deformation(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh)
+                    if mesh.mesh_id() == Some("analysis_mesh") && mesh.deformation().is_some() =>
+                {
+                    Some(mesh)
+                }
+                _ => None,
+            })
+            .expect("figure should include a deformed analysis mesh plot")
     }
 
     #[test]
@@ -2076,6 +2165,142 @@ mod tests {
         assert_eq!(counts.len(), 1);
         assert_eq!(counts[0].vertices, topology.meshes[0].vertices.len());
         assert_eq!(counts[0].triangles, topology.meshes[0].triangles.len());
+    }
+
+    #[test]
+    fn mesh_result_figures_apply_mapped_solver_element_scalar_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(2), Some(0), Some(1)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA scalar field: structural.von_mises");
+        let scalar = analysis_mesh_plot(&figures[0].figure)
+            .scalar_field()
+            .expect("scalar field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Triangle);
+        assert_eq!(scalar.values, vec![30.0, 10.0, 20.0]);
+        assert!(scalar
+            .label
+            .as_deref()
+            .is_some_and(|label| label.contains("boundary projection")));
+        assert!(figures[0].warnings.is_empty());
+    }
+
+    #[test]
+    fn mesh_result_figures_apply_mapped_solver_node_vector_and_deformation_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.displacement",
+                vec![4, 3],
+                vec![
+                    1.0, 0.0, 0.0, //
+                    0.0, 2.0, 0.0, //
+                    0.0, 0.0, 3.0, //
+                    4.0, 0.0, 0.0,
+                ],
+            )],
+            mapped_render_topology(
+                vec![Some(2), Some(0), Some(3), Some(1)],
+                vec![Some(0), Some(0), Some(0)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 3,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+
+        let deformed = figures
+            .iter()
+            .find(|figure| figure.title == "FEA deformed shape: structural.displacement")
+            .expect("deformed shape figure should be generated");
+        let deformation = analysis_mesh_plot_with_deformation(&deformed.figure)
+            .deformation()
+            .expect("deformation should be attached to solver mesh");
+        assert_eq!(
+            deformation.displacements,
+            vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]
+        );
+
+        let magnitude = figures
+            .iter()
+            .find(|figure| figure.title == "FEA scalar field: structural.displacement.magnitude")
+            .expect("mapped displacement magnitude figure should be generated");
+        let scalar = analysis_mesh_plot(&magnitude.figure)
+            .scalar_field()
+            .expect("magnitude field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Vertex);
+        assert_eq!(scalar.values, vec![3.0, 1.0, 4.0, 2.0]);
+
+        let vector = figures
+            .iter()
+            .find(|figure| figure.title == "FEA vector field: structural.displacement")
+            .expect("mapped displacement vector figure should be generated");
+        let vector_field = analysis_mesh_plot(&vector.figure)
+            .vector_field()
+            .expect("vector field should be attached to solver mesh");
+        assert_eq!(vector_field.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            vector_field.vectors,
+            vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_report_unmapped_solver_element_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(vec![Some(0), Some(1), Some(2), Some(3)], Vec::new()),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA field topology mismatch");
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("structural.von_mises")));
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("render_triangle_count=3")));
     }
 
     #[test]
