@@ -1146,11 +1146,18 @@ fn boundary_load_patch_benchmark_case() -> MeshBenchmarkCase {
     case.validation.required_material_region_ids =
         vec!["benchmark_root".to_string(), "benchmark_tip".to_string()];
     case.sizing = Some(MeshSizingField {
-        samples: vec![SizingSample {
-            position_m: [0.75, 0.75, 0.75],
-            target_size_m: 0.25,
-            reason: Some("load_region".to_string()),
-        }],
+        samples: vec![
+            SizingSample {
+                position_m: [0.75, 0.75, 0.75],
+                target_size_m: 0.25,
+                reason: Some("structural.load_regions".to_string()),
+            },
+            SizingSample {
+                position_m: [0.25, 0.25, 0.25],
+                target_size_m: 0.25,
+                reason: Some("structural.constraint_regions".to_string()),
+            },
+        ],
         ..MeshSizingField::default()
     });
     case
@@ -1667,11 +1674,15 @@ mod tests {
             .sizing
             .as_ref()
             .expect("load patch benchmark should carry sizing markers");
-        assert_eq!(load_patch_sizing.samples.len(), 1);
-        assert_eq!(
-            load_patch_sizing.samples[0].reason.as_deref(),
-            Some("load_region")
-        );
+        assert_eq!(load_patch_sizing.samples.len(), 2);
+        assert!(load_patch_sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
+        assert!(load_patch_sizing
+            .samples
+            .iter()
+            .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
         assert_eq!(cases[6].benchmark_id, "adaptive_refinement_marker");
         assert_eq!(cases[6].tier, MeshBenchmarkTier::AdaptiveRefinement);
         let adaptive_sizing = cases[6]
@@ -1742,7 +1753,25 @@ mod tests {
         assert_eq!(report.benchmark_id, "boundary_load_patch");
         assert_eq!(report.tier, MeshBenchmarkTier::SizingField);
         assert!(report.solve_readiness.solve_ready);
-        assert_eq!(report.sizing.applied_by_reason.get("load_region"), Some(&1));
+        assert_eq!(
+            report
+                .sizing
+                .applied_by_reason
+                .get("structural.load_regions"),
+            Some(&1)
+        );
+        assert_eq!(
+            report
+                .sizing
+                .applied_by_reason
+                .get("structural.constraint_regions"),
+            Some(&1)
+        );
+        assert_eq!(report.sizing.requested_tet_refinement_point_count, 2);
+        assert!(
+            report.sizing.accepted_requested_tet_refinement_point_count > 0,
+            "boundary patch sizing should survive into retained production Tet topology"
+        );
         assert!(
             report
                 .regions
