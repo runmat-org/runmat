@@ -2319,6 +2319,7 @@ mod tests {
             diagnostic_node_cavity_reconnection_rejection_reason,
             diagnostic_small_cavity_boundary_mismatch_shapes,
             diagnostic_small_cavity_exact_cover_rejection_reasons,
+            diagnostic_small_cavity_missing_face_classes,
             diagnostic_small_cavity_reconnection_rejection_reasons,
             diagnostic_small_cavity_star_insertion_rejection_reasons, TetCandidateOptions,
         },
@@ -3106,6 +3107,8 @@ mod tests {
         let mut bad_face_exact_cover_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_one_ring_star_insert_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_face_star_insert_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_one_ring_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
+        let mut bad_face_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut diagnosed_bad_edges = BTreeSet::<[u32; 2]>::new();
         let diagnostic_options = TetCandidateOptions {
             min_scaled_jacobian: case.options.validation.quality.min_scaled_jacobian,
@@ -3261,6 +3264,21 @@ mod tests {
             *bad_face_star_insert_rejected_by_reason
                 .entry(face_star_reason.to_string())
                 .or_default() += 1;
+            let (one_ring_missing_class, face_missing_class) =
+                diagnostic_small_cavity_missing_face_classes(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &face_index_adjacency,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("small cavity missing face diagnostic should evaluate");
+            *bad_one_ring_missing_face_class
+                .entry(one_ring_missing_class)
+                .or_default() += 1;
+            *bad_face_missing_face_class
+                .entry(face_missing_class)
+                .or_default() += 1;
         }
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
@@ -3306,6 +3324,10 @@ mod tests {
             "annular recovery bad_small_cavity_star_insert_rejected_by_reason one_ring={:?} face_closure={:?}",
             bad_one_ring_star_insert_rejected_by_reason,
             bad_face_star_insert_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery bad_small_cavity_missing_face_class one_ring={:?} face_closure={:?}",
+            bad_one_ring_missing_face_class, bad_face_missing_face_class,
         );
 
         let mut valid_seed_star_cavity_count = 0_usize;

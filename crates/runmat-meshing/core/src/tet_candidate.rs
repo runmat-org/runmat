@@ -5739,6 +5739,115 @@ pub(crate) fn diagnostic_small_cavity_star_insertion_rejection_reasons(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_missing_face_classes(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<((usize, usize, usize), (usize, usize, usize)), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_missing_face_class(
+            &one_ring,
+            tets,
+            face_adjacency,
+            node_points,
+            options,
+        )?,
+        diagnostic_face_cavity_missing_face_class(
+            &face_closure,
+            tets,
+            face_adjacency,
+            node_points,
+            options,
+        )?,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_missing_face_class(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<(usize, usize, usize), TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok((0, 0, 0));
+    };
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok((0, 0, 0));
+        }
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 16 {
+        return Ok((0, 0, 0));
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok((0, 0, 0));
+        };
+        candidates.push(candidate);
+    }
+    let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
+    let mut missing_global = 0_usize;
+    let mut missing_internal = 0_usize;
+    for face in &boundary_faces {
+        if candidate_boundary_faces.contains(face) {
+            continue;
+        }
+        if face_adjacency.get(face).map_or(0, Vec::len) == 1 {
+            missing_global += 1;
+        } else {
+            missing_internal += 1;
+        }
+    }
+    let unexpected = candidate_boundary_faces
+        .iter()
+        .filter(|face| !boundary_faces.contains(*face))
+        .count();
+    Ok((missing_global, missing_internal, unexpected))
+}
+
+#[cfg(test)]
 fn diagnostic_face_cavity_star_insertion_rejection_reason(
     tet_index: usize,
     adjacent: &[usize],
