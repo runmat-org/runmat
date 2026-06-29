@@ -173,11 +173,13 @@ pub struct MeshBenchmarkSuiteReport {
     pub reports: Vec<MeshBenchmarkReport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBenchmarkGenerationFailure {
     pub benchmark_id: String,
     pub tier: MeshBenchmarkTier,
     pub message: String,
+    #[serde(default)]
+    pub total_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -498,6 +500,7 @@ pub fn run_mesh_benchmark_cases_collecting_failures_with(
                 benchmark_id: case.benchmark_id,
                 tier: case.tier,
                 message,
+                total_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             }),
         }
     }
@@ -894,7 +897,16 @@ fn mesh_benchmark_suite_summary(
                 .boundary_area_ratio
                 .map(coverage_ratio_error)
         })),
-        total_ms: finite_sum(reports.iter().filter_map(|report| report.timing.total_ms)),
+        total_ms: finite_sum(
+            reports
+                .iter()
+                .filter_map(|report| report.timing.total_ms)
+                .chain(
+                    generation_failures
+                        .iter()
+                        .filter_map(|failure| failure.total_ms),
+                ),
+        ),
         failure_counts_by_code,
         summary_by_tier: mesh_benchmark_tier_summaries(reports, generation_failures),
     }
@@ -991,7 +1003,14 @@ fn mesh_benchmark_tier_summaries(
                             .map(coverage_ratio_error)
                     })),
                     total_ms: finite_sum(
-                        reports.iter().filter_map(|report| report.timing.total_ms),
+                        reports
+                            .iter()
+                            .filter_map(|report| report.timing.total_ms)
+                            .chain(
+                                generation_failures
+                                    .iter()
+                                    .filter_map(|failure| failure.total_ms),
+                            ),
                     ),
                     failure_counts_by_code,
                 },
@@ -1906,6 +1925,8 @@ mod tests {
             suite.generation_failures[0].message,
             "synthetic generation failure"
         );
+        assert!(suite.generation_failures[0].total_ms.is_some());
+        assert!(suite.summary.total_ms.is_some());
         assert_eq!(
             suite
                 .summary
@@ -2139,6 +2160,7 @@ mod tests {
                 benchmark_id: "case_a".to_string(),
                 tier: MeshBenchmarkTier::Solid3d,
                 message: "generation failed".to_string(),
+                total_ms: Some(3.0),
             }],
         );
 
