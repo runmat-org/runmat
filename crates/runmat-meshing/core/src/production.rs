@@ -2153,6 +2153,33 @@ mod tests {
     }
 
     #[test]
+    fn production_sizing_bounds_requested_sample_ids_to_seed_budget() {
+        let mut samples = Vec::<SizingSample>::new();
+        for index in 0..17 {
+            samples.push(SizingSample {
+                position_m: [
+                    0.10 + 0.02 * index as f64,
+                    0.25 + 0.01 * index as f64,
+                    0.25 + 0.005 * index as f64,
+                ],
+                target_size_m: 0.25,
+                reason: Some(format!("requested.marker.{index}")),
+            });
+        }
+        let sizing = MeshSizingField {
+            samples,
+            ..MeshSizingField::default()
+        };
+
+        let requested_ids = requested_sizing_sample_ids(&sizing);
+
+        assert_eq!(requested_ids.len(), 16);
+        assert_eq!(requested_ids.get(&0), Some(&0));
+        assert_eq!(requested_ids.get(&15), Some(&15));
+        assert_eq!(requested_ids.get(&16), None);
+    }
+
+    #[test]
     fn production_sizing_includes_cad_curvature_samples() {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.5);
