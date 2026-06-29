@@ -2435,6 +2435,34 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "expensive production fixture suite; run manually when closing meshing gates"]
+    fn generic_benchmark_suite_collects_current_fixture_readiness() {
+        let case_count = generic_mesh_benchmark_cases().len();
+        let suite = run_generic_mesh_benchmark_suite_collecting_failures();
+
+        assert_eq!(suite.suite_id, "generic-production");
+        assert_eq!(
+            suite
+                .summary
+                .report_count
+                .saturating_add(suite.summary.generation_failure_count),
+            case_count
+        );
+        assert_eq!(
+            suite.summary.failed_count,
+            suite
+                .summary
+                .report_count
+                .saturating_sub(suite.summary.solve_ready_count)
+                .saturating_add(suite.summary.generation_failure_count)
+        );
+        assert_eq!(
+            suite.summary.failure_counts_by_code.values().sum::<usize>(),
+            suite.summary.failed_count
+        );
+    }
+
+    #[test]
     fn benchmark_case_runner_reports_mesh_generation_failure() {
         let case = generic_mesh_benchmark_cases()
             .into_iter()
