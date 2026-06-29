@@ -15,7 +15,9 @@ use crate::{
     },
     generate_analysis_mesh, generate_analysis_mesh_with_sizing,
     predicate::{tet_volume, triangle_area},
+    prepare_production_mesh,
     sizing::{MeshSizingField, SizingSample},
+    tet_candidate::TetCandidateNodeSource,
     topology::VolumeElementKind,
     validation::{volume_component_count, AnalysisMeshValidationOptions},
     MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions,
@@ -2992,11 +2994,99 @@ mod tests {
         let err = generate_mesh_for_benchmark_case(&case)
             .expect_err("annular bore block should expose exact-quality recovery gap");
         let message = err.to_string();
+        eprintln!("annular bore block exact-quality gap: {message}");
 
         assert!(
             message.contains("UnrepairedExactQualityPresent"),
             "expected exact-quality recovery gate, got {message}"
         );
+    }
+
+    #[test]
+    #[ignore = "annular bore recovery diagnostic"]
+    fn annular_bore_block_recovery_counters_are_observable() {
+        let case = annular_bore_block_benchmark_case();
+        let preparation = prepare_production_mesh(&case.geometry, &case.options)
+            .expect("annular bore preparation should complete before strict validation");
+        let recovery = &preparation.tet_candidates.recovery;
+
+        eprintln!(
+            "annular recovery nodes={} tets={} min_exact={:.6} below={} repair_passes={} reconnected={} split={} seed_collapse={} seed_relocate={} unrepaired_total={} boundary_adjacent={} node_adjacent={} interior_seed={} edge_star={} general={}",
+            preparation.tet_candidates.nodes.len(),
+            preparation.tet_candidates.tets.len(),
+            recovery.min_exact_scaled_jacobian,
+            recovery.exact_scaled_jacobian_below_threshold_count,
+            recovery.exact_quality_repair_pass_count,
+            recovery.exact_quality_reconnected_cavity_count,
+            recovery.exact_quality_split_cavity_count,
+            recovery.exact_quality_seed_star_collapse_count,
+            recovery.exact_quality_seed_star_relocation_count,
+            recovery.exact_quality_unrepaired_total_count,
+            recovery.exact_quality_unrepaired_boundary_adjacent_count,
+            recovery.exact_quality_unrepaired_node_adjacent_count,
+            recovery.exact_quality_unrepaired_interior_seed_count,
+            recovery.exact_quality_unrepaired_edge_star_count,
+            recovery.exact_quality_unrepaired_general_cavity_count,
+        );
+
+        let interior_node_ids = preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut node_adjacency = BTreeMap::<u32, usize>::new();
+        let mut edge_adjacency = BTreeMap::<[u32; 2], usize>::new();
+        for tet in &preparation.tet_candidates.tets {
+            for node_id in tet.node_ids {
+                *node_adjacency.entry(node_id).or_default() += 1;
+            }
+            for edge in diagnostic_tet_edges(tet.node_ids) {
+                *edge_adjacency.entry(edge).or_default() += 1;
+            }
+        }
+        let mut bad_interior_star_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_edge_star_histogram = BTreeMap::<usize, usize>::new();
+        for tet in preparation.tet_candidates.tets.iter().filter(|tet| {
+            tet.exact_scaled_jacobian < case.options.validation.quality.min_scaled_jacobian
+        }) {
+            for node_id in tet
+                .node_ids
+                .into_iter()
+                .filter(|node_id| interior_node_ids.contains(node_id))
+            {
+                if let Some(star_size) = node_adjacency.get(&node_id).copied() {
+                    *bad_interior_star_histogram.entry(star_size).or_default() += 1;
+                }
+            }
+            for edge in diagnostic_tet_edges(tet.node_ids) {
+                if let Some(star_size) = edge_adjacency.get(&edge).copied() {
+                    *bad_edge_star_histogram.entry(star_size).or_default() += 1;
+                }
+            }
+        }
+        eprintln!(
+            "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
+            bad_interior_star_histogram, bad_edge_star_histogram
+        );
+    }
+
+    fn diagnostic_tet_edges(node_ids: [u32; 4]) -> [[u32; 2]; 6] {
+        [
+            diagnostic_sorted_edge([node_ids[0], node_ids[1]]),
+            diagnostic_sorted_edge([node_ids[0], node_ids[2]]),
+            diagnostic_sorted_edge([node_ids[0], node_ids[3]]),
+            diagnostic_sorted_edge([node_ids[1], node_ids[2]]),
+            diagnostic_sorted_edge([node_ids[1], node_ids[3]]),
+            diagnostic_sorted_edge([node_ids[2], node_ids[3]]),
+        ]
+    }
+
+    fn diagnostic_sorted_edge(mut edge: [u32; 2]) -> [u32; 2] {
+        edge.sort();
+        edge
     }
 
     #[test]
