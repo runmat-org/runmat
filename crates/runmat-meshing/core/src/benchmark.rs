@@ -240,6 +240,51 @@ pub struct MeshBenchmarkTierSummary {
     pub failure_counts_by_code: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshBenchmarkSuiteGatePolicy {
+    #[serde(default)]
+    pub require_all_solve_ready: bool,
+    #[serde(default)]
+    pub require_no_budget_exceeded: bool,
+    #[serde(default)]
+    pub max_generation_failure_count: Option<usize>,
+    #[serde(default)]
+    pub max_failed_count: Option<usize>,
+    #[serde(default)]
+    pub max_total_ms: Option<f64>,
+    #[serde(default)]
+    pub max_analysis_mesh_json_bytes: Option<usize>,
+    #[serde(default)]
+    pub max_mesh_evidence_json_bytes: Option<usize>,
+}
+
+impl Default for MeshBenchmarkSuiteGatePolicy {
+    fn default() -> Self {
+        Self {
+            require_all_solve_ready: true,
+            require_no_budget_exceeded: true,
+            max_generation_failure_count: Some(0),
+            max_failed_count: Some(0),
+            max_total_ms: None,
+            max_analysis_mesh_json_bytes: None,
+            max_mesh_evidence_json_bytes: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshBenchmarkSuiteGateViolation {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshBenchmarkSuiteGateResult {
+    pub passed: bool,
+    pub violation_count: usize,
+    pub violations: Vec<MeshBenchmarkSuiteGateViolation>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MeshBenchmarkComparisonThresholds {
     pub max_runtime_regression_ratio: f64,
@@ -442,6 +487,100 @@ pub fn build_mesh_benchmark_suite_report_with_failures(
         summary,
         generation_failures,
         reports,
+    }
+}
+
+pub fn evaluate_mesh_benchmark_suite_gate(
+    suite: &MeshBenchmarkSuiteReport,
+    policy: &MeshBenchmarkSuiteGatePolicy,
+) -> MeshBenchmarkSuiteGateResult {
+    let mut violations = Vec::<MeshBenchmarkSuiteGateViolation>::new();
+    if let Some(max_generation_failure_count) = policy.max_generation_failure_count {
+        if suite.summary.generation_failure_count > max_generation_failure_count {
+            violations.push(gate_violation(
+                "generation_failure_count_exceeded",
+                format!(
+                    "generation failures {} exceed limit {}",
+                    suite.summary.generation_failure_count, max_generation_failure_count
+                ),
+            ));
+        }
+    }
+    if let Some(max_failed_count) = policy.max_failed_count {
+        if suite.summary.failed_count > max_failed_count {
+            violations.push(gate_violation(
+                "failed_count_exceeded",
+                format!(
+                    "failed benchmark count {} exceeds limit {}",
+                    suite.summary.failed_count, max_failed_count
+                ),
+            ));
+        }
+    }
+    if policy.require_all_solve_ready
+        && suite.summary.solve_ready_count != suite.summary.report_count
+    {
+        violations.push(gate_violation(
+            "not_all_reports_solve_ready",
+            format!(
+                "solve-ready reports {} do not match report count {}",
+                suite.summary.solve_ready_count, suite.summary.report_count
+            ),
+        ));
+    }
+    if policy.require_no_budget_exceeded && suite.summary.budget_exceeded_count > 0 {
+        violations.push(gate_violation(
+            "element_budget_exceeded",
+            format!(
+                "{} benchmark reports exceeded element budget",
+                suite.summary.budget_exceeded_count
+            ),
+        ));
+    }
+    if let (Some(total_ms), Some(max_total_ms)) = (suite.summary.total_ms, policy.max_total_ms) {
+        if total_ms > max_total_ms {
+            violations.push(gate_violation(
+                "total_runtime_exceeded",
+                format!("total runtime {total_ms:.3} ms exceeds limit {max_total_ms:.3} ms"),
+            ));
+        }
+    }
+    if let (Some(bytes), Some(max_bytes)) = (
+        suite.summary.largest_analysis_mesh_json_bytes,
+        policy.max_analysis_mesh_json_bytes,
+    ) {
+        if bytes > max_bytes {
+            violations.push(gate_violation(
+                "analysis_mesh_artifact_size_exceeded",
+                format!("analysis mesh artifact {bytes} bytes exceeds limit {max_bytes} bytes"),
+            ));
+        }
+    }
+    if let (Some(bytes), Some(max_bytes)) = (
+        suite.summary.largest_mesh_evidence_json_bytes,
+        policy.max_mesh_evidence_json_bytes,
+    ) {
+        if bytes > max_bytes {
+            violations.push(gate_violation(
+                "mesh_evidence_artifact_size_exceeded",
+                format!("mesh evidence artifact {bytes} bytes exceeds limit {max_bytes} bytes"),
+            ));
+        }
+    }
+    MeshBenchmarkSuiteGateResult {
+        passed: violations.is_empty(),
+        violation_count: violations.len(),
+        violations,
+    }
+}
+
+fn gate_violation(
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> MeshBenchmarkSuiteGateViolation {
+    MeshBenchmarkSuiteGateViolation {
+        code: code.into(),
+        message: message.into(),
     }
 }
 
@@ -1957,6 +2096,92 @@ mod tests {
             .expect("solid tier summary should be present");
         assert_eq!(solid.budget_exceeded_count, 1);
         assert_eq!(solid.worst_volume_element_budget_used_ratio, Some(1.0));
+    }
+
+    #[test]
+    fn suite_gate_accepts_solve_ready_suite_within_budgets() {
+        let mesh = fixture_mesh();
+        let mut ready = build_mesh_benchmark_report(
+            &mesh,
+            &AnalysisMeshValidationOptions {
+                expected_volume_m3: Some(1.0 / 6.0),
+                expected_boundary_area_m2: Some(0.5),
+                max_volume_element_count: Some(4),
+                ..AnalysisMeshValidationOptions::default()
+            },
+            MeshBenchmarkInput::new("ready", MeshBenchmarkTier::Solid3d),
+        );
+        ready.timing.total_ms = Some(4.0);
+        ready.artifacts.analysis_mesh_json_bytes = Some(1000);
+        ready.artifacts.mesh_evidence_json_bytes = Some(1200);
+        let suite = build_mesh_benchmark_suite_report("gate", vec![ready]);
+
+        let result = evaluate_mesh_benchmark_suite_gate(
+            &suite,
+            &MeshBenchmarkSuiteGatePolicy {
+                max_total_ms: Some(5.0),
+                max_analysis_mesh_json_bytes: Some(1000),
+                max_mesh_evidence_json_bytes: Some(1200),
+                ..MeshBenchmarkSuiteGatePolicy::default()
+            },
+        );
+
+        assert!(result.passed);
+        assert_eq!(result.violation_count, 0);
+        assert!(result.violations.is_empty());
+    }
+
+    #[test]
+    fn suite_gate_reports_budget_runtime_artifact_and_failure_violations() {
+        let mesh = fixture_mesh();
+        let mut over_budget = build_mesh_benchmark_report(
+            &mesh,
+            &AnalysisMeshValidationOptions {
+                max_volume_element_count: Some(0),
+                expected_volume_m3: Some(1.0),
+                min_volume_coverage_ratio: 0.95,
+                ..AnalysisMeshValidationOptions::default()
+            },
+            MeshBenchmarkInput::new("failed", MeshBenchmarkTier::Solid3d),
+        );
+        over_budget.timing.total_ms = Some(8.0);
+        over_budget.artifacts.analysis_mesh_json_bytes = Some(1500);
+        over_budget.artifacts.mesh_evidence_json_bytes = Some(1700);
+        let suite = build_mesh_benchmark_suite_report_with_failures(
+            "gate",
+            vec![over_budget],
+            vec![MeshBenchmarkGenerationFailure {
+                benchmark_id: "missing".to_string(),
+                tier: MeshBenchmarkTier::ThinFeature,
+                message: "failed before mesh".to_string(),
+                total_ms: Some(2.0),
+            }],
+        );
+
+        let result = evaluate_mesh_benchmark_suite_gate(
+            &suite,
+            &MeshBenchmarkSuiteGatePolicy {
+                max_total_ms: Some(5.0),
+                max_analysis_mesh_json_bytes: Some(1000),
+                max_mesh_evidence_json_bytes: Some(1600),
+                ..MeshBenchmarkSuiteGatePolicy::default()
+            },
+        );
+        let codes = result
+            .violations
+            .iter()
+            .map(|violation| violation.code.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(!result.passed);
+        assert_eq!(result.violation_count, result.violations.len());
+        assert!(codes.contains(&"generation_failure_count_exceeded"));
+        assert!(codes.contains(&"failed_count_exceeded"));
+        assert!(codes.contains(&"not_all_reports_solve_ready"));
+        assert!(codes.contains(&"element_budget_exceeded"));
+        assert!(codes.contains(&"total_runtime_exceeded"));
+        assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
+        assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
     }
 
     #[test]
