@@ -253,6 +253,12 @@ pub struct MeshBenchmarkSuiteGatePolicy {
     #[serde(default)]
     pub require_all_surface_source_edge_loops_closed: bool,
     #[serde(default)]
+    pub require_no_missing_cad_exact_queries: bool,
+    #[serde(default)]
+    pub require_no_missing_cad_derivative_queries: bool,
+    #[serde(default)]
+    pub require_no_missing_cad_curvature_queries: bool,
+    #[serde(default)]
     pub max_generation_failure_count: Option<usize>,
     #[serde(default)]
     pub max_failed_count: Option<usize>,
@@ -271,6 +277,9 @@ impl Default for MeshBenchmarkSuiteGatePolicy {
             require_no_budget_exceeded: true,
             require_no_missing_surface_source_edges: true,
             require_all_surface_source_edge_loops_closed: true,
+            require_no_missing_cad_exact_queries: true,
+            require_no_missing_cad_derivative_queries: true,
+            require_no_missing_cad_curvature_queries: true,
             max_generation_failure_count: Some(0),
             max_failed_count: Some(0),
             max_total_ms: None,
@@ -579,6 +588,51 @@ pub fn evaluate_mesh_benchmark_suite_gate(
                 "surface_source_edge_loops_open",
                 format!(
                     "{open_source_edge_loop_count} surface source-edge loops are not closed in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_missing_cad_exact_queries {
+        let missing_exact_query_count = suite
+            .reports
+            .iter()
+            .map(|report| report.cad.missing_exact_query_face_count)
+            .sum::<usize>();
+        if missing_exact_query_count > 0 {
+            violations.push(gate_violation(
+                "cad_exact_queries_missing",
+                format!(
+                    "{missing_exact_query_count} CAD evaluator faces are missing exact query-backed frames in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_missing_cad_derivative_queries {
+        let missing_derivative_query_count = suite
+            .reports
+            .iter()
+            .map(|report| report.cad.missing_derivative_query_face_count)
+            .sum::<usize>();
+        if missing_derivative_query_count > 0 {
+            violations.push(gate_violation(
+                "cad_derivative_queries_missing",
+                format!(
+                    "{missing_derivative_query_count} CAD evaluator faces are missing derivative queries in benchmark reports"
+                ),
+            ));
+        }
+    }
+    if policy.require_no_missing_cad_curvature_queries {
+        let missing_curvature_query_count = suite
+            .reports
+            .iter()
+            .map(|report| report.cad.missing_curvature_query_face_count)
+            .sum::<usize>();
+        if missing_curvature_query_count > 0 {
+            violations.push(gate_violation(
+                "cad_curvature_queries_missing",
+                format!(
+                    "{missing_curvature_query_count} CAD evaluator faces are missing curvature queries in benchmark reports"
                 ),
             ));
         }
@@ -2304,6 +2358,9 @@ mod tests {
         over_budget.cad.surface_source_edge_loop_count = 2;
         over_budget.cad.surface_closed_edge_loop_count = 1;
         over_budget.cad.surface_missing_source_edge_count = 2;
+        over_budget.cad.missing_exact_query_face_count = 3;
+        over_budget.cad.missing_derivative_query_face_count = 4;
+        over_budget.cad.missing_curvature_query_face_count = 5;
         let suite = build_mesh_benchmark_suite_report_with_failures(
             "gate",
             vec![over_budget],
@@ -2338,6 +2395,9 @@ mod tests {
         assert!(codes.contains(&"element_budget_exceeded"));
         assert!(codes.contains(&"surface_source_edges_missing"));
         assert!(codes.contains(&"surface_source_edge_loops_open"));
+        assert!(codes.contains(&"cad_exact_queries_missing"));
+        assert!(codes.contains(&"cad_derivative_queries_missing"));
+        assert!(codes.contains(&"cad_curvature_queries_missing"));
         assert!(codes.contains(&"total_runtime_exceeded"));
         assert!(codes.contains(&"analysis_mesh_artifact_size_exceeded"));
         assert!(codes.contains(&"mesh_evidence_artifact_size_exceeded"));
