@@ -201,9 +201,17 @@ pub struct MeshBenchmarkSuiteSummary {
     pub failed_count: usize,
     #[serde(default)]
     pub budget_exceeded_count: usize,
+    #[serde(default)]
+    pub fan_fallback_component_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_total_count: usize,
     pub worst_min_scaled_jacobian: Option<f64>,
     pub worst_min_exact_scaled_jacobian: Option<f64>,
     pub worst_max_aspect_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_boundary_face_recovery_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_boundary_edge_recovery_ratio: Option<f64>,
     #[serde(default)]
     pub worst_volume_element_budget_used_ratio: Option<f64>,
     #[serde(default)]
@@ -228,8 +236,16 @@ pub struct MeshBenchmarkTierSummary {
     pub failed_count: usize,
     #[serde(default)]
     pub budget_exceeded_count: usize,
+    #[serde(default)]
+    pub fan_fallback_component_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_total_count: usize,
     pub worst_min_exact_scaled_jacobian: Option<f64>,
     pub worst_max_aspect_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_boundary_face_recovery_ratio: Option<f64>,
+    #[serde(default)]
+    pub worst_boundary_edge_recovery_ratio: Option<f64>,
     #[serde(default)]
     pub worst_volume_element_budget_used_ratio: Option<f64>,
     #[serde(default)]
@@ -1295,6 +1311,14 @@ fn mesh_benchmark_suite_summary(
             .iter()
             .filter(|report| report.budget.volume_element_budget_exceeded)
             .count(),
+        fan_fallback_component_count: reports
+            .iter()
+            .map(|report| report.solve_readiness.fan_fallback_component_count)
+            .sum(),
+        unrepaired_exact_quality_total_count: reports
+            .iter()
+            .map(|report| report.solve_readiness.unrepaired_exact_quality_total_count)
+            .sum(),
         worst_min_scaled_jacobian: finite_min(
             reports
                 .iter()
@@ -1307,6 +1331,16 @@ fn mesh_benchmark_suite_summary(
         ),
         worst_max_aspect_ratio: finite_max(
             reports.iter().map(|report| report.quality.max_aspect_ratio),
+        ),
+        worst_boundary_face_recovery_ratio: finite_min(
+            reports
+                .iter()
+                .map(|report| report.coverage.boundary_face_recovery_ratio),
+        ),
+        worst_boundary_edge_recovery_ratio: finite_min(
+            reports
+                .iter()
+                .map(|report| report.coverage.boundary_edge_recovery_ratio),
         ),
         worst_volume_element_budget_used_ratio: finite_max(
             reports
@@ -1420,6 +1454,14 @@ fn mesh_benchmark_tier_summaries(
                         .iter()
                         .filter(|report| report.budget.volume_element_budget_exceeded)
                         .count(),
+                    fan_fallback_component_count: reports
+                        .iter()
+                        .map(|report| report.solve_readiness.fan_fallback_component_count)
+                        .sum(),
+                    unrepaired_exact_quality_total_count: reports
+                        .iter()
+                        .map(|report| report.solve_readiness.unrepaired_exact_quality_total_count)
+                        .sum(),
                     worst_min_exact_scaled_jacobian: finite_min(
                         reports
                             .iter()
@@ -1427,6 +1469,16 @@ fn mesh_benchmark_tier_summaries(
                     ),
                     worst_max_aspect_ratio: finite_max(
                         reports.iter().map(|report| report.quality.max_aspect_ratio),
+                    ),
+                    worst_boundary_face_recovery_ratio: finite_min(
+                        reports
+                            .iter()
+                            .map(|report| report.coverage.boundary_face_recovery_ratio),
+                    ),
+                    worst_boundary_edge_recovery_ratio: finite_min(
+                        reports
+                            .iter()
+                            .map(|report| report.coverage.boundary_edge_recovery_ratio),
                     ),
                     worst_volume_element_budget_used_ratio: finite_max(
                         reports
@@ -2312,6 +2364,10 @@ mod tests {
             MeshBenchmarkInput::new("failed", MeshBenchmarkTier::HoleFeature),
         );
         failed.timing.total_ms = Some(6.0);
+        failed.solve_readiness.fan_fallback_component_count = 2;
+        failed.solve_readiness.unrepaired_exact_quality_total_count = 3;
+        failed.coverage.boundary_face_recovery_ratio = 0.75;
+        failed.coverage.boundary_edge_recovery_ratio = 0.5;
 
         let suite = build_mesh_benchmark_suite_report("smoke", vec![ready, failed]);
 
@@ -2320,6 +2376,8 @@ mod tests {
         assert_eq!(suite.summary.solve_ready_count, 1);
         assert_eq!(suite.summary.failed_count, 1);
         assert_eq!(suite.summary.budget_exceeded_count, 0);
+        assert_eq!(suite.summary.fan_fallback_component_count, 2);
+        assert_eq!(suite.summary.unrepaired_exact_quality_total_count, 3);
         assert_eq!(
             suite
                 .summary
@@ -2329,6 +2387,8 @@ mod tests {
         );
         assert_eq!(suite.summary.worst_min_exact_scaled_jacobian, Some(0.45));
         assert_eq!(suite.summary.worst_max_aspect_ratio, Some(2.0));
+        assert_eq!(suite.summary.worst_boundary_face_recovery_ratio, Some(0.75));
+        assert_eq!(suite.summary.worst_boundary_edge_recovery_ratio, Some(0.5));
         assert_eq!(suite.summary.worst_volume_element_budget_used_ratio, None);
         assert!(
             suite
@@ -2358,6 +2418,10 @@ mod tests {
         assert_eq!(solid.solve_ready_count, 1);
         assert_eq!(solid.failed_count, 0);
         assert_eq!(solid.budget_exceeded_count, 0);
+        assert_eq!(solid.fan_fallback_component_count, 0);
+        assert_eq!(solid.unrepaired_exact_quality_total_count, 0);
+        assert_eq!(solid.worst_boundary_face_recovery_ratio, Some(1.0));
+        assert_eq!(solid.worst_boundary_edge_recovery_ratio, Some(1.0));
         assert_eq!(solid.total_ms, Some(4.0));
         assert!(solid.largest_analysis_mesh_json_bytes.unwrap_or_default() > 0);
         let hole = suite
@@ -2369,6 +2433,10 @@ mod tests {
         assert_eq!(hole.solve_ready_count, 0);
         assert_eq!(hole.failed_count, 1);
         assert_eq!(hole.budget_exceeded_count, 0);
+        assert_eq!(hole.fan_fallback_component_count, 2);
+        assert_eq!(hole.unrepaired_exact_quality_total_count, 3);
+        assert_eq!(hole.worst_boundary_face_recovery_ratio, Some(0.75));
+        assert_eq!(hole.worst_boundary_edge_recovery_ratio, Some(0.5));
         assert_eq!(hole.total_ms, Some(6.0));
         assert_eq!(
             hole.failure_counts_by_code.get("volume_coverage_failed"),
