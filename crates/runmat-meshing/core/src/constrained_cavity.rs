@@ -993,16 +993,16 @@ fn boundary_node_refill_candidate(
         options.volume_relative_tolerance,
     ) {
         Ok(refill) => Ok(Ok(refill)),
-        Err(err) => {
-            let Some(completed_tets) = complete_missing_boundary_face_tets(
+        Err(_) => {
+            let completed_tets = match complete_missing_boundary_face_tets(
                 cavity,
                 boundary_nodes,
                 refill_tets,
                 &boundary_triangles,
                 options,
-            )?
-            else {
-                return Ok(Err(boundary_node_refill_validation_reason(&err)));
+            )? {
+                Ok(completed_tets) => completed_tets,
+                Err(reason) => return Ok(Err(reason)),
             };
             let refill =
                 match refill_from_tets(cavity, completed_tets, options.volume_relative_tolerance) {
@@ -1045,7 +1045,8 @@ fn complete_missing_boundary_face_tets(
     mut refill_tets: Vec<ConstrainedCavityRefillTet>,
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
-) -> Result<Option<Vec<ConstrainedCavityRefillTet>>, ConstrainedCavityValidationError> {
+) -> Result<Result<Vec<ConstrainedCavityRefillTet>, &'static str>, ConstrainedCavityValidationError>
+{
     let mut changed = false;
     loop {
         let missing_faces = missing_refill_boundary_faces(cavity, &refill_tets)?;
@@ -1059,18 +1060,22 @@ fn complete_missing_boundary_face_tets(
             boundary_triangles,
             options,
         ) else {
-            return Ok(None);
+            return Ok(Err("boundary_node_completion_no_candidate"));
         };
         if refill_tets
             .iter()
             .any(|existing| sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids))
         {
-            return Ok(None);
+            return Ok(Err("boundary_node_completion_duplicate_tet"));
         }
         refill_tets.push(tet);
         changed = true;
     }
-    Ok(changed.then_some(refill_tets))
+    if changed {
+        Ok(Ok(refill_tets))
+    } else {
+        Ok(Err("boundary_node_completion_no_missing_faces"))
+    }
 }
 
 fn missing_refill_boundary_faces(
@@ -1972,6 +1977,36 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("completed refill should preserve volume");
+    }
+
+    #[test]
+    fn boundary_node_completion_reports_when_no_cap_tet_passes_quality() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let initial_options = refill_options();
+        let points = [0, 1, 2, 3].map(|node_id| boundary_nodes[&node_id]);
+        let incomplete_tet =
+            raw_refill_tet_with_rejection_reason([0, 1, 2, 3], points, initial_options)
+                .expect("fixture tet should pass initial quality gates");
+
+        let rejected = complete_missing_boundary_face_tets(
+            &cavity,
+            &boundary_nodes,
+            vec![incomplete_tet],
+            &boundary_triangles,
+            ConstrainedCavityRefillOptions {
+                min_scaled_jacobian: 0.95,
+                ..initial_options
+            },
+        )
+        .expect("completion should evaluate")
+        .expect_err("strict quality should reject every cap tet");
+
+        assert_eq!(rejected, "boundary_node_completion_no_candidate");
     }
 
     #[test]
