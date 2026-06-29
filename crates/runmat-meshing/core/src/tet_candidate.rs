@@ -5608,6 +5608,28 @@ pub(crate) fn diagnostic_node_cavity_reconnection_rejection_reason(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_bad_cavity_sizes(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    options: TetCandidateOptions,
+) -> (usize, usize, usize) {
+    (
+        one_ring_tet_cavity(tet_index, tets, face_adjacency).len(),
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options).len(),
+        connected_bad_tet_cavity_with_node_closure(
+            tet_index,
+            tets,
+            face_adjacency,
+            node_adjacency,
+            options,
+        )
+        .len(),
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_boundary_cavity_reconnection_rejection_reason(
     tet_index: usize,
     tets: &[TetCandidate],

@@ -2314,7 +2314,7 @@ mod tests {
         quality::{AnalysisMeshQualityReport, ElementQuality},
         sizing::{MeshSizingField, SizingSample, SizingSampleApplication},
         tet_candidate::{
-            diagnostic_boundary_cavity_reconnection_rejection_reason,
+            diagnostic_bad_cavity_sizes, diagnostic_boundary_cavity_reconnection_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
             diagnostic_node_cavity_reconnection_rejection_reason, TetCandidateOptions,
         },
@@ -3089,6 +3089,9 @@ mod tests {
         let mut bad_edge_reconnection_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_boundary_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_one_ring_cavity_size_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_face_cavity_size_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_node_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut diagnosed_bad_edges = BTreeSet::<[u32; 2]>::new();
         let diagnostic_options = TetCandidateOptions {
             min_scaled_jacobian: case.options.validation.quality.min_scaled_jacobian,
@@ -3167,6 +3170,22 @@ mod tests {
             *bad_boundary_cavity_rejected_by_reason
                 .entry(boundary_cavity_reason.to_string())
                 .or_default() += 1;
+            let (one_ring_size, face_cavity_size, node_cavity_size) = diagnostic_bad_cavity_sizes(
+                tet_index,
+                &preparation.tet_candidates.tets,
+                &face_index_adjacency,
+                &node_index_adjacency,
+                diagnostic_options,
+            );
+            *bad_one_ring_cavity_size_histogram
+                .entry(one_ring_size)
+                .or_default() += 1;
+            *bad_face_cavity_size_histogram
+                .entry(face_cavity_size)
+                .or_default() += 1;
+            *bad_node_cavity_size_histogram
+                .entry(node_cavity_size)
+                .or_default() += 1;
         }
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
@@ -3187,6 +3206,12 @@ mod tests {
         eprintln!(
             "annular recovery bad_boundary_cavity_rejected_by_reason={:?}",
             bad_boundary_cavity_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_cavity_size_histograms one_ring={:?} face_closure={:?} node_closure={:?}",
+            bad_one_ring_cavity_size_histogram,
+            bad_face_cavity_size_histogram,
+            bad_node_cavity_size_histogram,
         );
 
         let mut valid_seed_star_cavity_count = 0_usize;
