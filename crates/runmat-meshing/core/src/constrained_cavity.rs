@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     predicate::{
-        point_in_closed_triangle_surface, tet_edge_aspect_ratio, tet_scaled_jacobian,
-        tet_signed_volume, Point3, PointInClosedSurface, Triangle3,
+        distance_squared, point_in_closed_triangle_surface, tet_edge_aspect_ratio,
+        tet_scaled_jacobian, tet_signed_volume, Point3, PointInClosedSurface, Triangle3,
     },
     tet_candidate::TetCandidate,
     tolerance::MeshingTolerance,
@@ -45,6 +45,7 @@ pub struct ConstrainedCavityRefillOptions {
     pub max_aspect_ratio: f64,
     pub min_scaled_jacobian: f64,
     pub volume_relative_tolerance: f64,
+    pub min_protected_node_distance_m: f64,
 }
 
 impl Default for ConstrainedCavityRefillOptions {
@@ -54,6 +55,7 @@ impl Default for ConstrainedCavityRefillOptions {
             max_aspect_ratio: 1.0e6,
             min_scaled_jacobian: 0.15,
             volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
         }
     }
 }
@@ -312,6 +314,15 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 },
             );
         }
+        if !candidate_respects_protected_boundary_distance(
+            cavity,
+            &boundary_node_map,
+            node.coordinates_m,
+            options,
+        ) {
+            record_refill_rejection(&mut rejected_by_reason, "protected_boundary_distance");
+            continue;
+        }
         if point_in_closed_triangle_surface(node.coordinates_m, &boundary_triangles, tolerance)
             != PointInClosedSurface::Inside
         {
@@ -521,6 +532,8 @@ fn validate_refill_options(
         || options.min_scaled_jacobian < 0.0
         || !options.volume_relative_tolerance.is_finite()
         || options.volume_relative_tolerance < 0.0
+        || !options.min_protected_node_distance_m.is_finite()
+        || options.min_protected_node_distance_m < 0.0
     {
         return Err(ConstrainedCavityRefillError::InvalidOptions);
     }
@@ -551,6 +564,23 @@ fn cavity_boundary_node_ids(cavity: &ConstrainedCavity) -> BTreeSet<u32> {
         .iter()
         .flat_map(|face| face.node_ids)
         .collect()
+}
+
+fn candidate_respects_protected_boundary_distance(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    point: Point3,
+    options: ConstrainedCavityRefillOptions,
+) -> bool {
+    if options.min_protected_node_distance_m <= 0.0 || cavity.protected_node_ids.is_empty() {
+        return true;
+    }
+    let min_distance_squared = options.min_protected_node_distance_m.powi(2);
+    cavity.protected_node_ids.iter().all(|node_id| {
+        boundary_nodes.get(node_id).is_none_or(|protected_point| {
+            distance_squared(point, *protected_point) > min_distance_squared
+        })
+    })
 }
 
 fn cavity_boundary_triangles(
@@ -1181,6 +1211,66 @@ mod tests {
     }
 
     #[test]
+    fn refill_evaluation_skips_points_too_close_to_protected_boundary_nodes() {
+        let mut cavity = unit_tet_cavity();
+        cavity.protected_node_ids = vec![0];
+        let nodes = unit_tet_nodes();
+        let candidates = [
+            ConstrainedCavityNode {
+                node_id: 10,
+                coordinates_m: [0.01, 0.01, 0.01],
+            },
+            ConstrainedCavityNode {
+                node_id: 11,
+                coordinates_m: [0.25, 0.25, 0.25],
+            },
+        ];
+
+        let evaluation = evaluate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &candidates,
+            protected_refill_options(),
+        )
+        .expect("evaluation should continue after protected-distance rejection");
+
+        assert!(evaluation.refill.is_some());
+        assert_eq!(
+            evaluation.rejected_by_reason,
+            BTreeMap::from([("protected_boundary_distance".to_string(), 1)])
+        );
+    }
+
+    #[test]
+    fn refill_generation_reports_protected_boundary_distance_rejections() {
+        let mut cavity = unit_tet_cavity();
+        cavity.protected_node_ids = vec![0];
+        let nodes = unit_tet_nodes();
+        let candidates = [ConstrainedCavityNode {
+            node_id: 10,
+            coordinates_m: [0.01, 0.01, 0.01],
+        }];
+
+        let err = generate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &candidates,
+            protected_refill_options(),
+        )
+        .expect_err("all candidates too close to protected nodes should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityRefillError::NoValidCandidate {
+                rejected_by_reason: BTreeMap::from([(
+                    "protected_boundary_distance".to_string(),
+                    1
+                )])
+            }
+        );
+    }
+
+    #[test]
     fn star_refill_candidates_reject_boundary_node_reuse() {
         let cavity = unit_tet_cavity();
         let nodes = unit_tet_nodes();
@@ -1415,6 +1505,15 @@ mod tests {
         ConstrainedCavityRefillOptions {
             min_scaled_jacobian: 0.0,
             volume_relative_tolerance: 1.0e-12,
+            ..ConstrainedCavityRefillOptions::default()
+        }
+    }
+
+    fn protected_refill_options() -> ConstrainedCavityRefillOptions {
+        ConstrainedCavityRefillOptions {
+            min_scaled_jacobian: 0.0,
+            volume_relative_tolerance: 1.0e-12,
+            min_protected_node_distance_m: 0.10,
             ..ConstrainedCavityRefillOptions::default()
         }
     }
