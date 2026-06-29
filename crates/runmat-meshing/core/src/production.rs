@@ -3194,6 +3194,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn faceted_cylinder_uses_layered_sweep_recovery() {
+        let geometry = faceted_cylinder_geometry();
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.459_259_458_684_314_6);
+        options.max_elements = 50_000;
+
+        let preparation =
+            prepare_production_mesh(&geometry, &options).expect("faceted mesh prepares");
+        let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
+            .expect("faceted analysis mesh should build");
+
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .insertion_component_count,
+            1
+        );
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .fan_fallback_component_count,
+            0
+        );
+        assert!(
+            preparation
+                .tet_candidates
+                .recovery
+                .min_exact_scaled_jacobian
+                >= QualityThresholds::default().min_scaled_jacobian
+        );
+        assert_eq!(
+            preparation
+                .tet_candidates
+                .recovery
+                .exact_scaled_jacobian_below_threshold_count,
+            0
+        );
+        assert_eq!(volume_component_count(&mesh), 1);
+    }
+
     fn log_preparation_stage_timings(
         label: &str,
         geometry: &GeometryAsset,

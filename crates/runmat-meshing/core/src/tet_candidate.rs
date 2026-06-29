@@ -343,6 +343,14 @@ pub fn form_tet_candidates(
                 options,
                 tolerance,
             )?;
+            add_sweep_recovery_layer_points(
+                component,
+                &mut component_seed_points,
+                &surface_nodes,
+                &surface_elements,
+                options,
+                tolerance,
+            )?;
         }
         let optimization = if dense_component {
             SmoothingSummary::empty()
@@ -915,8 +923,10 @@ fn append_component_insertion_tets(
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<InsertionStatus, TetCandidateError> {
-    if let Some(status) = append_thin_sweep_tets(
+    if let Some(status) = append_sweep_tets(
         component,
+        seed_node_ids,
+        seed_points,
         surface_nodes,
         surface_elements,
         options,
@@ -1021,15 +1031,17 @@ fn append_component_insertion_tets(
     Ok(status)
 }
 
-fn append_thin_sweep_tets(
+fn append_sweep_tets(
     component: &VolumeCandidateComponent,
+    seed_node_ids: &[u32],
+    seed_points: &[[f64; 3]],
     surface_nodes: &BTreeMap<u32, [f64; 3]>,
     surface_elements: &BTreeMap<u32, &SurfaceElement>,
     options: TetCandidateOptions,
     tolerance: MeshingTolerance,
     tets: &mut Vec<TetCandidate>,
 ) -> Result<Option<InsertionStatus>, TetCandidateError> {
-    let Some(axis) = thin_sweep_axis(component, tolerance) else {
+    let Some(axis) = sweep_axis(component, surface_nodes, surface_elements, tolerance)? else {
         return Ok(None);
     };
     let mut lower_elements = Vec::<&SurfaceElement>::new();
@@ -1059,6 +1071,7 @@ fn append_thin_sweep_tets(
         return Ok(None);
     }
 
+    let seed_nodes_by_point = seed_nodes_by_point(seed_node_ids, seed_points);
     let start_len = tets.len();
     for lower in lower_elements {
         let lower_keys = element_projected_keys(lower, surface_nodes, axis, tolerance)?;
@@ -1073,16 +1086,29 @@ fn append_thin_sweep_tets(
             upper_points[index] = point;
         }
         let lower_points = element_node_points(lower, surface_nodes)?;
-        append_consistent_sweep_frustum_tets(
-            component,
-            lower,
+        let Some((layer_node_ids, layer_points)) = sweep_column_layers(
             lower.node_ids,
             upper_ids,
             lower_points,
             upper_points,
+            &seed_nodes_by_point,
             options,
-            tets,
-        );
+        ) else {
+            tets.truncate(start_len);
+            return Ok(None);
+        };
+        for layer in 0..layer_node_ids.len().saturating_sub(1) {
+            append_consistent_sweep_frustum_tets(
+                component,
+                lower,
+                layer_node_ids[layer],
+                layer_node_ids[layer + 1],
+                layer_points[layer],
+                layer_points[layer + 1],
+                options,
+                tets,
+            );
+        }
     }
 
     let status = insertion_tet_status(component, &tets[start_len..], options);
@@ -1095,6 +1121,117 @@ fn append_thin_sweep_tets(
         tets.truncate(start_len);
         Ok(None)
     }
+}
+
+fn add_sweep_recovery_layer_points(
+    component: &VolumeCandidateComponent,
+    seed_points: &mut Vec<[f64; 3]>,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    options: TetCandidateOptions,
+    tolerance: MeshingTolerance,
+) -> Result<(), TetCandidateError> {
+    if options.dense_recovery_layer_count < 2 {
+        return Ok(());
+    }
+    let Some(axis) = sweep_axis(component, surface_nodes, surface_elements, tolerance)? else {
+        return Ok(());
+    };
+    let mut lower_node_by_key = BTreeMap::<[i64; 2], [f64; 3]>::new();
+    let mut upper_node_by_key = BTreeMap::<[i64; 2], [f64; 3]>::new();
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let node_points = element_node_points(element, surface_nodes)?;
+        if points_on_axis_plane(&node_points, axis, component.bounds_min_m[axis], tolerance) {
+            for point in node_points {
+                lower_node_by_key
+                    .entry(projected_key(point, axis, tolerance))
+                    .or_insert(point);
+            }
+        } else if points_on_axis_plane(&node_points, axis, component.bounds_max_m[axis], tolerance)
+        {
+            for point in node_points {
+                upper_node_by_key
+                    .entry(projected_key(point, axis, tolerance))
+                    .or_insert(point);
+            }
+        }
+    }
+    let max_extra_points = options
+        .max_dense_recovery_nodes
+        .saturating_sub(component.node_ids.len())
+        .saturating_sub(seed_points.len());
+    if max_extra_points == 0 {
+        return Ok(());
+    }
+    let mut inserted = 0_usize;
+    for (key, lower_point) in lower_node_by_key {
+        let Some(upper_point) = upper_node_by_key.get(&key).copied() else {
+            continue;
+        };
+        for layer in 1..options.dense_recovery_layer_count {
+            if inserted >= max_extra_points {
+                return Ok(());
+            }
+            let point = sweep_layer_point(lower_point, upper_point, layer, options);
+            if contains_point(seed_points, point, tolerance) {
+                continue;
+            }
+            seed_points.push(point);
+            inserted += 1;
+        }
+    }
+    Ok(())
+}
+
+fn sweep_column_layers(
+    lower_ids: [u32; 3],
+    upper_ids: [u32; 3],
+    lower_points: [[f64; 3]; 3],
+    upper_points: [[f64; 3]; 3],
+    seed_nodes_by_point: &BTreeMap<[u64; 3], (u32, [f64; 3])>,
+    options: TetCandidateOptions,
+) -> Option<(Vec<[u32; 3]>, Vec<[[f64; 3]; 3]>)> {
+    let layer_count = options.dense_recovery_layer_count.max(1);
+    let mut layer_node_ids = Vec::<[u32; 3]>::with_capacity(layer_count + 1);
+    let mut layer_points = Vec::<[[f64; 3]; 3]>::with_capacity(layer_count + 1);
+    layer_node_ids.push(lower_ids);
+    layer_points.push(lower_points);
+    for layer in 1..layer_count {
+        let mut ids = [0_u32; 3];
+        let mut points = [[0.0; 3]; 3];
+        for corner in 0..3 {
+            let point =
+                sweep_layer_point(lower_points[corner], upper_points[corner], layer, options);
+            let (node_id, coordinates_m) = seed_nodes_by_point.get(&point_key(point)).copied()?;
+            ids[corner] = node_id;
+            points[corner] = coordinates_m;
+        }
+        layer_node_ids.push(ids);
+        layer_points.push(points);
+    }
+    layer_node_ids.push(upper_ids);
+    layer_points.push(upper_points);
+    Some((layer_node_ids, layer_points))
+}
+
+fn sweep_layer_point(
+    lower_point: [f64; 3],
+    upper_point: [f64; 3],
+    layer: usize,
+    options: TetCandidateOptions,
+) -> [f64; 3] {
+    let t = layer as f64 / options.dense_recovery_layer_count.max(1) as f64;
+    [
+        lower_point[0] * (1.0 - t) + upper_point[0] * t,
+        lower_point[1] * (1.0 - t) + upper_point[1] * t,
+        lower_point[2] * (1.0 - t) + upper_point[2] * t,
+    ]
 }
 
 fn append_consistent_sweep_frustum_tets(
@@ -1132,20 +1269,73 @@ fn sweep_column_order(node_ids: [u32; 3]) -> [usize; 3] {
     order
 }
 
-fn thin_sweep_axis(
+fn sweep_axis(
     component: &VolumeCandidateComponent,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
     tolerance: MeshingTolerance,
-) -> Option<usize> {
-    let spans = [
-        component.bounds_max_m[0] - component.bounds_min_m[0],
-        component.bounds_max_m[1] - component.bounds_min_m[1],
-        component.bounds_max_m[2] - component.bounds_min_m[2],
-    ];
-    let min_axis = (0..3)
-        .filter(|axis| spans[*axis].is_finite() && spans[*axis] > tolerance.absolute_m)
-        .min_by(|left, right| spans[*left].total_cmp(&spans[*right]))?;
-    let max_span = spans.iter().copied().fold(0.0_f64, f64::max);
-    (max_span / spans[min_axis] >= 6.0).then_some(min_axis)
+) -> Result<Option<usize>, TetCandidateError> {
+    let mut best = None::<(usize, usize)>;
+    for axis in 0..3 {
+        let cap =
+            sweep_axis_cap_match(component, surface_nodes, surface_elements, axis, tolerance)?;
+        if cap.is_match && best.is_none_or(|(_, count)| cap.lower_element_count > count) {
+            best = Some((axis, cap.lower_element_count));
+        }
+    }
+    Ok(best.map(|(axis, _)| axis))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SweepAxisCapMatch {
+    is_match: bool,
+    lower_element_count: usize,
+}
+
+fn sweep_axis_cap_match(
+    component: &VolumeCandidateComponent,
+    surface_nodes: &BTreeMap<u32, [f64; 3]>,
+    surface_elements: &BTreeMap<u32, &SurfaceElement>,
+    axis: usize,
+    tolerance: MeshingTolerance,
+) -> Result<SweepAxisCapMatch, TetCandidateError> {
+    let span_m = component.bounds_max_m[axis] - component.bounds_min_m[axis];
+    if !span_m.is_finite() || span_m <= tolerance.absolute_m {
+        return Ok(SweepAxisCapMatch {
+            is_match: false,
+            lower_element_count: 0,
+        });
+    }
+
+    let mut lower_keys = BTreeSet::<[i64; 2]>::new();
+    let mut upper_keys = BTreeSet::<[i64; 2]>::new();
+    let mut lower_element_count = 0_usize;
+    let mut upper_element_count = 0_usize;
+    for element_id in &component.surface_element_ids {
+        let element =
+            surface_elements
+                .get(element_id)
+                .ok_or(TetCandidateError::MissingSurfaceElement {
+                    element_id: *element_id,
+                })?;
+        let node_points = element_node_points(element, surface_nodes)?;
+        if points_on_axis_plane(&node_points, axis, component.bounds_min_m[axis], tolerance) {
+            lower_element_count += 1;
+            lower_keys.extend(node_points.map(|point| projected_key(point, axis, tolerance)));
+        } else if points_on_axis_plane(&node_points, axis, component.bounds_max_m[axis], tolerance)
+        {
+            upper_element_count += 1;
+            upper_keys.extend(node_points.map(|point| projected_key(point, axis, tolerance)));
+        }
+    }
+
+    Ok(SweepAxisCapMatch {
+        is_match: lower_element_count > 0
+            && upper_element_count > 0
+            && lower_keys.len() >= 3
+            && lower_keys == upper_keys,
+        lower_element_count,
+    })
 }
 
 fn element_node_points(
@@ -7625,11 +7815,16 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         let tolerance =
             MeshingTolerance::from_bounds(component.bounds_min_m, component.bounds_max_m);
-        let options = TetCandidateOptions::default();
+        let options = TetCandidateOptions {
+            dense_recovery_layer_count: 1,
+            ..TetCandidateOptions::default()
+        };
         let mut tets = Vec::new();
 
-        let status = append_thin_sweep_tets(
+        let status = append_sweep_tets(
             component,
+            &[],
+            &[],
             &surface_nodes,
             &surface_elements,
             options,
