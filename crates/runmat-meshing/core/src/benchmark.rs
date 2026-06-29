@@ -12,9 +12,10 @@ use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets,
         constrained_cavity_from_selected_tets_with_anchor_trim,
-        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
-        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
-        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
+        diagnostic_boundary_node_completion, evaluate_constrained_cavity_refill_candidates,
+        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
+        ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3418,6 +3419,12 @@ mod tests {
         let mut trimmed_seed_star_refill_success_count = 0_usize;
         let mut trimmed_seed_star_boundary_face_histogram = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_refill_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_reason = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_missing_faces = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_completion_cap_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_completion_outside_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_completion_duplicate_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3523,6 +3530,32 @@ mod tests {
                                     *trimmed_seed_star_refill_rejected_by_reason
                                         .entry(reason)
                                         .or_default() += count;
+                                }
+                                if let Ok(diagnostic) = diagnostic_boundary_node_completion(
+                                    &trimmed_cavity,
+                                    &boundary_nodes,
+                                    refill_options,
+                                ) {
+                                    *trimmed_seed_star_completion_reason
+                                        .entry(diagnostic.reason.to_string())
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_completion_missing_faces
+                                        .entry(diagnostic.missing_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_completion_cap_candidates
+                                        .entry(diagnostic.cap_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_completion_outside_candidates
+                                        .entry(diagnostic.outside_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_completion_duplicate_candidates
+                                        .entry(diagnostic.duplicate_candidate_count)
+                                        .or_default() += 1;
+                                    for (reason, count) in diagnostic.rejected_by_reason {
+                                        *trimmed_seed_star_completion_rejected_by_reason
+                                            .entry(reason.to_string())
+                                            .or_default() += count;
+                                    }
                                 }
                             }
                         }
@@ -3667,6 +3700,15 @@ mod tests {
             trimmed_seed_star_refill_success_count,
             trimmed_seed_star_boundary_face_histogram,
             trimmed_seed_star_refill_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} rejected_by_reason={:?}",
+            trimmed_seed_star_completion_reason,
+            trimmed_seed_star_completion_missing_faces,
+            trimmed_seed_star_completion_cap_candidates,
+            trimmed_seed_star_completion_outside_candidates,
+            trimmed_seed_star_completion_duplicate_candidates,
+            trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",

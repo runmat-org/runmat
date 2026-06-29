@@ -84,6 +84,17 @@ pub struct ConstrainedCavityRefill {
     pub total_volume_m3: f64,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BoundaryNodeCompletionDiagnostic {
+    pub reason: &'static str,
+    pub missing_face_count: usize,
+    pub cap_candidate_count: usize,
+    pub outside_candidate_count: usize,
+    pub duplicate_candidate_count: usize,
+    pub rejected_by_reason: BTreeMap<&'static str, usize>,
+}
+
 const MAX_ANCHOR_TRIM_STATES: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1036,6 +1047,168 @@ fn boundary_node_refill_validation_reason(
         "boundary_region_mismatch" => "boundary_node_boundary_region_mismatch",
         "invalid_cavity" => "boundary_node_invalid_cavity",
         other => other,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_node_completion(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<BoundaryNodeCompletionDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let points = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id,
+            coordinates_m: boundary_node_map[&node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            refill_tets.push(tet);
+        }
+    }
+    let mut aggregate = BoundaryNodeCompletionDiagnostic {
+        reason: "boundary_node_completion_no_missing_faces",
+        missing_face_count: 0,
+        cap_candidate_count: 0,
+        outside_candidate_count: 0,
+        duplicate_candidate_count: 0,
+        rejected_by_reason: BTreeMap::new(),
+    };
+    loop {
+        let missing_faces = missing_refill_boundary_faces(cavity, &refill_tets)
+            .map_err(ConstrainedCavityRefillError::Validation)?;
+        let Some(missing_face) = missing_faces.first().copied() else {
+            break;
+        };
+        aggregate.missing_face_count = missing_faces.len();
+        let diagnostic = diagnostic_boundary_face_completion(
+            missing_face,
+            cavity,
+            &boundary_node_map,
+            &refill_tets,
+            &boundary_triangles,
+            options,
+            missing_faces.len(),
+        );
+        aggregate.cap_candidate_count += diagnostic.cap_candidate_count;
+        aggregate.outside_candidate_count += diagnostic.outside_candidate_count;
+        aggregate.duplicate_candidate_count += diagnostic.duplicate_candidate_count;
+        for (reason, count) in diagnostic.rejected_by_reason {
+            *aggregate.rejected_by_reason.entry(reason).or_default() += count;
+        }
+        let Some(tet) = best_boundary_face_completion_tet(
+            missing_face,
+            cavity,
+            &boundary_node_map,
+            &boundary_triangles,
+            options,
+        ) else {
+            aggregate.reason = "boundary_node_completion_no_candidate";
+            return Ok(aggregate);
+        };
+        if refill_tets
+            .iter()
+            .any(|existing| sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids))
+        {
+            aggregate.reason = "boundary_node_completion_duplicate_tet";
+            return Ok(aggregate);
+        }
+        refill_tets.push(tet);
+    }
+    if aggregate.missing_face_count == 0 {
+        return Ok(BoundaryNodeCompletionDiagnostic {
+            reason: "boundary_node_completion_no_missing_faces",
+            missing_face_count: 0,
+            cap_candidate_count: 0,
+            outside_candidate_count: 0,
+            duplicate_candidate_count: 0,
+            rejected_by_reason: BTreeMap::new(),
+        });
+    }
+    aggregate.reason = "boundary_node_completion_completed";
+    Ok(aggregate)
+}
+
+#[cfg(test)]
+fn diagnostic_boundary_face_completion(
+    face: [u32; 3],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    refill_tets: &[ConstrainedCavityRefillTet],
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+    missing_face_count: usize,
+) -> BoundaryNodeCompletionDiagnostic {
+    let mut cap_candidate_count = 0_usize;
+    let mut outside_candidate_count = 0_usize;
+    let mut duplicate_candidate_count = 0_usize;
+    let mut rejected_by_reason = BTreeMap::<&'static str, usize>::new();
+    let mut saw_non_duplicate = false;
+    for node_id in cavity_boundary_node_ids(cavity) {
+        if face.contains(&node_id) {
+            continue;
+        }
+        let node_ids = [face[0], face[1], face[2], node_id];
+        let points = node_ids.map(|id| boundary_nodes[&id]);
+        if point_in_closed_triangle_surface(
+            tet_centroid(points),
+            boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            outside_candidate_count += 1;
+            continue;
+        }
+        match raw_refill_tet_with_rejection_reason(node_ids, points, options) {
+            Ok(tet) => {
+                cap_candidate_count += 1;
+                if refill_tets.iter().any(|existing| {
+                    sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+                }) {
+                    duplicate_candidate_count += 1;
+                } else {
+                    saw_non_duplicate = true;
+                }
+            }
+            Err(reason) => {
+                *rejected_by_reason
+                    .entry(boundary_node_refill_rejection_reason(reason))
+                    .or_default() += 1;
+            }
+        }
+    }
+    let reason = if saw_non_duplicate {
+        "boundary_node_completion_has_candidate"
+    } else if duplicate_candidate_count > 0 {
+        "boundary_node_completion_duplicate_tet"
+    } else {
+        "boundary_node_completion_no_candidate"
+    };
+    BoundaryNodeCompletionDiagnostic {
+        reason,
+        missing_face_count,
+        cap_candidate_count,
+        outside_candidate_count,
+        duplicate_candidate_count,
+        rejected_by_reason,
     }
 }
 
@@ -2007,6 +2180,28 @@ mod tests {
         .expect_err("strict quality should reject every cap tet");
 
         assert_eq!(rejected, "boundary_node_completion_no_candidate");
+    }
+
+    #[test]
+    fn boundary_node_completion_diagnostic_classifies_no_cap_candidate() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+
+        let diagnostic = diagnostic_boundary_node_completion(
+            &cavity,
+            &nodes,
+            ConstrainedCavityRefillOptions {
+                min_scaled_jacobian: 0.95,
+                volume_relative_tolerance: 1.0e-12,
+                ..ConstrainedCavityRefillOptions::default()
+            },
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(diagnostic.reason, "boundary_node_completion_no_candidate");
+        assert!(diagnostic.missing_face_count > 0);
+        assert_eq!(diagnostic.cap_candidate_count, 0);
+        assert!(!diagnostic.rejected_by_reason.is_empty());
     }
 
     #[test]
