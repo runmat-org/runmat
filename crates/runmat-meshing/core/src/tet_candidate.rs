@@ -5676,6 +5676,315 @@ pub(crate) fn diagnostic_small_cavity_boundary_mismatch_shapes(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_exact_cover_rejection_reasons(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<(&'static str, &'static str), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_exact_cover_rejection_reason(
+            &one_ring,
+            tets,
+            node_points,
+            options,
+            "one_ring",
+        )?,
+        diagnostic_face_cavity_exact_cover_rejection_reason(
+            &face_closure,
+            tets,
+            node_points,
+            options,
+            "face_closure",
+        )?,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_exact_cover_rejection_reason(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+) -> Result<&'static str, TetCandidateError> {
+    if adjacent.len() < 3 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_too_small",
+            _ => "face_closure_exact_cover_too_small",
+        });
+    }
+    let Some((boundary_faces, boundary_nodes, original_volume, reference)) =
+        diagnostic_face_cavity_boundary_data(adjacent, tets)
+    else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_component_mismatch",
+            _ => "face_closure_exact_cover_component_mismatch",
+        });
+    };
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 8 || boundary_faces.len() > 16 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_over_limit",
+            _ => "face_closure_exact_cover_over_limit",
+        });
+    }
+    let Some(candidates) = exhaustive_boundary_cover_candidates(
+        reference,
+        &boundary_faces,
+        &boundary_nodes,
+        node_points,
+        options,
+    )?
+    else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_no_raw_candidates",
+            _ => "face_closure_exact_cover_no_raw_candidates",
+        });
+    };
+    let Some(cover) = select_boundary_exact_cover(&candidates, &boundary_faces, original_volume)
+    else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_not_found",
+            _ => "face_closure_exact_cover_not_found",
+        });
+    };
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let candidate_below_count =
+        count_exact_quality_violations(cover.iter(), options.min_scaled_jacobian);
+    let candidate_min_exact = min_exact_scaled_jacobian(cover.iter());
+    if cavity_reconnection_improves_quality(
+        candidate_below_count,
+        candidate_min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_reconnectable",
+            _ => "face_closure_exact_cover_reconnectable",
+        })
+    } else {
+        Ok(match prefix {
+            "one_ring" => "one_ring_exact_cover_no_improvement",
+            _ => "face_closure_exact_cover_no_improvement",
+        })
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_boundary_data<'a>(
+    adjacent: &[usize],
+    tets: &'a [TetCandidate],
+) -> Option<(BTreeSet<[u32; 3]>, BTreeSet<u32>, f64, &'a TetCandidate)> {
+    let reference = adjacent.first().map(|index| &tets[*index])?;
+    let mut original_volume = 0.0_f64;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return None;
+        }
+        original_volume += tet.volume_m3;
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    Some((boundary_faces, boundary_nodes, original_volume, reference))
+}
+
+#[cfg(test)]
+fn exhaustive_boundary_cover_candidates(
+    reference: &TetCandidate,
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    boundary_nodes: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let node_ids = boundary_nodes.iter().copied().collect::<Vec<_>>();
+    let mut candidates = Vec::<TetCandidate>::new();
+    for first in 0..node_ids.len() {
+        for second in (first + 1)..node_ids.len() {
+            for third in (second + 1)..node_ids.len() {
+                for fourth in (third + 1)..node_ids.len() {
+                    let tet_node_ids = [
+                        node_ids[first],
+                        node_ids[second],
+                        node_ids[third],
+                        node_ids[fourth],
+                    ];
+                    if !tet_node_faces(tet_node_ids)
+                        .map(sorted_node_face)
+                        .iter()
+                        .any(|face| boundary_faces.contains(face))
+                    {
+                        continue;
+                    }
+                    let points = [
+                        *node_points.get(&tet_node_ids[0]).ok_or(
+                            TetCandidateError::MissingSurfaceNode {
+                                node_id: tet_node_ids[0],
+                            },
+                        )?,
+                        *node_points.get(&tet_node_ids[1]).ok_or(
+                            TetCandidateError::MissingSurfaceNode {
+                                node_id: tet_node_ids[1],
+                            },
+                        )?,
+                        *node_points.get(&tet_node_ids[2]).ok_or(
+                            TetCandidateError::MissingSurfaceNode {
+                                node_id: tet_node_ids[2],
+                            },
+                        )?,
+                        *node_points.get(&tet_node_ids[3]).ok_or(
+                            TetCandidateError::MissingSurfaceNode {
+                                node_id: tet_node_ids[3],
+                            },
+                        )?,
+                    ];
+                    let Some(candidate) = raw_candidate_tet(
+                        reference.component_id,
+                        reference.source_surface_element_id,
+                        &reference.region_ids,
+                        tet_node_ids,
+                        points,
+                        options,
+                    ) else {
+                        continue;
+                    };
+                    candidates.push(candidate);
+                }
+            }
+        }
+    }
+    Ok((!candidates.is_empty() && candidates.len() <= 80).then_some(candidates))
+}
+
+#[cfg(test)]
+fn select_boundary_exact_cover(
+    candidates: &[TetCandidate],
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    original_volume: f64,
+) -> Option<Vec<TetCandidate>> {
+    let candidate_faces = candidates
+        .iter()
+        .map(|candidate| tet_node_faces(candidate.node_ids).map(sorted_node_face))
+        .collect::<Vec<_>>();
+    let mut selected = Vec::<usize>::new();
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let tolerance = original_volume.max(1.0e-18) * 1.0e-9;
+    let mut attempts = 0_usize;
+    let selected_indices = search_boundary_exact_cover(
+        candidates,
+        &candidate_faces,
+        boundary_faces,
+        original_volume,
+        tolerance,
+        0.0,
+        &mut face_counts,
+        &mut selected,
+        &mut attempts,
+    )?;
+    Some(
+        selected_indices
+            .into_iter()
+            .map(|index| candidates[index].clone())
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn search_boundary_exact_cover(
+    candidates: &[TetCandidate],
+    candidate_faces: &[[[u32; 3]; 4]],
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    target_volume: f64,
+    tolerance: f64,
+    current_volume: f64,
+    face_counts: &mut BTreeMap<[u32; 3], usize>,
+    selected: &mut Vec<usize>,
+    attempts: &mut usize,
+) -> Option<Vec<usize>> {
+    *attempts += 1;
+    if *attempts > 5_000 || current_volume > target_volume + tolerance {
+        return None;
+    }
+    let Some(target_face) = boundary_faces
+        .iter()
+        .find(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
+        .copied()
+    else {
+        let boundary_ok = boundary_faces
+            .iter()
+            .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+        let interior_ok = face_counts
+            .iter()
+            .all(|(face, count)| boundary_faces.contains(face) || *count == 2);
+        if boundary_ok && interior_ok && (current_volume - target_volume).abs() <= tolerance {
+            return Some(selected.clone());
+        }
+        return None;
+    };
+    for candidate_index in 0..candidates.len() {
+        if selected.contains(&candidate_index)
+            || !candidate_faces[candidate_index].contains(&target_face)
+            || !candidate_faces[candidate_index].iter().all(|face| {
+                let count = face_counts.get(face).copied().unwrap_or(0);
+                if boundary_faces.contains(face) {
+                    count == 0
+                } else {
+                    count < 2
+                }
+            })
+        {
+            continue;
+        }
+        for face in candidate_faces[candidate_index] {
+            *face_counts.entry(face).or_default() += 1;
+        }
+        selected.push(candidate_index);
+        if let Some(result) = search_boundary_exact_cover(
+            candidates,
+            candidate_faces,
+            boundary_faces,
+            target_volume,
+            tolerance,
+            current_volume + candidates[candidate_index].volume_m3,
+            face_counts,
+            selected,
+            attempts,
+        ) {
+            return Some(result);
+        }
+        selected.pop();
+        for face in candidate_faces[candidate_index] {
+            if let Some(count) = face_counts.get_mut(&face) {
+                *count -= 1;
+                if *count == 0 {
+                    face_counts.remove(&face);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
 fn diagnostic_face_cavity_boundary_mismatch_shape(
     adjacent: &[usize],
     tets: &[TetCandidate],
