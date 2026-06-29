@@ -164,7 +164,11 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_rejected_requested_refinement_point_count: usize,
     #[serde(default)]
+    pub tet_requested_refinement_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub tet_dropped_requested_refinement_point_count: usize,
+    #[serde(default)]
+    pub tet_requested_refinement_dropped_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
     pub tet_max_radius_edge_ratio: f64,
     #[serde(default)]
@@ -302,7 +306,9 @@ impl Default for MeshBackendSummary {
             tet_accepted_requested_refinement_point_count: 0,
             tet_accepted_requested_refinement_surrogate_point_count: 0,
             tet_rejected_requested_refinement_point_count: 0,
+            tet_requested_refinement_rejected_by_reason: BTreeMap::new(),
             tet_dropped_requested_refinement_point_count: 0,
+            tet_requested_refinement_dropped_by_reason: BTreeMap::new(),
             tet_max_radius_edge_ratio: 0.0,
             tet_sizing_violation_count: 0,
             tet_min_exact_scaled_jacobian: 1.0,

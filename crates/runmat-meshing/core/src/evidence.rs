@@ -151,7 +151,11 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub rejected_requested_tet_refinement_point_count: usize,
     #[serde(default)]
+    pub requested_tet_refinement_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub dropped_requested_tet_refinement_point_count: usize,
+    #[serde(default)]
+    pub requested_tet_refinement_dropped_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
     pub requested_tet_refinement_acceptance_ratio: Option<f64>,
     #[serde(default)]
@@ -571,9 +575,17 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         rejected_requested_tet_refinement_point_count: mesh
             .backend
             .tet_rejected_requested_refinement_point_count,
+        requested_tet_refinement_rejected_by_reason: mesh
+            .backend
+            .tet_requested_refinement_rejected_by_reason
+            .clone(),
         dropped_requested_tet_refinement_point_count: mesh
             .backend
             .tet_dropped_requested_refinement_point_count,
+        requested_tet_refinement_dropped_by_reason: mesh
+            .backend
+            .tet_requested_refinement_dropped_by_reason
+            .clone(),
         requested_tet_refinement_acceptance_ratio: if mesh
             .backend
             .tet_requested_refinement_point_count
@@ -1234,7 +1246,15 @@ mod tests {
                 tet_accepted_requested_refinement_point_count: 3,
                 tet_accepted_requested_refinement_surrogate_point_count: 2,
                 tet_rejected_requested_refinement_point_count: 1,
+                tet_requested_refinement_rejected_by_reason: BTreeMap::from([(
+                    "quality_or_recovery".to_string(),
+                    1,
+                )]),
                 tet_dropped_requested_refinement_point_count: 2,
+                tet_requested_refinement_dropped_by_reason: BTreeMap::from([(
+                    "not_retained_after_repair".to_string(),
+                    2,
+                )]),
                 tet_optimization_pass_count: 1,
                 tet_smoothed_point_count: 2,
                 tet_sliver_candidate_count: 1,
@@ -1370,8 +1390,22 @@ mod tests {
             1
         );
         assert_eq!(
+            evidence
+                .sizing
+                .requested_tet_refinement_rejected_by_reason
+                .get("quality_or_recovery"),
+            Some(&1)
+        );
+        assert_eq!(
             evidence.sizing.dropped_requested_tet_refinement_point_count,
             2
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .requested_tet_refinement_dropped_by_reason
+                .get("not_retained_after_repair"),
+            Some(&2)
         );
         assert_eq!(
             evidence

@@ -124,7 +124,11 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub rejected_requested_refinement_point_count: usize,
     #[serde(default)]
+    pub requested_refinement_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub dropped_requested_refinement_point_count: usize,
+    #[serde(default)]
+    pub requested_refinement_dropped_by_reason: BTreeMap<String, usize>,
     pub max_radius_edge_ratio: f64,
     pub sizing_violation_count: usize,
     pub min_exact_scaled_jacobian: f64,
@@ -275,10 +279,12 @@ pub fn form_tet_candidates(
     let mut fan_fallback_component_count = 0_usize;
     let mut refinement_pass_count = 0_usize;
     let mut refinement_point_count = 0_usize;
-    let mut requested_refinement_point_count = 0_usize;
+    let requested_refinement_point_count = options.requested_refinement_point_count;
     let mut accepted_requested_refinement_point_count = 0_usize;
     let mut accepted_requested_refinement_surrogate_point_count = 0_usize;
     let mut rejected_requested_refinement_point_count = 0_usize;
+    let mut attempted_requested_refinement_ids = BTreeSet::<usize>::new();
+    let mut duplicate_requested_refinement_ids = BTreeSet::<usize>::new();
     let mut sizing_violation_count = 0_usize;
     let mut optimization_pass_count = 0_usize;
     let mut smoothed_point_count = 0_usize;
@@ -307,11 +313,14 @@ pub fn form_tet_candidates(
         )?;
         refinement_pass_count += refinement.pass_count;
         refinement_point_count += refinement.inserted_point_count;
-        requested_refinement_point_count += refinement.requested_point_count;
         accepted_requested_refinement_point_count += refinement.accepted_requested_point_count;
         accepted_requested_refinement_surrogate_point_count +=
             refinement.accepted_requested_surrogate_point_count;
         rejected_requested_refinement_point_count += refinement.rejected_requested_point_count;
+        attempted_requested_refinement_ids
+            .extend(refinement.attempted_requested_ids.iter().copied());
+        duplicate_requested_refinement_ids
+            .extend(refinement.duplicate_requested_ids.iter().copied());
         sizing_violation_count += refinement.sizing_violation_count;
         if dense_component_for_global_insertion(component, component_seed_points.len(), options) {
             add_dense_recovery_layer_points(
@@ -426,6 +435,10 @@ pub fn form_tet_candidates(
         .collect::<BTreeSet<_>>();
     let accepted_requested_refinement_candidate_count =
         accepted_requested_refinement_seed_points.len();
+    let accepted_requested_refinement_ids = accepted_requested_refinement_seed_points
+        .iter()
+        .map(|(_, _, requested_id)| *requested_id)
+        .collect::<BTreeSet<_>>();
     let retained_requested_refinement = retained_requested_refinement_points(
         accepted_requested_refinement_seed_points,
         &retained_node_ids,
@@ -443,6 +456,18 @@ pub fn form_tet_candidates(
         );
     let dropped_requested_refinement_point_count =
         dropped_requested_refinement_sample_indices.len();
+    let requested_refinement_rejected_by_reason = requested_refinement_rejection_reasons(
+        options.requested_refinement_point_count,
+        &attempted_requested_refinement_ids,
+        &duplicate_requested_refinement_ids,
+        &accepted_requested_refinement_ids,
+    );
+    rejected_requested_refinement_point_count = requested_refinement_rejected_by_reason
+        .values()
+        .copied()
+        .sum();
+    let requested_refinement_dropped_by_reason =
+        requested_refinement_drop_reasons(&dropped_requested_refinement_sample_indices);
     let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum();
     let expected_volume_m3 = volume_candidates.total_volume_m3;
     let total_candidate_volume_ratio = if expected_volume_m3 > f64::EPSILON {
@@ -482,7 +507,9 @@ pub fn form_tet_candidates(
             accepted_requested_refinement_point_count,
             accepted_requested_refinement_surrogate_point_count,
             rejected_requested_refinement_point_count,
+            requested_refinement_rejected_by_reason,
             dropped_requested_refinement_point_count,
+            requested_refinement_dropped_by_reason,
             max_radius_edge_ratio: quality_summary.max_radius_edge_ratio,
             sizing_violation_count,
             min_exact_scaled_jacobian: quality_summary.min_exact_scaled_jacobian,
@@ -579,6 +606,40 @@ fn retained_requested_refinement_surrogate_count(
                     > 1.0e-24
         })
         .count()
+}
+
+fn requested_refinement_rejection_reasons(
+    requested_count: usize,
+    attempted_ids: &BTreeSet<usize>,
+    duplicate_ids: &BTreeSet<usize>,
+    accepted_ids: &BTreeSet<usize>,
+) -> BTreeMap<String, usize> {
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    for requested_id in 0..requested_count {
+        if accepted_ids.contains(&requested_id) {
+            continue;
+        }
+        let reason = if attempted_ids.contains(&requested_id) {
+            "quality_or_recovery"
+        } else if duplicate_ids.contains(&requested_id) {
+            "already_present"
+        } else {
+            "outside_volume"
+        };
+        *by_reason.entry(reason.to_string()).or_default() += 1;
+    }
+    by_reason
+}
+
+fn requested_refinement_drop_reasons(dropped_sample_indices: &[usize]) -> BTreeMap<String, usize> {
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    if !dropped_sample_indices.is_empty() {
+        by_reason.insert(
+            "not_retained_after_repair".to_string(),
+            dropped_sample_indices.len(),
+        );
+    }
+    by_reason
 }
 
 fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateError> {
@@ -1567,6 +1628,8 @@ struct SeedRefinementSummary {
     accepted_requested_point_count: usize,
     accepted_requested_surrogate_point_count: usize,
     rejected_requested_point_count: usize,
+    attempted_requested_ids: BTreeSet<usize>,
+    duplicate_requested_ids: BTreeSet<usize>,
     accepted_requested_points: Vec<AcceptedRequestedRefinementPoint>,
     sizing_violation_count: usize,
 }
@@ -1601,6 +1664,8 @@ fn refine_component_seed_points(
             accepted_requested_point_count: 0,
             accepted_requested_surrogate_point_count: 0,
             rejected_requested_point_count: 0,
+            attempted_requested_ids: BTreeSet::new(),
+            duplicate_requested_ids: BTreeSet::new(),
             accepted_requested_points: Vec::new(),
             sizing_violation_count: 0,
         });
@@ -1616,6 +1681,7 @@ fn refine_component_seed_points(
     let mut accepted_requested_points = Vec::<AcceptedRequestedRefinementPoint>::new();
     let mut accepted_requested_ids = BTreeSet::<usize>::new();
     let mut attempted_requested_ids = BTreeSet::<usize>::new();
+    let mut duplicate_requested_ids = BTreeSet::<usize>::new();
     let mut sizing_violation_count = 0_usize;
     for _ in 0..options.max_refinement_passes {
         if seed_points.len() >= options.max_interior_seed_points {
@@ -1653,6 +1719,7 @@ fn refine_component_seed_points(
         )?;
         requested_point_count += refinement_points.requested_point_count;
         attempted_requested_ids.extend(refinement_points.requested_ids.iter().copied());
+        duplicate_requested_ids.extend(refinement_points.duplicate_requested_ids.iter().copied());
         sizing_violation_count += refinement_points.sizing_violation_count;
         if refinement_points.points.is_empty() {
             break;
@@ -1739,6 +1806,8 @@ fn refine_component_seed_points(
             &attempted_requested_ids,
             &accepted_requested_ids,
         ),
+        attempted_requested_ids,
+        duplicate_requested_ids,
         accepted_requested_points,
         sizing_violation_count,
     })
@@ -1763,6 +1832,7 @@ struct RefinementPointCandidate {
 struct RefinementPointSet {
     points: Vec<RefinementPointCandidate>,
     requested_ids: Vec<usize>,
+    duplicate_requested_ids: Vec<usize>,
     requested_point_count: usize,
     sizing_violation_count: usize,
 }
@@ -1784,6 +1854,7 @@ fn refinement_points_for_tets(
         return Ok(RefinementPointSet {
             points: Vec::new(),
             requested_ids: Vec::new(),
+            duplicate_requested_ids: Vec::new(),
             requested_point_count: 0,
             sizing_violation_count: 0,
         });
@@ -1791,6 +1862,7 @@ fn refinement_points_for_tets(
     let all_nodes = candidate_node_coordinates(surface_nodes, seed_node_ids, seed_points);
     let mut ranked = Vec::<RankedRefinementPoint>::new();
     let mut requested_ids = Vec::<usize>::new();
+    let mut duplicate_requested_ids = Vec::<usize>::new();
     let mut requested_point_count = 0_usize;
     let mut sizing_violation_count = 0_usize;
     for (requested_id, point) in options
@@ -1802,7 +1874,11 @@ fn refinement_points_for_tets(
         if accepted_requested_ids.contains(&requested_id) {
             continue;
         }
-        if classifier.contains_point(*point) && !contains_point(seed_points, *point, tolerance) {
+        if classifier.contains_point(*point) && contains_point(seed_points, *point, tolerance) {
+            duplicate_requested_ids.push(requested_id);
+            continue;
+        }
+        if classifier.contains_point(*point) {
             for candidate_point in requested_refinement_candidate_points(
                 *point,
                 seed_points,
@@ -1899,6 +1975,7 @@ fn refinement_points_for_tets(
     Ok(RefinementPointSet {
         points,
         requested_ids,
+        duplicate_requested_ids,
         requested_point_count,
         sizing_violation_count,
     })
@@ -6397,6 +6474,10 @@ mod tests {
                 .rejected_requested_refinement_point_count,
             0
         );
+        assert!(candidates
+            .recovery
+            .requested_refinement_rejected_by_reason
+            .is_empty());
         assert_eq!(candidates.recovery.refinement_pass_count, 1);
         assert_eq!(candidates.recovery.refinement_point_count, 1);
         assert_eq!(candidates.recovery.fan_fallback_component_count, 0);
@@ -6442,6 +6523,10 @@ mod tests {
         );
         assert!(candidates
             .dropped_requested_refinement_sample_indices
+            .is_empty());
+        assert!(candidates
+            .recovery
+            .requested_refinement_dropped_by_reason
             .is_empty());
         assert!(
             distance_squared(
@@ -6588,6 +6673,10 @@ mod tests {
         assert_eq!(retained.points, vec![[0.1, 0.1, 0.1], [0.3, 0.3, 0.3]]);
         assert_eq!(retained.sample_indices, vec![0, 2]);
         assert_eq!(retained.dropped_sample_indices, vec![1]);
+        assert_eq!(
+            requested_refinement_drop_reasons(&retained.dropped_sample_indices),
+            BTreeMap::from([("not_retained_after_repair".to_string(), 1)])
+        );
     }
 
     #[test]
@@ -6598,6 +6687,22 @@ mod tests {
         assert_eq!(
             rejected_requested_refinement_point_count(&attempted, &accepted),
             2
+        );
+    }
+
+    #[test]
+    fn requested_refinement_rejection_reasons_are_actionable() {
+        let attempted = BTreeSet::from([0_usize, 1]);
+        let duplicate = BTreeSet::from([2_usize]);
+        let accepted = BTreeSet::from([1_usize]);
+
+        assert_eq!(
+            requested_refinement_rejection_reasons(4, &attempted, &duplicate, &accepted),
+            BTreeMap::from([
+                ("already_present".to_string(), 1),
+                ("outside_volume".to_string(), 1),
+                ("quality_or_recovery".to_string(), 1),
+            ])
         );
     }
 

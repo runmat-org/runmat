@@ -6740,7 +6740,13 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
     mesh.backend
         .tet_accepted_requested_refinement_surrogate_point_count = 2;
     mesh.backend.tet_rejected_requested_refinement_point_count = 1;
+    mesh.backend
+        .tet_requested_refinement_rejected_by_reason
+        .insert("quality_or_recovery".to_string(), 1);
     mesh.backend.tet_dropped_requested_refinement_point_count = 1;
+    mesh.backend
+        .tet_requested_refinement_dropped_by_reason
+        .insert("not_retained_after_repair".to_string(), 1);
     mesh.sizing.anisotropic_samples = vec![
         runmat_meshing_core::AnisotropicSizingSample {
             position_m: [0.2, 0.2, 0.2],
@@ -6798,7 +6804,16 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(1)
     );
     assert_eq!(
+        summary["requested_tet_refinement"]["rejected_by_reason"]["quality_or_recovery"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
         summary["requested_tet_refinement"]["dropped_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tet_refinement"]["dropped_by_reason"]["not_retained_after_repair"]
+            .as_u64(),
         Some(1)
     );
     assert_eq!(

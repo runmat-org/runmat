@@ -15341,7 +15341,9 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
             "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
             "accepted_surrogate_count": accepted_surrogate,
             "rejected_count": rejected_requested,
+            "rejected_by_reason": mesh.backend.tet_requested_refinement_rejected_by_reason.clone(),
             "dropped_count": dropped_requested,
+            "dropped_by_reason": mesh.backend.tet_requested_refinement_dropped_by_reason.clone(),
             "acceptance_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
                 Some(accepted_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
             } else {

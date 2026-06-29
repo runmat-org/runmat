@@ -1077,10 +1077,20 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .rejected_requested_refinement_point_count,
+        tet_requested_refinement_rejected_by_reason: preparation
+            .tet_candidates
+            .recovery
+            .requested_refinement_rejected_by_reason
+            .clone(),
         tet_dropped_requested_refinement_point_count: preparation
             .tet_candidates
             .recovery
             .dropped_requested_refinement_point_count,
+        tet_requested_refinement_dropped_by_reason: preparation
+            .tet_candidates
+            .recovery
+            .requested_refinement_dropped_by_reason
+            .clone(),
         tet_max_radius_edge_ratio: preparation.tet_candidates.recovery.max_radius_edge_ratio,
         tet_sizing_violation_count: preparation.tet_candidates.recovery.sizing_violation_count,
         tet_min_exact_scaled_jacobian: preparation
