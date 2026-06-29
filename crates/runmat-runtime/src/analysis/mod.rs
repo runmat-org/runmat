@@ -15148,20 +15148,22 @@ fn update_mesh_evidence_from_analysis_mesh_payload(
         .cloned()
         .map(serde_json::from_value::<runmat_meshing_core::MeshValidationEvidence>)
         .transpose()
-        .map_err(|err| format!("failed to decode mesh evidence validation policy: {err}"))?
-        .unwrap_or_else(|| {
-            runmat_meshing_core::build_mesh_evidence_artifact(
-                mesh,
-                &AnalysisMeshValidationOptions::default(),
-            )
-            .validation
-        });
-    evidence_payload["mesh_evidence"] = serde_json::to_value(
-        runmat_meshing_core::build_mesh_evidence_artifact_with_validation_evidence(
-            mesh, validation,
-        ),
-    )
-    .map_err(|err| format!("failed to encode mesh evidence payload: {err}"))?;
+        .map_err(|err| format!("failed to decode mesh evidence validation policy: {err}"))?;
+    let mesh_evidence = if let Some(validation) = validation {
+        runmat_meshing_core::build_mesh_evidence_artifact_with_validation_evidence(mesh, validation)
+    } else {
+        let validation_options =
+            analysis_mesh_validation_options_for_loaded_artifact(analysis_mesh_payload, mesh)
+                .map_err(|err| {
+                    format!("failed to decode analysis mesh validation policy: {err}")
+                })?;
+        if let Some(validation_value) = analysis_mesh_payload.get("mesh_validation_options") {
+            evidence_payload["mesh_validation_options"] = validation_value.clone();
+        }
+        runmat_meshing_core::build_mesh_evidence_artifact(mesh, &validation_options)
+    };
+    evidence_payload["mesh_evidence"] = serde_json::to_value(mesh_evidence)
+        .map_err(|err| format!("failed to encode mesh evidence payload: {err}"))?;
     let bytes = serde_json::to_vec_pretty(&evidence_payload)
         .map_err(|err| format!("failed to encode mesh evidence artifact: {err}"))?;
     atomic_write_bytes(&evidence_path, &bytes)

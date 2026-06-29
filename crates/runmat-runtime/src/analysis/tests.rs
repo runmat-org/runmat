@@ -5499,6 +5499,71 @@ fn loaded_analysis_mesh_artifact_enforces_persisted_required_regions() {
 }
 
 #[test]
+fn mesh_evidence_refresh_uses_persisted_validation_options() {
+    let root = temp_artifact_root("mesh-evidence-refresh-validation-policy");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_evidence": {
+                "schema_version": "mesh-evidence/v1"
+            }
+        }))
+        .expect("encode stale evidence"),
+    )
+    .expect("write stale evidence");
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
+    let payload = serde_json::json!({
+        "schema_version": "fea_study_analysis_mesh_artifact/v1",
+        "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+        "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+        },
+        "mesh": mesh,
+    });
+    let mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
+
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)
+        .expect("evidence refresh should succeed");
+
+    let refreshed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
+            .expect("parse refreshed evidence");
+    assert_eq!(
+        refreshed["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("persisted required boundary regions")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        refreshed["mesh_evidence"]["validation"]["validation_error_code"].as_str(),
+        Some("missing_required_boundary_region")
+    );
+    assert_eq!(
+        refreshed["mesh_evidence"]["validation"]["solve_ready"].as_bool(),
+        Some(false)
+    );
+    assert!(
+        refreshed["mesh_evidence"]["validation"]["validation_error_message"]
+            .as_str()
+            .expect("validation message")
+            .contains("tip")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn analysis_mesh_missing_evidence_rejects_direct_run() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("mesh-evidence-missing-rejects-direct-run");
