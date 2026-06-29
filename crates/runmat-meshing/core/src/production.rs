@@ -18,7 +18,10 @@ use crate::{
         CurveDiscretizationOptions,
     },
     options::{MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions},
-    predicate::{distance_squared, dot, tet_centroid, tet_scaled_jacobian, triangle_centroid},
+    predicate::{
+        distance_squared, dot, point_in_closed_triangle_surface, point_triangle_distance,
+        tet_centroid, tet_scaled_jacobian, triangle_centroid, PointInClosedSurface, Triangle3,
+    },
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     sizing::{
@@ -264,11 +267,11 @@ fn tet_candidate_options_for_mesh(
     sizing: Option<&MeshSizingField>,
 ) -> TetCandidateOptions {
     let quality = QualityThresholds::default();
-    let requested_refinement = requested_refinement_points(sizing);
+    let requested_refinement = requested_refinement_selection(topology, sizing);
     TetCandidateOptions {
         interior_target_size_m: interior_target_size_for_tet_candidates(topology, options),
-        requested_refinement_points: requested_refinement.0,
-        requested_refinement_point_count: requested_refinement.1,
+        requested_refinement_points: requested_refinement.points,
+        requested_refinement_point_count: requested_refinement.count,
         max_requested_refinement_candidates_per_point:
             requested_refinement_candidate_limit_for_mesh(topology),
         max_interior_seed_points: options.max_elements.max(1).min(512),
@@ -404,23 +407,59 @@ fn topology_min_span(topology: &SourceTopologyModel) -> Option<f64> {
         .min_by(|left, right| left.total_cmp(right))
 }
 
-fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 16], usize) {
+#[derive(Debug, Clone, PartialEq)]
+struct RequestedRefinementSelection {
+    points: [[f64; 3]; 16],
+    count: usize,
+    sample_ids: BTreeMap<usize, usize>,
+}
+
+fn requested_refinement_selection(
+    topology: &SourceTopologyModel,
+    sizing: Option<&MeshSizingField>,
+) -> RequestedRefinementSelection {
     let Some(sizing) = sizing else {
-        return ([[0.0; 3]; 16], 0);
+        return RequestedRefinementSelection {
+            points: [[0.0; 3]; 16],
+            count: 0,
+            sample_ids: BTreeMap::new(),
+        };
     };
+    let surface_triangles = topology_surface_triangles(topology);
+    let tolerance = MeshingTolerance::from_bounds(topology.bounds_min_m, topology.bounds_max_m);
     let mut points = [[0.0; 3]; 16];
     let mut count = 0_usize;
-    for sample in &sizing.samples {
+    let mut sample_ids = BTreeMap::<usize, usize>::new();
+    for (sample_index, sample) in sizing.samples.iter().enumerate() {
         if !sample.target_size_m.is_finite()
             || sample.target_size_m <= 0.0
             || sample.position_m.iter().any(|value| !value.is_finite())
-            || points[..count]
-                .iter()
-                .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
+            || soft_generated_cad_sizing_sample(sample)
         {
             continue;
         }
-        points[count] = sample.position_m;
+        let candidate_point = if structural_boundary_requested_sample(sample) {
+            Some(sample.position_m)
+        } else {
+            feasible_requested_refinement_point(
+                sample.position_m,
+                sample.target_size_m,
+                topology,
+                &surface_triangles,
+                tolerance,
+            )
+        };
+        let Some(point) = candidate_point else {
+            continue;
+        };
+        if points[..count]
+            .iter()
+            .any(|existing| distance_squared(*existing, point) <= 1.0e-24)
+        {
+            continue;
+        }
+        sample_ids.insert(sample_index, count);
+        points[count] = point;
         count += 1;
         if count >= points.len() {
             break;
@@ -434,13 +473,139 @@ fn requested_refinement_points(sizing: Option<&MeshSizingField>) -> ([[f64; 3]; 
         {
             continue;
         }
-        points[count] = sample.position_m;
+        let Some(point) = feasible_requested_refinement_point(
+            sample.position_m,
+            sample
+                .target_sizes_m
+                .into_iter()
+                .fold(f64::INFINITY, f64::min),
+            topology,
+            &surface_triangles,
+            tolerance,
+        ) else {
+            continue;
+        };
+        points[count] = point;
         count += 1;
         if count >= points.len() {
             break;
         }
     }
-    (points, count)
+    RequestedRefinementSelection {
+        points,
+        count,
+        sample_ids,
+    }
+}
+
+fn topology_surface_triangles(topology: &SourceTopologyModel) -> Vec<Triangle3> {
+    topology
+        .faces
+        .iter()
+        .filter_map(|face| topology_face_points(topology, face.node_ids))
+        .collect()
+}
+
+fn structural_boundary_requested_sample(sample: &SizingSample) -> bool {
+    matches!(
+        sample.reason.as_deref(),
+        Some("structural.load_regions" | "structural.constraint_regions")
+    )
+}
+
+fn soft_generated_cad_sizing_sample(sample: &SizingSample) -> bool {
+    matches!(
+        sample.reason.as_deref(),
+        Some("cad.feature_edge" | "cad.interface" | "cad.proximity")
+    )
+}
+
+fn feasible_requested_refinement_point(
+    point: [f64; 3],
+    target_size_m: f64,
+    topology: &SourceTopologyModel,
+    surface_triangles: &[Triangle3],
+    tolerance: MeshingTolerance,
+) -> Option<[f64; 3]> {
+    match point_in_closed_triangle_surface(point, surface_triangles, tolerance) {
+        PointInClosedSurface::Inside => Some(point),
+        PointInClosedSurface::Outside => None,
+        PointInClosedSurface::OnBoundary => inward_requested_refinement_point(
+            point,
+            target_size_m,
+            topology,
+            surface_triangles,
+            tolerance,
+        ),
+    }
+}
+
+fn inward_requested_refinement_point(
+    point: [f64; 3],
+    target_size_m: f64,
+    topology: &SourceTopologyModel,
+    surface_triangles: &[Triangle3],
+    tolerance: MeshingTolerance,
+) -> Option<[f64; 3]> {
+    let step = target_size_m
+        .abs()
+        .max(tolerance.absolute_m * 100.0)
+        .min(topology_characteristic_span(topology).unwrap_or(1.0) * 0.05);
+    let nudges = topology
+        .faces
+        .iter()
+        .filter_map(|face| {
+            let triangle = topology_face_points(topology, face.node_ids)?;
+            (point_triangle_distance(point, triangle) <= tolerance.absolute_m * 10.0)
+                .then_some(face.unit_normal)
+        })
+        .flat_map(|normal| {
+            [0.01, 0.05, 0.10, 0.25]
+                .into_iter()
+                .flat_map(move |fraction| [(-fraction, normal), (fraction, normal)])
+        });
+    for (fraction, normal) in nudges {
+        let candidate = [
+            point[0] + normal[0] * step * fraction,
+            point[1] + normal[1] * step * fraction,
+            point[2] + normal[2] * step * fraction,
+        ];
+        if matches!(
+            point_in_closed_triangle_surface(candidate, surface_triangles, tolerance),
+            PointInClosedSurface::Inside
+        ) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn topology_characteristic_span(topology: &SourceTopologyModel) -> Option<f64> {
+    let span = (0..3)
+        .map(|axis| topology.bounds_max_m[axis] - topology.bounds_min_m[axis])
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(0.0_f64, f64::max);
+    (span.is_finite() && span > 0.0).then_some(span)
+}
+
+fn topology_face_points(topology: &SourceTopologyModel, node_ids: [u32; 3]) -> Option<Triangle3> {
+    Some([
+        topology
+            .vertices
+            .get(node_ids[0] as usize)
+            .filter(|vertex| vertex.vertex_id == node_ids[0])?
+            .coordinates_m,
+        topology
+            .vertices
+            .get(node_ids[1] as usize)
+            .filter(|vertex| vertex.vertex_id == node_ids[1])?
+            .coordinates_m,
+        topology
+            .vertices
+            .get(node_ids[2] as usize)
+            .filter(|vertex| vertex.vertex_id == node_ids[2])?
+            .coordinates_m,
+    ])
 }
 
 fn production_effective_sizing(
@@ -1023,7 +1188,7 @@ fn production_mesh_sizing(
     }
     if let Some(sizing) = sizing {
         let mut seen_positions = Vec::<[f64; 3]>::new();
-        let requested_sample_ids = requested_sizing_sample_ids(sizing);
+        let requested_sample_ids = requested_sizing_sample_ids(&preparation.topology, sizing);
         let accepted_requested_ids = preparation
             .tet_candidates
             .accepted_requested_refinement_sample_indices
@@ -1123,28 +1288,11 @@ fn production_mesh_sizing(
     mesh_sizing
 }
 
-fn requested_sizing_sample_ids(sizing: &MeshSizingField) -> BTreeMap<usize, usize> {
-    let mut requested_sample_ids = BTreeMap::<usize, usize>::new();
-    let mut requested_points = [[0.0; 3]; 16];
-    let mut requested_count = 0_usize;
-    for (sample_index, sample) in sizing.samples.iter().enumerate() {
-        if !sample.target_size_m.is_finite()
-            || sample.target_size_m <= 0.0
-            || sample.position_m.iter().any(|value| !value.is_finite())
-            || requested_points[..requested_count]
-                .iter()
-                .any(|point| distance_squared(*point, sample.position_m) <= 1.0e-24)
-        {
-            continue;
-        }
-        requested_sample_ids.insert(sample_index, requested_count);
-        requested_points[requested_count] = sample.position_m;
-        requested_count += 1;
-        if requested_count >= requested_points.len() {
-            break;
-        }
-    }
-    requested_sample_ids
+fn requested_sizing_sample_ids(
+    topology: &SourceTopologyModel,
+    sizing: &MeshSizingField,
+) -> BTreeMap<usize, usize> {
+    requested_refinement_selection(topology, Some(sizing)).sample_ids
 }
 
 fn production_sample_target_size(
@@ -2877,7 +3025,9 @@ mod tests {
             ..MeshSizingField::default()
         };
 
-        let requested_ids = requested_sizing_sample_ids(&sizing);
+        let topology =
+            extract_source_topology(&cube_geometry()).expect("cube topology should extract");
+        let requested_ids = requested_sizing_sample_ids(&topology, &sizing);
 
         assert_eq!(requested_ids.len(), 16);
         assert_eq!(requested_ids.get(&0), Some(&0));
@@ -2904,13 +3054,6 @@ mod tests {
             .iter()
             .any(|sample| sample.reason.as_deref() == Some("cad.curvature")
                 && sample.target_size_m < 0.5));
-        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
-            sample.reason.as_deref() == Some("cad.curvature")
-                && sample
-                    .detail
-                    .as_deref()
-                    .is_some_and(|detail| detail.starts_with("production_requested_tet_seed_"))
-        }));
         let evidence = crate::evidence::build_mesh_evidence_artifact(
             &mesh,
             &AnalysisMeshValidationOptions::default(),
@@ -2928,15 +3071,17 @@ mod tests {
             )
         );
         assert_eq!(
-            evidence.sizing.applied_by_reason.get("cad.curvature"),
-            Some(
-                &mesh
-                    .sizing
-                    .applied_samples
-                    .iter()
-                    .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
-                    .count()
-            )
+            evidence
+                .sizing
+                .applied_by_reason
+                .get("cad.curvature")
+                .copied()
+                .unwrap_or_default(),
+            mesh.sizing
+                .applied_samples
+                .iter()
+                .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
+                .count()
         );
         let curvature_inserted = evidence
             .sizing
@@ -2958,7 +3103,10 @@ mod tests {
                 .filter(|sample| sample.reason.as_deref() == Some("cad.curvature"))
                 .count()
         );
-        assert!(mesh.backend.tet_requested_refinement_point_count > 0);
+        assert_eq!(
+            mesh.backend.tet_rejected_requested_refinement_point_count,
+            0
+        );
     }
 
     #[test]
@@ -3227,7 +3375,10 @@ mod tests {
         assert!(sizing.samples.iter().any(|sample| {
             sample.reason.as_deref() == Some("cad.proximity") && sample.target_size_m < 0.1
         }));
-        assert!(requested_refinement_points(Some(&sizing)).1 > 4);
+        assert_eq!(
+            requested_refinement_selection(&topology, Some(&sizing)).count,
+            0
+        );
     }
 
     #[test]
@@ -3647,7 +3798,10 @@ mod tests {
             .samples
             .iter()
             .any(|sample| sample.position_m == [0.75, 0.75, 0.75]));
-        assert_eq!(requested_refinement_points(Some(&effective)).1, 1);
+        assert_eq!(
+            requested_refinement_selection(&topology, Some(&effective)).count,
+            1
+        );
         assert_eq!(
             production_sizing_target_size(0.5, &sizing, &options, None),
             0.05

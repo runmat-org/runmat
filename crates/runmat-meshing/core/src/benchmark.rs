@@ -2929,7 +2929,18 @@ mod tests {
                     );
                     let mut input = MeshBenchmarkInput::new(case.benchmark_id, case.tier);
                     input.timing.total_ms = Some(elapsed_ms);
-                    reports.push(build_mesh_benchmark_report(&mesh, &case.validation, input));
+                    let report = build_mesh_benchmark_report(&mesh, &case.validation, input);
+                    eprintln!(
+                        "benchmark case id={} requested_refinement requested={} accepted={} rejected={} dropped={} rejected_by_reason={:?} dropped_by_reason={:?}",
+                        report.benchmark_id,
+                        report.sizing.requested_tet_refinement_point_count,
+                        report.sizing.accepted_requested_tet_refinement_point_count,
+                        report.sizing.rejected_requested_tet_refinement_point_count,
+                        report.sizing.dropped_requested_tet_refinement_point_count,
+                        report.sizing.requested_tet_refinement_rejected_by_reason,
+                        report.sizing.requested_tet_refinement_dropped_by_reason
+                    );
+                    reports.push(report);
                 }
                 Err(message) => {
                     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;

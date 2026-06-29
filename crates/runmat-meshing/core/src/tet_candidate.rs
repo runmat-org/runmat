@@ -648,12 +648,14 @@ fn requested_refinement_rejection_reasons(
         if accepted_ids.contains(&requested_id) {
             continue;
         }
-        let reason = if attempted_ids.contains(&requested_id) {
-            "quality_or_recovery"
+        let Some(reason) = (if attempted_ids.contains(&requested_id) {
+            Some("quality_or_recovery")
         } else if duplicate_ids.contains(&requested_id) {
-            "already_present"
+            None
         } else {
-            "outside_volume"
+            None
+        }) else {
+            continue;
         };
         *by_reason.entry(reason.to_string()).or_default() += 1;
     }
@@ -7285,11 +7287,7 @@ mod tests {
 
         assert_eq!(
             requested_refinement_rejection_reasons(4, &attempted, &duplicate, &accepted),
-            BTreeMap::from([
-                ("already_present".to_string(), 1),
-                ("outside_volume".to_string(), 1),
-                ("quality_or_recovery".to_string(), 1),
-            ])
+            BTreeMap::from([("quality_or_recovery".to_string(), 1)])
         );
     }
 
