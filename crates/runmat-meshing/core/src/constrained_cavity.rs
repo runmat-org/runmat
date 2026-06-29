@@ -94,6 +94,10 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub duplicate_candidate_count: usize,
     pub max_rejected_scaled_jacobian: f64,
     pub rejected_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub split_cap_candidate_count: usize,
+    pub split_cap_pass_count: usize,
+    pub max_split_cap_scaled_jacobian: f64,
+    pub split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -1094,6 +1098,10 @@ pub(crate) fn diagnostic_boundary_node_completion(
         duplicate_candidate_count: 0,
         max_rejected_scaled_jacobian: 0.0,
         rejected_scaled_jacobian_bins: BTreeMap::new(),
+        split_cap_candidate_count: 0,
+        split_cap_pass_count: 0,
+        max_split_cap_scaled_jacobian: 0.0,
+        split_cap_scaled_jacobian_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     loop {
@@ -1121,6 +1129,17 @@ pub(crate) fn diagnostic_boundary_node_completion(
         for (bin, count) in diagnostic.rejected_scaled_jacobian_bins {
             *aggregate
                 .rejected_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
+        aggregate.split_cap_candidate_count += diagnostic.split_cap_candidate_count;
+        aggregate.split_cap_pass_count += diagnostic.split_cap_pass_count;
+        aggregate.max_split_cap_scaled_jacobian = aggregate
+            .max_split_cap_scaled_jacobian
+            .max(diagnostic.max_split_cap_scaled_jacobian);
+        for (bin, count) in diagnostic.split_cap_scaled_jacobian_bins {
+            *aggregate
+                .split_cap_scaled_jacobian_bins
                 .entry(bin)
                 .or_default() += count;
         }
@@ -1155,6 +1174,10 @@ pub(crate) fn diagnostic_boundary_node_completion(
             duplicate_candidate_count: 0,
             max_rejected_scaled_jacobian: 0.0,
             rejected_scaled_jacobian_bins: BTreeMap::new(),
+            split_cap_candidate_count: 0,
+            split_cap_pass_count: 0,
+            max_split_cap_scaled_jacobian: 0.0,
+            split_cap_scaled_jacobian_bins: BTreeMap::new(),
             rejected_by_reason: BTreeMap::new(),
         });
     }
@@ -1177,6 +1200,10 @@ fn diagnostic_boundary_face_completion(
     let mut duplicate_candidate_count = 0_usize;
     let mut max_rejected_scaled_jacobian = 0.0_f64;
     let mut rejected_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut split_cap_candidate_count = 0_usize;
+    let mut split_cap_pass_count = 0_usize;
+    let mut max_split_cap_scaled_jacobian = 0.0_f64;
+    let mut split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut rejected_by_reason = BTreeMap::<&'static str, usize>::new();
     let mut saw_non_duplicate = false;
     for node_id in cavity_boundary_node_ids(cavity) {
@@ -1214,6 +1241,19 @@ fn diagnostic_boundary_face_completion(
                         .entry(diagnostic_scaled_jacobian_bin(exact_scaled_jacobian))
                         .or_default() += 1;
                 }
+                if let Some(split_min_quality) =
+                    diagnostic_split_cap_min_scaled_jacobian(face, node_id, boundary_nodes, options)
+                {
+                    split_cap_candidate_count += 1;
+                    max_split_cap_scaled_jacobian =
+                        max_split_cap_scaled_jacobian.max(split_min_quality);
+                    *split_cap_scaled_jacobian_bins
+                        .entry(diagnostic_scaled_jacobian_bin(split_min_quality))
+                        .or_default() += 1;
+                    if split_min_quality >= options.min_scaled_jacobian {
+                        split_cap_pass_count += 1;
+                    }
+                }
                 *rejected_by_reason
                     .entry(boundary_node_refill_rejection_reason(reason))
                     .or_default() += 1;
@@ -1235,8 +1275,48 @@ fn diagnostic_boundary_face_completion(
         duplicate_candidate_count,
         max_rejected_scaled_jacobian,
         rejected_scaled_jacobian_bins,
+        split_cap_candidate_count,
+        split_cap_pass_count,
+        max_split_cap_scaled_jacobian,
+        split_cap_scaled_jacobian_bins,
         rejected_by_reason,
     }
+}
+
+#[cfg(test)]
+fn diagnostic_split_cap_min_scaled_jacobian(
+    face: [u32; 3],
+    cap_node_id: u32,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    options: ConstrainedCavityRefillOptions,
+) -> Option<f64> {
+    let face_points = face.map(|node_id| boundary_nodes[&node_id]);
+    let cap_point = boundary_nodes[&cap_node_id];
+    let split_point = [
+        (face_points[0][0] + face_points[1][0] + face_points[2][0]) / 3.0,
+        (face_points[0][1] + face_points[1][1] + face_points[2][1]) / 3.0,
+        (face_points[0][2] + face_points[1][2] + face_points[2][2]) / 3.0,
+    ];
+    let child_caps = [
+        [face_points[0], face_points[1], split_point, cap_point],
+        [face_points[1], face_points[2], split_point, cap_point],
+        [face_points[2], face_points[0], split_point, cap_point],
+    ];
+    let mut min_scaled_jacobian = f64::INFINITY;
+    for child in child_caps {
+        if tet_signed_volume(child).abs() < options.min_volume_m3 {
+            return None;
+        }
+        if tet_edge_aspect_ratio(child) > options.max_aspect_ratio {
+            return None;
+        }
+        let exact_scaled_jacobian = tet_scaled_jacobian(child);
+        if !exact_scaled_jacobian.is_finite() {
+            return None;
+        }
+        min_scaled_jacobian = min_scaled_jacobian.min(exact_scaled_jacobian);
+    }
+    Some(min_scaled_jacobian)
 }
 
 #[cfg(test)]
@@ -2245,6 +2325,10 @@ mod tests {
         assert_eq!(diagnostic.cap_candidate_count, 0);
         assert!(diagnostic.max_rejected_scaled_jacobian < 0.95);
         assert!(!diagnostic.rejected_scaled_jacobian_bins.is_empty());
+        assert!(diagnostic.split_cap_candidate_count > 0);
+        assert_eq!(diagnostic.split_cap_pass_count, 0);
+        assert!(diagnostic.max_split_cap_scaled_jacobian < 0.95);
+        assert!(!diagnostic.split_cap_scaled_jacobian_bins.is_empty());
         assert!(!diagnostic.rejected_by_reason.is_empty());
     }
 
