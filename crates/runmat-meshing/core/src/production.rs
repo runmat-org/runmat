@@ -1256,6 +1256,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_quality_connected_reconnected_cavity_count,
+        tet_exact_quality_node_adjacent_reconnected_cavity_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_node_adjacent_reconnected_cavity_count,
         tet_exact_quality_boundary_adjacent_reconnected_cavity_count: preparation
             .tet_candidates
             .recovery
@@ -1846,6 +1850,10 @@ mod tests {
         preparation
             .tet_candidates
             .recovery
+            .exact_quality_node_adjacent_reconnected_cavity_count = 10;
+        preparation
+            .tet_candidates
+            .recovery
             .exact_quality_expanded_connected_reconnected_cavity_count = 6;
         preparation
             .tet_candidates
@@ -1903,6 +1911,11 @@ mod tests {
             mesh.backend
                 .tet_exact_quality_connected_reconnected_cavity_count,
             5
+        );
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_node_adjacent_reconnected_cavity_count,
+            10
         );
         assert_eq!(
             mesh.backend
@@ -1966,6 +1979,12 @@ mod tests {
                 .tet_recovery
                 .exact_quality_connected_reconnected_cavity_count,
             5
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_node_adjacent_reconnected_cavity_count,
+            10
         );
         assert_eq!(
             evidence

@@ -242,6 +242,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tet_exact_quality_connected_reconnected_cavity_count: usize,
     #[serde(default)]
+    pub tet_exact_quality_node_adjacent_reconnected_cavity_count: usize,
+    #[serde(default)]
     pub tet_exact_quality_boundary_adjacent_reconnected_cavity_count: usize,
     #[serde(default)]
     pub tet_exact_quality_expanded_connected_reconnected_cavity_count: usize,
@@ -365,6 +367,7 @@ impl Default for MeshBackendSummary {
             tet_exact_quality_reconnection_quality_gain_count: 0,
             tet_exact_quality_face_neighbor_reconnected_cavity_count: 0,
             tet_exact_quality_connected_reconnected_cavity_count: 0,
+            tet_exact_quality_node_adjacent_reconnected_cavity_count: 0,
             tet_exact_quality_boundary_adjacent_reconnected_cavity_count: 0,
             tet_exact_quality_expanded_connected_reconnected_cavity_count: 0,
             tet_exact_quality_split_cavity_count: 0,

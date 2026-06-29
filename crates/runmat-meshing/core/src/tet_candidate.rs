@@ -179,6 +179,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_connected_reconnected_cavity_count: usize,
     #[serde(default)]
+    pub exact_quality_node_adjacent_reconnected_cavity_count: usize,
+    #[serde(default)]
     pub exact_quality_boundary_adjacent_reconnected_cavity_count: usize,
     #[serde(default)]
     pub exact_quality_expanded_connected_reconnected_cavity_count: usize,
@@ -550,6 +552,8 @@ pub fn form_tet_candidates(
                 .face_neighbor_reconnected_cavity_count,
             exact_quality_connected_reconnected_cavity_count: repair
                 .connected_reconnected_cavity_count,
+            exact_quality_node_adjacent_reconnected_cavity_count: repair
+                .node_adjacent_reconnected_cavity_count,
             exact_quality_boundary_adjacent_reconnected_cavity_count: repair
                 .boundary_adjacent_reconnected_cavity_count,
             exact_quality_expanded_connected_reconnected_cavity_count: repair
@@ -2881,6 +2885,7 @@ struct TetQualityRepairSummary {
     reconnection_quality_gain_count: usize,
     face_neighbor_reconnected_cavity_count: usize,
     connected_reconnected_cavity_count: usize,
+    node_adjacent_reconnected_cavity_count: usize,
     boundary_adjacent_reconnected_cavity_count: usize,
     expanded_connected_reconnected_cavity_count: usize,
     split_cavity_count: usize,
@@ -2895,6 +2900,7 @@ struct TetQualityRepairPassSummary {
     reconnection_quality_gain_count: usize,
     face_neighbor_reconnected_cavity_count: usize,
     connected_reconnected_cavity_count: usize,
+    node_adjacent_reconnected_cavity_count: usize,
     boundary_adjacent_reconnected_cavity_count: usize,
     expanded_connected_reconnected_cavity_count: usize,
     split_cavity_count: usize,
@@ -2934,6 +2940,8 @@ fn repair_exact_quality_tets(
         summary.face_neighbor_reconnected_cavity_count +=
             pass.face_neighbor_reconnected_cavity_count;
         summary.connected_reconnected_cavity_count += pass.connected_reconnected_cavity_count;
+        summary.node_adjacent_reconnected_cavity_count +=
+            pass.node_adjacent_reconnected_cavity_count;
         summary.boundary_adjacent_reconnected_cavity_count +=
             pass.boundary_adjacent_reconnected_cavity_count;
         summary.expanded_connected_reconnected_cavity_count +=
@@ -3229,7 +3237,7 @@ fn repair_exact_quality_tets_once(
             }
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
-            summary.connected_reconnected_cavity_count += 1;
+            summary.node_adjacent_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
             repaired.extend(candidates);
             continue;
@@ -8270,6 +8278,7 @@ mod tests {
         assert!(repair.changed);
         assert_eq!(repair.reconnected_cavity_count, 1);
         assert_eq!(repair.boundary_adjacent_reconnected_cavity_count, 1);
+        assert_eq!(repair.node_adjacent_reconnected_cavity_count, 0);
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
         assert_eq!(repair.split_cavity_count, 0);
@@ -8437,6 +8446,7 @@ mod tests {
         assert!(repair.changed);
         assert_eq!(repair.reconnected_cavity_count, 1);
         assert_eq!(repair.boundary_adjacent_reconnected_cavity_count, 1);
+        assert_eq!(repair.node_adjacent_reconnected_cavity_count, 0);
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
         assert_eq!(
