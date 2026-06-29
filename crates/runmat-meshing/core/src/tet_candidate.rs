@@ -3421,7 +3421,7 @@ fn repair_exact_quality_tets(
     {
         return Ok(summary);
     }
-    let pass_limit = options.max_refinement_passes.max(1);
+    let pass_limit = exact_quality_repair_pass_limit(options);
     for _ in 0..pass_limit {
         if !tets
             .iter()
@@ -3456,6 +3456,14 @@ fn repair_exact_quality_tets(
         summary.seed_star_relocation_count += pass.seed_star_relocation_count;
     }
     Ok(summary)
+}
+
+fn exact_quality_repair_pass_limit(options: TetCandidateOptions) -> usize {
+    options
+        .max_refinement_passes
+        .max(1)
+        .saturating_mul(8)
+        .min(32)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -8244,6 +8252,28 @@ mod tests {
         assert_eq!(counts.boundary_adjacent_count, 4);
         assert_eq!(counts.interior_seed_count, 4);
         assert_eq!(counts.edge_star_count, 4);
+    }
+
+    #[test]
+    fn exact_quality_repair_pass_limit_is_bounded_above_refinement_passes() {
+        assert_eq!(
+            exact_quality_repair_pass_limit(TetCandidateOptions::default()),
+            8
+        );
+        assert_eq!(
+            exact_quality_repair_pass_limit(TetCandidateOptions {
+                max_refinement_passes: 3,
+                ..TetCandidateOptions::default()
+            }),
+            24
+        );
+        assert_eq!(
+            exact_quality_repair_pass_limit(TetCandidateOptions {
+                max_refinement_passes: 100,
+                ..TetCandidateOptions::default()
+            }),
+            32
+        );
     }
 
     #[test]
