@@ -74,6 +74,8 @@ pub struct CadEvaluationReport {
     #[serde(default)]
     pub exact_query_face_count: usize,
     #[serde(default)]
+    pub missing_exact_query_face_count: usize,
+    #[serde(default)]
     pub evaluator_sample_count: usize,
     #[serde(default)]
     pub evaluator_rejected_sample_count: usize,
@@ -247,6 +249,8 @@ pub fn build_cad_evaluation_model_with_provider(
         .iter()
         .filter(|frame| frame.exact_query_backed)
         .count();
+    let missing_exact_query_face_count =
+        evaluator_backed_frame_count.saturating_sub(exact_query_face_count);
     let evaluator_sample_count = frames
         .iter()
         .map(|frame| frame.evaluator_sample_count)
@@ -289,6 +293,7 @@ pub fn build_cad_evaluation_model_with_provider(
         evaluator_face_count: cad_topology.report.evaluator_face_count,
         live_query_face_count,
         exact_query_face_count,
+        missing_exact_query_face_count,
         evaluator_sample_count,
         evaluator_rejected_sample_count,
         normal_query_count: frames.len(),
@@ -440,6 +445,7 @@ pub fn summarize_cad_evaluation(
         evaluator_face_count: model.report.evaluator_face_count,
         live_query_face_count: model.report.live_query_face_count,
         exact_query_face_count: model.report.exact_query_face_count,
+        missing_exact_query_face_count: model.report.missing_exact_query_face_count,
         evaluator_sample_count: model.report.evaluator_sample_count,
         evaluator_rejected_sample_count: model.report.evaluator_rejected_sample_count,
         normal_query_count: model.face_frames.len(),
@@ -941,6 +947,7 @@ mod tests {
         assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
         assert_eq!(model.report.evaluator_face_count, 2);
         assert_eq!(model.report.exact_query_face_count, 0);
+        assert_eq!(model.report.missing_exact_query_face_count, 2);
         assert_eq!(model.report.evaluator_sample_count, 0);
         assert!(model.face_frames.iter().any(|frame| frame.evaluator_backed
             && frame.origin_m == [0.25, 0.25, 0.75]
@@ -963,6 +970,7 @@ mod tests {
         assert_eq!(model.source, CadEvaluationSource::ImportedEvaluatorSamples);
         assert_eq!(model.report.live_query_face_count, 0);
         assert_eq!(model.report.exact_query_face_count, 0);
+        assert_eq!(model.report.missing_exact_query_face_count, 2);
         assert!(model
             .face_frames
             .iter()
@@ -1013,8 +1021,10 @@ mod tests {
         assert_eq!(model.source, CadEvaluationSource::ParametricCad);
         assert_eq!(model.report.live_query_face_count, 2);
         assert_eq!(model.report.exact_query_face_count, 2);
+        assert_eq!(model.report.missing_exact_query_face_count, 0);
         assert_eq!(model.report.evaluator_sample_count, 2);
         assert_eq!(report.live_query_face_count, 2);
+        assert_eq!(report.missing_exact_query_face_count, 0);
         assert_eq!(report.source, CadEvaluationSource::ParametricCad);
         assert_eq!(frame.origin_m, [0.5, 0.5, 1.0]);
         assert_eq!(frame.evaluator_samples.len(), 1);
