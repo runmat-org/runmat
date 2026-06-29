@@ -2227,6 +2227,8 @@ mod tests {
             ..MeshSizingField::default()
         };
 
+        let coarse = generate_production_analysis_mesh(&cube_geometry(), &options)
+            .expect("baseline production mesh should generate");
         let mesh =
             generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
                 .expect("production mesh should generate with boundary patch sizing");
@@ -2254,6 +2256,17 @@ mod tests {
             2,
             "exact boundary samples should be represented by retained inward surrogate Tet seeds"
         );
+        for sample in &sizing.samples {
+            let reason = sample.reason.as_deref().expect("reasoned boundary sample");
+            let coarse_near_count =
+                volume_element_centroid_count_within(&coarse, sample.position_m, 0.35);
+            let refined_near_count =
+                volume_element_centroid_count_within(&mesh, sample.position_m, 0.35);
+            assert!(
+                refined_near_count > coarse_near_count,
+                "{reason} should create denser retained Tet topology near the boundary patch; coarse={coarse_near_count}, refined={refined_near_count}"
+            );
+        }
         assert!(mesh
             .backend
             .tet_requested_refinement_rejected_by_reason
