@@ -1837,12 +1837,12 @@ mod tests {
                 SizingSample {
                     position_m: [0.25, 0.25, 0.25],
                     target_size_m: 0.25,
-                    reason: Some("boundary_region".to_string()),
+                    reason: Some("structural.load_regions".to_string()),
                 },
                 SizingSample {
                     position_m: [0.75, 0.75, 0.75],
                     target_size_m: 0.25,
-                    reason: Some("material_region".to_string()),
+                    reason: Some("structural.constraint_regions".to_string()),
                 },
             ],
             ..MeshSizingField::default()
@@ -1866,10 +1866,33 @@ mod tests {
 
         assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
         assert!(mesh.backend.tet_accepted_requested_refinement_point_count > 0);
-        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
-            sample.reason.as_deref() == Some("boundary_region")
-                && sample.inserted_breakpoint_count > 0
-        }));
+        assert!(
+            mesh.sizing.applied_samples.iter().any(|sample| {
+                sample.reason.as_deref() == Some("structural.load_regions")
+                    && sample.inserted_breakpoint_count > 0
+            }) || mesh.sizing.applied_samples.iter().any(|sample| {
+                sample.reason.as_deref() == Some("structural.constraint_regions")
+                    && sample.inserted_breakpoint_count > 0
+            })
+        );
+        assert_eq!(
+            evidence.sizing.requested_tet_refinement_point_count,
+            mesh.backend.tet_requested_refinement_point_count
+        );
+        assert_eq!(
+            evidence
+                .sizing
+                .accepted_requested_tet_refinement_point_count,
+            mesh.backend.tet_accepted_requested_refinement_point_count
+        );
+        assert!(evidence
+            .sizing
+            .applied_by_reason
+            .contains_key("structural.load_regions"));
+        assert!(evidence
+            .sizing
+            .applied_by_reason
+            .contains_key("structural.constraint_regions"));
         assert!(
             evidence
                 .regions
