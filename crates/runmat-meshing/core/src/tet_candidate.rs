@@ -5630,6 +5630,192 @@ pub(crate) fn diagnostic_bad_cavity_sizes(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_small_cavity_reconnection_rejection_reasons(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<(&'static str, &'static str), TetCandidateError> {
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    Ok((
+        diagnostic_face_cavity_reconnection_rejection_reason(
+            &one_ring,
+            tets,
+            node_points,
+            options,
+            "one_ring",
+        )?,
+        diagnostic_face_cavity_reconnection_rejection_reason(
+            &face_closure,
+            tets,
+            node_points,
+            options,
+            "face_closure",
+        )?,
+    ))
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_reconnection_rejection_reason(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+) -> Result<&'static str, TetCandidateError> {
+    if adjacent.len() < 3 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_too_small",
+            _ => "face_closure_too_small",
+        });
+    }
+    if adjacent.len() > 16 {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_over_reconnection_limit",
+            _ => "face_closure_over_reconnection_limit",
+        });
+    }
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let candidate_result = diagnostic_face_neighbor_cavity_reconnection_candidates(
+        adjacent,
+        tets,
+        node_points,
+        options,
+    )?;
+    let Some((candidates, candidate_reason)) = candidate_result else {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_empty_candidate",
+            _ => "face_closure_empty_candidate",
+        });
+    };
+    if let Some(reason) = candidate_reason {
+        return Ok(match (prefix, reason) {
+            ("one_ring", "component_mismatch") => "one_ring_component_mismatch",
+            ("one_ring", "too_few_boundary_faces") => "one_ring_too_few_boundary_faces",
+            ("one_ring", "boundary_node_count") => "one_ring_boundary_node_count",
+            ("one_ring", "raw_candidate_rejected") => "one_ring_raw_candidate_rejected",
+            ("one_ring", "empty_tetrahedralization") => "one_ring_empty_tetrahedralization",
+            ("one_ring", "boundary_face_mismatch") => "one_ring_boundary_face_mismatch",
+            ("one_ring", "volume_mismatch") => "one_ring_volume_mismatch",
+            (_, "component_mismatch") => "face_closure_component_mismatch",
+            (_, "too_few_boundary_faces") => "face_closure_too_few_boundary_faces",
+            (_, "boundary_node_count") => "face_closure_boundary_node_count",
+            (_, "raw_candidate_rejected") => "face_closure_raw_candidate_rejected",
+            (_, "empty_tetrahedralization") => "face_closure_empty_tetrahedralization",
+            (_, "boundary_face_mismatch") => "face_closure_boundary_face_mismatch",
+            (_, "volume_mismatch") => "face_closure_volume_mismatch",
+            _ => "face_closure_candidate_rejected",
+        });
+    }
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let min_exact = min_exact_scaled_jacobian(candidates.iter());
+    if cavity_reconnection_improves_quality(
+        candidate_below_count,
+        min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        return Ok(match prefix {
+            "one_ring" => "one_ring_reconnectable",
+            _ => "face_closure_reconnectable",
+        });
+    }
+    Ok(match prefix {
+        "one_ring" => "one_ring_no_improving_reconnection",
+        _ => "face_closure_no_improving_reconnection",
+    })
+}
+
+#[cfg(test)]
+fn diagnostic_face_neighbor_cavity_reconnection_candidates(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<TetCandidate>, Option<&'static str>)>, TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok(None);
+    };
+    let mut original_volume = 0.0_f64;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok(Some((Vec::new(), Some("component_mismatch"))));
+        }
+        original_volume += tet.volume_m3;
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    if boundary_faces.len() < 4 {
+        return Ok(Some((Vec::new(), Some("too_few_boundary_faces"))));
+    }
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 16 {
+        return Ok(Some((Vec::new(), Some("boundary_node_count"))));
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok(Some((Vec::new(), Some("raw_candidate_rejected"))));
+        };
+        candidates.push(candidate);
+    }
+    if candidates.is_empty() {
+        return Ok(Some((Vec::new(), Some("empty_tetrahedralization"))));
+    }
+    let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
+    if candidate_boundary_faces != boundary_faces {
+        return Ok(Some((candidates, Some("boundary_face_mismatch"))));
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok(Some((candidates, Some("volume_mismatch"))));
+    }
+    Ok(Some((candidates, None)))
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_boundary_cavity_reconnection_rejection_reason(
     tet_index: usize,
     tets: &[TetCandidate],
