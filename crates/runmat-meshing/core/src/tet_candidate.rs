@@ -4478,10 +4478,17 @@ fn constrained_interior_seed_star_refill_candidates(
             })
         })
         .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let interior_candidates = constrained_seed_star_refill_interior_candidates(
+        tets,
+        tet_index,
+        adjacent,
+        &boundary_node_ids,
+        node_points,
+    )?;
     let refill = evaluate_constrained_cavity_refill_candidates(
         &cavity,
         &boundary_nodes,
-        &[],
+        &interior_candidates,
         ConstrainedCavityRefillOptions {
             min_volume_m3: options.min_volume_m3,
             max_aspect_ratio: options.max_aspect_ratio,
@@ -4511,6 +4518,130 @@ fn constrained_interior_seed_star_refill_candidates(
         })
         .collect::<Vec<_>>();
     Ok(Some((selected_indices, candidates)))
+}
+
+fn constrained_seed_star_refill_interior_candidates(
+    tets: &[TetCandidate],
+    tet_index: usize,
+    adjacent: &[usize],
+    boundary_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+) -> Result<Vec<ConstrainedCavityNode>, TetCandidateError> {
+    let mut candidates = Vec::<ConstrainedCavityNode>::new();
+    let mut used_node_ids = BTreeSet::<u32>::new();
+    for node_id in tets[tet_index].node_ids {
+        if !boundary_node_ids.contains(&node_id) {
+            candidates.push(ConstrainedCavityNode {
+                node_id,
+                coordinates_m: *node_points
+                    .get(&node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?,
+            });
+            used_node_ids.insert(node_id);
+        }
+    }
+    if let Some(centroid) = boundary_node_centroid(boundary_node_ids, node_points)? {
+        let node_id = synthetic_refill_candidate_node_id(tets, &mut used_node_ids);
+        candidates.push(ConstrainedCavityNode {
+            node_id,
+            coordinates_m: centroid,
+        });
+    }
+    let tet_points = candidate_tet_points(&tets[tet_index], node_points)?;
+    let node_id = synthetic_refill_candidate_node_id(tets, &mut used_node_ids);
+    candidates.push(ConstrainedCavityNode {
+        node_id,
+        coordinates_m: tet_centroid(tet_points),
+    });
+    if adjacent.len() > 1 {
+        let mut weighted = [0.0_f64; 3];
+        let mut total_volume = 0.0_f64;
+        for index in adjacent {
+            let tet = &tets[*index];
+            let centroid = tet_centroid(candidate_tet_points(tet, node_points)?);
+            let weight = tet.volume_m3.max(0.0);
+            weighted[0] += centroid[0] * weight;
+            weighted[1] += centroid[1] * weight;
+            weighted[2] += centroid[2] * weight;
+            total_volume += weight;
+        }
+        if total_volume > 0.0 {
+            let node_id = synthetic_refill_candidate_node_id(tets, &mut used_node_ids);
+            candidates.push(ConstrainedCavityNode {
+                node_id,
+                coordinates_m: [
+                    weighted[0] / total_volume,
+                    weighted[1] / total_volume,
+                    weighted[2] / total_volume,
+                ],
+            });
+        }
+    }
+    dedup_refill_candidate_points(candidates)
+}
+
+fn boundary_node_centroid(
+    boundary_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+) -> Result<Option<[f64; 3]>, TetCandidateError> {
+    if boundary_node_ids.is_empty() {
+        return Ok(None);
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in boundary_node_ids {
+        let point = node_points
+            .get(node_id)
+            .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?;
+        centroid[0] += point[0];
+        centroid[1] += point[1];
+        centroid[2] += point[2];
+    }
+    let scale = 1.0 / boundary_node_ids.len() as f64;
+    Ok(Some([
+        centroid[0] * scale,
+        centroid[1] * scale,
+        centroid[2] * scale,
+    ]))
+}
+
+fn synthetic_refill_candidate_node_id(
+    tets: &[TetCandidate],
+    used_node_ids: &mut BTreeSet<u32>,
+) -> u32 {
+    let mut node_id = tets
+        .iter()
+        .flat_map(|tet| tet.node_ids)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    while !used_node_ids.insert(node_id) {
+        node_id = node_id.saturating_add(1);
+    }
+    node_id
+}
+
+fn dedup_refill_candidate_points(
+    candidates: Vec<ConstrainedCavityNode>,
+) -> Result<Vec<ConstrainedCavityNode>, TetCandidateError> {
+    let tolerance = MeshingTolerance::default();
+    let mut deduped = Vec::<ConstrainedCavityNode>::new();
+    for candidate in candidates {
+        if candidate
+            .coordinates_m
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(TetCandidateError::InvalidOptions);
+        }
+        if deduped.iter().any(|existing| {
+            distance_squared(existing.coordinates_m, candidate.coordinates_m)
+                <= tolerance.absolute_m * tolerance.absolute_m
+        }) {
+            continue;
+        }
+        deduped.push(candidate);
+    }
+    Ok(deduped)
 }
 
 fn best_interior_seed_node_collapse(
@@ -11310,6 +11441,21 @@ mod tests {
             .collect::<Vec<_>>();
         let node_adjacency = tet_node_adjacency(&tets);
         let interior_node_ids = BTreeSet::from([6]);
+        let boundary_node_ids = (0..=5).collect::<BTreeSet<_>>();
+        let interior_candidates = constrained_seed_star_refill_interior_candidates(
+            &tets,
+            0,
+            &(0..8).collect::<Vec<_>>(),
+            &boundary_node_ids,
+            &node_points,
+        )
+        .expect("interior candidate generation should evaluate");
+        assert_eq!(interior_candidates.len(), 2);
+        assert_eq!(interior_candidates[0].node_id, 6);
+        assert!(
+            distance(interior_candidates[1].coordinates_m, [0.25, 0.25, 0.25]) < 1.0e-12,
+            "target tet centroid should be included as a bounded interior candidate"
+        );
         let reason = diagnostic_constrained_seed_star_refill_rejection_reason(
             0,
             &tets,
