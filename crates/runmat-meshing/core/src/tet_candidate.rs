@@ -6415,18 +6415,18 @@ fn dense_component_for_global_insertion(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ConnectivityPoint {
-    node_id: u32,
-    coordinates_m: [f64; 3],
-    is_super: bool,
+pub(crate) struct ConnectivityPoint {
+    pub(crate) node_id: u32,
+    pub(crate) coordinates_m: [f64; 3],
+    pub(crate) is_super: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ConnectivityTet {
-    vertices: [usize; 4],
+pub(crate) struct ConnectivityTet {
+    pub(crate) vertices: [usize; 4],
 }
 
-fn tetrahedralize_points(input_points: &[ConnectivityPoint]) -> Vec<ConnectivityTet> {
+pub(crate) fn tetrahedralize_points(input_points: &[ConnectivityPoint]) -> Vec<ConnectivityTet> {
     if input_points.len() < 4 {
         return Vec::new();
     }

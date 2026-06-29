@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     predicate::{
-        distance_squared, point_in_closed_triangle_surface, tet_edge_aspect_ratio,
+        distance_squared, point_in_closed_triangle_surface, tet_centroid, tet_edge_aspect_ratio,
         tet_scaled_jacobian, tet_signed_volume, Point3, PointInClosedSurface, Triangle3,
     },
-    tet_candidate::TetCandidate,
+    tet_candidate::{tetrahedralize_points, ConnectivityPoint, TetCandidate},
     tolerance::MeshingTolerance,
 };
 
@@ -440,24 +440,35 @@ pub fn evaluate_constrained_cavity_refill_candidates(
     let mut rejected_by_reason = BTreeMap::<String, usize>::new();
 
     if interior_candidate_nodes.is_empty() {
-        let Some(refill) = single_tet_refill_candidate(cavity, &boundary_node_map, options)
-            .map_err(ConstrainedCavityRefillError::Validation)?
-        else {
-            record_refill_rejection(
-                &mut rejected_by_reason,
-                if boundary_node_ids.len() == 4 {
-                    "single_tet_candidate_rejected"
-                } else {
-                    "unsupported_boundary_node_count_without_interior_point"
-                },
-            );
+        if boundary_node_ids.len() == 4 {
+            let Some(refill) = single_tet_refill_candidate(cavity, &boundary_node_map, options)
+                .map_err(ConstrainedCavityRefillError::Validation)?
+            else {
+                record_refill_rejection(&mut rejected_by_reason, "single_tet_candidate_rejected");
+                return Ok(ConstrainedCavityRefillEvaluation {
+                    refill: None,
+                    rejected_by_reason,
+                });
+            };
             return Ok(ConstrainedCavityRefillEvaluation {
-                refill: None,
+                refill: Some(refill),
                 rejected_by_reason,
             });
         };
+        match boundary_node_refill_candidate(cavity, &boundary_node_map, options) {
+            Ok(Ok(refill)) => {
+                return Ok(ConstrainedCavityRefillEvaluation {
+                    refill: Some(refill),
+                    rejected_by_reason,
+                });
+            }
+            Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
+            Err(err) => {
+                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
+            }
+        }
         return Ok(ConstrainedCavityRefillEvaluation {
-            refill: Some(refill),
+            refill: None,
             rejected_by_reason,
         });
     }
@@ -514,6 +525,15 @@ pub fn evaluate_constrained_cavity_refill_candidates(
             .is_none_or(|candidate| refill_is_better(&refill, candidate))
         {
             best = Some(refill);
+        }
+    }
+    if best.is_none() && boundary_node_ids.len() > 4 {
+        match boundary_node_refill_candidate(cavity, &boundary_node_map, options) {
+            Ok(Ok(refill)) => best = Some(refill),
+            Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
+            Err(err) => {
+                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
+            }
         }
     }
 
@@ -806,6 +826,61 @@ fn single_tet_refill_candidate(
     };
     let refill = refill_from_tets(cavity, vec![tet], options.volume_relative_tolerance)?;
     Ok(Some(refill))
+}
+
+fn boundary_node_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
+    let boundary_triangles = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            [
+                boundary_nodes[&face.node_ids[0]],
+                boundary_nodes[&face.node_ids[1]],
+                boundary_nodes[&face.node_ids[2]],
+            ]
+        })
+        .collect::<Vec<_>>();
+    let points = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id,
+            coordinates_m: boundary_nodes[&node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    let mut first_rejection = None::<&'static str>;
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        match raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            Ok(tet) => refill_tets.push(tet),
+            Err(reason) => {
+                if first_rejection.is_none() {
+                    first_rejection = Some(reason);
+                }
+            }
+        }
+    }
+    if refill_tets.is_empty() {
+        return Ok(Err(
+            first_rejection.unwrap_or("boundary_node_delaunay_empty")
+        ));
+    }
+    let refill = refill_from_tets(cavity, refill_tets, options.volume_relative_tolerance)?;
+    Ok(Ok(refill))
 }
 
 fn star_refill_candidate_with_rejection_reason(
@@ -1424,7 +1499,7 @@ mod tests {
     }
 
     #[test]
-    fn refill_evaluation_records_unsupported_boundary_count_without_interior_point() {
+    fn refill_evaluation_uses_boundary_nodes_for_multi_face_cavity_without_interior_point() {
         let cavity = octahedron_cavity();
         let nodes = octahedron_nodes();
 
@@ -1432,14 +1507,18 @@ mod tests {
             evaluate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], refill_options())
                 .expect("evaluation should complete");
 
-        assert!(evaluation.refill.is_none());
-        assert_eq!(
-            evaluation.rejected_by_reason,
-            BTreeMap::from([(
-                "unsupported_boundary_node_count_without_interior_point".to_string(),
-                1
-            )])
-        );
+        let refill = evaluation
+            .refill
+            .expect("boundary-node refill should support closed multi-face cavities");
+        assert!(evaluation.rejected_by_reason.is_empty());
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("boundary-node refill should preserve the cavity boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            1.0e-12,
+        )
+        .expect("boundary-node refill should preserve volume");
     }
 
     #[test]
