@@ -5410,6 +5410,320 @@ fn best_componentized_edge_reconnection(
     }))
 }
 
+#[cfg(test)]
+pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
+    tet_index: usize,
+    edge: [u32; 2],
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    if !adjacent.contains(&tet_index) {
+        return Ok("target_not_in_edge_star");
+    }
+    if adjacent.len() < 3 {
+        return Ok("too_few_edge_tets");
+    }
+    if (4..=8).contains(&adjacent.len()) {
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+        if let Some(candidates) =
+            multi_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        {
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            let min_exact = min_exact_scaled_jacobian(candidates.iter());
+            if cavity_reconnection_improves_quality(
+                candidate_below_count,
+                min_exact,
+                original_below_count,
+                original_min_exact,
+            ) {
+                return Ok("whole_edge_star_reconnectable");
+            }
+            return Ok("whole_edge_star_no_improving_reconnection");
+        }
+    }
+    if adjacent.len() == 3 {
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+        if let Some(candidates) =
+            three_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        {
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            let min_exact = min_exact_scaled_jacobian(candidates.iter());
+            if cavity_reconnection_improves_quality(
+                candidate_below_count,
+                min_exact,
+                original_below_count,
+                original_min_exact,
+            ) {
+                return Ok("three_tet_edge_star_reconnectable");
+            }
+            return Ok("three_tet_edge_star_no_improving_reconnection");
+        }
+    }
+
+    let mut candidate_groups = edge_star_ring_components(adjacent, edge, tets)?;
+    candidate_groups.extend(edge_star_simple_cycle_components(
+        adjacent, edge, tet_index, tets,
+    )?);
+    let mut seen_groups = BTreeSet::<Vec<usize>>::new();
+    let mut saw_target_group = false;
+    let mut saw_too_small_group = false;
+    let mut saw_too_large_group = false;
+    let mut saw_whole_star_group = false;
+    let mut saw_invalid_candidate = false;
+    let mut saw_non_improving_candidate = false;
+    for component in candidate_groups {
+        if !seen_groups.insert(component.clone()) || !component.contains(&tet_index) {
+            continue;
+        }
+        saw_target_group = true;
+        if component.len() < 3 {
+            saw_too_small_group = true;
+            continue;
+        }
+        if component.len() > 8 {
+            saw_too_large_group = true;
+            continue;
+        }
+        if component.len() == adjacent.len() {
+            saw_whole_star_group = true;
+            continue;
+        }
+        let original_below_count = count_exact_quality_violations(
+            component.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(component.iter().map(|index| &tets[*index]));
+        let candidates = if component.len() == 3 {
+            three_tet_edge_reconnection_candidates(&component, edge, tets, node_points, options)?
+        } else {
+            multi_tet_edge_reconnection_candidates(&component, edge, tets, node_points, options)?
+        };
+        let Some(candidates) = candidates else {
+            saw_invalid_candidate = true;
+            continue;
+        };
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            return Ok("component_edge_star_reconnectable");
+        }
+        saw_non_improving_candidate = true;
+    }
+    if saw_non_improving_candidate {
+        Ok("component_edge_star_no_improving_reconnection")
+    } else if saw_invalid_candidate {
+        Ok("component_edge_star_candidate_invalid")
+    } else if saw_too_large_group {
+        Ok("component_edge_star_over_reconnection_limit")
+    } else if saw_too_small_group {
+        Ok("component_edge_star_too_small")
+    } else if saw_whole_star_group {
+        Ok("component_edge_star_whole_star_only")
+    } else if saw_target_group {
+        Ok("component_edge_star_no_candidate")
+    } else {
+        Ok("no_component_edge_star_for_target")
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_node_cavity_reconnection_rejection_reason(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let adjacent = connected_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    if adjacent.len() < 3 {
+        return Ok("node_cavity_too_small");
+    }
+    if adjacent.len() > 40 {
+        return Ok("node_cavity_over_star_insertion_limit");
+    }
+    if adjacent.len() > 24 {
+        return Ok("node_cavity_over_reconnection_limit");
+    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    if adjacent.len() <= face_closure.len() {
+        return Ok("node_cavity_no_node_expansion");
+    }
+
+    let base = face_closure.into_iter().collect::<BTreeSet<_>>();
+    let extra = adjacent
+        .iter()
+        .copied()
+        .filter(|index| !base.contains(index))
+        .collect::<Vec<_>>();
+    let mut candidate_groups = vec![adjacent.clone()];
+    for extra_index in &extra {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        candidate_groups.push(group.into_iter().collect());
+    }
+    for left in 0..extra.len() {
+        for right in (left + 1)..extra.len() {
+            let mut group = base.clone();
+            group.insert(extra[left]);
+            group.insert(extra[right]);
+            candidate_groups.push(group.into_iter().collect());
+        }
+    }
+    diagnostic_cavity_group_reconnection_rejection_reason(
+        candidate_groups,
+        tets,
+        node_points,
+        options,
+        "node_cavity",
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_cavity_reconnection_rejection_reason(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let adjacent = boundary_adjacent_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    let expanded = boundary_adjacent_bad_tet_cavity_with_node_closure_layers(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+        2,
+    );
+    let mut candidate_groups = vec![adjacent];
+    if candidate_groups
+        .first()
+        .is_some_and(|group| group.as_slice() != expanded.as_slice())
+    {
+        candidate_groups.push(expanded);
+    }
+    diagnostic_cavity_group_reconnection_rejection_reason(
+        candidate_groups,
+        tets,
+        node_points,
+        options,
+        "boundary_cavity",
+    )
+}
+
+#[cfg(test)]
+fn diagnostic_cavity_group_reconnection_rejection_reason(
+    candidate_groups: Vec<Vec<usize>>,
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+) -> Result<&'static str, TetCandidateError> {
+    let mut saw_group = false;
+    let mut saw_oversized_group = false;
+    let mut saw_star_sized_group = false;
+    let mut saw_invalid_candidate = false;
+    let mut saw_non_improving_candidate = false;
+    for group in candidate_groups {
+        if group.len() < 3 {
+            continue;
+        }
+        saw_group = true;
+        if group.len() > 40 {
+            saw_oversized_group = true;
+            continue;
+        }
+        if group.len() > 24 {
+            saw_star_sized_group = true;
+        }
+        let original_below_count = count_exact_quality_violations(
+            group.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        else {
+            saw_invalid_candidate = true;
+            continue;
+        };
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            return Ok(match prefix {
+                "boundary_cavity" => "boundary_cavity_reconnectable",
+                _ => "node_cavity_reconnectable",
+            });
+        }
+        saw_non_improving_candidate = true;
+    }
+    Ok(
+        match (
+            prefix,
+            saw_non_improving_candidate,
+            saw_invalid_candidate,
+            saw_oversized_group,
+            saw_star_sized_group,
+            saw_group,
+        ) {
+            ("boundary_cavity", true, _, _, _, _) => "boundary_cavity_no_improving_reconnection",
+            ("boundary_cavity", _, true, _, _, _) => "boundary_cavity_candidate_invalid",
+            ("boundary_cavity", _, _, true, _, _) => "boundary_cavity_over_star_insertion_limit",
+            ("boundary_cavity", _, _, _, true, _) => "boundary_cavity_over_reconnection_limit",
+            ("boundary_cavity", _, _, _, _, true) => "boundary_cavity_no_candidate",
+            ("boundary_cavity", _, _, _, _, _) => "boundary_cavity_too_small",
+            (_, true, _, _, _, _) => "node_cavity_no_improving_reconnection",
+            (_, _, true, _, _, _) => "node_cavity_candidate_invalid",
+            (_, _, _, true, _, _) => "node_cavity_over_star_insertion_limit",
+            (_, _, _, _, true, _) => "node_cavity_over_reconnection_limit",
+            (_, _, _, _, _, true) => "node_cavity_no_candidate",
+            _ => "node_cavity_too_small",
+        },
+    )
+}
+
 fn edge_star_ring_components(
     adjacent: &[usize],
     edge: [u32; 2],

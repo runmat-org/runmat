@@ -2313,6 +2313,11 @@ mod tests {
         provenance::AnalysisMeshProvenance,
         quality::{AnalysisMeshQualityReport, ElementQuality},
         sizing::{MeshSizingField, SizingSample, SizingSampleApplication},
+        tet_candidate::{
+            diagnostic_boundary_cavity_reconnection_rejection_reason,
+            diagnostic_edge_reconnection_rejection_reason,
+            diagnostic_node_cavity_reconnection_rejection_reason, TetCandidateOptions,
+        },
         topology::{BoundaryElementKind, VolumeElementKind},
     };
 
@@ -3054,6 +3059,7 @@ mod tests {
         let mut node_index_adjacency = BTreeMap::<u32, Vec<usize>>::new();
         let mut edge_adjacency = BTreeMap::<[u32; 2], usize>::new();
         let mut edge_index_adjacency = BTreeMap::<[u32; 2], Vec<usize>>::new();
+        let mut face_index_adjacency = BTreeMap::<[u32; 3], Vec<usize>>::new();
         for (tet_index, tet) in preparation.tet_candidates.tets.iter().enumerate() {
             for node_id in tet.node_ids {
                 *node_adjacency.entry(node_id).or_default() += 1;
@@ -3069,15 +3075,35 @@ mod tests {
                     .or_default()
                     .push(tet_index);
             }
+            for face in diagnostic_tet_faces(tet.node_ids) {
+                face_index_adjacency
+                    .entry(face)
+                    .or_default()
+                    .push(tet_index);
+            }
         }
         let mut bad_interior_star_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_edge_star_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_interior_seed_ids = BTreeSet::<u32>::new();
         let mut bad_edge_star_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_edge_reconnection_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_node_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_boundary_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut diagnosed_bad_edges = BTreeSet::<[u32; 2]>::new();
-        for tet in preparation.tet_candidates.tets.iter().filter(|tet| {
-            tet.exact_scaled_jacobian < case.options.validation.quality.min_scaled_jacobian
-        }) {
+        let diagnostic_options = TetCandidateOptions {
+            min_scaled_jacobian: case.options.validation.quality.min_scaled_jacobian,
+            ..TetCandidateOptions::default()
+        };
+        for (tet_index, tet) in
+            preparation
+                .tet_candidates
+                .tets
+                .iter()
+                .enumerate()
+                .filter(|(_, tet)| {
+                    tet.exact_scaled_jacobian < case.options.validation.quality.min_scaled_jacobian
+                })
+        {
             for node_id in tet
                 .node_ids
                 .into_iter()
@@ -3102,9 +3128,45 @@ mod tests {
                         *bad_edge_star_rejected_by_reason
                             .entry(reason.to_string())
                             .or_default() += 1;
+                        let reconnect_reason = diagnostic_edge_reconnection_rejection_reason(
+                            tet_index,
+                            edge,
+                            adjacent,
+                            &preparation.tet_candidates.tets,
+                            &node_points,
+                            diagnostic_options,
+                        )
+                        .expect("edge reconnection diagnostic should evaluate");
+                        *bad_edge_reconnection_rejected_by_reason
+                            .entry(reconnect_reason.to_string())
+                            .or_default() += 1;
                     }
                 }
             }
+            let node_cavity_reason = diagnostic_node_cavity_reconnection_rejection_reason(
+                tet_index,
+                &preparation.tet_candidates.tets,
+                &face_index_adjacency,
+                &node_index_adjacency,
+                &node_points,
+                diagnostic_options,
+            )
+            .expect("node cavity diagnostic should evaluate");
+            *bad_node_cavity_rejected_by_reason
+                .entry(node_cavity_reason.to_string())
+                .or_default() += 1;
+            let boundary_cavity_reason = diagnostic_boundary_cavity_reconnection_rejection_reason(
+                tet_index,
+                &preparation.tet_candidates.tets,
+                &face_index_adjacency,
+                &node_index_adjacency,
+                &node_points,
+                diagnostic_options,
+            )
+            .expect("boundary cavity diagnostic should evaluate");
+            *bad_boundary_cavity_rejected_by_reason
+                .entry(boundary_cavity_reason.to_string())
+                .or_default() += 1;
         }
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
@@ -3113,6 +3175,18 @@ mod tests {
         eprintln!(
             "annular recovery bad_edge_star_rejected_by_reason={:?}",
             bad_edge_star_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_edge_reconnection_rejected_by_reason={:?}",
+            bad_edge_reconnection_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_node_cavity_rejected_by_reason={:?}",
+            bad_node_cavity_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_boundary_cavity_rejected_by_reason={:?}",
+            bad_boundary_cavity_rejected_by_reason
         );
 
         let mut valid_seed_star_cavity_count = 0_usize;
