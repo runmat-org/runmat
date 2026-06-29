@@ -3237,10 +3237,112 @@ mod tests {
                 tet_candidates.tets.len(),
                 tet_candidates.accepted_requested_refinement_points
             ),
-            Err(err) => eprintln!(
-                "{label} tet_candidates_failed elapsed_ms={:.1}: {err}",
-                stage.elapsed().as_secs_f64() * 1000.0
-            ),
+            Err(err) => {
+                eprintln!(
+                    "{label} tet_candidates_failed elapsed_ms={:.1}: {err}",
+                    stage.elapsed().as_secs_f64() * 1000.0
+                );
+                let mut fallback_options = tet_options;
+                fallback_options.allow_fan_fallback = true;
+                let fallback_stage = std::time::Instant::now();
+                match form_tet_candidates(&surface, &volume_candidates, fallback_options) {
+                    Ok(tet_candidates) => eprintln!(
+                        "{label} fallback_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6} below={} fan_fallback={}",
+                        fallback_stage.elapsed().as_secs_f64() * 1000.0,
+                        tet_candidates.nodes.len(),
+                        tet_candidates.tets.len(),
+                        tet_candidates.recovery.min_exact_scaled_jacobian,
+                        tet_candidates.recovery.exact_scaled_jacobian_below_threshold_count,
+                        tet_candidates.recovery.fan_fallback_component_count
+                    ),
+                    Err(fallback_err) => eprintln!(
+                        "{label} fallback_tet_candidates_failed elapsed_ms={:.1}: {fallback_err}",
+                        fallback_stage.elapsed().as_secs_f64() * 1000.0
+                    ),
+                }
+                let mut relaxed_options = tet_options;
+                relaxed_options.sliver_aspect_ratio = 1.0e6;
+                relaxed_options.min_scaled_jacobian = 0.0;
+                let relaxed_stage = std::time::Instant::now();
+                match form_tet_candidates(&surface, &volume_candidates, relaxed_options) {
+                    Ok(tet_candidates) => eprintln!(
+                        "{label} relaxed_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6} below={} fan_fallback={}",
+                        relaxed_stage.elapsed().as_secs_f64() * 1000.0,
+                        tet_candidates.nodes.len(),
+                        tet_candidates.tets.len(),
+                        tet_candidates.recovery.min_exact_scaled_jacobian,
+                        tet_candidates.recovery.exact_scaled_jacobian_below_threshold_count,
+                        tet_candidates.recovery.fan_fallback_component_count
+                    ),
+                    Err(relaxed_err) => eprintln!(
+                        "{label} relaxed_tet_candidates_failed elapsed_ms={:.1}: {relaxed_err}",
+                        relaxed_stage.elapsed().as_secs_f64() * 1000.0
+                    ),
+                }
+                let mut repair_options = tet_options;
+                repair_options.sliver_aspect_ratio = 1.0e6;
+                let repair_stage = std::time::Instant::now();
+                match form_tet_candidates(&surface, &volume_candidates, repair_options) {
+                    Ok(tet_candidates) => eprintln!(
+                        "{label} repair_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6} below={} repair_passes={} unrepaired={}",
+                        repair_stage.elapsed().as_secs_f64() * 1000.0,
+                        tet_candidates.nodes.len(),
+                        tet_candidates.tets.len(),
+                        tet_candidates.recovery.min_exact_scaled_jacobian,
+                        tet_candidates.recovery.exact_scaled_jacobian_below_threshold_count,
+                        tet_candidates.recovery.exact_quality_repair_pass_count,
+                        tet_candidates.recovery.exact_quality_unrepaired_total_count
+                    ),
+                    Err(repair_err) => eprintln!(
+                        "{label} repair_tet_candidates_failed elapsed_ms={:.1}: {repair_err}",
+                        repair_stage.elapsed().as_secs_f64() * 1000.0
+                    ),
+                }
+                if thin_low_face_topology(&topology) {
+                    let alternate_stage = std::time::Instant::now();
+                    let alternate_surface = discretize_cad_surfaces_with_curves(
+                        &topology,
+                        &cad_evaluation,
+                        &curves,
+                        SurfaceDiscretizationOptions {
+                            max_curve_segments_per_edge: 8,
+                            ..SurfaceDiscretizationOptions::default()
+                        },
+                    )
+                    .expect("alternate thin surface");
+                    let alternate_volume_candidates = prepare_volume_candidates(
+                        &alternate_surface,
+                        VolumeCandidateOptions::default(),
+                    )
+                    .expect("alternate volume candidates");
+                    let mut alternate_options = tet_candidate_options_for_mesh(
+                        &topology,
+                        options,
+                        effective_sizing.as_ref(),
+                    );
+                    alternate_options.max_global_insertion_points = 256;
+                    alternate_options.sliver_aspect_ratio = 1.0e6;
+                    alternate_options.min_scaled_jacobian = 0.0;
+                    match form_tet_candidates(
+                        &alternate_surface,
+                        &alternate_volume_candidates,
+                        alternate_options,
+                    ) {
+                        Ok(tet_candidates) => eprintln!(
+                            "{label} alternate_relaxed_tet_candidates elapsed_ms={:.1} surface_elements={} nodes={} tets={} min_exact={:.6}",
+                            alternate_stage.elapsed().as_secs_f64() * 1000.0,
+                            alternate_surface.elements.len(),
+                            tet_candidates.nodes.len(),
+                            tet_candidates.tets.len(),
+                            tet_candidates.recovery.min_exact_scaled_jacobian
+                        ),
+                        Err(alternate_err) => eprintln!(
+                            "{label} alternate_relaxed_tet_candidates_failed elapsed_ms={:.1}: {alternate_err}",
+                            alternate_stage.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    }
+                }
+            }
         }
     }
 
