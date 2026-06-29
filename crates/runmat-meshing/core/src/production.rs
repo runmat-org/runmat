@@ -354,10 +354,10 @@ fn sliver_aspect_ratio_for_mesh(topology: &SourceTopologyModel, quality: Quality
 }
 
 fn exact_quality_repair_target_limit_for_mesh(topology: &SourceTopologyModel) -> usize {
-    if constrained_recovery_topology(topology) {
+    if thin_low_face_topology(topology) {
         64
     } else {
-        512
+        topology.faces.len().saturating_mul(8).clamp(512, 8_192)
     }
 }
 
@@ -2726,6 +2726,20 @@ mod tests {
         assert_eq!(
             sliver_aspect_ratio_for_mesh(&topology, quality),
             quality.max_aspect_ratio
+        );
+        assert_eq!(exact_quality_repair_target_limit_for_mesh(&topology), 64);
+    }
+
+    #[test]
+    fn non_thin_constrained_topology_scales_exact_quality_repair_targets() {
+        let geometry = faceted_cylinder_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+
+        assert!(constrained_recovery_topology(&topology));
+        assert!(!thin_low_face_topology(&topology));
+        assert_eq!(
+            exact_quality_repair_target_limit_for_mesh(&topology),
+            topology.faces.len().saturating_mul(8).clamp(512, 8_192)
         );
     }
 
