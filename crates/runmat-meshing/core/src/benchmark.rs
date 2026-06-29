@@ -2526,6 +2526,20 @@ mod tests {
             suite.summary.failure_counts_by_code.values().sum::<usize>(),
             suite.summary.failed_count
         );
+        let gate = evaluate_mesh_benchmark_suite_gate(
+            &suite,
+            &MeshBenchmarkSuiteGatePolicy {
+                max_total_ms: Some(15_000.0),
+                max_analysis_mesh_json_bytes: Some(10_000_000),
+                max_mesh_evidence_json_bytes: Some(10_000_000),
+                ..MeshBenchmarkSuiteGatePolicy::default()
+            },
+        );
+        assert!(
+            gate.passed,
+            "generic production benchmark gate failed: {:?}",
+            gate.violations
+        );
     }
 
     #[test]
