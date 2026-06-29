@@ -1762,6 +1762,29 @@ fn through_hole_block_benchmark_case() -> MeshBenchmarkCase {
     )
 }
 
+fn annular_bore_block_benchmark_case() -> MeshBenchmarkCase {
+    let dimensions_m = [1.0, 1.0, 0.8];
+    let bore_radius_m = 0.18;
+    let segment_count = 12_usize;
+    let (vertices, triangles) =
+        annular_bore_block_surface(dimensions_m, bore_radius_m, segment_count);
+    let expected_volume_m3 = closed_surface_volume_m3(&vertices, &triangles);
+    let expected_boundary_area_m2 = closed_surface_area_m2(&vertices, &triangles);
+    benchmark_case(
+        "annular_bore_block",
+        MeshBenchmarkTier::HoleFeature,
+        geometry_from_surface(
+            "annular_bore_block",
+            "generic_annular_bore_block_surface",
+            vertices,
+            triangles,
+        ),
+        expected_volume_m3,
+        expected_boundary_area_m2,
+        1,
+    )
+}
+
 fn faceted_cylinder_benchmark_case() -> MeshBenchmarkCase {
     let segment_count = 16_usize;
     let radius_m = 0.5_f64;
@@ -2148,6 +2171,88 @@ fn through_hole_block_surface(
         [7, 4, 12, 15],
     ] {
         push_quad(&mut triangles, quad);
+    }
+    (vertices, triangles)
+}
+
+fn annular_bore_block_surface(
+    dimensions_m: [f64; 3],
+    bore_radius_m: f64,
+    segment_count: usize,
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let [sx, sy, sz] = dimensions_m;
+    let center = [sx * 0.5, sy * 0.5];
+    let mut vertices = Vec::<[f64; 3]>::with_capacity(segment_count * 4);
+    for z in [0.0, sz] {
+        for radius in [None, Some(bore_radius_m)] {
+            for index in 0..segment_count {
+                let theta = std::f64::consts::TAU * index as f64 / segment_count as f64;
+                let direction = [theta.cos(), theta.sin()];
+                let radius = radius.unwrap_or_else(|| {
+                    let x_limit = if direction[0].abs() > f64::EPSILON {
+                        sx * 0.5 / direction[0].abs()
+                    } else {
+                        f64::INFINITY
+                    };
+                    let y_limit = if direction[1].abs() > f64::EPSILON {
+                        sy * 0.5 / direction[1].abs()
+                    } else {
+                        f64::INFINITY
+                    };
+                    x_limit.min(y_limit)
+                });
+                vertices.push([
+                    center[0] + direction[0] * radius,
+                    center[1] + direction[1] * radius,
+                    z,
+                ]);
+            }
+        }
+    }
+
+    let bottom_outer = 0_u32;
+    let bottom_inner = segment_count as u32;
+    let top_outer = (segment_count * 2) as u32;
+    let top_inner = (segment_count * 3) as u32;
+    let mut triangles = Vec::<[u32; 3]>::with_capacity(segment_count * 8);
+    for index in 0..segment_count as u32 {
+        let next = (index + 1) % segment_count as u32;
+        push_quad(
+            &mut triangles,
+            [
+                bottom_outer + index,
+                bottom_outer + next,
+                top_outer + next,
+                top_outer + index,
+            ],
+        );
+        push_quad(
+            &mut triangles,
+            [
+                bottom_inner + next,
+                bottom_inner + index,
+                top_inner + index,
+                top_inner + next,
+            ],
+        );
+        push_quad(
+            &mut triangles,
+            [
+                top_outer + next,
+                top_inner + next,
+                top_inner + index,
+                top_outer + index,
+            ],
+        );
+        push_quad(
+            &mut triangles,
+            [
+                bottom_outer + index,
+                bottom_inner + index,
+                bottom_inner + next,
+                bottom_outer + next,
+            ],
+        );
     }
     (vertices, triangles)
 }
@@ -2878,6 +2983,20 @@ mod tests {
         );
         assert!(report.coverage.boundary_edge_recovery_ratio >= 1.0);
         assert!(report.coverage.boundary_face_recovery_ratio >= 1.0);
+    }
+
+    #[test]
+    #[ignore = "documents remaining surface/topology recovery work for annular through-bore fixtures"]
+    fn annular_bore_block_benchmark_reaches_surface_topology_gate() {
+        let case = annular_bore_block_benchmark_case();
+        let err = generate_mesh_for_benchmark_case(&case)
+            .expect_err("annular bore block should expose surface/topology recovery gap");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("orientation alignment"),
+            "expected surface orientation recovery gate, got {message}"
+        );
     }
 
     #[test]
