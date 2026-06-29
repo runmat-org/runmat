@@ -8225,6 +8225,10 @@ mod tests {
                 .count()
                 >= 4
         );
+        let original_boundary_faces = boundary_faces_from_tets(&split_tets);
+        let original_volume = split_tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let original_bad_count =
+            count_exact_quality_violations(split_tets.iter(), options.min_scaled_jacobian);
         let face_adjacency = tet_face_adjacency(&split_tets);
         let node_adjacency = tet_node_adjacency(&split_tets);
         let face_closure =
@@ -8292,6 +8296,21 @@ mod tests {
         assert_eq!(repair.boundary_adjacent_reconnected_cavity_count, 1);
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
+        assert_eq!(
+            boundary_faces_from_tets(&repair_tets),
+            original_boundary_faces,
+            "boundary-adjacent repair must preserve the cavity boundary"
+        );
+        let repaired_volume = repair_tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!(
+            (repaired_volume - original_volume).abs() <= original_volume.max(1.0e-18) * 1.0e-9,
+            "boundary-adjacent repair must preserve cavity volume"
+        );
+        assert!(
+            count_exact_quality_violations(repair_tets.iter(), options.min_scaled_jacobian)
+                < original_bad_count,
+            "boundary-adjacent repair must reduce exact-quality violations"
+        );
     }
 
     #[test]
@@ -8329,6 +8348,8 @@ mod tests {
         );
         let original_full_bad_count =
             count_exact_quality_violations(split_tets.iter(), options.min_scaled_jacobian);
+        let original_boundary_faces = boundary_faces_from_tets(&split_tets);
+        let original_volume = split_tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         let face_adjacency = tet_face_adjacency(&split_tets);
         let node_adjacency = tet_node_adjacency(&split_tets);
 
@@ -8347,7 +8368,13 @@ mod tests {
         assert_eq!(indices.len(), split_tets.len());
         assert_eq!(
             boundary_faces_from_tets(&candidates),
-            boundary_faces_from_tets(&split_tets)
+            original_boundary_faces,
+            "boundary-cavity untangling must preserve the cavity boundary"
+        );
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!(
+            (candidate_volume - original_volume).abs() <= original_volume.max(1.0e-18) * 1.0e-9,
+            "boundary-cavity untangling must preserve cavity volume"
         );
         assert!(
             count_tets_below_exact_quality(candidates.iter(), threshold)
