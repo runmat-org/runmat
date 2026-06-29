@@ -245,6 +245,8 @@ pub struct MeshBenchmarkComparisonThresholds {
     pub max_runtime_regression_ratio: f64,
     pub max_quality_regression_ratio: f64,
     pub max_coverage_error_increase: f64,
+    #[serde(default = "default_max_artifact_size_regression_ratio")]
+    pub max_artifact_size_regression_ratio: f64,
 }
 
 impl Default for MeshBenchmarkComparisonThresholds {
@@ -253,8 +255,13 @@ impl Default for MeshBenchmarkComparisonThresholds {
             max_runtime_regression_ratio: 0.20,
             max_quality_regression_ratio: 0.10,
             max_coverage_error_increase: 1.0e-6,
+            max_artifact_size_regression_ratio: default_max_artifact_size_regression_ratio(),
         }
     }
+}
+
+fn default_max_artifact_size_regression_ratio() -> f64 {
+    0.25
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -277,6 +284,8 @@ pub struct MeshBenchmarkComparisonSummary {
     pub quality_regression_count: usize,
     pub coverage_regression_count: usize,
     pub runtime_regression_count: usize,
+    #[serde(default)]
+    pub artifact_size_regression_count: usize,
     pub candidate_new_failure_count: usize,
     pub regression_count: usize,
     pub has_regression: bool,
@@ -294,6 +303,8 @@ pub struct MeshBenchmarkTierComparisonSummary {
     pub quality_regression_count: usize,
     pub coverage_regression_count: usize,
     pub runtime_regression_count: usize,
+    #[serde(default)]
+    pub artifact_size_regression_count: usize,
     pub candidate_new_failure_count: usize,
     pub regression_count: usize,
     pub has_regression: bool,
@@ -319,10 +330,20 @@ pub struct MeshBenchmarkCaseComparison {
     pub boundary_area_error_delta: Option<f64>,
     pub runtime_ms_delta: Option<f64>,
     pub runtime_regression_ratio: Option<f64>,
+    #[serde(default)]
+    pub analysis_mesh_json_bytes_delta: Option<i64>,
+    #[serde(default)]
+    pub mesh_evidence_json_bytes_delta: Option<i64>,
+    #[serde(default)]
+    pub analysis_mesh_json_bytes_regression_ratio: Option<f64>,
+    #[serde(default)]
+    pub mesh_evidence_json_bytes_regression_ratio: Option<f64>,
     pub publishability_regressed: bool,
     pub quality_regressed: bool,
     pub coverage_regressed: bool,
     pub runtime_regressed: bool,
+    #[serde(default)]
+    pub artifact_size_regressed: bool,
     pub candidate_new_failure: bool,
 }
 
@@ -688,6 +709,22 @@ fn compare_mesh_benchmark_case(
         baseline.and_then(|report| report.timing.total_ms),
         candidate.and_then(|report| report.timing.total_ms),
     );
+    let analysis_mesh_json_bytes_delta = usize_delta(
+        baseline.and_then(|report| report.artifacts.analysis_mesh_json_bytes),
+        candidate.and_then(|report| report.artifacts.analysis_mesh_json_bytes),
+    );
+    let mesh_evidence_json_bytes_delta = usize_delta(
+        baseline.and_then(|report| report.artifacts.mesh_evidence_json_bytes),
+        candidate.and_then(|report| report.artifacts.mesh_evidence_json_bytes),
+    );
+    let analysis_mesh_json_bytes_regression_ratio = usize_regression_ratio(
+        baseline.and_then(|report| report.artifacts.analysis_mesh_json_bytes),
+        candidate.and_then(|report| report.artifacts.analysis_mesh_json_bytes),
+    );
+    let mesh_evidence_json_bytes_regression_ratio = usize_regression_ratio(
+        baseline.and_then(|report| report.artifacts.mesh_evidence_json_bytes),
+        candidate.and_then(|report| report.artifacts.mesh_evidence_json_bytes),
+    );
 
     let publishability_regressed = matches!(
         (
@@ -720,6 +757,10 @@ fn compare_mesh_benchmark_case(
             .is_some_and(|delta| delta > thresholds.max_coverage_error_increase);
     let runtime_regressed = runtime_regression_ratio
         .is_some_and(|ratio| ratio > thresholds.max_runtime_regression_ratio);
+    let artifact_size_regressed = analysis_mesh_json_bytes_regression_ratio
+        .is_some_and(|ratio| ratio > thresholds.max_artifact_size_regression_ratio)
+        || mesh_evidence_json_bytes_regression_ratio
+            .is_some_and(|ratio| ratio > thresholds.max_artifact_size_regression_ratio);
 
     MeshBenchmarkCaseComparison {
         benchmark_id: benchmark_id.to_string(),
@@ -742,10 +783,15 @@ fn compare_mesh_benchmark_case(
         boundary_area_error_delta,
         runtime_ms_delta,
         runtime_regression_ratio,
+        analysis_mesh_json_bytes_delta,
+        mesh_evidence_json_bytes_delta,
+        analysis_mesh_json_bytes_regression_ratio,
+        mesh_evidence_json_bytes_regression_ratio,
         publishability_regressed,
         quality_regressed,
         coverage_regressed,
         runtime_regressed,
+        artifact_size_regressed,
         candidate_new_failure,
     }
 }
@@ -760,6 +806,10 @@ fn mesh_benchmark_comparison_summary(
     let quality_regression_count = cases.iter().filter(|case| case.quality_regressed).count();
     let coverage_regression_count = cases.iter().filter(|case| case.coverage_regressed).count();
     let runtime_regression_count = cases.iter().filter(|case| case.runtime_regressed).count();
+    let artifact_size_regression_count = cases
+        .iter()
+        .filter(|case| case.artifact_size_regressed)
+        .count();
     let candidate_new_failure_count = cases
         .iter()
         .filter(|case| case.candidate_new_failure)
@@ -779,6 +829,7 @@ fn mesh_benchmark_comparison_summary(
         quality_regression_count,
         coverage_regression_count,
         runtime_regression_count,
+        artifact_size_regression_count,
         candidate_new_failure_count,
         regression_count,
         has_regression: regression_count > 0,
@@ -809,6 +860,10 @@ fn mesh_benchmark_comparison_tier_summaries(
                 cases.iter().filter(|case| case.coverage_regressed).count();
             let runtime_regression_count =
                 cases.iter().filter(|case| case.runtime_regressed).count();
+            let artifact_size_regression_count = cases
+                .iter()
+                .filter(|case| case.artifact_size_regressed)
+                .count();
             let candidate_new_failure_count = cases
                 .iter()
                 .filter(|case| case.candidate_new_failure)
@@ -837,6 +892,7 @@ fn mesh_benchmark_comparison_tier_summaries(
                     quality_regression_count,
                     coverage_regression_count,
                     runtime_regression_count,
+                    artifact_size_regression_count,
                     candidate_new_failure_count,
                     regression_count,
                     has_regression: regression_count > 0,
@@ -851,6 +907,7 @@ fn comparison_case_has_regression(case: &MeshBenchmarkCaseComparison) -> bool {
         || case.quality_regressed
         || case.coverage_regressed
         || case.runtime_regressed
+        || case.artifact_size_regressed
         || case.candidate_new_failure
         || !case.candidate_present
 }
@@ -1126,6 +1183,21 @@ fn runtime_regression_ratio(baseline_ms: Option<f64>, candidate_ms: Option<f64>)
         return None;
     }
     Some((candidate_ms - baseline_ms) / baseline_ms)
+}
+
+fn usize_delta(baseline: Option<usize>, candidate: Option<usize>) -> Option<i64> {
+    let baseline = baseline?;
+    let candidate = candidate?;
+    Some(candidate as i64 - baseline as i64)
+}
+
+fn usize_regression_ratio(baseline: Option<usize>, candidate: Option<usize>) -> Option<f64> {
+    let baseline = baseline?;
+    let candidate = candidate?;
+    if baseline == 0 || candidate <= baseline {
+        return None;
+    }
+    Some((candidate - baseline) as f64 / baseline as f64)
 }
 
 fn quality_regressed(
@@ -2125,22 +2197,22 @@ mod tests {
 
     #[test]
     fn benchmark_comparison_reports_quality_runtime_and_publishability_regressions() {
-        let baseline = build_mesh_benchmark_suite_report(
-            "baseline",
-            vec![ready_report("case_a", 0.5, 2.0, 0.0, 12.0, true, None)],
+        let mut baseline_report = ready_report("case_a", 0.5, 2.0, 0.0, 12.0, true, None);
+        baseline_report.artifacts.analysis_mesh_json_bytes = Some(1000);
+        baseline_report.artifacts.mesh_evidence_json_bytes = Some(1000);
+        let mut candidate_report = ready_report(
+            "case_a",
+            0.35,
+            2.5,
+            0.02,
+            18.0,
+            false,
+            Some("quality_threshold_failed"),
         );
-        let candidate = build_mesh_benchmark_suite_report(
-            "candidate",
-            vec![ready_report(
-                "case_a",
-                0.35,
-                2.5,
-                0.02,
-                18.0,
-                false,
-                Some("quality_threshold_failed"),
-            )],
-        );
+        candidate_report.artifacts.analysis_mesh_json_bytes = Some(1400);
+        candidate_report.artifacts.mesh_evidence_json_bytes = Some(1300);
+        let baseline = build_mesh_benchmark_suite_report("baseline", vec![baseline_report]);
+        let candidate = build_mesh_benchmark_suite_report("candidate", vec![candidate_report]);
 
         let comparison = compare_mesh_benchmark_suites(
             "candidate_vs_baseline",
@@ -2150,6 +2222,7 @@ mod tests {
                 max_runtime_regression_ratio: 0.20,
                 max_quality_regression_ratio: 0.10,
                 max_coverage_error_increase: 0.01,
+                max_artifact_size_regression_ratio: 0.20,
             },
         );
 
@@ -2162,6 +2235,7 @@ mod tests {
         assert_eq!(comparison.summary.quality_regression_count, 1);
         assert_eq!(comparison.summary.coverage_regression_count, 1);
         assert_eq!(comparison.summary.runtime_regression_count, 1);
+        assert_eq!(comparison.summary.artifact_size_regression_count, 1);
         assert_eq!(comparison.summary.candidate_new_failure_count, 1);
         assert_eq!(comparison.summary.regression_count, 1);
         assert!(comparison.summary.has_regression);
@@ -2176,6 +2250,7 @@ mod tests {
         assert_eq!(tier.quality_regression_count, 1);
         assert_eq!(tier.coverage_regression_count, 1);
         assert_eq!(tier.runtime_regression_count, 1);
+        assert_eq!(tier.artifact_size_regression_count, 1);
         assert_eq!(tier.candidate_new_failure_count, 1);
         assert!(tier.has_regression);
 
@@ -2187,10 +2262,15 @@ mod tests {
         assert_close(case.volume_coverage_error_delta, 0.02);
         assert_eq!(case.runtime_ms_delta, Some(6.0));
         assert_eq!(case.runtime_regression_ratio, Some(0.5));
+        assert_eq!(case.analysis_mesh_json_bytes_delta, Some(400));
+        assert_eq!(case.mesh_evidence_json_bytes_delta, Some(300));
+        assert_eq!(case.analysis_mesh_json_bytes_regression_ratio, Some(0.4));
+        assert_eq!(case.mesh_evidence_json_bytes_regression_ratio, Some(0.3));
         assert!(case.publishability_regressed);
         assert!(case.quality_regressed);
         assert!(case.coverage_regressed);
         assert!(case.runtime_regressed);
+        assert!(case.artifact_size_regressed);
         assert!(case.candidate_new_failure);
     }
 
