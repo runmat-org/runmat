@@ -1825,6 +1825,90 @@ mod tests {
     }
 
     #[test]
+    fn production_mesh_preserves_regions_through_requested_refinement() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(0.75);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [0.25, 0.25, 0.25],
+                    target_size_m: 0.25,
+                    reason: Some("boundary_region".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.75, 0.75, 0.75],
+                    target_size_m: 0.25,
+                    reason: Some("material_region".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let mesh =
+            generate_production_analysis_mesh_with_sizing(&cube_geometry(), &options, &sizing)
+                .expect("production mesh should generate with requested refinement");
+        let validation = AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+            required_material_region_ids: vec!["root".to_string(), "tip".to_string()],
+            min_boundary_face_recovery_ratio: 1.0,
+            min_boundary_edge_recovery_ratio: 1.0,
+            require_no_fan_fallback: true,
+            require_no_unrepaired_exact_quality: true,
+            ..AnalysisMeshValidationOptions::default()
+        };
+        crate::validate_analysis_mesh_with_options(&mesh, validation.clone())
+            .expect("required regions should remain selectable after requested refinement");
+        let evidence = crate::build_mesh_evidence_artifact(&mesh, &validation);
+
+        assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
+        assert!(mesh.backend.tet_accepted_requested_refinement_point_count > 0);
+        assert!(mesh.sizing.applied_samples.iter().any(|sample| {
+            sample.reason.as_deref() == Some("boundary_region")
+                && sample.inserted_breakpoint_count > 0
+        }));
+        assert!(
+            evidence
+                .regions
+                .boundary_region_recovered_face_counts
+                .get("root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .boundary_region_recovered_face_counts
+                .get("tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .material_region_element_counts
+                .get("root")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+        assert!(
+            evidence
+                .regions
+                .material_region_element_counts
+                .get("tip")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        );
+    }
+
+    #[test]
     fn production_sizing_includes_cad_curvature_samples() {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.5);
