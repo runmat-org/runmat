@@ -2435,6 +2435,33 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "expensive boundary patch benchmark timing diagnostic"]
+    fn boundary_load_patch_benchmark_stage_timings_are_observable() {
+        let case = boundary_load_patch_benchmark_case();
+        let started = std::time::Instant::now();
+        let mesh = generate_mesh_for_benchmark_case(&case)
+            .expect("boundary load patch benchmark should generate");
+        eprintln!(
+            "boundary_load_patch generate elapsed_ms={:.1} nodes={} elements={}",
+            started.elapsed().as_secs_f64() * 1000.0,
+            mesh.nodes.len(),
+            mesh.volume_elements.len()
+        );
+
+        let report_started = std::time::Instant::now();
+        let report = build_mesh_benchmark_report(
+            &mesh,
+            &case.validation,
+            MeshBenchmarkInput::new(case.benchmark_id.clone(), case.tier),
+        );
+        eprintln!(
+            "boundary_load_patch report elapsed_ms={:.1} solve_ready={}",
+            report_started.elapsed().as_secs_f64() * 1000.0,
+            report.solve_readiness.solve_ready
+        );
+    }
+
+    #[test]
     #[ignore = "expensive production fixture suite; run manually when closing meshing gates"]
     fn generic_benchmark_suite_collects_current_fixture_readiness() {
         let cases = generic_mesh_benchmark_cases();

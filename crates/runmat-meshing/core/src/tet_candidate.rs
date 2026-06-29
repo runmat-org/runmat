@@ -21,6 +21,7 @@ pub struct TetCandidateOptions {
     pub interior_target_size_m: Option<f64>,
     pub requested_refinement_points: [[f64; 3]; 16],
     pub requested_refinement_point_count: usize,
+    pub max_requested_refinement_candidates_per_point: usize,
     pub max_interior_seed_points: usize,
     pub max_global_insertion_points: usize,
     pub allow_fan_fallback: bool,
@@ -45,6 +46,7 @@ impl Default for TetCandidateOptions {
             interior_target_size_m: None,
             requested_refinement_points: [[0.0; 3]; 16],
             requested_refinement_point_count: 0,
+            max_requested_refinement_candidates_per_point: 16,
             max_interior_seed_points: 1,
             max_global_insertion_points: 512,
             allow_fan_fallback: false,
@@ -691,6 +693,7 @@ fn validate_options(options: TetCandidateOptions) -> Result<(), TetCandidateErro
             .iter()
             .take(options.requested_refinement_point_count)
             .any(|point| point.iter().any(|value| !value.is_finite()))
+        || options.max_requested_refinement_candidates_per_point == 0
     {
         return Err(TetCandidateError::InvalidOptions);
     }
@@ -1989,9 +1992,20 @@ fn refinement_points_for_tets(
     ranked.sort_by(compare_ranked_refinement_points);
     let mut points = Vec::<RefinementPointCandidate>::new();
     let mut unrequested_point_count = 0_usize;
+    let mut requested_candidate_counts = BTreeMap::<usize, usize>::new();
     for ranked_point in ranked {
         if ranked_point.requested_id.is_none() && unrequested_point_count >= point_budget {
             break;
+        }
+        if let Some(requested_id) = ranked_point.requested_id {
+            if requested_candidate_counts
+                .get(&requested_id)
+                .copied()
+                .unwrap_or_default()
+                >= options.max_requested_refinement_candidates_per_point
+            {
+                continue;
+            }
         }
         if contains_point(seed_points, ranked_point.point, tolerance)
             || points.iter().any(|candidate| {
@@ -2006,6 +2020,8 @@ fn refinement_points_for_tets(
         });
         if ranked_point.requested_id.is_none() {
             unrequested_point_count += 1;
+        } else if let Some(requested_id) = ranked_point.requested_id {
+            *requested_candidate_counts.entry(requested_id).or_default() += 1;
         }
     }
     Ok(RefinementPointSet {
@@ -6989,6 +7005,50 @@ mod tests {
         assert_eq!(ranked[2].point, [0.4, 0.0, 0.0]);
         assert_eq!(ranked[3].requested_id, Some(0));
         assert_eq!(ranked[4].requested_id, None);
+    }
+
+    #[test]
+    fn requested_refinement_candidates_are_capped_per_marker_after_ranking() {
+        let (surface, volume_candidates) = cube_surface_and_volume_candidates();
+        let component = &volume_candidates.components[0];
+        let surface_elements = surface
+            .elements
+            .iter()
+            .map(|element| (element.element_id, element))
+            .collect::<BTreeMap<_, _>>();
+        let tolerance = MeshingTolerance::default();
+        let classifier =
+            ComponentSurfaceClassifier::new(component, &surface, &surface_elements, tolerance)
+                .expect("classifier should build");
+        let mut requested_refinement_points = [[0.0; 3]; 16];
+        requested_refinement_points[0] = [0.3, 0.3, 0.3];
+
+        let candidates = refinement_points_for_tets(
+            &[],
+            &BTreeMap::new(),
+            &[],
+            &[[0.5, 0.5, 0.5]],
+            tolerance,
+            &classifier,
+            TetCandidateOptions {
+                interior_target_size_m: Some(0.4),
+                requested_refinement_points,
+                requested_refinement_point_count: 1,
+                max_requested_refinement_candidates_per_point: 4,
+                ..TetCandidateOptions::default()
+            },
+            16,
+            &BTreeSet::new(),
+            false,
+        )
+        .expect("requested refinement candidates should build");
+
+        assert_eq!(candidates.requested_point_count, 1);
+        assert_eq!(candidates.points.len(), 4);
+        assert!(candidates
+            .points
+            .iter()
+            .all(|candidate| candidate.requested_id == Some(0)));
     }
 
     #[test]

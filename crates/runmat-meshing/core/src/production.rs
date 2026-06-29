@@ -207,7 +207,7 @@ pub fn generate_production_analysis_mesh_with_sizing(
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
     let base_target_size_m = target_size_for_mesh(&topology, options);
     let effective_target_size_m =
-        production_sizing_target_size(base_target_size_m, sizing, options);
+        production_sizing_target_size(base_target_size_m, sizing, options, Some(&topology));
     let mut effective_options = options.clone();
     if effective_target_size_m < base_target_size_m {
         effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
@@ -230,7 +230,7 @@ pub fn generate_production_analysis_mesh_with_sizing_and_cad_evaluator(
     let topology = extract_source_topology(geometry).map_err(ProductionMeshError::Topology)?;
     let base_target_size_m = target_size_for_mesh(&topology, options);
     let effective_target_size_m =
-        production_sizing_target_size(base_target_size_m, sizing, options);
+        production_sizing_target_size(base_target_size_m, sizing, options, Some(&topology));
     let mut effective_options = options.clone();
     if effective_target_size_m < base_target_size_m {
         effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
@@ -267,6 +267,8 @@ fn tet_candidate_options_for_mesh(
         interior_target_size_m: interior_target_size_for_tet_candidates(topology, options),
         requested_refinement_points: requested_refinement.0,
         requested_refinement_point_count: requested_refinement.1,
+        max_requested_refinement_candidates_per_point:
+            requested_refinement_candidate_limit_for_mesh(topology),
         max_interior_seed_points: options.max_elements.max(1).min(512),
         max_global_insertion_points: global_insertion_point_limit_for_mesh(topology, options),
         allow_fan_fallback: false,
@@ -335,6 +337,10 @@ fn quality_recovery_seed_candidate_limit_for_mesh(topology: &SourceTopologyModel
     } else {
         16
     }
+}
+
+fn requested_refinement_candidate_limit_for_mesh(_topology: &SourceTopologyModel) -> usize {
+    16
 }
 
 fn constrained_recovery_topology(topology: &SourceTopologyModel) -> bool {
@@ -688,6 +694,7 @@ fn production_sizing_target_size(
     base_target_size_m: f64,
     sizing: &MeshSizingField,
     options: &VolumeMeshingOptions,
+    topology: Option<&SourceTopologyModel>,
 ) -> f64 {
     let mut target_size_m = base_target_size_m;
     let mut global_target_size_m = base_target_size_m;
@@ -698,7 +705,10 @@ fn production_sizing_target_size(
         }
     }
     for sample in &sizing.samples {
-        if sample.target_size_m.is_finite() && sample.target_size_m > 0.0 {
+        if sample_drives_global_target_size(sample, topology)
+            && sample.target_size_m.is_finite()
+            && sample.target_size_m > 0.0
+        {
             let sample_target_size_m = production_sample_target_size(
                 sample.target_size_m,
                 Some(global_target_size_m),
@@ -730,6 +740,28 @@ fn production_sizing_target_size(
         }
     }
     target_size_m.max(1.0e-9)
+}
+
+fn sample_drives_global_target_size(
+    sample: &SizingSample,
+    topology: Option<&SourceTopologyModel>,
+) -> bool {
+    if matches!(
+        sample.reason.as_deref(),
+        Some("structural.load_regions" | "structural.constraint_regions")
+    ) && topology.is_some_and(|topology| point_on_topology_boundary(sample.position_m, topology))
+    {
+        return false;
+    }
+    true
+}
+
+fn point_on_topology_boundary(point_m: [f64; 3], topology: &SourceTopologyModel) -> bool {
+    let tolerance = MeshingTolerance::from_bounds(topology.bounds_min_m, topology.bounds_max_m);
+    (0..3).any(|axis| {
+        (point_m[axis] - topology.bounds_min_m[axis]).abs() <= tolerance.absolute_m
+            || (point_m[axis] - topology.bounds_max_m[axis]).abs() <= tolerance.absolute_m
+    })
 }
 
 fn clamp_mesh_target_size(mut value: f64, options: &VolumeMeshingOptions) -> f64 {
@@ -2376,9 +2408,9 @@ mod tests {
         for sample in &sizing.samples {
             let reason = sample.reason.as_deref().expect("reasoned boundary sample");
             let coarse_near_count =
-                volume_element_centroid_count_within(&coarse, sample.position_m, 0.35);
+                volume_element_count_with_node_within(&coarse, sample.position_m, 0.20);
             let refined_near_count =
-                volume_element_centroid_count_within(&mesh, sample.position_m, 0.35);
+                volume_element_count_with_node_within(&mesh, sample.position_m, 0.20);
             assert!(
                 refined_near_count > coarse_near_count,
                 "{reason} should create denser retained Tet topology near the boundary patch; coarse={coarse_near_count}, refined={refined_near_count}"
@@ -2430,6 +2462,48 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "expensive boundary patch sizing timing diagnostic"]
+    fn boundary_patch_sizing_stage_timings_are_observable() {
+        let mut options = VolumeMeshingOptions::default();
+        options.target_size = MeshTargetSize::LengthM(1.0);
+        options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
+        options.refinement.focus.curvature = false;
+        options.refinement.focus.small_features = false;
+        options.refinement.focus.interfaces = RefinementFocusLevel::Off;
+        let sizing = MeshSizingField {
+            samples: vec![
+                SizingSample {
+                    position_m: [1.0, 0.5, 0.5],
+                    target_size_m: 0.25,
+                    reason: Some("structural.load_regions".to_string()),
+                },
+                SizingSample {
+                    position_m: [0.5, 0.0, 0.5],
+                    target_size_m: 0.25,
+                    reason: Some("structural.constraint_regions".to_string()),
+                },
+            ],
+            ..MeshSizingField::default()
+        };
+
+        let geometry = cube_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+        let base_target_size_m = target_size_for_mesh(&topology, &options);
+        let effective_target_size_m =
+            production_sizing_target_size(base_target_size_m, &sizing, &options, Some(&topology));
+        let mut effective_options = options.clone();
+        if effective_target_size_m < base_target_size_m {
+            effective_options.target_size = MeshTargetSize::LengthM(effective_target_size_m);
+        }
+        log_preparation_stage_timings(
+            "boundary_patch",
+            &geometry,
+            &effective_options,
+            Some(&sizing),
+        );
+    }
+
     fn volume_element_centroid_count_within(
         mesh: &AnalysisMeshArtifact,
         point_m: [f64; 3],
@@ -2443,6 +2517,31 @@ mod tests {
                     return false;
                 };
                 distance_squared(centroid, point_m) <= radius_squared_m
+            })
+            .count()
+    }
+
+    fn volume_element_count_with_node_within(
+        mesh: &AnalysisMeshArtifact,
+        point_m: [f64; 3],
+        radius_m: f64,
+    ) -> usize {
+        let radius_squared_m = radius_m * radius_m;
+        let near_node_ids = mesh
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                (distance_squared(node.coordinates_m, point_m) <= radius_squared_m)
+                    .then_some(node.node_id)
+            })
+            .collect::<BTreeSet<_>>();
+        mesh.volume_elements
+            .iter()
+            .filter(|element| {
+                element
+                    .node_ids
+                    .iter()
+                    .any(|node_id| near_node_ids.contains(node_id))
             })
             .count()
     }
@@ -2951,7 +3050,7 @@ mod tests {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.1_f64.cbrt() / 2.0);
         options.max_elements = 50_000;
-        log_preparation_stage_timings("thin_box", &geometry, &options);
+        log_preparation_stage_timings("thin_box", &geometry, &options, None);
     }
 
     #[test]
@@ -2961,7 +3060,7 @@ mod tests {
         let mut options = VolumeMeshingOptions::default();
         options.target_size = MeshTargetSize::LengthM(0.459_259_458_684_314_6);
         options.max_elements = 50_000;
-        log_preparation_stage_timings("faceted_cylinder", &geometry, &options);
+        log_preparation_stage_timings("faceted_cylinder", &geometry, &options, None);
     }
 
     #[test]
@@ -2990,6 +3089,7 @@ mod tests {
         label: &str,
         geometry: &GeometryAsset,
         options: &VolumeMeshingOptions,
+        sizing: Option<&MeshSizingField>,
     ) {
         let started = std::time::Instant::now();
         let topology = extract_source_topology(geometry).expect("topology");
@@ -3019,7 +3119,7 @@ mod tests {
 
         let stage = std::time::Instant::now();
         let effective_sizing =
-            production_effective_sizing(&topology, &cad_evaluation, options, None);
+            production_effective_sizing(&topology, &cad_evaluation, options, sizing);
         eprintln!(
             "{label} sizing elapsed_ms={:.1}",
             stage.elapsed().as_secs_f64() * 1000.0
@@ -3082,10 +3182,11 @@ mod tests {
         );
         match form_tet_candidates(&surface, &volume_candidates, tet_options) {
             Ok(tet_candidates) => eprintln!(
-                "{label} tet_candidates elapsed_ms={:.1} nodes={} tets={}",
+                "{label} tet_candidates elapsed_ms={:.1} nodes={} tets={} accepted_requested={:?}",
                 stage.elapsed().as_secs_f64() * 1000.0,
                 tet_candidates.nodes.len(),
-                tet_candidates.tets.len()
+                tet_candidates.tets.len(),
+                tet_candidates.accepted_requested_refinement_points
             ),
             Err(err) => eprintln!(
                 "{label} tet_candidates_failed elapsed_ms={:.1}: {err}",
@@ -3140,7 +3241,55 @@ mod tests {
             .iter()
             .any(|sample| sample.position_m == [0.75, 0.75, 0.75]));
         assert_eq!(requested_refinement_points(Some(&effective)).1, 1);
-        assert_eq!(production_sizing_target_size(0.5, &sizing, &options), 0.05);
+        assert_eq!(
+            production_sizing_target_size(0.5, &sizing, &options, None),
+            0.05
+        );
+    }
+
+    #[test]
+    fn production_point_sizing_samples_do_not_lower_global_target_size() {
+        let options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            ..VolumeMeshingOptions::default()
+        };
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [1.0, 0.5, 0.5],
+                target_size_m: 0.1,
+                reason: Some("structural.load_regions".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let geometry = cube_geometry();
+        let topology = extract_source_topology(&geometry).expect("topology");
+
+        assert_eq!(
+            production_sizing_target_size(1.0, &sizing, &options, Some(&topology)),
+            1.0
+        );
+    }
+
+    #[test]
+    fn production_physics_sizing_samples_can_lower_global_target_size() {
+        let options = VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(1.0),
+            ..VolumeMeshingOptions::default()
+        };
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.25, 0.25, 0.25],
+                target_size_m: 0.25,
+                reason: Some("structural.stress_gradient".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        assert_eq!(
+            production_sizing_target_size(1.0, &sizing, &options, None),
+            0.25
+        );
     }
 
     #[test]
