@@ -3299,37 +3299,39 @@ mod tests {
                     ),
                 }
                 if thin_low_face_topology(&topology) {
-                    let alternate_stage = std::time::Instant::now();
-                    let alternate_surface = discretize_cad_surfaces_with_curves(
-                        &topology,
-                        &cad_evaluation,
-                        &curves,
-                        SurfaceDiscretizationOptions {
-                            max_curve_segments_per_edge: 8,
-                            ..SurfaceDiscretizationOptions::default()
-                        },
-                    )
-                    .expect("alternate thin surface");
-                    let alternate_volume_candidates = prepare_volume_candidates(
-                        &alternate_surface,
-                        VolumeCandidateOptions::default(),
-                    )
-                    .expect("alternate volume candidates");
-                    let mut alternate_options = tet_candidate_options_for_mesh(
-                        &topology,
-                        options,
-                        effective_sizing.as_ref(),
-                    );
-                    alternate_options.max_global_insertion_points = 256;
-                    alternate_options.sliver_aspect_ratio = 1.0e6;
-                    alternate_options.min_scaled_jacobian = 0.0;
-                    match form_tet_candidates(
+                    for alternate_segments in [8_usize] {
+                        let alternate_stage = std::time::Instant::now();
+                        let alternate_surface = discretize_cad_surfaces_with_curves(
+                            &topology,
+                            &cad_evaluation,
+                            &curves,
+                            SurfaceDiscretizationOptions {
+                                max_curve_segments_per_edge: alternate_segments,
+                                ..SurfaceDiscretizationOptions::default()
+                            },
+                        )
+                        .expect("alternate thin surface");
+                        let alternate_volume_candidates = prepare_volume_candidates(
+                            &alternate_surface,
+                            VolumeCandidateOptions::default(),
+                        )
+                        .expect("alternate volume candidates");
+                        let mut alternate_options = tet_candidate_options_for_mesh(
+                            &topology,
+                            options,
+                            effective_sizing.as_ref(),
+                        );
+                        alternate_options.max_global_insertion_points = 256;
+                        alternate_options.sliver_aspect_ratio = 1.0e6;
+                        alternate_options.min_scaled_jacobian = 0.0;
+                        match form_tet_candidates(
                         &alternate_surface,
                         &alternate_volume_candidates,
                         alternate_options,
                     ) {
                         Ok(tet_candidates) => eprintln!(
-                            "{label} alternate_relaxed_tet_candidates elapsed_ms={:.1} surface_elements={} nodes={} tets={} min_exact={:.6}",
+                            "{label} alternate_relaxed_tet_candidates segments={} elapsed_ms={:.1} surface_elements={} nodes={} tets={} min_exact={:.6}",
+                            alternate_segments,
                             alternate_stage.elapsed().as_secs_f64() * 1000.0,
                             alternate_surface.elements.len(),
                             tet_candidates.nodes.len(),
@@ -3337,8 +3339,38 @@ mod tests {
                             tet_candidates.recovery.min_exact_scaled_jacobian
                         ),
                         Err(alternate_err) => eprintln!(
-                            "{label} alternate_relaxed_tet_candidates_failed elapsed_ms={:.1}: {alternate_err}",
+                            "{label} alternate_relaxed_tet_candidates_failed segments={} elapsed_ms={:.1}: {alternate_err}",
+                            alternate_segments,
                             alternate_stage.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    }
+                    }
+                    let seeded_stage = std::time::Instant::now();
+                    let mut seeded_options = tet_candidate_options_for_mesh(
+                        &topology,
+                        options,
+                        effective_sizing.as_ref(),
+                    );
+                    seeded_options.interior_target_size_m = Some(
+                        (topology.bounds_max_m[2] - topology.bounds_min_m[2])
+                            .abs()
+                            .max(1.0e-6),
+                    );
+                    seeded_options.max_interior_seed_points = 128;
+                    seeded_options.max_global_insertion_points = 4096;
+                    seeded_options.sliver_aspect_ratio = 1.0e6;
+                    seeded_options.min_scaled_jacobian = 0.0;
+                    match form_tet_candidates(&surface, &volume_candidates, seeded_options) {
+                        Ok(tet_candidates) => eprintln!(
+                            "{label} seeded_relaxed_tet_candidates elapsed_ms={:.1} nodes={} tets={} min_exact={:.6}",
+                            seeded_stage.elapsed().as_secs_f64() * 1000.0,
+                            tet_candidates.nodes.len(),
+                            tet_candidates.tets.len(),
+                            tet_candidates.recovery.min_exact_scaled_jacobian
+                        ),
+                        Err(seeded_err) => eprintln!(
+                            "{label} seeded_relaxed_tet_candidates_failed elapsed_ms={:.1}: {seeded_err}",
+                            seeded_stage.elapsed().as_secs_f64() * 1000.0
                         ),
                     }
                 }
