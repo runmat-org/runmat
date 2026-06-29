@@ -10,6 +10,7 @@ pub mod constrained_cavity;
 pub mod curve;
 pub mod evidence;
 pub mod field_mapping;
+pub mod local_tet_flip;
 pub mod options;
 pub mod predicate;
 pub mod production;
@@ -97,6 +98,10 @@ pub use field_mapping::{
     map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
     map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,
     BoundaryNodeVectorValue, FieldMappingError,
+};
+pub use local_tet_flip::{
+    local_tet_boundary_faces, three_to_two_edge_flip_candidate, two_to_three_face_flip_candidate,
+    LocalTet, LocalTetFlipCandidate, LocalTetFlipError, LocalTetFlipKind,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
