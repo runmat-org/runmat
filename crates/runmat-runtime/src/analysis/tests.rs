@@ -1988,6 +1988,11 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
+    let mut model = sample_model();
+    model.geometry_id = spec.geometry.geometry_id.clone();
+    model.geometry_revision = spec.geometry.revision;
+    model.units = spec.geometry.units;
+    spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetFallback;
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
@@ -2027,12 +2032,39 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         payload["mesh_evidence_artifact_path"].as_str(),
         Some(evidence_path.as_str())
     );
+    assert_eq!(
+        payload["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        payload["mesh_validation_options"]["required_material_region_ids"]
+            .as_array()
+            .expect("required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     let evidence_payload: serde_json::Value =
         serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
             .expect("parse mesh evidence artifact");
     assert_eq!(
         evidence_payload["schema_version"].as_str(),
         Some("fea_study_mesh_evidence_artifact/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("evidence required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
     );
     assert_eq!(
         evidence_payload["mesh_evidence"]["schema_version"].as_str(),
@@ -5405,6 +5437,63 @@ fn analysis_mesh_evidence_failure_rejects_direct_run() {
     assert!(reason
         .detail
         .contains("validation_error_code=coverage_sample_failed"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn loaded_analysis_mesh_artifact_enforces_persisted_required_regions() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("mesh-required-region-rejects-direct-run");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
+                required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+                ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+            },
+            "mesh": analysis_mesh_with_boundary_regions(&["root"], &[]),
+        }))
+        .expect("encode analysis mesh"),
+    )
+    .expect("write analysis mesh");
+
+    let err = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-mesh-required-region-rejects-direct-run".to_string()),
+            None,
+        ),
+    )
+    .expect_err("loaded mesh artifact should enforce persisted required regions");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID"
+    );
+    assert_eq!(
+        err.context
+            .get("mesh_validation_code")
+            .map(|value| value.as_str()),
+        Some("missing_required_boundary_region")
+    );
+    assert!(err.message.contains("tip"));
 
     let _ = fs::remove_dir_all(&root);
 }

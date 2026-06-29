@@ -13671,6 +13671,7 @@ fn generate_and_persist_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "mesh_validation_options": validation_options,
             "mesh_evidence": mesh_evidence,
         }),
     )
@@ -13706,6 +13707,7 @@ fn generate_and_persist_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "mesh_validation_options": validation_options,
             "sizing_applications": sizing_application_summary(&mesh),
             "sizing_rejections": sizing_rejection_summary(&mesh),
             "mesh": mesh,
@@ -13800,6 +13802,9 @@ fn analysis_mesh_validation_options_for_loaded_artifact(
     payload: &serde_json::Value,
     mesh: &AnalysisMeshArtifact,
 ) -> Result<AnalysisMeshValidationOptions, serde_json::Error> {
+    if let Some(validation_value) = payload.get("mesh_validation_options") {
+        return serde_json::from_value::<AnalysisMeshValidationOptions>(validation_value.clone());
+    }
     let Some(options_value) = payload.get("mesh_options") else {
         return Ok(AnalysisMeshValidationOptions::default());
     };
@@ -14363,6 +14368,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "mesh_validation_options": validation_options,
             "refinement_effect": refinement_effect.clone(),
             "mesh_evidence": refined_mesh_evidence,
         }),
@@ -14400,6 +14406,7 @@ fn generate_and_persist_refined_study_analysis_mesh(
             "run_kind": analysis_refinement_run_kind_label(spec.run_kind),
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
+            "mesh_validation_options": validation_options,
             "sizing_applications": sizing_application_summary(&refined_mesh),
             "sizing_rejections": sizing_rejection_summary(&refined_mesh),
             "refinement_effect": refinement_effect.clone(),
