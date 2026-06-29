@@ -158,6 +158,10 @@ pub struct MeshBenchmarkSolveReadiness {
     pub validation_error_code: Option<String>,
     pub validation_error_message: Option<String>,
     #[serde(default)]
+    pub required_boundary_region_ids: Vec<String>,
+    #[serde(default)]
+    pub required_material_region_ids: Vec<String>,
+    #[serde(default)]
     pub fan_fallback_component_count: usize,
     #[serde(default)]
     pub unrepaired_exact_quality_total_count: usize,
@@ -499,6 +503,8 @@ pub fn build_mesh_benchmark_report(
             solve_ready: evidence.validation.solve_ready,
             validation_error_code: evidence.validation.validation_error_code,
             validation_error_message: evidence.validation.validation_error_message,
+            required_boundary_region_ids: evidence.validation.required_boundary_region_ids,
+            required_material_region_ids: evidence.validation.required_material_region_ids,
             fan_fallback_component_count: evidence.validation.fan_fallback_component_count,
             unrepaired_exact_quality_total_count: evidence
                 .validation
@@ -2220,6 +2226,8 @@ mod tests {
             min_boundary_face_recovery_ratio: 1.0,
             min_boundary_edge_recovery_ratio: 1.0,
             coverage_sample_points_m: vec![[0.1, 0.1, 0.1]],
+            required_boundary_region_ids: vec!["fixed".to_string()],
+            required_material_region_ids: vec!["solid".to_string()],
             ..AnalysisMeshValidationOptions::default()
         };
         let input = MeshBenchmarkInput {
@@ -2277,6 +2285,14 @@ mod tests {
         assert_eq!(report.quality.exact_scaled_jacobian_p50, Some(0.45));
         assert!(report.solve_readiness.solve_ready);
         assert_eq!(report.solve_readiness.validation_error_code, None);
+        assert_eq!(
+            report.solve_readiness.required_boundary_region_ids,
+            vec!["fixed".to_string()]
+        );
+        assert_eq!(
+            report.solve_readiness.required_material_region_ids,
+            vec!["solid".to_string()]
+        );
         assert_eq!(report.solve_readiness.fan_fallback_component_count, 0);
         assert_eq!(
             report.solve_readiness.unrepaired_exact_quality_total_count,
