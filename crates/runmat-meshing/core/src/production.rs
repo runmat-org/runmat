@@ -1820,7 +1820,27 @@ mod tests {
         preparation
             .tet_candidates
             .recovery
-            .exact_quality_seed_star_relocation_count = 4;
+            .exact_quality_face_neighbor_reconnected_cavity_count = 4;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_connected_reconnected_cavity_count = 5;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_expanded_connected_reconnected_cavity_count = 6;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_split_cavity_count = 7;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_seed_star_collapse_count = 8;
+        preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_seed_star_relocation_count = 9;
 
         let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
             .expect("production mesh should generate with recovery summary evidence");
@@ -1851,7 +1871,24 @@ mod tests {
                 .tet_exact_quality_boundary_adjacent_reconnected_cavity_count,
             3
         );
-        assert_eq!(mesh.backend.tet_exact_quality_seed_star_relocation_count, 4);
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_face_neighbor_reconnected_cavity_count,
+            4
+        );
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_connected_reconnected_cavity_count,
+            5
+        );
+        assert_eq!(
+            mesh.backend
+                .tet_exact_quality_expanded_connected_reconnected_cavity_count,
+            6
+        );
+        assert_eq!(mesh.backend.tet_exact_quality_split_cavity_count, 7);
+        assert_eq!(mesh.backend.tet_exact_quality_seed_star_collapse_count, 8);
+        assert_eq!(mesh.backend.tet_exact_quality_seed_star_relocation_count, 9);
         assert_eq!(evidence.tet_recovery.untangling_pass_count, 2);
         assert_eq!(
             evidence.tet_recovery.untangling_initial_near_singular_count,
@@ -1892,8 +1929,31 @@ mod tests {
         assert_eq!(
             evidence
                 .tet_recovery
-                .exact_quality_seed_star_relocation_count,
+                .exact_quality_face_neighbor_reconnected_cavity_count,
             4
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_connected_reconnected_cavity_count,
+            5
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_expanded_connected_reconnected_cavity_count,
+            6
+        );
+        assert_eq!(evidence.tet_recovery.exact_quality_split_cavity_count, 7);
+        assert_eq!(
+            evidence.tet_recovery.exact_quality_seed_star_collapse_count,
+            8
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_seed_star_relocation_count,
+            9
         );
     }
 
