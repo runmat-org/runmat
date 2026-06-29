@@ -2,7 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::tet_candidate::TetCandidate;
+use crate::{
+    predicate::{
+        point_in_closed_triangle_surface, tet_edge_aspect_ratio, tet_scaled_jacobian,
+        tet_signed_volume, Point3, PointInClosedSurface, Triangle3,
+    },
+    tet_candidate::TetCandidate,
+    tolerance::MeshingTolerance,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavity {
@@ -30,6 +37,46 @@ pub struct ConstrainedCavityValidationReport {
     pub boundary_node_count: usize,
     pub protected_node_count: usize,
     pub target_volume_m3: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ConstrainedCavityRefillOptions {
+    pub min_volume_m3: f64,
+    pub max_aspect_ratio: f64,
+    pub min_scaled_jacobian: f64,
+    pub volume_relative_tolerance: f64,
+}
+
+impl Default for ConstrainedCavityRefillOptions {
+    fn default() -> Self {
+        Self {
+            min_volume_m3: 1.0e-18,
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            volume_relative_tolerance: 1.0e-9,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstrainedCavityNode {
+    pub node_id: u32,
+    pub coordinates_m: Point3,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstrainedCavityRefillTet {
+    pub node_ids: [u32; 4],
+    pub volume_m3: f64,
+    pub aspect_ratio: f64,
+    pub exact_scaled_jacobian: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstrainedCavityRefill {
+    pub tets: Vec<ConstrainedCavityRefillTet>,
+    pub boundary_faces: Vec<ConstrainedCavityBoundaryFace>,
+    pub total_volume_m3: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,6 +142,18 @@ pub enum ConstrainedCavityExtractionError {
     SelectedTetIndexOutOfBounds { tet_index: usize, tet_count: usize },
     DuplicateSelectedTetIndex { tet_index: usize },
     Validation(ConstrainedCavityValidationError),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstrainedCavityRefillError {
+    InvalidOptions,
+    Validation(ConstrainedCavityValidationError),
+    MissingBoundaryNode { node_id: u32 },
+    DuplicateInteriorNode { node_id: u32 },
+    InteriorNodeReusesBoundaryNode { node_id: u32 },
+    InteriorPointOutsideCavity { node_id: u32 },
+    NoValidCandidate,
 }
 
 pub fn constrained_cavity_from_selected_tets(
@@ -163,6 +222,66 @@ pub fn constrained_cavity_from_selected_tets(
     };
     validate_constrained_cavity(&cavity).map_err(ConstrainedCavityExtractionError::Validation)?;
     Ok(cavity)
+}
+
+pub fn generate_constrained_cavity_refill_candidates(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    interior_candidate_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<ConstrainedCavityRefill, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_node_ids = cavity_boundary_node_ids(cavity);
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+
+    if interior_candidate_nodes.is_empty() {
+        let Some(refill) = single_tet_refill_candidate(cavity, &boundary_node_map, options)
+            .map_err(ConstrainedCavityRefillError::Validation)?
+        else {
+            return Err(ConstrainedCavityRefillError::NoValidCandidate);
+        };
+        return Ok(refill);
+    }
+
+    let mut seen_interior_nodes = BTreeSet::<u32>::new();
+    let tolerance = MeshingTolerance::default();
+    let mut best = None::<ConstrainedCavityRefill>;
+    for node in interior_candidate_nodes {
+        if !seen_interior_nodes.insert(node.node_id) {
+            return Err(ConstrainedCavityRefillError::DuplicateInteriorNode {
+                node_id: node.node_id,
+            });
+        }
+        if boundary_node_ids.contains(&node.node_id) {
+            return Err(
+                ConstrainedCavityRefillError::InteriorNodeReusesBoundaryNode {
+                    node_id: node.node_id,
+                },
+            );
+        }
+        if point_in_closed_triangle_surface(node.coordinates_m, &boundary_triangles, tolerance)
+            != PointInClosedSurface::Inside
+        {
+            return Err(ConstrainedCavityRefillError::InteriorPointOutsideCavity {
+                node_id: node.node_id,
+            });
+        }
+        let Some(refill) = star_refill_candidate(cavity, &boundary_node_map, node.clone(), options)
+            .map_err(ConstrainedCavityRefillError::Validation)?
+        else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|candidate| refill_is_better(&refill, candidate))
+        {
+            best = Some(refill);
+        }
+    }
+
+    best.ok_or(ConstrainedCavityRefillError::NoValidCandidate)
 }
 
 pub fn validate_constrained_cavity(
@@ -329,6 +448,234 @@ pub fn validate_constrained_cavity_boundary_preserved(
     }
 
     Ok(())
+}
+
+fn validate_refill_options(
+    options: ConstrainedCavityRefillOptions,
+) -> Result<(), ConstrainedCavityRefillError> {
+    if !options.min_volume_m3.is_finite()
+        || options.min_volume_m3 <= 0.0
+        || !options.max_aspect_ratio.is_finite()
+        || options.max_aspect_ratio <= 0.0
+        || !options.min_scaled_jacobian.is_finite()
+        || options.min_scaled_jacobian < 0.0
+        || !options.volume_relative_tolerance.is_finite()
+        || options.volume_relative_tolerance < 0.0
+    {
+        return Err(ConstrainedCavityRefillError::InvalidOptions);
+    }
+    Ok(())
+}
+
+fn boundary_node_coordinates(
+    cavity: &ConstrainedCavity,
+    nodes: &[ConstrainedCavityNode],
+) -> Result<BTreeMap<u32, Point3>, ConstrainedCavityRefillError> {
+    let coordinates = nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    for face in &cavity.boundary_faces {
+        for node_id in face.node_ids {
+            if !coordinates.contains_key(&node_id) {
+                return Err(ConstrainedCavityRefillError::MissingBoundaryNode { node_id });
+            }
+        }
+    }
+    Ok(coordinates)
+}
+
+fn cavity_boundary_node_ids(cavity: &ConstrainedCavity) -> BTreeSet<u32> {
+    cavity
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.node_ids)
+        .collect()
+}
+
+fn cavity_boundary_triangles(
+    cavity: &ConstrainedCavity,
+    nodes: &BTreeMap<u32, Point3>,
+) -> Result<Vec<Triangle3>, ConstrainedCavityRefillError> {
+    cavity
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            Ok([
+                *nodes.get(&face.node_ids[0]).ok_or(
+                    ConstrainedCavityRefillError::MissingBoundaryNode {
+                        node_id: face.node_ids[0],
+                    },
+                )?,
+                *nodes.get(&face.node_ids[1]).ok_or(
+                    ConstrainedCavityRefillError::MissingBoundaryNode {
+                        node_id: face.node_ids[1],
+                    },
+                )?,
+                *nodes.get(&face.node_ids[2]).ok_or(
+                    ConstrainedCavityRefillError::MissingBoundaryNode {
+                        node_id: face.node_ids[2],
+                    },
+                )?,
+            ])
+        })
+        .collect()
+}
+
+fn single_tet_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
+    let node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if node_ids.len() != 4 {
+        return Ok(None);
+    }
+    let points = [
+        boundary_nodes[&node_ids[0]],
+        boundary_nodes[&node_ids[1]],
+        boundary_nodes[&node_ids[2]],
+        boundary_nodes[&node_ids[3]],
+    ];
+    let Some(tet) = raw_refill_tet(
+        [node_ids[0], node_ids[1], node_ids[2], node_ids[3]],
+        points,
+        options,
+    ) else {
+        return Ok(None);
+    };
+    let refill = refill_from_tets(cavity, vec![tet], options.volume_relative_tolerance)?;
+    Ok(Some(refill))
+}
+
+fn star_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    interior_node: ConstrainedCavityNode,
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
+    let mut tets = Vec::<ConstrainedCavityRefillTet>::with_capacity(cavity.boundary_faces.len());
+    for face in &cavity.boundary_faces {
+        let node_ids = [
+            face.node_ids[0],
+            face.node_ids[1],
+            face.node_ids[2],
+            interior_node.node_id,
+        ];
+        let points = [
+            boundary_nodes[&face.node_ids[0]],
+            boundary_nodes[&face.node_ids[1]],
+            boundary_nodes[&face.node_ids[2]],
+            interior_node.coordinates_m,
+        ];
+        let Some(tet) = raw_refill_tet(node_ids, points, options) else {
+            return Ok(None);
+        };
+        tets.push(tet);
+    }
+    let refill = refill_from_tets(cavity, tets, options.volume_relative_tolerance)?;
+    Ok(Some(refill))
+}
+
+fn raw_refill_tet(
+    mut node_ids: [u32; 4],
+    points: [Point3; 4],
+    options: ConstrainedCavityRefillOptions,
+) -> Option<ConstrainedCavityRefillTet> {
+    let mut signed_volume_m3 = tet_signed_volume(points);
+    if signed_volume_m3 < 0.0 {
+        node_ids.swap(1, 2);
+        signed_volume_m3 = -signed_volume_m3;
+    }
+    let volume_m3 = signed_volume_m3.abs();
+    if volume_m3 < options.min_volume_m3 {
+        return None;
+    }
+    let aspect_ratio = tet_edge_aspect_ratio(points);
+    if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
+        return None;
+    }
+    let exact_scaled_jacobian = tet_scaled_jacobian(points);
+    if !exact_scaled_jacobian.is_finite() || exact_scaled_jacobian < options.min_scaled_jacobian {
+        return None;
+    }
+    Some(ConstrainedCavityRefillTet {
+        node_ids,
+        volume_m3,
+        aspect_ratio,
+        exact_scaled_jacobian,
+    })
+}
+
+fn refill_from_tets(
+    cavity: &ConstrainedCavity,
+    tets: Vec<ConstrainedCavityRefillTet>,
+    volume_relative_tolerance: f64,
+) -> Result<ConstrainedCavityRefill, ConstrainedCavityValidationError> {
+    let boundary_faces = boundary_faces_from_refill_tets(cavity, &tets)?;
+    validate_constrained_cavity_boundary_preserved(cavity, &boundary_faces)?;
+    let total_volume_m3 = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+    validate_constrained_cavity_refill_volume(
+        cavity.target_volume_m3,
+        total_volume_m3,
+        volume_relative_tolerance,
+    )?;
+    Ok(ConstrainedCavityRefill {
+        tets,
+        boundary_faces,
+        total_volume_m3,
+    })
+}
+
+fn boundary_faces_from_refill_tets(
+    cavity: &ConstrainedCavity,
+    tets: &[ConstrainedCavityRefillTet],
+) -> Result<Vec<ConstrainedCavityBoundaryFace>, ConstrainedCavityValidationError> {
+    let cavity_faces = boundary_face_map(&cavity.boundary_faces)?;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in tets {
+        for face in tet_faces(tet.node_ids) {
+            *face_counts.entry(sorted_face(face)).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| {
+            (count == 1).then(|| {
+                cavity_faces
+                    .get(&face)
+                    .map(|source| (*source).clone())
+                    .unwrap_or(ConstrainedCavityBoundaryFace {
+                        node_ids: face,
+                        source_face_id: None,
+                        source_edge_ids: [None, None, None],
+                        region_ids: Vec::new(),
+                    })
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(boundary_faces)
+}
+
+fn refill_is_better(
+    candidate: &ConstrainedCavityRefill,
+    current: &ConstrainedCavityRefill,
+) -> bool {
+    let candidate_min = candidate
+        .tets
+        .iter()
+        .map(|tet| tet.exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
+    let current_min = current
+        .tets
+        .iter()
+        .map(|tet| tet.exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
+    candidate_min > current_min + 1.0e-12
+        || ((candidate_min - current_min).abs() <= 1.0e-12
+            && candidate.tets.len() < current.tets.len())
 }
 
 fn sorted_face(mut node_ids: [u32; 3]) -> [u32; 3] {
@@ -598,6 +945,128 @@ mod tests {
     }
 
     #[test]
+    fn refill_candidates_preserve_single_tet_cavity_boundary_and_volume() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+
+        let refill =
+            generate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], refill_options())
+                .expect("single tet cavity should refill");
+
+        assert_eq!(refill.tets.len(), 1);
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("refill boundary should match cavity boundary");
+        assert!((refill.total_volume_m3 - cavity.target_volume_m3).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn single_tet_refill_ignores_non_boundary_nodes_in_coordinate_table() {
+        let cavity = unit_tet_cavity();
+        let mut nodes = unit_tet_nodes();
+        nodes.push(ConstrainedCavityNode {
+            node_id: 99,
+            coordinates_m: [4.0, 4.0, 4.0],
+        });
+
+        let refill =
+            generate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], refill_options())
+                .expect("coordinate table may contain nodes outside the cavity boundary");
+
+        assert_eq!(refill.tets.len(), 1);
+        assert!((refill.total_volume_m3 - cavity.target_volume_m3).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn star_refill_candidates_preserve_cavity_boundary_and_volume() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let interior = [ConstrainedCavityNode {
+            node_id: 10,
+            coordinates_m: [0.25, 0.25, 0.25],
+        }];
+
+        let refill = generate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &interior,
+            refill_options(),
+        )
+        .expect("interior star refill should generate");
+
+        assert_eq!(refill.tets.len(), 4);
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("star refill boundary should match cavity boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            1.0e-12,
+        )
+        .expect("star refill should preserve cavity volume");
+    }
+
+    #[test]
+    fn refill_candidates_reject_missing_boundary_nodes() {
+        let cavity = unit_tet_cavity();
+        let mut nodes = unit_tet_nodes();
+        nodes.pop();
+
+        let err =
+            generate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], refill_options())
+                .expect_err("missing boundary node should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityRefillError::MissingBoundaryNode { node_id: 3 }
+        );
+    }
+
+    #[test]
+    fn star_refill_candidates_reject_exterior_interior_points() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let exterior = [ConstrainedCavityNode {
+            node_id: 10,
+            coordinates_m: [2.0, 2.0, 2.0],
+        }];
+
+        let err = generate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &exterior,
+            refill_options(),
+        )
+        .expect_err("exterior interior candidate should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityRefillError::InteriorPointOutsideCavity { node_id: 10 }
+        );
+    }
+
+    #[test]
+    fn star_refill_candidates_reject_boundary_node_reuse() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let reused = [ConstrainedCavityNode {
+            node_id: 0,
+            coordinates_m: [0.25, 0.25, 0.25],
+        }];
+
+        let err = generate_constrained_cavity_refill_candidates(
+            &cavity,
+            &nodes,
+            &reused,
+            refill_options(),
+        )
+        .expect_err("interior candidate cannot reuse a boundary node");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityRefillError::InteriorNodeReusesBoundaryNode { node_id: 0 }
+        );
+    }
+
+    #[test]
     fn validates_closed_tet_cavity_boundary() {
         let cavity = tet_cavity();
 
@@ -709,6 +1178,52 @@ mod tests {
             ],
             protected_node_ids: vec![0, 1],
             target_volume_m3: 1.0,
+        }
+    }
+
+    fn unit_tet_cavity() -> ConstrainedCavity {
+        ConstrainedCavity {
+            removed_tet_ids: vec![1],
+            boundary_faces: tet_faces([0, 1, 2, 3])
+                .into_iter()
+                .map(|node_ids| ConstrainedCavityBoundaryFace {
+                    node_ids,
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: vec!["body".to_string()],
+                })
+                .collect(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0 / 6.0,
+        }
+    }
+
+    fn unit_tet_nodes() -> Vec<ConstrainedCavityNode> {
+        vec![
+            ConstrainedCavityNode {
+                node_id: 0,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 1,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 2,
+                coordinates_m: [0.0, 1.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 3,
+                coordinates_m: [0.0, 0.0, 1.0],
+            },
+        ]
+    }
+
+    fn refill_options() -> ConstrainedCavityRefillOptions {
+        ConstrainedCavityRefillOptions {
+            min_scaled_jacobian: 0.0,
+            volume_relative_tolerance: 1.0e-12,
+            ..ConstrainedCavityRefillOptions::default()
         }
     }
 
