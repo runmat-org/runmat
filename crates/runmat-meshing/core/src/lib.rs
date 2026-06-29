@@ -7,6 +7,7 @@ pub mod cad_eval;
 pub mod cad_topology;
 pub mod curve;
 pub mod evidence;
+pub mod field_mapping;
 pub mod options;
 pub mod predicate;
 pub mod production;
@@ -77,6 +78,9 @@ pub use evidence::{
 };
 #[cfg(feature = "dev-evidence")]
 pub use evidence::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
+pub use field_mapping::{
+    map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, FieldMappingError,
+};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,

@@ -45,7 +45,7 @@ use crate::{
     tolerance::MeshingTolerance,
     topology::{BoundaryElementKind, VolumeElementKind},
     validation::{
-        validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,
+        validate_analysis_mesh_with_options, AnalysisMeshValidationError,
         AnalysisMeshValidationOptions,
     },
     volume_candidate::{
@@ -1724,6 +1724,10 @@ fn quality_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        field_mapping::map_volume_scalar_field_to_boundary_faces,
+        validation::volume_component_count,
+    };
     use runmat_geometry_core::{
         CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
         CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, GeometryAsset,
@@ -2611,6 +2615,26 @@ mod tests {
             "thin sweep recovery should retain a production-scale solver topology"
         );
         assert_eq!(volume_component_count(&mesh), 1);
+    }
+
+    #[test]
+    fn production_boundary_faces_map_element_scalars_for_visualization() {
+        let mesh =
+            generate_production_analysis_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
+                .expect("production mesh should generate");
+        let element_values = (0..mesh.volume_elements.len())
+            .map(|index| index as f64 + 1.0)
+            .collect::<Vec<_>>();
+
+        let mapped = map_volume_scalar_field_to_boundary_faces(&mesh, &element_values)
+            .expect("boundary faces should map element scalars");
+
+        assert_eq!(mapped.len(), mesh.boundary_faces.len());
+        assert!(mapped.iter().all(|value| value.value.is_finite()));
+        assert!(mapped
+            .iter()
+            .zip(mesh.boundary_faces.iter())
+            .all(|(value, face)| value.face_id == face.face_id));
     }
 
     fn volume_element_centroid_count_within(
