@@ -81,6 +81,8 @@ pub struct ConstrainedCavityRefillTet {
 pub struct ConstrainedCavityRefill {
     pub tets: Vec<ConstrainedCavityRefillTet>,
     pub boundary_faces: Vec<ConstrainedCavityBoundaryFace>,
+    #[serde(default)]
+    pub inserted_nodes: Vec<ConstrainedCavityNode>,
     pub total_volume_m3: f64,
 }
 
@@ -1011,21 +1013,26 @@ fn boundary_node_refill_candidate(
     ) {
         Ok(refill) => Ok(Ok(refill)),
         Err(_) => {
-            let completed_tets = match complete_missing_boundary_face_tets(
-                cavity,
-                boundary_nodes,
-                refill_tets,
-                &boundary_triangles,
-                options,
-            )? {
-                Ok(completed_tets) => completed_tets,
-                Err(reason) => return Ok(Err(reason)),
-            };
-            let refill =
-                match refill_from_tets(cavity, completed_tets, options.volume_relative_tolerance) {
-                    Ok(refill) => refill,
-                    Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
+            let (completed_cavity, completed_tets, inserted_nodes) =
+                match complete_missing_boundary_face_tets(
+                    cavity,
+                    boundary_nodes,
+                    refill_tets,
+                    &boundary_triangles,
+                    options,
+                )? {
+                    Ok(completed_tets) => completed_tets,
+                    Err(reason) => return Ok(Err(reason)),
                 };
+            let mut refill = match refill_from_tets(
+                &completed_cavity,
+                completed_tets,
+                options.volume_relative_tolerance,
+            ) {
+                Ok(refill) => refill,
+                Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
+            };
+            refill.inserted_nodes = inserted_nodes;
             Ok(Ok(refill))
         }
     }
@@ -1340,36 +1347,170 @@ fn complete_missing_boundary_face_tets(
     mut refill_tets: Vec<ConstrainedCavityRefillTet>,
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
-) -> Result<Result<Vec<ConstrainedCavityRefillTet>, &'static str>, ConstrainedCavityValidationError>
-{
+) -> Result<
+    Result<
+        (
+            ConstrainedCavity,
+            Vec<ConstrainedCavityRefillTet>,
+            Vec<ConstrainedCavityNode>,
+        ),
+        &'static str,
+    >,
+    ConstrainedCavityValidationError,
+> {
+    let mut refined_cavity = cavity.clone();
+    let mut refined_boundary_nodes = boundary_nodes.clone();
+    let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
     let mut changed = false;
     loop {
-        let missing_faces = missing_refill_boundary_faces(cavity, &refill_tets)?;
+        let missing_faces = missing_refill_boundary_faces(&refined_cavity, &refill_tets)?;
         let Some(missing_face) = missing_faces.into_iter().next() else {
             break;
         };
-        let Some(tet) = best_boundary_face_completion_tet(
+        if let Some(tet) = best_boundary_face_completion_tet(
             missing_face,
-            cavity,
-            boundary_nodes,
+            &refined_cavity,
+            &refined_boundary_nodes,
             boundary_triangles,
             options,
-        ) else {
+        ) {
+            if refill_tets.iter().any(|existing| {
+                sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+            }) {
+                return Ok(Err("boundary_node_completion_duplicate_tet"));
+            }
+            refill_tets.push(tet);
+            changed = true;
+            continue;
+        }
+
+        let Some((split_cavity, split_node, split_tets)) = best_boundary_face_split_completion(
+            missing_face,
+            &refined_cavity,
+            &refined_boundary_nodes,
+            boundary_triangles,
+            &refill_tets,
+            options,
+        )?
+        else {
             return Ok(Err("boundary_node_completion_no_candidate"));
         };
-        if refill_tets
-            .iter()
-            .any(|existing| sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids))
-        {
-            return Ok(Err("boundary_node_completion_duplicate_tet"));
-        }
-        refill_tets.push(tet);
+        refined_boundary_nodes.insert(split_node.node_id, split_node.coordinates_m);
+        inserted_nodes.push(split_node);
+        refined_cavity = split_cavity;
+        refill_tets.extend(split_tets);
         changed = true;
     }
     if changed {
-        Ok(Ok(refill_tets))
+        Ok(Ok((refined_cavity, refill_tets, inserted_nodes)))
     } else {
         Ok(Err("boundary_node_completion_no_missing_faces"))
+    }
+}
+
+fn best_boundary_face_split_completion(
+    face: [u32; 3],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    refill_tets: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<
+    Option<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+    )>,
+    ConstrainedCavityValidationError,
+> {
+    let split_node = boundary_face_centroid_node(face, boundary_nodes);
+    let split_faces =
+        split_constrained_cavity_boundary_faces(&cavity.boundary_faces, face, split_node.node_id)
+            .map_err(|_| ConstrainedCavityValidationError::MissingBoundaryFace {
+            node_ids: sorted_face(face),
+        })?;
+    let mut split_cavity = cavity.clone();
+    split_cavity.boundary_faces = split_faces;
+    validate_constrained_cavity(&split_cavity)?;
+    let mut best = None::<(Vec<ConstrainedCavityRefillTet>, f64)>;
+    for cap_node_id in cavity_boundary_node_ids(cavity) {
+        if face.contains(&cap_node_id) {
+            continue;
+        }
+        let cap_point = boundary_nodes[&cap_node_id];
+        let child_specs = [
+            [face[0], face[1], split_node.node_id, cap_node_id],
+            [face[1], face[2], split_node.node_id, cap_node_id],
+            [face[2], face[0], split_node.node_id, cap_node_id],
+        ];
+        let mut child_tets = Vec::<ConstrainedCavityRefillTet>::with_capacity(3);
+        let mut min_quality = f64::INFINITY;
+        let mut duplicate = false;
+        for node_ids in child_specs {
+            let points = [
+                boundary_nodes[&node_ids[0]],
+                boundary_nodes[&node_ids[1]],
+                split_node.coordinates_m,
+                cap_point,
+            ];
+            if point_in_closed_triangle_surface(
+                tet_centroid(points),
+                boundary_triangles,
+                MeshingTolerance::default(),
+            ) != PointInClosedSurface::Inside
+            {
+                duplicate = true;
+                break;
+            }
+            let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, points, options) else {
+                duplicate = true;
+                break;
+            };
+            if refill_tets.iter().any(|existing| {
+                sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+            }) || child_tets.iter().any(|existing| {
+                sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+            }) {
+                duplicate = true;
+                break;
+            }
+            min_quality = min_quality.min(tet.exact_scaled_jacobian);
+            child_tets.push(tet);
+        }
+        if duplicate || child_tets.len() != 3 {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_quality)| min_quality > *best_quality)
+        {
+            best = Some((child_tets, min_quality));
+        }
+    }
+    Ok(best.map(|(tets, _)| (split_cavity, split_node, tets)))
+}
+
+fn boundary_face_centroid_node(
+    face: [u32; 3],
+    boundary_nodes: &BTreeMap<u32, Point3>,
+) -> ConstrainedCavityNode {
+    let points = face.map(|node_id| boundary_nodes[&node_id]);
+    let mut node_id = boundary_nodes
+        .keys()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    while boundary_nodes.contains_key(&node_id) {
+        node_id = node_id.saturating_add(1);
+    }
+    ConstrainedCavityNode {
+        node_id,
+        coordinates_m: [
+            (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+            (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+            (points[0][2] + points[1][2] + points[2][2]) / 3.0,
+        ],
     }
 }
 
@@ -1503,6 +1644,7 @@ fn refill_from_tets(
     Ok(ConstrainedCavityRefill {
         tets,
         boundary_faces,
+        inserted_nodes: Vec::new(),
         total_volume_m3,
     })
 }
@@ -2251,7 +2393,7 @@ mod tests {
         )
         .is_err());
 
-        let completed = complete_missing_boundary_face_tets(
+        let (_, completed, inserted_nodes) = complete_missing_boundary_face_tets(
             &cavity,
             &boundary_nodes,
             vec![incomplete_tet],
@@ -2263,6 +2405,7 @@ mod tests {
         let refill = refill_from_tets(&cavity, completed, options.volume_relative_tolerance)
             .expect("completed refill should validate");
 
+        assert!(inserted_nodes.is_empty());
         assert_eq!(refill.tets.len(), 2);
         validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
             .expect("completed refill should preserve the cavity boundary");
@@ -2302,6 +2445,59 @@ mod tests {
         .expect_err("strict quality should reject every cap tet");
 
         assert_eq!(rejected, "boundary_node_completion_no_candidate");
+    }
+
+    #[test]
+    fn boundary_face_split_completion_reports_inserted_node_and_refined_boundary() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let options = refill_options();
+
+        let (refined_cavity, inserted_node, split_tets) = best_boundary_face_split_completion(
+            [0, 1, 2],
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            &[],
+            options,
+        )
+        .expect("split completion should evaluate")
+        .expect("split completion should generate child cap tets");
+
+        assert_eq!(inserted_node.node_id, 4);
+        assert_eq!(inserted_node.coordinates_m, [1.0 / 3.0, 1.0 / 3.0, 0.0]);
+        assert_eq!(split_tets.len(), 3);
+        assert!(split_tets
+            .iter()
+            .all(|tet| tet.node_ids.contains(&inserted_node.node_id)));
+        assert!(!refined_cavity
+            .boundary_faces
+            .iter()
+            .any(|face| sorted_face(face.node_ids) == [0, 1, 2]));
+        assert_eq!(
+            refined_cavity
+                .boundary_faces
+                .iter()
+                .filter(|face| face.node_ids.contains(&inserted_node.node_id))
+                .count(),
+            3
+        );
+        let refill = refill_from_tets(
+            &refined_cavity,
+            split_tets,
+            options.volume_relative_tolerance,
+        )
+        .expect("split child tets should preserve the refined boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("split completion should preserve the original target volume");
     }
 
     #[test]

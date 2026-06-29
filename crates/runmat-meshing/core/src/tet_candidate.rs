@@ -4719,21 +4719,29 @@ fn constrained_interior_seed_star_refill_candidates(
         return Ok(None);
     };
     let reference = &tets[selected_indices[0]];
-    let inserted_nodes = refill
+    let mut inserted_nodes = refill.inserted_nodes.clone();
+    let mut inserted_node_ids = inserted_nodes
+        .iter()
+        .map(|node| node.node_id)
+        .collect::<BTreeSet<_>>();
+    for node_id in refill
         .tets
         .iter()
         .flat_map(|tet| tet.node_ids)
         .filter(|node_id| !node_points.contains_key(node_id))
         .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|node_id| {
-            interior_candidates
-                .iter()
-                .find(|candidate| candidate.node_id == node_id)
-                .cloned()
-                .ok_or(TetCandidateError::MissingSurfaceNode { node_id })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    {
+        if inserted_node_ids.contains(&node_id) {
+            continue;
+        }
+        let node = interior_candidates
+            .iter()
+            .find(|candidate| candidate.node_id == node_id)
+            .cloned()
+            .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?;
+        inserted_node_ids.insert(node.node_id);
+        inserted_nodes.push(node);
+    }
     let candidates = refill
         .tets
         .into_iter()
