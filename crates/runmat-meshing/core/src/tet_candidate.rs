@@ -7393,6 +7393,18 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             ("one_ring", "boundary_face_mismatch_constrained_invalid") => {
                 "one_ring_boundary_face_mismatch_constrained_invalid"
             }
+            ("one_ring", "boundary_face_mismatch_constrained_non_manifold_boundary_edge") => {
+                "one_ring_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_duplicate_boundary_face") => {
+                "one_ring_boundary_face_mismatch_constrained_duplicate_boundary_face"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_degenerate_boundary_face") => {
+                "one_ring_boundary_face_mismatch_constrained_degenerate_boundary_face"
+            }
+            ("one_ring", "boundary_face_mismatch_constrained_too_few_boundary_faces") => {
+                "one_ring_boundary_face_mismatch_constrained_too_few_boundary_faces"
+            }
             ("one_ring", "volume_mismatch") => "one_ring_volume_mismatch",
             (_, "component_mismatch") => "face_closure_component_mismatch",
             (_, "too_few_boundary_faces") => "face_closure_too_few_boundary_faces",
@@ -7408,6 +7420,18 @@ fn diagnostic_face_cavity_reconnection_rejection_reason(
             }
             (_, "boundary_face_mismatch_constrained_invalid") => {
                 "face_closure_boundary_face_mismatch_constrained_invalid"
+            }
+            (_, "boundary_face_mismatch_constrained_non_manifold_boundary_edge") => {
+                "face_closure_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+            }
+            (_, "boundary_face_mismatch_constrained_duplicate_boundary_face") => {
+                "face_closure_boundary_face_mismatch_constrained_duplicate_boundary_face"
+            }
+            (_, "boundary_face_mismatch_constrained_degenerate_boundary_face") => {
+                "face_closure_boundary_face_mismatch_constrained_degenerate_boundary_face"
+            }
+            (_, "boundary_face_mismatch_constrained_too_few_boundary_faces") => {
+                "face_closure_boundary_face_mismatch_constrained_too_few_boundary_faces"
             }
             (_, "volume_mismatch") => "face_closure_volume_mismatch",
             _ => "face_closure_candidate_rejected",
@@ -7574,7 +7598,86 @@ fn diagnostic_constrained_boundary_mismatch_reason(
             Ok("boundary_face_mismatch_constrained_available")
         }
         Ok(_) => Ok("boundary_face_mismatch_constrained_no_refill"),
-        Err(_) => Ok("boundary_face_mismatch_constrained_invalid"),
+        Err(err) => Ok(diagnostic_constrained_boundary_mismatch_error_reason(&err)),
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_boundary_mismatch_error_reason(
+    err: &crate::constrained_cavity::ConstrainedCavityRefillError,
+) -> &'static str {
+    match err {
+        crate::constrained_cavity::ConstrainedCavityRefillError::InvalidOptions => {
+            "boundary_face_mismatch_constrained_invalid_options"
+        }
+        crate::constrained_cavity::ConstrainedCavityRefillError::Validation(err) => {
+            diagnostic_constrained_boundary_mismatch_validation_reason(err)
+        }
+        crate::constrained_cavity::ConstrainedCavityRefillError::MissingBoundaryNode { .. } => {
+            "boundary_face_mismatch_constrained_missing_boundary_node"
+        }
+        crate::constrained_cavity::ConstrainedCavityRefillError::DuplicateInteriorNode { .. } => {
+            "boundary_face_mismatch_constrained_duplicate_interior_node"
+        }
+        crate::constrained_cavity::ConstrainedCavityRefillError::InteriorNodeReusesBoundaryNode {
+            ..
+        } => "boundary_face_mismatch_constrained_interior_node_reuses_boundary_node",
+        crate::constrained_cavity::ConstrainedCavityRefillError::InteriorPointOutsideCavity {
+            ..
+        } => "boundary_face_mismatch_constrained_interior_point_outside_cavity",
+        crate::constrained_cavity::ConstrainedCavityRefillError::NoValidCandidate { .. } => {
+            "boundary_face_mismatch_constrained_no_valid_candidate"
+        }
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_constrained_boundary_mismatch_validation_reason(
+    err: &ConstrainedCavityValidationError,
+) -> &'static str {
+    match err {
+        ConstrainedCavityValidationError::EmptyRemovedTetSet => {
+            "boundary_face_mismatch_constrained_empty_removed_tet_set"
+        }
+        ConstrainedCavityValidationError::InvalidTargetVolume { .. } => {
+            "boundary_face_mismatch_constrained_invalid_target_volume"
+        }
+        ConstrainedCavityValidationError::TooFewBoundaryFaces { .. } => {
+            "boundary_face_mismatch_constrained_too_few_boundary_faces"
+        }
+        ConstrainedCavityValidationError::DegenerateBoundaryFace { .. } => {
+            "boundary_face_mismatch_constrained_degenerate_boundary_face"
+        }
+        ConstrainedCavityValidationError::DuplicateBoundaryFace { .. } => {
+            "boundary_face_mismatch_constrained_duplicate_boundary_face"
+        }
+        ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. } => {
+            "boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+        }
+        ConstrainedCavityValidationError::ProtectedNodeOutsideBoundary { .. } => {
+            "boundary_face_mismatch_constrained_protected_node_outside_boundary"
+        }
+        ConstrainedCavityValidationError::InvalidRefillVolume { .. } => {
+            "boundary_face_mismatch_constrained_invalid_refill_volume"
+        }
+        ConstrainedCavityValidationError::BoundaryFaceCountMismatch { .. } => {
+            "boundary_face_mismatch_constrained_boundary_face_count_mismatch"
+        }
+        ConstrainedCavityValidationError::MissingBoundaryFace { .. } => {
+            "boundary_face_mismatch_constrained_missing_boundary_face"
+        }
+        ConstrainedCavityValidationError::UnexpectedBoundaryFace { .. } => {
+            "boundary_face_mismatch_constrained_unexpected_boundary_face"
+        }
+        ConstrainedCavityValidationError::BoundarySourceFaceMismatch { .. } => {
+            "boundary_face_mismatch_constrained_boundary_source_face_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundarySourceEdgeMismatch { .. } => {
+            "boundary_face_mismatch_constrained_boundary_source_edge_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
+            "boundary_face_mismatch_constrained_boundary_region_mismatch"
+        }
     }
 }
 
@@ -7741,6 +7844,20 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         ("boundary_cavity", Some("boundary_face_mismatch_constrained_invalid")) => {
             "boundary_cavity_boundary_face_mismatch_constrained_invalid"
         }
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_non_manifold_boundary_edge"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_non_manifold_boundary_edge",
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_duplicate_boundary_face")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_duplicate_boundary_face"
+        }
+        (
+            "boundary_cavity",
+            Some("boundary_face_mismatch_constrained_degenerate_boundary_face"),
+        ) => "boundary_cavity_boundary_face_mismatch_constrained_degenerate_boundary_face",
+        ("boundary_cavity", Some("boundary_face_mismatch_constrained_too_few_boundary_faces")) => {
+            "boundary_cavity_boundary_face_mismatch_constrained_too_few_boundary_faces"
+        }
         ("boundary_cavity", Some("volume_mismatch")) => "boundary_cavity_volume_mismatch",
         ("boundary_cavity", Some("empty_candidate")) => "boundary_cavity_empty_candidate",
         ("boundary_cavity", _) => "boundary_cavity_candidate_invalid",
@@ -7758,6 +7875,18 @@ fn diagnostic_cavity_candidate_invalid_bucket(
         }
         (_, Some("boundary_face_mismatch_constrained_invalid")) => {
             "node_cavity_boundary_face_mismatch_constrained_invalid"
+        }
+        (_, Some("boundary_face_mismatch_constrained_non_manifold_boundary_edge")) => {
+            "node_cavity_boundary_face_mismatch_constrained_non_manifold_boundary_edge"
+        }
+        (_, Some("boundary_face_mismatch_constrained_duplicate_boundary_face")) => {
+            "node_cavity_boundary_face_mismatch_constrained_duplicate_boundary_face"
+        }
+        (_, Some("boundary_face_mismatch_constrained_degenerate_boundary_face")) => {
+            "node_cavity_boundary_face_mismatch_constrained_degenerate_boundary_face"
+        }
+        (_, Some("boundary_face_mismatch_constrained_too_few_boundary_faces")) => {
+            "node_cavity_boundary_face_mismatch_constrained_too_few_boundary_faces"
         }
         (_, Some("volume_mismatch")) => "node_cavity_volume_mismatch",
         (_, Some("empty_candidate")) => "node_cavity_empty_candidate",
