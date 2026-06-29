@@ -1284,6 +1284,10 @@ fn production_backend_summary(
             .tet_candidates
             .recovery
             .exact_quality_unrepaired_boundary_adjacent_count,
+        tet_exact_quality_unrepaired_node_adjacent_count: preparation
+            .tet_candidates
+            .recovery
+            .exact_quality_unrepaired_node_adjacent_count,
         tet_exact_quality_unrepaired_interior_seed_count: preparation
             .tet_candidates
             .recovery

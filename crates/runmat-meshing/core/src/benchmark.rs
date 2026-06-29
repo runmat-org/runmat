@@ -166,6 +166,8 @@ pub struct MeshBenchmarkSolveReadiness {
     #[serde(default)]
     pub unrepaired_exact_quality_boundary_adjacent_count: usize,
     #[serde(default)]
+    pub unrepaired_exact_quality_node_adjacent_count: usize,
+    #[serde(default)]
     pub unrepaired_exact_quality_interior_seed_count: usize,
     #[serde(default)]
     pub unrepaired_exact_quality_edge_star_count: usize,
@@ -458,6 +460,9 @@ pub fn build_mesh_benchmark_report(
             unrepaired_exact_quality_boundary_adjacent_count: evidence
                 .validation
                 .unrepaired_exact_quality_boundary_adjacent_count,
+            unrepaired_exact_quality_node_adjacent_count: evidence
+                .validation
+                .unrepaired_exact_quality_node_adjacent_count,
             unrepaired_exact_quality_interior_seed_count: evidence
                 .validation
                 .unrepaired_exact_quality_interior_seed_count,
@@ -1934,6 +1939,8 @@ mod tests {
             .tet_exact_quality_unrepaired_general_cavity_count = 1;
         mesh.backend
             .tet_exact_quality_unrepaired_boundary_adjacent_count = 2;
+        mesh.backend
+            .tet_exact_quality_unrepaired_node_adjacent_count = 4;
         let validation = AnalysisMeshValidationOptions {
             expected_volume_m3: Some(1.0),
             min_volume_coverage_ratio: 0.95,
@@ -1968,6 +1975,12 @@ mod tests {
                 .solve_readiness
                 .unrepaired_exact_quality_boundary_adjacent_count,
             2
+        );
+        assert_eq!(
+            report
+                .solve_readiness
+                .unrepaired_exact_quality_node_adjacent_count,
+            4
         );
     }
 

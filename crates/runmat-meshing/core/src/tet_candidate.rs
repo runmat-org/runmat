@@ -193,6 +193,8 @@ pub struct TetRecoveryReport {
     #[serde(default)]
     pub exact_quality_unrepaired_boundary_adjacent_count: usize,
     #[serde(default)]
+    pub exact_quality_unrepaired_node_adjacent_count: usize,
+    #[serde(default)]
     pub exact_quality_unrepaired_interior_seed_count: usize,
     #[serde(default)]
     pub exact_quality_unrepaired_edge_star_count: usize,
@@ -555,6 +557,7 @@ pub fn form_tet_candidates(
             exact_quality_unrepaired_general_cavity_count: unrepaired_quality.general_cavity_count,
             exact_quality_unrepaired_boundary_adjacent_count: unrepaired_quality
                 .boundary_adjacent_count,
+            exact_quality_unrepaired_node_adjacent_count: unrepaired_quality.node_adjacent_count,
             exact_quality_unrepaired_interior_seed_count: unrepaired_quality.interior_seed_count,
             exact_quality_unrepaired_edge_star_count: unrepaired_quality.edge_star_count,
         },
@@ -2943,6 +2946,7 @@ struct RemainingExactQualityViolationCounts {
     total_count: usize,
     general_cavity_count: usize,
     boundary_adjacent_count: usize,
+    node_adjacent_count: usize,
     interior_seed_count: usize,
     edge_star_count: usize,
 }
@@ -2954,6 +2958,7 @@ fn remaining_exact_quality_violation_counts(
 ) -> RemainingExactQualityViolationCounts {
     let face_adjacency = tet_face_adjacency(tets);
     let edge_adjacency = tet_edge_adjacency(tets);
+    let node_adjacency = tet_node_adjacency(tets);
     let interior_node_ids = nodes
         .iter()
         .filter_map(|node| {
@@ -2961,18 +2966,32 @@ fn remaining_exact_quality_violation_counts(
         })
         .collect::<BTreeSet<_>>();
     let mut counts = RemainingExactQualityViolationCounts::default();
-    for tet in tets
+    for (tet_index, tet) in tets
         .iter()
-        .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+        .enumerate()
+        .filter(|(_, tet)| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
     {
         counts.total_count += 1;
         let mut classified = false;
+        let face_closure =
+            connected_bad_tet_cavity_with_face_closure(tet_index, tets, &face_adjacency, options);
+        let node_closure = connected_bad_tet_cavity_with_node_closure(
+            tet_index,
+            tets,
+            &face_adjacency,
+            &node_adjacency,
+            options,
+        );
         if tet_node_faces(tet.node_ids)
             .map(sorted_node_face)
             .into_iter()
             .any(|face| face_adjacency.get(&face).map_or(0, Vec::len) == 1)
         {
             counts.boundary_adjacent_count += 1;
+            classified = true;
+        }
+        if node_closure.len() > face_closure.len() {
+            counts.node_adjacent_count += 1;
             classified = true;
         }
         if tet

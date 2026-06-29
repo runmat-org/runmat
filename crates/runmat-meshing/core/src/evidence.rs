@@ -319,6 +319,8 @@ pub struct MeshTetRecoveryEvidence {
     #[serde(default)]
     pub exact_quality_unrepaired_boundary_adjacent_count: usize,
     #[serde(default)]
+    pub exact_quality_unrepaired_node_adjacent_count: usize,
+    #[serde(default)]
     pub exact_quality_unrepaired_interior_seed_count: usize,
     #[serde(default)]
     pub exact_quality_unrepaired_edge_star_count: usize,
@@ -384,6 +386,8 @@ pub struct MeshValidationEvidence {
     pub unrepaired_exact_quality_general_cavity_count: usize,
     #[serde(default)]
     pub unrepaired_exact_quality_boundary_adjacent_count: usize,
+    #[serde(default)]
+    pub unrepaired_exact_quality_node_adjacent_count: usize,
     #[serde(default)]
     pub unrepaired_exact_quality_interior_seed_count: usize,
     #[serde(default)]
@@ -922,6 +926,9 @@ fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence
         exact_quality_unrepaired_boundary_adjacent_count: mesh
             .backend
             .tet_exact_quality_unrepaired_boundary_adjacent_count,
+        exact_quality_unrepaired_node_adjacent_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_node_adjacent_count,
         exact_quality_unrepaired_interior_seed_count: mesh
             .backend
             .tet_exact_quality_unrepaired_interior_seed_count,
@@ -1088,6 +1095,9 @@ fn validation_evidence(
         unrepaired_exact_quality_boundary_adjacent_count: mesh
             .backend
             .tet_exact_quality_unrepaired_boundary_adjacent_count,
+        unrepaired_exact_quality_node_adjacent_count: mesh
+            .backend
+            .tet_exact_quality_unrepaired_node_adjacent_count,
         unrepaired_exact_quality_interior_seed_count: mesh
             .backend
             .tet_exact_quality_unrepaired_interior_seed_count,
@@ -1460,6 +1470,7 @@ mod tests {
                 tet_exact_quality_unrepaired_total_count: 9,
                 tet_exact_quality_unrepaired_general_cavity_count: 1,
                 tet_exact_quality_unrepaired_boundary_adjacent_count: 6,
+                tet_exact_quality_unrepaired_node_adjacent_count: 10,
                 tet_exact_quality_unrepaired_interior_seed_count: 7,
                 tet_exact_quality_unrepaired_edge_star_count: 8,
                 ..MeshBackendSummary::default()
@@ -1545,6 +1556,12 @@ mod tests {
                 .validation
                 .unrepaired_exact_quality_boundary_adjacent_count,
             6
+        );
+        assert_eq!(
+            evidence
+                .validation
+                .unrepaired_exact_quality_node_adjacent_count,
+            10
         );
         assert_eq!(
             evidence
@@ -1776,6 +1793,12 @@ mod tests {
                 .tet_recovery
                 .exact_quality_unrepaired_boundary_adjacent_count,
             6
+        );
+        assert_eq!(
+            evidence
+                .tet_recovery
+                .exact_quality_unrepaired_node_adjacent_count,
+            10
         );
         assert_eq!(
             evidence

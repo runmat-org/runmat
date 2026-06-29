@@ -5335,6 +5335,7 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     evidence.unrepaired_exact_quality_total_count = 3;
     evidence.unrepaired_exact_quality_general_cavity_count = 1;
     evidence.unrepaired_exact_quality_boundary_adjacent_count = 2;
+    evidence.unrepaired_exact_quality_node_adjacent_count = 4;
 
     let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
         evidence.clone(),
@@ -5361,6 +5362,9 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     assert!(reasons[0]
         .detail
         .contains("unrepaired_exact_quality_boundary_adjacent_count=2"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_node_adjacent_count=4"));
 
     evidence.solve_ready = true;
     assert!(

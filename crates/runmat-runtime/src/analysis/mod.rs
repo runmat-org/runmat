@@ -9622,6 +9622,7 @@ fn mesh_validation_recovery_detail(
     if validation.unrepaired_exact_quality_total_count > 0
         || validation.unrepaired_exact_quality_general_cavity_count > 0
         || validation.unrepaired_exact_quality_boundary_adjacent_count > 0
+        || validation.unrepaired_exact_quality_node_adjacent_count > 0
         || validation.unrepaired_exact_quality_interior_seed_count > 0
         || validation.unrepaired_exact_quality_edge_star_count > 0
     {
@@ -9636,6 +9637,10 @@ fn mesh_validation_recovery_detail(
         details.push(format!(
             "unrepaired_exact_quality_boundary_adjacent_count={}",
             validation.unrepaired_exact_quality_boundary_adjacent_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_node_adjacent_count={}",
+            validation.unrepaired_exact_quality_node_adjacent_count
         ));
         details.push(format!(
             "unrepaired_exact_quality_interior_seed_count={}",

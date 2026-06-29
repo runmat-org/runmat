@@ -172,6 +172,7 @@ pub enum AnalysisMeshValidationError {
         total_count: usize,
         general_cavity_count: usize,
         boundary_adjacent_count: usize,
+        node_adjacent_count: usize,
         interior_seed_count: usize,
         edge_star_count: usize,
     },
@@ -523,8 +524,12 @@ fn validate_no_unrepaired_exact_quality(
     let interior_seed_count = mesh
         .backend
         .tet_exact_quality_unrepaired_interior_seed_count;
+    let node_adjacent_count = mesh
+        .backend
+        .tet_exact_quality_unrepaired_node_adjacent_count;
     let edge_star_count = mesh.backend.tet_exact_quality_unrepaired_edge_star_count;
     let categorized_count = boundary_adjacent_count
+        .saturating_add(node_adjacent_count)
         .saturating_add(interior_seed_count)
         .saturating_add(edge_star_count)
         .saturating_add(general_cavity_count);
@@ -537,6 +542,7 @@ fn validate_no_unrepaired_exact_quality(
             total_count,
             general_cavity_count,
             boundary_adjacent_count,
+            node_adjacent_count,
             interior_seed_count,
             edge_star_count,
         });
@@ -1230,6 +1236,8 @@ mod tests {
         mesh.backend
             .tet_exact_quality_unrepaired_boundary_adjacent_count = 2;
         mesh.backend
+            .tet_exact_quality_unrepaired_node_adjacent_count = 4;
+        mesh.backend
             .tet_exact_quality_unrepaired_interior_seed_count = 3;
         mesh.backend.tet_exact_quality_unrepaired_edge_star_count = 5;
 
@@ -1245,9 +1253,10 @@ mod tests {
         assert_eq!(
             err,
             AnalysisMeshValidationError::UnrepairedExactQualityPresent {
-                total_count: 10,
+                total_count: 14,
                 general_cavity_count: 0,
                 boundary_adjacent_count: 2,
+                node_adjacent_count: 4,
                 interior_seed_count: 3,
                 edge_star_count: 5,
             }
@@ -1280,6 +1289,7 @@ mod tests {
                 total_count: 1,
                 general_cavity_count: 1,
                 boundary_adjacent_count: 0,
+                node_adjacent_count: 0,
                 interior_seed_count: 0,
                 edge_star_count: 0,
             }
