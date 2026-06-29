@@ -71,6 +71,7 @@ pub enum SurfaceValidationError {
     },
     OrientationMismatch {
         element_id: u32,
+        source_face_id: u32,
         alignment: f64,
         min_alignment: f64,
     },
@@ -125,11 +126,12 @@ impl std::fmt::Display for SurfaceValidationError {
             ),
             Self::OrientationMismatch {
                 element_id,
+                source_face_id,
                 alignment,
                 min_alignment,
             } => write!(
                 formatter,
-                "surface element {element_id} orientation alignment {alignment:.6e} is below {min_alignment:.6e}"
+                "surface element {element_id} on source face {source_face_id} orientation alignment {alignment:.6e} is below {min_alignment:.6e}"
             ),
             Self::UncoveredSourceFace { source_face_id } => {
                 write!(formatter, "source face {source_face_id} is not covered")
@@ -203,6 +205,7 @@ pub fn validate_surface_discretization(
         if alignment < options.min_orientation_alignment {
             return Err(SurfaceValidationError::OrientationMismatch {
                 element_id: element.element_id,
+                source_face_id: element.source_face_id,
                 alignment,
                 min_alignment: options.min_orientation_alignment,
             });
@@ -556,6 +559,36 @@ mod tests {
             err,
             SurfaceValidationError::ProjectionError { .. }
         ));
+    }
+
+    #[test]
+    fn orientation_mismatch_reports_source_face() {
+        let topology = cube_topology();
+        let mut surface =
+            discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
+                .expect("surface should discretize");
+        let source_face_id = surface.elements[0].source_face_id;
+        surface.elements[0].node_ids.swap(1, 2);
+
+        let err = validate_surface_discretization(
+            &topology,
+            &surface,
+            SurfaceValidationOptions::default(),
+        )
+        .expect_err("flipped surface orientation should fail");
+
+        assert_eq!(
+            err,
+            SurfaceValidationError::OrientationMismatch {
+                element_id: 0,
+                source_face_id,
+                alignment: -1.0,
+                min_alignment: SurfaceValidationOptions::default().min_orientation_alignment,
+            }
+        );
+        assert!(err
+            .to_string()
+            .contains(&format!("source face {source_face_id}")));
     }
 
     #[test]
