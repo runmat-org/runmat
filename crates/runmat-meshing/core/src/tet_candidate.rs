@@ -4207,6 +4207,25 @@ enum InteriorSeedCollapseScope {
     LargerStarsOnly,
 }
 
+const MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE: usize = 24;
+const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
+
+fn interior_seed_collapse_scope_matches(
+    scope: InteriorSeedCollapseScope,
+    star_size: usize,
+) -> bool {
+    match scope {
+        InteriorSeedCollapseScope::FourTetOnly => star_size == 4,
+        InteriorSeedCollapseScope::LargerStarsOnly => {
+            (5..=MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE).contains(&star_size)
+        }
+    }
+}
+
+fn interior_seed_relocation_scope_matches(star_size: usize) -> bool {
+    (5..=MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE).contains(&star_size)
+}
+
 fn best_constrained_interior_seed_star_refill(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -4369,11 +4388,9 @@ fn best_interior_seed_node_collapse(
         let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
             continue;
         };
-        let adjacent_len_matches_scope = match scope {
-            InteriorSeedCollapseScope::FourTetOnly => adjacent.len() == 4,
-            InteriorSeedCollapseScope::LargerStarsOnly => (5..=24).contains(&adjacent.len()),
-        };
-        if !adjacent_len_matches_scope || !adjacent.contains(&tet_index) {
+        if !interior_seed_collapse_scope_matches(scope, adjacent.len())
+            || !adjacent.contains(&tet_index)
+        {
             continue;
         }
         let original_below_count = count_exact_quality_violations(
@@ -4567,7 +4584,8 @@ fn best_interior_seed_node_relocation(
         let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
             continue;
         };
-        if adjacent.len() < 5 || adjacent.len() > 24 || !adjacent.contains(&tet_index) {
+        if !interior_seed_relocation_scope_matches(adjacent.len()) || !adjacent.contains(&tet_index)
+        {
             continue;
         }
         let original_below_count = count_exact_quality_violations(
@@ -4651,7 +4669,8 @@ fn best_interior_seed_node_untangling(
         let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
             continue;
         };
-        if adjacent.len() < 5 || adjacent.len() > 24 || !adjacent.contains(&tet_index) {
+        if !interior_seed_relocation_scope_matches(adjacent.len()) || !adjacent.contains(&tet_index)
+        {
             continue;
         }
         let original_near_singular_count =
@@ -9119,6 +9138,35 @@ mod tests {
             }),
             32
         );
+    }
+
+    #[test]
+    fn interior_seed_repair_star_size_scopes_are_bounded() {
+        assert!(interior_seed_collapse_scope_matches(
+            InteriorSeedCollapseScope::FourTetOnly,
+            4
+        ));
+        assert!(!interior_seed_collapse_scope_matches(
+            InteriorSeedCollapseScope::FourTetOnly,
+            5
+        ));
+        assert!(interior_seed_collapse_scope_matches(
+            InteriorSeedCollapseScope::LargerStarsOnly,
+            MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE
+        ));
+        assert!(!interior_seed_collapse_scope_matches(
+            InteriorSeedCollapseScope::LargerStarsOnly,
+            MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE + 1
+        ));
+        assert!(interior_seed_relocation_scope_matches(
+            MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE + 1
+        ));
+        assert!(interior_seed_relocation_scope_matches(
+            MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE
+        ));
+        assert!(!interior_seed_relocation_scope_matches(
+            MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE + 1
+        ));
     }
 
     #[test]
