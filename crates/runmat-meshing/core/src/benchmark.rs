@@ -3819,6 +3819,10 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_missing_face_node_component_size =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_common_node_count =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_common_node_source =
+            BTreeMap::<&'static str, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -4195,6 +4199,18 @@ mod tests {
                                             .entry(size)
                                             .or_default() += count;
                                     }
+                                    for (common_count, count) in
+                                        clusters.node_component_common_node_count_histogram
+                                    {
+                                        *trimmed_seed_star_shell_trim_missing_face_common_node_count
+                                            .entry(common_count)
+                                            .or_default() += count;
+                                    }
+                                    accumulate_node_source_histogram(
+                                        &mut trimmed_seed_star_shell_trim_missing_face_common_node_source,
+                                        clusters.node_component_common_node_ids,
+                                        &node_sources,
+                                    );
                                 }
                                 match evaluate_constrained_cavity_refill_candidates(
                                     &shell_trim_cavity,
@@ -4907,12 +4923,14 @@ mod tests {
             trimmed_seed_star_shell_trim_steiner_exact_cover_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?} common_nodes={:?} common_node_sources={:?}",
             trimmed_seed_star_shell_trim_missing_face_count,
             trimmed_seed_star_shell_trim_missing_face_edge_component_count,
             trimmed_seed_star_shell_trim_missing_face_edge_component_size,
             trimmed_seed_star_shell_trim_missing_face_node_component_count,
             trimmed_seed_star_shell_trim_missing_face_node_component_size,
+            trimmed_seed_star_shell_trim_missing_face_common_node_count,
+            trimmed_seed_star_shell_trim_missing_face_common_node_source,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",

@@ -160,6 +160,8 @@ pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
     pub edge_component_size_histogram: BTreeMap<usize, usize>,
     pub node_component_count: usize,
     pub node_component_size_histogram: BTreeMap<usize, usize>,
+    pub node_component_common_node_count_histogram: BTreeMap<usize, usize>,
+    pub node_component_common_node_ids: BTreeMap<u32, usize>,
 }
 
 #[cfg(test)]
@@ -3756,13 +3758,27 @@ pub(crate) fn diagnostic_boundary_missing_face_clusters(
     let missing_faces = missing_refill_boundary_faces(cavity, &refill_tets)
         .map_err(ConstrainedCavityRefillError::Validation)?;
     let edge_component_sizes = missing_face_component_sizes(&missing_faces, MissingFaceLink::Edge);
-    let node_component_sizes = missing_face_component_sizes(&missing_faces, MissingFaceLink::Node);
+    let node_components = missing_face_components(&missing_faces, MissingFaceLink::Node);
+    let node_component_sizes = node_components.iter().map(Vec::len).collect::<Vec<_>>();
+    let mut node_component_common_node_count_histogram = BTreeMap::<usize, usize>::new();
+    let mut node_component_common_node_ids = BTreeMap::<u32, usize>::new();
+    for component in &node_components {
+        let common_node_ids = missing_face_component_common_node_ids(&missing_faces, component);
+        *node_component_common_node_count_histogram
+            .entry(common_node_ids.len())
+            .or_default() += 1;
+        for node_id in common_node_ids {
+            *node_component_common_node_ids.entry(node_id).or_default() += 1;
+        }
+    }
     Ok(BoundaryMissingFaceClusterDiagnostic {
         missing_face_count: missing_faces.len(),
         edge_component_count: edge_component_sizes.len(),
         edge_component_size_histogram: component_size_histogram(edge_component_sizes),
         node_component_count: node_component_sizes.len(),
         node_component_size_histogram: component_size_histogram(node_component_sizes),
+        node_component_common_node_count_histogram,
+        node_component_common_node_ids,
     })
 }
 
@@ -3775,16 +3791,24 @@ enum MissingFaceLink {
 
 #[cfg(test)]
 fn missing_face_component_sizes(faces: &[[u32; 3]], link: MissingFaceLink) -> Vec<usize> {
+    missing_face_components(faces, link)
+        .into_iter()
+        .map(|component| component.len())
+        .collect()
+}
+
+#[cfg(test)]
+fn missing_face_components(faces: &[[u32; 3]], link: MissingFaceLink) -> Vec<Vec<usize>> {
     let mut visited = BTreeSet::<usize>::new();
-    let mut sizes = Vec::<usize>::new();
+    let mut components = Vec::<Vec<usize>>::new();
     for start in 0..faces.len() {
         if !visited.insert(start) {
             continue;
         }
-        let mut size = 0_usize;
+        let mut component = Vec::<usize>::new();
         let mut pending = vec![start];
         while let Some(index) = pending.pop() {
-            size += 1;
+            component.push(index);
             for neighbor in 0..faces.len() {
                 if visited.contains(&neighbor)
                     || !missing_faces_connected(faces[index], faces[neighbor], link)
@@ -3795,10 +3819,24 @@ fn missing_face_component_sizes(faces: &[[u32; 3]], link: MissingFaceLink) -> Ve
                 pending.push(neighbor);
             }
         }
-        sizes.push(size);
+        component.sort_unstable();
+        components.push(component);
     }
-    sizes.sort_unstable();
-    sizes
+    components.sort();
+    components
+}
+
+#[cfg(test)]
+fn missing_face_component_common_node_ids(faces: &[[u32; 3]], component: &[usize]) -> Vec<u32> {
+    let Some(first) = component.first() else {
+        return Vec::new();
+    };
+    let mut common = faces[*first].into_iter().collect::<BTreeSet<_>>();
+    for index in component.iter().skip(1) {
+        let face_nodes = faces[*index].into_iter().collect::<BTreeSet<_>>();
+        common.retain(|node_id| face_nodes.contains(node_id));
+    }
+    common.into_iter().collect()
 }
 
 #[cfg(test)]
@@ -4976,9 +5014,20 @@ mod tests {
             component_size_histogram(missing_face_component_sizes(&faces, MissingFaceLink::Edge));
         let node_histogram =
             component_size_histogram(missing_face_component_sizes(&faces, MissingFaceLink::Node));
+        let node_components = missing_face_components(&faces, MissingFaceLink::Node);
+        let common_node_ids =
+            missing_face_component_common_node_ids(&faces, node_components.first().unwrap());
 
         assert_eq!(edge_histogram, BTreeMap::from([(1, 2), (2, 1)]));
         assert_eq!(node_histogram, BTreeMap::from([(4, 1)]));
+        assert_eq!(common_node_ids, Vec::<u32>::new());
+
+        let fan_faces = [[9, 1, 2], [9, 2, 3], [9, 3, 4]];
+        let fan_components = missing_face_components(&fan_faces, MissingFaceLink::Node);
+        assert_eq!(
+            missing_face_component_common_node_ids(&fan_faces, fan_components.first().unwrap()),
+            vec![9]
+        );
     }
 
     #[test]
