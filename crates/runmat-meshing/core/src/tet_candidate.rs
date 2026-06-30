@@ -7970,13 +7970,10 @@ pub(crate) fn diagnostic_boundary_cavity_reconnection_rejection_reason(
         options,
         2,
     );
-    let mut candidate_groups = vec![adjacent];
-    if candidate_groups
-        .first()
-        .is_some_and(|group| group.as_slice() != expanded.as_slice())
-    {
-        candidate_groups.push(expanded);
-    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    let candidate_groups =
+        boundary_adjacent_cavity_candidate_groups(face_closure, adjacent, expanded, tets);
     diagnostic_cavity_group_reconnection_rejection_reason(
         candidate_groups,
         tets,
@@ -8913,13 +8910,10 @@ fn best_boundary_adjacent_cavity_reconnection(
         options,
         2,
     );
-    let mut candidate_groups = vec![adjacent];
-    if candidate_groups
-        .first()
-        .is_some_and(|group| group.as_slice() != expanded.as_slice())
-    {
-        candidate_groups.push(expanded);
-    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    let candidate_groups =
+        boundary_adjacent_cavity_candidate_groups(face_closure, adjacent, expanded, tets);
 
     let mut best = None::<(Vec<usize>, BoundaryCavityReconnection, usize, f64, bool)>;
     for group in candidate_groups {
@@ -8968,6 +8962,57 @@ fn best_boundary_adjacent_cavity_reconnection(
     Ok(best.map(|(indices, candidates, _, _, quality_gain_only)| {
         (indices, candidates, quality_gain_only)
     }))
+}
+
+fn boundary_adjacent_cavity_candidate_groups(
+    face_closure: Vec<usize>,
+    adjacent: Vec<usize>,
+    expanded: Vec<usize>,
+    tets: &[TetCandidate],
+) -> Vec<Vec<usize>> {
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut seen = BTreeSet::<Vec<usize>>::new();
+    let mut push_group = |mut group: Vec<usize>| {
+        group.sort_unstable();
+        group.dedup();
+        if group.len() >= 4 && group.len() <= 24 && seen.insert(group.clone()) {
+            groups.push(group);
+        }
+    };
+
+    push_group(adjacent.clone());
+    push_group(expanded.clone());
+    push_group(face_closure.clone());
+
+    let base = face_closure.into_iter().collect::<BTreeSet<_>>();
+    if base.len() < 4 || base.len() > 24 {
+        return groups;
+    }
+    let extra = bounded_node_cavity_extra_indices(
+        adjacent
+            .iter()
+            .chain(expanded.iter())
+            .copied()
+            .filter(|index| !base.contains(index))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        tets,
+    );
+    for extra_index in &extra {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        push_group(group.into_iter().collect());
+    }
+    for left in 0..extra.len() {
+        for right in (left + 1)..extra.len() {
+            let mut group = base.clone();
+            group.insert(extra[left]);
+            group.insert(extra[right]);
+            push_group(group.into_iter().collect());
+        }
+    }
+    groups
 }
 
 fn best_node_adjacent_cavity_reconnection(
@@ -13887,6 +13932,46 @@ mod tests {
         assert_eq!(one_layer, vec![0, 1, 2]);
         assert_eq!(two_layer, vec![0, 1, 2, 3]);
         assert!(!two_layer.contains(&4));
+    }
+
+    #[test]
+    fn boundary_adjacent_candidate_groups_bound_oversized_node_closure() {
+        let tets = (0..32)
+            .map(|tet_id| TetCandidate {
+                tet_id,
+                component_id: 0,
+                node_ids: [tet_id * 4, tet_id * 4 + 1, tet_id * 4 + 2, tet_id * 4 + 3],
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: if tet_id < 4 {
+                    1.0
+                } else {
+                    (32 - tet_id) as f64 / 100.0
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let groups = boundary_adjacent_cavity_candidate_groups(
+            vec![0, 1, 2, 3],
+            (0..30).collect(),
+            (0..32).collect(),
+            &tets,
+        );
+        let allowed_extras = (24..32).collect::<BTreeSet<_>>();
+
+        assert!(groups.contains(&vec![0, 1, 2, 3]));
+        assert!(groups.contains(&vec![0, 1, 2, 3, 31]));
+        assert!(groups.contains(&vec![0, 1, 2, 3, 30, 31]));
+        assert!(groups.iter().all(|group| group.len() <= 24));
+        assert!(groups.iter().all(|group| {
+            group
+                .iter()
+                .copied()
+                .filter(|index| *index >= 4)
+                .all(|index| allowed_extras.contains(&index))
+        }));
     }
 
     #[test]
