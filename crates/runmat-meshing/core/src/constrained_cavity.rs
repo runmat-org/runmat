@@ -3143,12 +3143,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         {
             return None;
         }
-        let Some(target_face) = self
-            .boundary_faces
-            .iter()
-            .find(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
-            .copied()
-        else {
+        let Some(candidate_indices) = self.next_boundary_cover_candidates(face_counts) else {
             let boundary_ok = self
                 .boundary_faces
                 .iter()
@@ -3164,18 +3159,8 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             }
             return None;
         };
-        for candidate_index in 0..self.candidates.len() {
-            if selected.contains(&candidate_index)
-                || !self.candidate_faces[candidate_index].contains(&target_face)
-                || !self.candidate_faces[candidate_index].iter().all(|face| {
-                    let count = face_counts.get(face).copied().unwrap_or(0);
-                    if self.boundary_faces.contains(face) {
-                        count == 0
-                    } else {
-                        count < 2
-                    }
-                })
-            {
+        for candidate_index in candidate_indices {
+            if selected.contains(&candidate_index) {
                 continue;
             }
             for face in self.candidate_faces[candidate_index] {
@@ -3200,6 +3185,46 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             }
         }
         None
+    }
+
+    fn next_boundary_cover_candidates(
+        &self,
+        face_counts: &BTreeMap<[u32; 3], usize>,
+    ) -> Option<Vec<usize>> {
+        let mut best = None::<Vec<usize>>;
+        for face in self
+            .boundary_faces
+            .iter()
+            .filter(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
+        {
+            let mut candidates = (0..self.candidates.len())
+                .filter(|candidate_index| {
+                    self.candidate_faces[*candidate_index].contains(face)
+                        && self.candidate_faces[*candidate_index]
+                            .iter()
+                            .all(|candidate_face| {
+                                let count = face_counts.get(candidate_face).copied().unwrap_or(0);
+                                if self.boundary_faces.contains(candidate_face) {
+                                    count == 0
+                                } else {
+                                    count < 2
+                                }
+                            })
+                })
+                .collect::<Vec<_>>();
+            candidates.sort_by(|left, right| {
+                self.candidates[*right]
+                    .exact_scaled_jacobian
+                    .total_cmp(&self.candidates[*left].exact_scaled_jacobian)
+            });
+            if best
+                .as_ref()
+                .is_none_or(|current| candidates.len() < current.len())
+            {
+                best = Some(candidates);
+            }
+        }
+        best
     }
 }
 
