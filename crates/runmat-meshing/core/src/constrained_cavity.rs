@@ -4619,6 +4619,38 @@ pub(crate) fn diagnostic_missing_face_shared_patch_cap_stitch(
     boundary_nodes: &[ConstrainedCavityNode],
     options: ConstrainedCavityRefillOptions,
 ) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
+    diagnostic_missing_face_shared_cap_stitch_with_link(
+        cavity,
+        boundary_nodes,
+        options,
+        MissingFaceLink::Node,
+        "incomplete_shared_patch_caps",
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_missing_face_edge_subpatch_cap_stitch(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
+    diagnostic_missing_face_shared_cap_stitch_with_link(
+        cavity,
+        boundary_nodes,
+        options,
+        MissingFaceLink::Edge,
+        "incomplete_edge_subpatch_caps",
+    )
+}
+
+#[cfg(test)]
+fn diagnostic_missing_face_shared_cap_stitch_with_link(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+    patch_link: MissingFaceLink,
+    incomplete_reason: &'static str,
+) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
     validate_refill_options(options)?;
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
     let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
@@ -4652,7 +4684,7 @@ pub(crate) fn diagnostic_missing_face_shared_patch_cap_stitch(
     }
     let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tets)
         .map_err(ConstrainedCavityRefillError::Validation)?;
-    let missing_face_patches = missing_face_components(&missing_faces, MissingFaceLink::Node);
+    let missing_face_patches = missing_face_components(&missing_faces, patch_link);
     let mut diagnostic = MissingFaceLocalCapStitchDiagnostic {
         missing_face_count: missing_faces.len(),
         patch_count: missing_face_patches.len(),
@@ -4739,7 +4771,7 @@ pub(crate) fn diagnostic_missing_face_shared_patch_cap_stitch(
     }
     diagnostic.inserted_node_count = inserted_nodes.len();
     if diagnostic.capped_face_count < diagnostic.missing_face_count {
-        diagnostic.reason = "incomplete_shared_patch_caps";
+        diagnostic.reason = incomplete_reason;
         diagnostic.candidate_tet_count = candidate_tets.len();
         return Ok(diagnostic);
     }
@@ -6908,6 +6940,26 @@ mod tests {
         assert_eq!(diagnostic.capped_face_count, 0);
         assert_eq!(diagnostic.inserted_node_count, 0);
         assert_eq!(diagnostic.side_connector_candidate_count, 0);
+        assert_eq!(diagnostic.candidate_tet_count, 0);
+        assert!(!diagnostic.found_cover);
+        assert_eq!(diagnostic.reason, "no_missing_faces");
+    }
+
+    #[test]
+    fn missing_face_edge_subpatch_cap_stitch_reports_boundary_complete_fixture() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let diagnostic =
+            diagnostic_missing_face_edge_subpatch_cap_stitch(&cavity, &nodes, refill_options())
+                .expect("edge subpatch cap stitch diagnostic should evaluate");
+
+        assert_eq!(diagnostic.missing_face_count, 0);
+        assert_eq!(diagnostic.patch_count, 0);
+        assert!(diagnostic.patch_size_histogram.is_empty());
+        assert!(diagnostic.patch_capped_face_count_histogram.is_empty());
+        assert!(diagnostic.incomplete_patch_size_histogram.is_empty());
+        assert_eq!(diagnostic.capped_face_count, 0);
+        assert_eq!(diagnostic.inserted_node_count, 0);
         assert_eq!(diagnostic.candidate_tet_count, 0);
         assert!(!diagnostic.found_cover);
         assert_eq!(diagnostic.reason, "no_missing_faces");
