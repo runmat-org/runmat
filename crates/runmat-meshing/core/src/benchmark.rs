@@ -2317,6 +2317,7 @@ mod tests {
         tet_candidate::{
             diagnostic_bad_cavity_sizes, diagnostic_boundary_cavity_reconnection_rejection_reason,
             diagnostic_boundary_cavity_reconnection_transitions,
+            diagnostic_boundary_recovery_node_relocation_transitions,
             diagnostic_cavity_decomposition_transitions,
             diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
@@ -3063,6 +3064,15 @@ mod tests {
                 matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
             })
             .collect::<std::collections::BTreeSet<_>>();
+        let boundary_recovery_node_ids = preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                matches!(node.source, TetCandidateNodeSource::BoundaryRecovery)
+                    .then_some(node.node_id)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
         let node_points = preparation
             .tet_candidates
             .nodes
@@ -3118,10 +3128,12 @@ mod tests {
         let mut bad_boundary_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
         let mut bad_cavity_decomposition_transitions = BTreeMap::<String, usize>::new();
         let mut bad_missing_face_owner_closure_transitions = BTreeMap::<String, usize>::new();
+        let mut bad_boundary_recovery_relocation_transitions = BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_transition_sample_count = 0_usize;
         let mut bad_boundary_cavity_transition_sample_count = 0_usize;
         let mut bad_cavity_decomposition_sample_count = 0_usize;
         let mut bad_missing_face_owner_closure_sample_count = 0_usize;
+        let mut bad_boundary_recovery_relocation_sample_count = 0_usize;
         let mut bad_one_ring_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_face_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_node_cavity_size_histogram = BTreeMap::<usize, usize>::new();
@@ -3318,6 +3330,23 @@ mod tests {
                         .or_default() += count;
                 }
             }
+            if bad_boundary_recovery_relocation_sample_count < 8 {
+                bad_boundary_recovery_relocation_sample_count += 1;
+                for (transition, count) in diagnostic_boundary_recovery_node_relocation_transitions(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &node_index_adjacency,
+                    &boundary_recovery_node_ids,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("boundary-recovery relocation diagnostic should evaluate")
+                {
+                    *bad_boundary_recovery_relocation_transitions
+                        .entry(transition.to_string())
+                        .or_default() += count;
+                }
+            }
             let (one_ring_size, face_cavity_size, node_cavity_size) = diagnostic_bad_cavity_sizes(
                 tet_index,
                 &preparation.tet_candidates.tets,
@@ -3499,6 +3528,10 @@ mod tests {
         eprintln!(
             "annular recovery bad_missing_face_owner_closure_transition_sample={} transitions={:?}",
             bad_missing_face_owner_closure_sample_count, bad_missing_face_owner_closure_transitions
+        );
+        eprintln!(
+            "annular recovery bad_boundary_recovery_relocation_transition_sample={} transitions={:?}",
+            bad_boundary_recovery_relocation_sample_count, bad_boundary_recovery_relocation_transitions
         );
         eprintln!(
             "annular recovery bad_cavity_size_histograms one_ring={:?} face_closure={:?} node_closure={:?}",

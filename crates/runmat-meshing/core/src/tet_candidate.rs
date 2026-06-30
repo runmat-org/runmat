@@ -5236,6 +5236,90 @@ fn best_interior_seed_node_relocation(
         .map(|(node_id, point, indices, candidates, _, _)| (node_id, point, indices, candidates)))
 }
 
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_recovery_node_relocation_transitions(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    boundary_recovery_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let mut transitions = BTreeMap::<&'static str, usize>::new();
+    let tet = &tets[tet_index];
+    for node_id in tet
+        .node_ids
+        .into_iter()
+        .filter(|node_id| boundary_recovery_node_ids.contains(node_id))
+    {
+        *transitions.entry("boundary_recovery_node").or_default() += 1;
+        let Some(adjacent) = node_adjacency.get(&node_id) else {
+            *transitions.entry("missing_node_star").or_default() += 1;
+            continue;
+        };
+        if !interior_seed_relocation_scope_matches(adjacent.len()) || !adjacent.contains(&tet_index)
+        {
+            *transitions.entry("star_out_of_scope").or_default() += 1;
+            continue;
+        }
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        if original_below_count == 0 {
+            *transitions.entry("star_has_no_target").or_default() += 1;
+            continue;
+        }
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+        let mut saw_point = false;
+        let mut saw_candidate = false;
+        let mut saw_no_improvement = false;
+        for relocated_point in
+            interior_seed_node_relocation_points(adjacent, node_id, tets, node_points)?
+        {
+            saw_point = true;
+            let Some(candidates) = interior_seed_node_relocation_candidates(
+                adjacent,
+                node_id,
+                relocated_point,
+                tets,
+                node_points,
+                options,
+            )?
+            else {
+                continue;
+            };
+            saw_candidate = true;
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+            if candidate_below_count < original_below_count {
+                *transitions.entry("count_reduction").or_default() += 1;
+                continue;
+            }
+            if candidate_below_count == original_below_count
+                && candidate_min_exact > original_min_exact + 1.0e-12
+            {
+                *transitions.entry("quality_only").or_default() += 1;
+            } else {
+                saw_no_improvement = true;
+            }
+        }
+        if !saw_point {
+            *transitions.entry("no_relocation_point").or_default() += 1;
+        } else if !saw_candidate {
+            *transitions.entry("no_candidate").or_default() += 1;
+        } else if saw_no_improvement {
+            *transitions.entry("no_improvement").or_default() += 1;
+        }
+    }
+    if !transitions.contains_key("boundary_recovery_node") {
+        *transitions.entry("no_boundary_recovery_node").or_default() += 1;
+    }
+    Ok(transitions)
+}
+
 fn best_interior_seed_node_untangling(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -13889,6 +13973,55 @@ mod tests {
         assert_eq!(interior_seed_points, vec![[0.0, 0.0, 0.0]]);
         let repaired_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((repaired_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn boundary_recovery_relocation_diagnostic_detects_count_reduction() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.35,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 1.0]),
+            (1, [0.0, 0.0, -1.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+            (6, [0.78, 0.0, 0.0]),
+        ]);
+        let tets = [
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 5],
+            [6, 0, 5, 2],
+            [6, 1, 3, 2],
+            [6, 1, 4, 3],
+            [6, 1, 5, 4],
+            [6, 1, 2, 5],
+        ]
+        .into_iter()
+        .map(|node_ids| {
+            let points = node_ids.map(|node_id| node_points[&node_id]);
+            raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                .expect("fixture tet should be valid")
+        })
+        .collect::<Vec<_>>();
+        let node_adjacency = tet_node_adjacency(&tets);
+
+        let transitions = diagnostic_boundary_recovery_node_relocation_transitions(
+            0,
+            &tets,
+            &node_adjacency,
+            &BTreeSet::from([6]),
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(transitions.get("boundary_recovery_node"), Some(&1));
+        assert!(transitions.get("count_reduction").copied().unwrap_or(0) > 0);
     }
 
     #[test]
