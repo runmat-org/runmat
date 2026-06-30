@@ -19,6 +19,7 @@ pub(crate) mod log1p;
 pub(crate) mod log2;
 pub(crate) mod minus;
 pub(crate) mod nextpow2;
+pub(crate) mod numeric_limits;
 pub(crate) mod plus;
 pub(crate) mod pow2;
 pub(crate) mod power;

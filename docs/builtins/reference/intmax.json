@@ -1,0 +1,18 @@
+{
+  "title": "intmax",
+  "category": "math/elementwise",
+  "keywords": ["intmax", "integer", "limits"],
+  "summary": "Return the largest value of an integer class.",
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Scalar metadata query." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": null },
+  "description": "`intmax` returns the largest representable value for an integer class. With no class name, RunMat follows MATLAB's `int32` default.",
+  "behaviors": ["Supports int8, int16, int32, int64, uint8, uint16, uint32, and uint64 class names."],
+  "examples": [{ "description": "Default integer maximum", "input": "intmax", "output": "ans = int32(2147483647)" }],
+  "faqs": [{ "question": "What is the default class?", "answer": "`int32`." }],
+  "links": [{ "label": "intmin", "url": "./intmin" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs" },
+  "gpu_residency": "The result is host-resident.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

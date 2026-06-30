@@ -1,0 +1,18 @@
+{
+  "title": "realmax",
+  "category": "math/elementwise",
+  "keywords": ["realmax", "float", "limits", "double", "single"],
+  "summary": "Return the largest finite floating-point value.",
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Scalar metadata query." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": null },
+  "description": "`realmax` returns the largest finite value for `double` or `single`; the default is `double`.",
+  "behaviors": ["Supports `double` and `single` class names."],
+  "examples": [{ "description": "Single precision maximum", "input": "realmax('single')", "output": "ans = single real maximum" }],
+  "faqs": [{ "question": "Does this allocate an array?", "answer": "No. It returns a scalar numeric value." }],
+  "links": [{ "label": "realmin", "url": "./realmin" }, { "label": "flintmax", "url": "./flintmax" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs" },
+  "gpu_residency": "The result is host-resident.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}
