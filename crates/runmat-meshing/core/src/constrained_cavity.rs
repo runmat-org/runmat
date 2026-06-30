@@ -205,6 +205,8 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub open_interior_face_count: usize,
     pub open_interior_component_count: usize,
     pub open_interior_component_size_histogram: BTreeMap<usize, usize>,
+    pub candidate_with_orphan_interior_face_count: usize,
+    pub candidate_without_orphan_interior_face_count: usize,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3376,6 +3378,38 @@ fn cap_side_face_mate_counts(
     mate_counts
 }
 
+#[cfg(test)]
+fn candidate_orphan_interior_face_counts(
+    cavity: &ConstrainedCavity,
+    candidate_tets: &[ConstrainedCavityRefillTet],
+) -> (usize, usize) {
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in candidate_tets {
+        for face in tet_faces(tet.node_ids).map(sorted_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let mut with_orphan = 0_usize;
+    let mut without_orphan = 0_usize;
+    for tet in candidate_tets {
+        let has_orphan = tet_faces(tet.node_ids)
+            .map(sorted_face)
+            .into_iter()
+            .any(|face| !boundary_faces.contains(&face) && face_counts[&face] == 1);
+        if has_orphan {
+            with_orphan += 1;
+        } else {
+            without_orphan += 1;
+        }
+    }
+    (with_orphan, without_orphan)
+}
+
 struct RefillBoundaryFaceDelta {
     missing: Vec<[u32; 3]>,
     unexpected: Vec<[u32; 3]>,
@@ -4433,6 +4467,8 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         open_interior_face_count: 0,
         open_interior_component_count: 0,
         open_interior_component_size_histogram: BTreeMap::new(),
+        candidate_with_orphan_interior_face_count: 0,
+        candidate_without_orphan_interior_face_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4579,6 +4615,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     diagnostic.open_interior_component_size_histogram = component_size_histogram(
         missing_face_component_sizes(&open_interior_faces, MissingFaceLink::Node),
     );
+    let (with_orphan, without_orphan) =
+        candidate_orphan_interior_face_counts(cavity, &candidate_tets);
+    diagnostic.candidate_with_orphan_interior_face_count = with_orphan;
+    diagnostic.candidate_without_orphan_interior_face_count = without_orphan;
     if candidate_tets.is_empty() {
         diagnostic.reason = "no_candidate_tets";
         return Ok(diagnostic);
@@ -4726,6 +4766,8 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         open_interior_face_count: 0,
         open_interior_component_count: 0,
         open_interior_component_size_histogram: BTreeMap::new(),
+        candidate_with_orphan_interior_face_count: 0,
+        candidate_without_orphan_interior_face_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4898,6 +4940,10 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
     diagnostic.open_interior_component_size_histogram = component_size_histogram(
         missing_face_component_sizes(&open_interior_faces, MissingFaceLink::Node),
     );
+    let (with_orphan, without_orphan) =
+        candidate_orphan_interior_face_counts(cavity, &candidate_tets);
+    diagnostic.candidate_with_orphan_interior_face_count = with_orphan;
+    diagnostic.candidate_without_orphan_interior_face_count = without_orphan;
     if candidate_tets.is_empty() {
         diagnostic.reason = "no_candidate_tets";
         return Ok(diagnostic);
@@ -7316,6 +7362,32 @@ mod tests {
                 &BTreeSet::from([4])
             ),
             vec![1, 0, 0]
+        );
+    }
+
+    #[test]
+    fn candidate_orphan_interior_face_counts_report_global_orphans() {
+        let cavity = two_tet_bipyramid_cavity();
+        let lower = ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 3],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+        let upper = ConstrainedCavityRefillTet {
+            node_ids: [0, 2, 1, 4],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+
+        assert_eq!(
+            candidate_orphan_interior_face_counts(&cavity, &[lower.clone()]),
+            (1, 0)
+        );
+        assert_eq!(
+            candidate_orphan_interior_face_counts(&cavity, &[lower, upper]),
+            (0, 2)
         );
     }
 
