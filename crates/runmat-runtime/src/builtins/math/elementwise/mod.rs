@@ -26,6 +26,7 @@ pub(crate) mod rdivide;
 pub(crate) mod real;
 pub(crate) mod sign;
 pub(crate) mod single;
+pub(crate) mod sparse;
 pub(crate) mod sqrt;
 pub(crate) mod times;
 pub(crate) mod uint16;

@@ -171,3 +171,75 @@ fn sparse_assignment_reports_stable_unsupported_identifier() {
         Some("RunMat:SparseAssignmentUnsupported")
     );
 }
+
+#[test]
+fn sparse_arithmetic_interops_with_dense_and_scalar_values() {
+    let vars = execute_source(
+        "s = sparse([1 3 2], [1 1 2], [10 30 20], 3, 2); t = sparse([3 1 2], [1 2 2], [5 7 -20], 3, 2); a = s + t; af = full(a); atf = issparse(a); b = s + 2; c = [1 2; 3 4; 5 6] - s; d = s .* [2 2; 3 3; 4 4]; df = full(d); dtf = issparse(d); e = 3 .* s; ef = full(e); etf = issparse(e);",
+    )
+    .unwrap();
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![10.0, 0.0, 35.0, 7.0, 0.0, 0.0]
+    ));
+    assert!(logical_truth(&vars[4]));
+    assert!(matches!(
+        &vars[5],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
+    ));
+    assert!(matches!(
+        &vars[6],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![-9.0, 3.0, -25.0, 2.0, -16.0, 6.0]
+    ));
+    assert!(matches!(
+        &vars[8],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![20.0, 0.0, 120.0, 0.0, 60.0, 0.0]
+    ));
+    assert!(logical_truth(&vars[9]));
+    assert!(matches!(
+        &vars[11],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![30.0, 0.0, 90.0, 0.0, 60.0, 0.0]
+    ));
+    assert!(logical_truth(&vars[12]));
+}
+
+#[test]
+fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
+    let vars = execute_source(
+        "s = sparse([1 3 2], [1 1 2], [10 30 20], 3, 2); cs = s + complex(1, 2); ct = complex(1, -1) .* s; sf = sparse(1, 1, 2, 1, 1) + s; sff = full(sf); sft = issparse(sf);",
+    )
+    .unwrap();
+    assert!(matches!(
+        &vars[1],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data[0] == (11.0, 2.0)
+                && tensor.data[1] == (1.0, 2.0)
+                && tensor.data[2] == (31.0, 2.0)
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::ComplexTensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data[0] == (10.0, -10.0)
+                && tensor.data[1] == (0.0, -0.0)
+                && tensor.data[2] == (30.0, -30.0)
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
+    ));
+    assert!(logical_truth(&vars[5]));
+}
