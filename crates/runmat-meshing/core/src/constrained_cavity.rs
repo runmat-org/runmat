@@ -563,6 +563,23 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
             }
         }
+        match centroid_interior_refill_candidate(
+            cavity,
+            &boundary_node_map,
+            &boundary_triangles,
+            options,
+        ) {
+            Ok(Ok(refill)) => {
+                return Ok(ConstrainedCavityRefillEvaluation {
+                    refill: Some(refill),
+                    rejected_by_reason,
+                });
+            }
+            Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
+            Err(err) => {
+                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
+            }
+        }
         return Ok(ConstrainedCavityRefillEvaluation {
             refill: None,
             rejected_by_reason,
@@ -1366,6 +1383,78 @@ fn boundary_node_refill_validation_reason(
         "boundary_source_edge_mismatch" => "boundary_node_boundary_source_edge_mismatch",
         "boundary_region_mismatch" => "boundary_node_boundary_region_mismatch",
         "invalid_cavity" => "boundary_node_invalid_cavity",
+        other => other,
+    }
+}
+
+fn centroid_interior_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
+    let Some(coordinates_m) = cavity_boundary_node_centroid(cavity, boundary_nodes) else {
+        return Ok(Err("centroid_interior_refill_empty_boundary"));
+    };
+    if point_in_closed_triangle_surface(
+        coordinates_m,
+        boundary_triangles,
+        MeshingTolerance::default(),
+    ) != PointInClosedSurface::Inside
+    {
+        return Ok(Err("centroid_interior_refill_outside_cavity"));
+    }
+    let node = ConstrainedCavityNode {
+        node_id: next_cavity_node_id(cavity),
+        coordinates_m,
+    };
+    match star_refill_candidate_with_rejection_reason(cavity, boundary_nodes, node.clone(), options)
+    {
+        Ok(Ok(mut refill)) => {
+            refill.inserted_nodes.push(node);
+            Ok(Ok(refill))
+        }
+        Ok(Err(reason)) => Ok(Err(centroid_interior_refill_rejection_reason(reason))),
+        Err(err) => Err(err),
+    }
+}
+
+fn cavity_boundary_node_centroid(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+) -> Option<Point3> {
+    let node_ids = cavity_boundary_node_ids(cavity);
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in &node_ids {
+        let point = boundary_nodes.get(node_id)?;
+        centroid[0] += point[0];
+        centroid[1] += point[1];
+        centroid[2] += point[2];
+    }
+    let scale = 1.0 / node_ids.len() as f64;
+    Some([
+        centroid[0] * scale,
+        centroid[1] * scale,
+        centroid[2] * scale,
+    ])
+}
+
+fn next_cavity_node_id(cavity: &ConstrainedCavity) -> u32 {
+    cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+fn centroid_interior_refill_rejection_reason(reason: &'static str) -> &'static str {
+    match reason {
+        "star_tet_min_volume" => "centroid_interior_refill_tet_min_volume",
+        "star_tet_aspect_ratio" => "centroid_interior_refill_tet_aspect_ratio",
+        "star_tet_scaled_jacobian" => "centroid_interior_refill_tet_scaled_jacobian",
         other => other,
     }
 }
@@ -4346,6 +4435,70 @@ mod tests {
         assert!(diagnostic.found_cover);
         assert_eq!(diagnostic.reason, "cover_found");
         assert_eq!(diagnostic.selected_tet_count, 2);
+    }
+
+    #[test]
+    fn centroid_interior_refill_candidate_recovers_split_boundary_tet_cavity() {
+        let mut cavity = unit_tet_cavity();
+        let split_specs = [
+            ([0, 2, 1], 4),
+            ([0, 1, 3], 5),
+            ([1, 2, 3], 6),
+            ([2, 0, 3], 7),
+        ];
+        for (face, split_node_id) in split_specs {
+            cavity.boundary_faces = split_constrained_cavity_boundary_faces(
+                &cavity.boundary_faces,
+                face,
+                split_node_id,
+            )
+            .expect("fixture face should split");
+        }
+        validate_constrained_cavity(&cavity).expect("split boundary fixture should be valid");
+        let mut nodes = unit_tet_nodes();
+        nodes.extend([
+            ConstrainedCavityNode {
+                node_id: 4,
+                coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 5,
+                coordinates_m: [1.0 / 3.0, 0.0, 1.0 / 3.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 6,
+                coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 7,
+                coordinates_m: [0.0, 1.0 / 3.0, 1.0 / 3.0],
+            },
+        ]);
+
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let refill = centroid_interior_refill_candidate(
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            refill_options(),
+        )
+        .expect("centroid interior refill should evaluate")
+        .expect("centroid interior refill should recover the split boundary cavity");
+
+        assert_eq!(refill.inserted_nodes.len(), 1);
+        assert_eq!(refill.inserted_nodes[0].node_id, 8);
+        assert_eq!(refill.tets.len(), cavity.boundary_faces.len());
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("centroid interior refill should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            refill_options().volume_relative_tolerance,
+        )
+        .expect("centroid interior refill should preserve volume");
     }
 
     #[test]
