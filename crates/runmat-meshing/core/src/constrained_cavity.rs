@@ -212,6 +212,8 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub root_boundary_min_raw_candidate_count: usize,
     pub root_boundary_min_addable_candidate_count: usize,
     pub root_boundary_max_addable_candidate_count: usize,
+    pub cover_dead_end_reason: &'static str,
+    pub cover_dead_end_depth: usize,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3440,6 +3442,19 @@ struct BoundaryExactCoverRootAvailability {
     max_addable_candidate_count: usize,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundaryExactCoverDeadEnd {
+    reason: &'static str,
+    depth: usize,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundaryExactCoverTrace {
+    dead_end: Option<BoundaryExactCoverDeadEnd>,
+}
+
 impl<'a> BoundaryExactCoverSearch<'a> {
     fn new(
         cavity: &ConstrainedCavity,
@@ -3475,6 +3490,29 @@ impl<'a> BoundaryExactCoverSearch<'a> {
 
     fn search(&mut self) -> Option<Vec<usize>> {
         self.search_from(0.0, &mut BTreeMap::new(), &mut Vec::new())
+    }
+
+    #[cfg(test)]
+    fn search_with_trace(&mut self) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
+        let mut trace = BoundaryExactCoverTrace { dead_end: None };
+        let result =
+            self.search_from_traced(0.0, &mut BTreeMap::new(), &mut Vec::new(), &mut trace);
+        (result, trace)
+    }
+
+    #[cfg(test)]
+    fn record_dead_end(
+        &self,
+        trace: &mut BoundaryExactCoverTrace,
+        selected: &[usize],
+        reason: &'static str,
+    ) {
+        if trace.dead_end.is_none() {
+            trace.dead_end = Some(BoundaryExactCoverDeadEnd {
+                reason,
+                depth: selected.len(),
+            });
+        }
     }
 
     #[cfg(test)]
@@ -3519,6 +3557,79 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             min_addable_candidate_count: min_addable,
             max_addable_candidate_count: max_addable,
         }
+    }
+
+    #[cfg(test)]
+    fn search_from_traced(
+        &mut self,
+        current_volume_m3: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+        trace: &mut BoundaryExactCoverTrace,
+    ) -> Option<Vec<usize>> {
+        self.attempts += 1;
+        if self.attempts > self.max_attempt_count {
+            self.record_dead_end(trace, selected, "attempt_limit");
+            return None;
+        }
+        if current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3 {
+            self.record_dead_end(trace, selected, "volume_overflow");
+            return None;
+        }
+        let Some((forced_volume_m3, forced_indices)) =
+            self.propagate_forced_interior_mates(current_volume_m3, face_counts, selected)
+        else {
+            self.record_dead_end(trace, selected, "forced_interior_mate_failed");
+            return None;
+        };
+        let current_volume_m3 = current_volume_m3 + forced_volume_m3;
+        let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
+            let boundary_ok = self
+                .boundary_faces
+                .iter()
+                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+            let interior_ok = face_counts
+                .iter()
+                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
+            if boundary_ok
+                && interior_ok
+                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
+            {
+                return Some(selected.clone());
+            }
+            let reason = if !boundary_ok {
+                "boundary_incomplete"
+            } else if !interior_ok {
+                "interior_incomplete"
+            } else {
+                "volume_mismatch"
+            };
+            self.record_dead_end(trace, selected, reason);
+            self.rollback_selected_candidates(&forced_indices, face_counts, selected);
+            return None;
+        };
+        for candidate_index in candidate_indices {
+            if selected.contains(&candidate_index) {
+                continue;
+            }
+            for face in self.candidate_faces[candidate_index] {
+                *face_counts.entry(face).or_default() += 1;
+            }
+            selected.push(candidate_index);
+            if let Some(result) = self.search_from_traced(
+                current_volume_m3 + self.candidates[candidate_index].volume_m3,
+                face_counts,
+                selected,
+                trace,
+            ) {
+                return Some(result);
+            }
+            selected.pop();
+            self.remove_candidate_faces(candidate_index, face_counts);
+        }
+        self.record_dead_end(trace, selected, "candidates_exhausted");
+        self.rollback_selected_candidates(&forced_indices, face_counts, selected);
+        None
     }
 
     fn search_from(
@@ -4533,6 +4644,8 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         root_boundary_min_raw_candidate_count: 0,
         root_boundary_min_addable_candidate_count: 0,
         root_boundary_max_addable_candidate_count: 0,
+        cover_dead_end_reason: "not_evaluated",
+        cover_dead_end_depth: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4707,8 +4820,12 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         root_availability.min_addable_candidate_count;
     diagnostic.root_boundary_max_addable_candidate_count =
         root_availability.max_addable_candidate_count;
-    let selected = search.search();
+    let (selected, trace) = search.search_with_trace();
     diagnostic.search_attempt_count = search.attempts;
+    if let Some(dead_end) = trace.dead_end {
+        diagnostic.cover_dead_end_reason = dead_end.reason;
+        diagnostic.cover_dead_end_depth = dead_end.depth;
+    }
     let Some(selected) = selected else {
         diagnostic.reason = if diagnostic.search_attempt_count > 25_000 {
             "search_exhausted"
@@ -4847,6 +4964,8 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         root_boundary_min_raw_candidate_count: 0,
         root_boundary_min_addable_candidate_count: 0,
         root_boundary_max_addable_candidate_count: 0,
+        cover_dead_end_reason: "not_evaluated",
+        cover_dead_end_depth: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -5047,8 +5166,12 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         root_availability.min_addable_candidate_count;
     diagnostic.root_boundary_max_addable_candidate_count =
         root_availability.max_addable_candidate_count;
-    let selected = search.search();
+    let (selected, trace) = search.search_with_trace();
     diagnostic.search_attempt_count = search.attempts;
+    if let Some(dead_end) = trace.dead_end {
+        diagnostic.cover_dead_end_reason = dead_end.reason;
+        diagnostic.cover_dead_end_depth = dead_end.depth;
+    }
     let Some(selected) = selected else {
         diagnostic.reason = if diagnostic.search_attempt_count > 25_000 {
             "search_exhausted"
@@ -7098,6 +7221,37 @@ mod tests {
 
         assert_eq!(sufficient_limit_search.search(), Some(vec![0, 1]));
         assert_eq!(sufficient_limit_search.attempts, 3);
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_volume_overflow_dead_end() {
+        let cavity = two_tet_bipyramid_cavity();
+        let candidates = [
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 2, 3],
+                volume_m3: 10.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.4,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 2, 1, 4],
+                volume_m3: 10.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.4,
+            },
+        ];
+        let mut search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-12);
+
+        let (selected, trace) = search.search_with_trace();
+
+        assert!(selected.is_none());
+        assert_eq!(
+            trace.dead_end,
+            Some(BoundaryExactCoverDeadEnd {
+                reason: "volume_overflow",
+                depth: 1,
+            })
+        );
     }
 
     #[test]

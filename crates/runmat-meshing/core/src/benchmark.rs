@@ -3894,6 +3894,10 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_max_addable_root_candidates =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_reason =
+            BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_depth =
+            BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts =
@@ -3979,6 +3983,10 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_hybrid_subpatch_cap_min_addable_root_candidates =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_hybrid_subpatch_cap_max_addable_root_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_reason =
+            BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_depth =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_hybrid_subpatch_cap_selected_tets =
             BTreeMap::<usize, usize>::new();
@@ -4524,6 +4532,12 @@ mod tests {
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_max_addable_root_candidates
                                         .entry(local_cap_stitch.root_boundary_max_addable_candidate_count)
                                         .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_reason
+                                        .entry(local_cap_stitch.cover_dead_end_reason.to_string())
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_depth
+                                        .entry(local_cap_stitch.cover_dead_end_depth)
+                                        .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets
                                         .entry(local_cap_stitch.selected_tet_count)
                                         .or_default() += 1;
@@ -4708,6 +4722,12 @@ mod tests {
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_hybrid_subpatch_cap_max_addable_root_candidates
                                         .entry(hybrid_subpatch_cap.root_boundary_max_addable_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_reason
+                                        .entry(hybrid_subpatch_cap.cover_dead_end_reason.to_string())
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_depth
+                                        .entry(hybrid_subpatch_cap.cover_dead_end_depth)
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_hybrid_subpatch_cap_selected_tets
                                         .entry(hybrid_subpatch_cap.selected_tet_count)
@@ -5500,7 +5520,7 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} patches={:?} patch_sizes={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} cap_side_faces={:?} zero_mate_cap_side_faces={:?} min_cap_side_face_mates={:?} max_cap_side_face_mates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} orphan_candidates={:?} non_orphan_candidates={:?} zero_raw_root_faces={:?} zero_addable_root_faces={:?} min_addable_root_candidates={:?} max_addable_root_candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} patches={:?} patch_sizes={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} cap_side_faces={:?} zero_mate_cap_side_faces={:?} min_cap_side_face_mates={:?} max_cap_side_face_mates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} orphan_candidates={:?} non_orphan_candidates={:?} zero_raw_root_faces={:?} zero_addable_root_faces={:?} min_addable_root_candidates={:?} max_addable_root_candidates={:?} dead_end_reason={:?} dead_end_depth={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
             trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces,
             trimmed_seed_star_shell_trim_local_cap_stitch_patch_count,
             trimmed_seed_star_shell_trim_local_cap_stitch_patch_size,
@@ -5522,6 +5542,8 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_stitch_zero_addable_root_faces,
             trimmed_seed_star_shell_trim_local_cap_stitch_min_addable_root_candidates,
             trimmed_seed_star_shell_trim_local_cap_stitch_max_addable_root_candidates,
+            trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_reason,
+            trimmed_seed_star_shell_trim_local_cap_stitch_dead_end_depth,
             trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets,
             trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts,
             trimmed_seed_star_shell_trim_local_cap_stitch_found,
@@ -5562,7 +5584,7 @@ mod tests {
             trimmed_seed_star_shell_trim_edge_subpatch_cap_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_hybrid_subpatch_cap_stitch capped_faces={:?} patches={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} candidates={:?} open_interior_faces={:?} open_interior_components={:?} orphan_candidates={:?} non_orphan_candidates={:?} zero_raw_root_faces={:?} zero_addable_root_faces={:?} min_addable_root_candidates={:?} max_addable_root_candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_hybrid_subpatch_cap_stitch capped_faces={:?} patches={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} candidates={:?} open_interior_faces={:?} open_interior_components={:?} orphan_candidates={:?} non_orphan_candidates={:?} zero_raw_root_faces={:?} zero_addable_root_faces={:?} min_addable_root_candidates={:?} max_addable_root_candidates={:?} dead_end_reason={:?} dead_end_depth={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_capped_faces,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_patch_count,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_patch_capped_faces,
@@ -5577,6 +5599,8 @@ mod tests {
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_zero_addable_root_faces,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_min_addable_root_candidates,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_max_addable_root_candidates,
+            trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_reason,
+            trimmed_seed_star_shell_trim_hybrid_subpatch_cap_dead_end_depth,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_selected_tets,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_search_attempts,
             trimmed_seed_star_shell_trim_hybrid_subpatch_cap_found,
