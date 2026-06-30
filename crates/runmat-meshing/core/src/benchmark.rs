@@ -12,10 +12,11 @@ use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets,
         constrained_cavity_from_selected_tets_with_anchor_trim, diagnostic_boundary_exact_cover,
-        diagnostic_boundary_node_completion, diagnostic_interior_star_quality,
-        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
-        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
-        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
+        diagnostic_boundary_node_completion, diagnostic_boundary_steiner_exact_cover,
+        diagnostic_interior_star_quality, evaluate_constrained_cavity_refill_candidates,
+        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
+        ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3793,6 +3794,22 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_exact_cover_found = 0_usize;
         let mut trimmed_seed_star_shell_trim_exact_cover_reason = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_zero_face_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_min_face_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_max_face_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_selected_tets =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_search_attempts =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_found = 0_usize;
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_reason =
+            BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality = 0.0_f64;
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -4112,6 +4129,38 @@ mod tests {
                                     *trimmed_seed_star_shell_trim_exact_cover_reason
                                         .entry(exact_cover.reason.to_string())
                                         .or_default() += 1;
+                                }
+                                if let Ok(steiner_cover) = diagnostic_boundary_steiner_exact_cover(
+                                    &shell_trim_cavity,
+                                    &shell_trim_boundary_nodes,
+                                    refill_options,
+                                ) {
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_candidates
+                                        .entry(steiner_cover.candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_zero_face_candidates
+                                        .entry(steiner_cover.zero_candidate_boundary_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_min_face_candidates
+                                        .entry(steiner_cover.min_boundary_face_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_max_face_candidates
+                                        .entry(steiner_cover.max_boundary_face_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_selected_tets
+                                        .entry(steiner_cover.selected_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_search_attempts
+                                        .entry(steiner_cover.search_attempt_count)
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_steiner_exact_cover_found +=
+                                        usize::from(steiner_cover.found_cover);
+                                    *trimmed_seed_star_shell_trim_steiner_exact_cover_reason
+                                        .entry(steiner_cover.reason.to_string())
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality =
+                                        trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality
+                                            .max(steiner_cover.max_min_scaled_jacobian);
                                 }
                                 match evaluate_constrained_cavity_refill_candidates(
                                     &shell_trim_cavity,
@@ -4810,6 +4859,18 @@ mod tests {
             trimmed_seed_star_shell_trim_exact_cover_search_attempts,
             trimmed_seed_star_shell_trim_exact_cover_found,
             trimmed_seed_star_shell_trim_exact_cover_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_steiner_exact_cover candidates={:?} zero_face_candidates={:?} min_face_candidates={:?} max_face_candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            trimmed_seed_star_shell_trim_steiner_exact_cover_candidates,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_zero_face_candidates,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_min_face_candidates,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_max_face_candidates,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_selected_tets,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_search_attempts,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_found,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality,
+            trimmed_seed_star_shell_trim_steiner_exact_cover_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",
