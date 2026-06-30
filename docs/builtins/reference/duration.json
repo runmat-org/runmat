@@ -8,7 +8,7 @@
     "Format",
     "MATLAB compatibility"
   ],
-  "summary": "Create duration arrays from hour, minute, and second components with MATLAB-compatible construction behavior.",
+  "summary": "Create duration arrays from hour, minute, second, and unit-helper forms with MATLAB-compatible construction behavior.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -26,11 +26,14 @@
   "tested": {
     "unit": "builtins::duration::tests"
   },
-  "description": "`duration` constructs duration objects from numeric hour, minute, and second components. It supports MATLAB-compatible scalar expansion, internal elapsed-time representation, and display-format controls.",
+  "description": "`duration` constructs duration objects from numeric hour, minute, and second components or from unit helper functions such as `days`, `hours`, `minutes`, `seconds`, `milliseconds`, and fixed-length `years`. It supports MATLAB-compatible scalar expansion, internal elapsed-time representation, conversion back to numeric unit counts, and display-format controls.",
   "behaviors": [
     "`duration(H)` treats the input as hours.",
     "`duration(H, M)` treats the inputs as hours and minutes.",
     "`duration(H, M, S)` treats the inputs as hours, minutes, and seconds.",
+    "`days(X)`, `hours(X)`, `minutes(X)`, `seconds(X)`, `milliseconds(X)`, and `years(X)` create duration values from numeric inputs.",
+    "Calling the unit helpers on a duration converts that duration back to numeric counts in the requested unit.",
+    "`isduration(x)` returns true for duration objects and false for non-duration values.",
     "Scalar component inputs broadcast to match non-scalar component arrays; non-scalar inputs must share the same shape.",
     "The `Format` property controls text rendering. Supported values are `hh:mm:ss`, `hh:mm`, `mm:ss`, `s`, and `ss`.",
     "Linear indexing `d(k)` is supported and returns duration values.",
@@ -57,6 +60,11 @@
       "description": "Adding a duration to a datetime",
       "input": "t0 = datetime(2024, 4, 9, 8, 0, 0);\nt1 = t0 + duration(1, 30, 0)",
       "output": "t1 =\n  09-Apr-2024 09:30:00"
+    },
+    {
+      "description": "Constructing and converting duration units",
+      "input": "d = days(1);\nh = hours(d)",
+      "output": "h = 24"
     }
   ],
   "faqs": [
@@ -81,6 +89,10 @@
     {
       "label": "datetime",
       "url": "./datetime"
+    },
+    {
+      "label": "calendarDuration",
+      "url": "./calendarDuration"
     },
     {
       "label": "string",
