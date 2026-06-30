@@ -8,3 +8,4 @@ pub mod readmatrix;
 pub mod writecell;
 pub mod writematrix;
 pub mod xlsread;
+pub mod xlswrite;

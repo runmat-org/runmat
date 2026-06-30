@@ -73005,6 +73005,393 @@
       ]
     },
     {
+      "name": "xlswrite",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = xlswrite(filename, A)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            }
+          ]
+        },
+        {
+          "label": "status = xlswrite(filename, A, sheetOrRange)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheetOrRange",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name/index or Excel A1 range start."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            }
+          ]
+        },
+        {
+          "label": "status = xlswrite(filename, A, sheet, range)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheet",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name or one-based worksheet index."
+            },
+            {
+              "name": "range",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Excel A1 range start or range."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            }
+          ]
+        },
+        {
+          "label": "status = xlswrite(filename, A, sheet, range, '-basic')",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheet",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name or one-based worksheet index."
+            },
+            {
+              "name": "range",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Excel A1 range start or range."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"basic\"",
+              "description": "Legacy '-basic' compatibility flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            }
+          ]
+        },
+        {
+          "label": "[status,message] = xlswrite(filename, A)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            },
+            {
+              "name": "message",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Diagnostic struct with message and identifier fields."
+            }
+          ]
+        },
+        {
+          "label": "[status,message] = xlswrite(filename, A, sheetOrRange)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheetOrRange",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name/index or Excel A1 range start."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            },
+            {
+              "name": "message",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Diagnostic struct with message and identifier fields."
+            }
+          ]
+        },
+        {
+          "label": "[status,message] = xlswrite(filename, A, sheet, range)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheet",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name or one-based worksheet index."
+            },
+            {
+              "name": "range",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Excel A1 range start or range."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            },
+            {
+              "name": "message",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Diagnostic struct with message and identifier fields."
+            }
+          ]
+        },
+        {
+          "label": "[status,message] = xlswrite(filename, A, sheet, range, '-basic')",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet file path."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, logical, string, character, or cell data to write."
+            },
+            {
+              "name": "sheet",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Worksheet name or one-based worksheet index."
+            },
+            {
+              "name": "range",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Excel A1 range start or range."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"basic\"",
+              "description": "Legacy '-basic' compatibility flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the spreadsheet was written successfully."
+            },
+            {
+              "name": "message",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Diagnostic struct with message and identifier fields."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XLSWRITE.INVALID_ARGUMENT",
+          "identifier": "RunMat:xlswrite:InvalidArgument",
+          "when": "Argument list does not match supported xlswrite call forms.",
+          "message": "xlswrite: invalid argument"
+        },
+        {
+          "code": "RM.XLSWRITE.FILENAME",
+          "identifier": "RunMat:xlswrite:Filename",
+          "when": "Filename is invalid or cannot be normalized.",
+          "message": "xlswrite: invalid filename"
+        },
+        {
+          "code": "RM.XLSWRITE.RANGE",
+          "identifier": "RunMat:xlswrite:Range",
+          "when": "Range specification is malformed or exceeds worksheet limits.",
+          "message": "xlswrite: invalid range"
+        },
+        {
+          "code": "RM.XLSWRITE.SHEET",
+          "identifier": "RunMat:xlswrite:Sheet",
+          "when": "Worksheet selector is invalid.",
+          "message": "xlswrite: invalid sheet"
+        },
+        {
+          "code": "RM.XLSWRITE.DATA",
+          "identifier": "RunMat:xlswrite:Data",
+          "when": "Input data cannot be represented as supported spreadsheet cells.",
+          "message": "xlswrite: invalid data"
+        },
+        {
+          "code": "RM.XLSWRITE.IO",
+          "identifier": "RunMat:xlswrite:Io",
+          "when": "Spreadsheet cannot be written.",
+          "message": "xlswrite: unable to write spreadsheet"
+        },
+        {
+          "code": "RM.XLSWRITE.OUTPUT_COUNT",
+          "identifier": "RunMat:xlswrite:OutputCount",
+          "when": "Caller requests more outputs than xlswrite supports.",
+          "message": "xlswrite: unsupported output count"
+        }
+      ]
+    },
+    {
       "name": "xor",
       "output_mode": "Fixed",
       "completion_policy": "Public",

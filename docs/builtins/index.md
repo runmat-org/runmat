@@ -154,7 +154,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
 | done | `io/import` | `importdata`, `textscan` | host | - | - | Legacy text import with delimiter detection, formatted parsing, header text, column headers, and row labels. |
 | done | `io/audio` | `audioinfo` | host | - | - | Audio metadata inspection for WAV/RF64, FLAC, AIFF/AIFC, Ogg/Vorbis, and MP3 frame headers. |
-| done | `io/tabular` | `readtable`, `detectImportOptions`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `writecell`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options, and `writecell` exports heterogeneous cells to text or spreadsheets. |
+| done | `io/tabular` | `readtable`, `detectImportOptions`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `writecell`, `xlsread`, `xlswrite`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options, and `xlswrite`/`writecell` export spreadsheet-compatible data. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images

@@ -310,6 +310,15 @@ pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     ])
 }
 
+pub fn xlswrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![
+        Type::Bool,
+        Type::OutputList(vec![Type::Bool]),
+        Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None }]),
+    ])
+}
+
 pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
@@ -573,6 +582,16 @@ mod tests {
     );
     assert_resolver!(writecell_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(writematrix_type_resolver, num_type, &[], Type::Num);
+    assert_resolver!(
+        xlswrite_type_resolver,
+        xlswrite_type,
+        &[],
+        Type::Union(vec![
+            Type::Bool,
+            Type::OutputList(vec![Type::Bool]),
+            Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None },]),
+        ])
+    );
 
     assert_resolver!(
         data_dataset_type_resolver,
