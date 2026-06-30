@@ -189,6 +189,9 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub inserted_node_count: usize,
     pub side_connector_candidate_count: usize,
     pub candidate_tet_count: usize,
+    pub open_interior_face_count: usize,
+    pub open_interior_component_count: usize,
+    pub open_interior_component_size_histogram: BTreeMap<usize, usize>,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3304,6 +3307,28 @@ fn missing_refill_boundary_faces(
     Ok(refill_boundary_face_delta(cavity, refill_tets)?.missing)
 }
 
+#[cfg(test)]
+fn open_interior_refill_faces(
+    cavity: &ConstrainedCavity,
+    refill_tets: &[ConstrainedCavityRefillTet],
+) -> Vec<[u32; 3]> {
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in refill_tets {
+        for face in tet_faces(tet.node_ids).map(sorted_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (!boundary_faces.contains(&face) && count == 1).then_some(face))
+        .collect()
+}
+
 struct RefillBoundaryFaceDelta {
     missing: Vec<[u32; 3]>,
     unexpected: Vec<[u32; 3]>,
@@ -4164,6 +4189,9 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         inserted_node_count: 0,
         side_connector_candidate_count: 0,
         candidate_tet_count: 0,
+        open_interior_face_count: 0,
+        open_interior_component_count: 0,
+        open_interior_component_size_histogram: BTreeMap::new(),
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4268,6 +4296,13 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         options,
     );
     diagnostic.candidate_tet_count = candidate_tets.len();
+    let open_interior_faces = open_interior_refill_faces(cavity, &candidate_tets);
+    diagnostic.open_interior_face_count = open_interior_faces.len();
+    diagnostic.open_interior_component_count =
+        missing_face_components(&open_interior_faces, MissingFaceLink::Node).len();
+    diagnostic.open_interior_component_size_histogram = component_size_histogram(
+        missing_face_component_sizes(&open_interior_faces, MissingFaceLink::Node),
+    );
     if candidate_tets.is_empty() {
         diagnostic.reason = "no_candidate_tets";
         return Ok(diagnostic);
@@ -6001,6 +6036,9 @@ mod tests {
         assert_eq!(diagnostic.inserted_node_count, 0);
         assert_eq!(diagnostic.side_connector_candidate_count, 0);
         assert_eq!(diagnostic.candidate_tet_count, 0);
+        assert_eq!(diagnostic.open_interior_face_count, 0);
+        assert_eq!(diagnostic.open_interior_component_count, 0);
+        assert!(diagnostic.open_interior_component_size_histogram.is_empty());
         assert_eq!(diagnostic.selected_tet_count, 0);
         assert_eq!(diagnostic.search_attempt_count, 0);
         assert!(!diagnostic.found_cover);
@@ -6029,6 +6067,29 @@ mod tests {
             missing_face_component_common_node_ids(&fan_faces, fan_components.first().unwrap()),
             vec![9]
         );
+    }
+
+    #[test]
+    fn open_interior_refill_faces_reports_unpaired_non_boundary_faces() {
+        let cavity = two_tet_bipyramid_cavity();
+        let lower = ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 3],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+        let upper = ConstrainedCavityRefillTet {
+            node_ids: [0, 2, 1, 4],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+
+        assert_eq!(
+            open_interior_refill_faces(&cavity, &[lower.clone()]),
+            vec![[0, 1, 2]]
+        );
+        assert!(open_interior_refill_faces(&cavity, &[lower, upper]).is_empty());
     }
 
     #[test]
