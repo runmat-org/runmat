@@ -6306,6 +6306,7 @@ pub(crate) fn diagnostic_cavity_decomposition_transitions(
 ) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
     let face_closure =
         connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    let one_ring = one_ring_tet_cavity(tet_index, tets, face_adjacency);
     let node_closure = connected_bad_tet_cavity_with_node_closure(
         tet_index,
         tets,
@@ -6330,6 +6331,12 @@ pub(crate) fn diagnostic_cavity_decomposition_transitions(
         .or_default() += 1;
     *transitions
         .entry(diagnostic_decomposition_size_bucket(
+            "one_ring",
+            one_ring.len(),
+        ))
+        .or_default() += 1;
+    *transitions
+        .entry(diagnostic_decomposition_size_bucket(
             "node_closure",
             node_closure.len(),
         ))
@@ -6340,12 +6347,17 @@ pub(crate) fn diagnostic_cavity_decomposition_transitions(
             boundary_closure.len(),
         ))
         .or_default() += 1;
-    let candidate_groups = boundary_adjacent_cavity_candidate_groups(
+    let mut candidate_groups = boundary_adjacent_cavity_candidate_groups(
         face_closure,
         node_closure,
         boundary_closure,
         tets,
     );
+    candidate_groups.extend(one_ring_frontier_candidate_groups(
+        one_ring,
+        &candidate_groups,
+        tets,
+    ));
     if candidate_groups.is_empty() {
         *transitions.entry("no_candidate_group").or_default() += 1;
     }
@@ -6355,6 +6367,13 @@ pub(crate) fn diagnostic_cavity_decomposition_transitions(
             continue;
         }
         *transitions.entry("candidate_group").or_default() += 1;
+        record_decomposition_candidate_group_transition(
+            &group,
+            tets,
+            node_points,
+            options,
+            &mut transitions,
+        )?;
         for subgroup in proper_connected_subcavity_groups(&group, tets) {
             if subgroup.len() < 3 || !seen_subgroups.insert(subgroup.clone()) {
                 continue;
@@ -6406,6 +6425,10 @@ fn diagnostic_decomposition_size_bucket(prefix: &'static str, size: usize) -> &'
         ("face_closure", 1..=3) => "face_closure_size_lt4",
         ("face_closure", 4..=24) => "face_closure_size_bounded",
         ("face_closure", _) => "face_closure_size_over24",
+        ("one_ring", 0) => "one_ring_size_0",
+        ("one_ring", 1..=3) => "one_ring_size_lt4",
+        ("one_ring", 4..=24) => "one_ring_size_bounded",
+        ("one_ring", _) => "one_ring_size_over24",
         ("node_closure", 0) => "node_closure_size_0",
         ("node_closure", 1..=3) => "node_closure_size_lt4",
         ("node_closure", 4..=24) => "node_closure_size_bounded",
@@ -6416,6 +6439,43 @@ fn diagnostic_decomposition_size_bucket(prefix: &'static str, size: usize) -> &'
         ("boundary_closure", _) => "boundary_closure_size_over24",
         _ => "unknown_closure_size",
     }
+}
+
+#[cfg(test)]
+fn record_decomposition_candidate_group_transition(
+    group: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    transitions: &mut BTreeMap<&'static str, usize>,
+) -> Result<(), TetCandidateError> {
+    let original_below_count = count_exact_quality_violations(
+        group.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+    let Some(candidates) =
+        face_neighbor_cavity_reconnection_candidates(group, tets, node_points, options)?
+    else {
+        *transitions
+            .entry("candidate_group_no_candidate")
+            .or_default() += 1;
+        return Ok(());
+    };
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+    let bucket = if candidate_below_count < original_below_count {
+        "candidate_group_count_reduction"
+    } else if candidate_below_count == original_below_count
+        && candidate_min_exact > original_min_exact + 1.0e-12
+    {
+        "candidate_group_quality_only"
+    } else {
+        "candidate_group_no_improvement"
+    };
+    *transitions.entry(bucket).or_default() += 1;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -9480,6 +9540,65 @@ fn boundary_adjacent_cavity_candidate_groups(
             let mut group = base.clone();
             group.insert(extra[left]);
             group.insert(extra[right]);
+            push_group(group.into_iter().collect());
+        }
+    }
+    groups
+}
+
+#[cfg(test)]
+fn one_ring_frontier_candidate_groups(
+    one_ring: Vec<usize>,
+    existing_groups: &[Vec<usize>],
+    tets: &[TetCandidate],
+) -> Vec<Vec<usize>> {
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut seen = existing_groups
+        .iter()
+        .map(|group| {
+            let mut group = group.clone();
+            group.sort_unstable();
+            group.dedup();
+            group
+        })
+        .collect::<BTreeSet<_>>();
+    let mut push_group = |mut group: Vec<usize>| {
+        group.sort_unstable();
+        group.dedup();
+        if (4..=24).contains(&group.len()) && seen.insert(group.clone()) {
+            groups.push(group);
+        }
+    };
+    if one_ring.len() > 24 {
+        return groups;
+    }
+    push_group(one_ring.clone());
+    let base = one_ring.iter().copied().collect::<BTreeSet<_>>();
+    let extras = bounded_node_cavity_extra_indices(
+        tets.iter()
+            .enumerate()
+            .filter_map(|(index, tet)| {
+                (!base.contains(&index)
+                    && base.iter().any(|base_index| {
+                        tet.node_ids
+                            .into_iter()
+                            .any(|node_id| tets[*base_index].node_ids.contains(&node_id))
+                    }))
+                .then_some(index)
+            })
+            .collect(),
+        tets,
+    );
+    for extra_index in &extras {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        push_group(group.into_iter().collect());
+    }
+    for left in 0..extras.len() {
+        for right in (left + 1)..extras.len() {
+            let mut group = base.clone();
+            group.insert(extras[left]);
+            group.insert(extras[right]);
             push_group(group.into_iter().collect());
         }
     }
@@ -14595,6 +14714,36 @@ mod tests {
         assert!(groups.contains(&vec![1, 2, 3]));
         assert!(groups.iter().all(|group| group.len() < 4));
         assert!(groups.iter().all(|group| group.len() >= 3));
+    }
+
+    #[test]
+    fn one_ring_frontier_groups_add_bounded_node_touching_extras() {
+        let tets = [
+            ([0, 1, 2, 3], 0.3),
+            ([0, 1, 2, 4], 0.4),
+            ([0, 1, 4, 5], 0.5),
+            ([0, 6, 7, 8], 0.1),
+            ([9, 10, 11, 12], 0.0),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(tet_id, (node_ids, exact_scaled_jacobian))| TetCandidate {
+            tet_id: tet_id as u32,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+
+        let groups = one_ring_frontier_candidate_groups(vec![0, 1, 2], &[], &tets);
+
+        assert!(groups.contains(&vec![0, 1, 2, 3]));
+        assert!(!groups.iter().any(|group| group.contains(&4)));
+        assert!(groups.iter().all(|group| (4..=5).contains(&group.len())));
     }
 
     #[test]
