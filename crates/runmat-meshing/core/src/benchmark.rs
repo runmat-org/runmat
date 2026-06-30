@@ -3514,6 +3514,11 @@ mod tests {
         let mut trimmed_seed_star_completion_max_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_three_edge_split_cap_candidates = 0_usize;
+        let mut trimmed_seed_star_completion_three_edge_split_cap_passes = 0_usize;
+        let mut trimmed_seed_star_completion_max_three_edge_split_cap_quality = 0.0_f64;
+        let mut trimmed_seed_star_completion_three_edge_split_cap_quality_bins =
+            BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_candidate_count = 0_usize;
         let mut trimmed_seed_star_interior_pass_count = 0_usize;
@@ -3718,6 +3723,23 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    trimmed_seed_star_completion_three_edge_split_cap_candidates +=
+                                        diagnostic.three_edge_split_cap_candidate_count;
+                                    trimmed_seed_star_completion_three_edge_split_cap_passes +=
+                                        diagnostic.three_edge_split_cap_pass_count;
+                                    trimmed_seed_star_completion_max_three_edge_split_cap_quality =
+                                        trimmed_seed_star_completion_max_three_edge_split_cap_quality
+                                            .max(
+                                                diagnostic
+                                                    .max_three_edge_split_cap_scaled_jacobian,
+                                            );
+                                    for (bin, count) in
+                                        diagnostic.three_edge_split_cap_scaled_jacobian_bins
+                                    {
+                                        *trimmed_seed_star_completion_three_edge_split_cap_quality_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
                                     for (reason, count) in diagnostic.rejected_by_reason {
                                         *trimmed_seed_star_completion_rejected_by_reason
                                             .entry(reason.to_string())
@@ -3869,7 +3891,7 @@ mod tests {
             trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_completion_reason,
             trimmed_seed_star_completion_missing_faces,
             trimmed_seed_star_completion_cap_candidates,
@@ -3888,6 +3910,10 @@ mod tests {
             trimmed_seed_star_completion_edge_split_cap_passes,
             trimmed_seed_star_completion_max_edge_split_cap_quality,
             trimmed_seed_star_completion_edge_split_cap_quality_bins,
+            trimmed_seed_star_completion_three_edge_split_cap_candidates,
+            trimmed_seed_star_completion_three_edge_split_cap_passes,
+            trimmed_seed_star_completion_max_three_edge_split_cap_quality,
+            trimmed_seed_star_completion_three_edge_split_cap_quality_bins,
             trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
