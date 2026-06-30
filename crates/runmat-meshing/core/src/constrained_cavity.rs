@@ -4908,8 +4908,59 @@ fn local_cap_apex_candidates(
                 source,
             });
         }
+        candidates.push(optimized_normal_cap_apex_candidate(
+            [first, second, third],
+            surface_point,
+            direction,
+            max_edge_length,
+            if direction == unit_normal {
+                "normal_optimized_positive"
+            } else {
+                "normal_optimized_negative"
+            },
+        ));
     }
     candidates
+}
+
+#[cfg(test)]
+fn optimized_normal_cap_apex_candidate(
+    face_points: [[f64; 3]; 3],
+    surface_point: [f64; 3],
+    direction: [f64; 3],
+    max_edge_length: f64,
+    source: &'static str,
+) -> LocalCapApexCandidate {
+    let quality_at = |scale: f64| {
+        let distance = max_edge_length * scale;
+        let apex = [
+            surface_point[0] + direction[0] * distance,
+            surface_point[1] + direction[1] * distance,
+            surface_point[2] + direction[2] * distance,
+        ];
+        tet_scaled_jacobian([face_points[0], face_points[1], face_points[2], apex])
+    };
+    let mut low = 0.02_f64;
+    let mut high = 1.75_f64;
+    for _ in 0..28 {
+        let left = low + (high - low) / 3.0;
+        let right = high - (high - low) / 3.0;
+        if quality_at(left) < quality_at(right) {
+            low = left;
+        } else {
+            high = right;
+        }
+    }
+    let scale = (low + high) * 0.5;
+    let distance = max_edge_length * scale;
+    LocalCapApexCandidate {
+        coordinates_m: [
+            surface_point[0] + direction[0] * distance,
+            surface_point[1] + direction[1] * distance,
+            surface_point[2] + direction[2] * distance,
+        ],
+        source,
+    }
 }
 
 #[cfg(test)]
@@ -6423,6 +6474,50 @@ mod tests {
         assert!(diagnostic.failed_face_scaled_jacobian_bins.is_empty());
         assert!(diagnostic.failed_face_source_bins.is_empty());
         assert!(diagnostic.rejected_by_reason.is_empty());
+    }
+
+    #[test]
+    fn local_cap_apex_candidates_include_optimized_normal_offsets() {
+        let face = [0, 1, 2];
+        let nodes = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.18, 0.72, 0.0]),
+        ]);
+        let surface_point = face_centroid(face, &nodes).expect("face should have a centroid");
+        let candidates = local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes);
+
+        let quality_for = |candidate: &LocalCapApexCandidate| {
+            tet_scaled_jacobian([
+                nodes[&face[0]],
+                nodes[&face[1]],
+                nodes[&face[2]],
+                candidate.coordinates_m,
+            ])
+        };
+        let best_discrete_positive = candidates
+            .iter()
+            .filter(|candidate| candidate.source == "normal_positive")
+            .map(quality_for)
+            .fold(0.0_f64, f64::max);
+        let best_discrete_negative = candidates
+            .iter()
+            .filter(|candidate| candidate.source == "normal_negative")
+            .map(quality_for)
+            .fold(0.0_f64, f64::max);
+        let best_optimized_positive = candidates
+            .iter()
+            .filter(|candidate| candidate.source == "normal_optimized_positive")
+            .map(quality_for)
+            .fold(0.0_f64, f64::max);
+        let best_optimized_negative = candidates
+            .iter()
+            .filter(|candidate| candidate.source == "normal_optimized_negative")
+            .map(quality_for)
+            .fold(0.0_f64, f64::max);
+
+        assert!(best_optimized_positive >= best_discrete_positive);
+        assert!(best_optimized_negative >= best_discrete_negative);
     }
 
     #[test]
