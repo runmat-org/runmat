@@ -4221,6 +4221,7 @@ enum InteriorSeedCollapseScope {
 
 const MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE: usize = 24;
 const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
+const MAX_EDGE_STAR_RECONNECTION_SIZE: usize = 18;
 const MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES: usize = 8;
 
 fn interior_seed_collapse_scope_matches(
@@ -5276,7 +5277,9 @@ fn best_edge_star_untangling(
         let Some(adjacent) = edge_adjacency.get(&edge) else {
             continue;
         };
-        if !(3..=8).contains(&adjacent.len()) || !adjacent.contains(&tet_index) {
+        if !(3..=MAX_EDGE_STAR_RECONNECTION_SIZE).contains(&adjacent.len())
+            || !adjacent.contains(&tet_index)
+        {
             continue;
         }
         let original_near_singular_count =
@@ -5801,7 +5804,10 @@ fn best_multi_tet_edge_reconnection(
         let Some(adjacent) = edge_adjacency.get(&edge) else {
             continue;
         };
-        if adjacent.len() < 4 || adjacent.len() > 8 || !adjacent.contains(&tet_index) {
+        if adjacent.len() < 4
+            || adjacent.len() > MAX_EDGE_STAR_RECONNECTION_SIZE
+            || !adjacent.contains(&tet_index)
+        {
             continue;
         }
         let original_below_count = count_exact_quality_violations(
@@ -5873,7 +5879,10 @@ fn best_componentized_edge_reconnection(
             if !seen_groups.insert(component.clone()) {
                 continue;
             }
-            if !component.contains(&tet_index) || component.len() < 3 || component.len() > 8 {
+            if !component.contains(&tet_index)
+                || component.len() < 3
+                || component.len() > MAX_EDGE_STAR_RECONNECTION_SIZE
+            {
                 continue;
             }
             if component.len() == adjacent.len() {
@@ -5955,7 +5964,7 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
     if adjacent.len() < 3 {
         return Ok("too_few_edge_tets");
     }
-    if (4..=8).contains(&adjacent.len()) {
+    if (4..=MAX_EDGE_STAR_RECONNECTION_SIZE).contains(&adjacent.len()) {
         let original_below_count = count_exact_quality_violations(
             adjacent.iter().map(|index| &tets[*index]),
             options.min_scaled_jacobian,
@@ -6024,7 +6033,7 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
             saw_too_small_group = true;
             continue;
         }
-        if component.len() > 8 {
+        if component.len() > MAX_EDGE_STAR_RECONNECTION_SIZE {
             saw_too_large_group = true;
             continue;
         }
@@ -8274,7 +8283,7 @@ fn edge_star_simple_cycle_components(
         &graph,
         &mut path,
         &mut paths,
-        7,
+        MAX_EDGE_STAR_RECONNECTION_SIZE.saturating_sub(1),
     );
 
     let mut components = Vec::<Vec<usize>>::new();
@@ -11707,6 +11716,111 @@ mod tests {
         assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
         assert!(!quality_gain_only);
         assert_eq!(candidates.len(), 4);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn multi_tet_edge_reconnection_repairs_nine_tet_edge_star() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.641306075584024]),
+            (1, [0.0, 0.0, 2.641306075584024]),
+            (2, [1.672221732238, 0.0, -0.08728527497905242]),
+            (
+                3,
+                [1.6100567452868202, 1.3509980211446626, -0.05592238391241849],
+            ),
+            (
+                4,
+                [
+                    0.12295201980691002,
+                    0.6972955546162051,
+                    -0.01706108461239957,
+                ],
+            ),
+            (
+                5,
+                [-0.819520110261051, 1.4194504687965892, -0.07777184361504533],
+            ),
+            (
+                6,
+                [-1.209384853099018, 0.4401800883004466, 0.08230867573851615],
+            ),
+            (
+                7,
+                [
+                    -1.823022278068695,
+                    -0.6635258456211687,
+                    -0.026744827538847306,
+                ],
+            ),
+            (
+                8,
+                [
+                    -0.7593990888507061,
+                    -1.3153178051109335,
+                    -0.018458105000630897,
+                ],
+            ),
+            (
+                9,
+                [
+                    0.22175055126931031,
+                    -1.2576098699038472,
+                    -0.006673065389847666,
+                ],
+            ),
+            (
+                10,
+                [
+                    0.8362045922769009,
+                    -0.7016589649682959,
+                    -0.05557397025847204,
+                ],
+            ),
+        ]);
+        let ring_count = 9_usize;
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let tets = (0..ring_count)
+            .map(|index| {
+                let node_ids = [
+                    0,
+                    1,
+                    (index + 2) as u32,
+                    ((index + 1) % ring_count + 2) as u32,
+                ];
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tets.iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            3
+        );
+
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        let (reconnected_indices, candidates, quality_gain_only) =
+            best_multi_tet_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
+                .expect("reconnection should evaluate")
+                .expect("nine-tet edge-star reconnection should be available");
+
+        assert_eq!(reconnected_indices, (0..ring_count).collect::<Vec<_>>());
+        assert!(!quality_gain_only);
+        assert_eq!(candidates.len(), (ring_count - 2) * 2);
         assert_eq!(
             candidates
                 .iter()
