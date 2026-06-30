@@ -103,6 +103,10 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub split_cap_pass_count: usize,
     pub max_split_cap_scaled_jacobian: f64,
     pub split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub edge_split_cap_candidate_count: usize,
+    pub edge_split_cap_pass_count: usize,
+    pub max_edge_split_cap_scaled_jacobian: f64,
+    pub edge_split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -848,6 +852,94 @@ pub fn split_constrained_cavity_boundary_faces(
     Ok(split_faces)
 }
 
+fn split_constrained_cavity_boundary_face_on_edge(
+    face: &ConstrainedCavityBoundaryFace,
+    edge: [u32; 2],
+    split_node_id: u32,
+) -> Result<[ConstrainedCavityBoundaryFace; 2], ConstrainedCavityBoundarySplitError> {
+    if face.node_ids.contains(&split_node_id) {
+        return Err(
+            ConstrainedCavityBoundarySplitError::SplitNodeReusesFaceNode {
+                node_id: split_node_id,
+            },
+        );
+    }
+    let sorted_split_edge = sorted_edge(edge);
+    if !face_edges(face.node_ids)
+        .into_iter()
+        .any(|candidate| sorted_edge(candidate) == sorted_split_edge)
+    {
+        return Err(ConstrainedCavityBoundarySplitError::MissingBoundaryFace {
+            node_ids: sorted_face(face.node_ids),
+        });
+    }
+    let source_edges = boundary_face_source_edges(face).map_err(|_| {
+        ConstrainedCavityBoundarySplitError::MissingBoundaryFace {
+            node_ids: sorted_face(face.node_ids),
+        }
+    })?;
+    let source_edge_id = source_edges.get(&sorted_split_edge).copied().flatten();
+    let [a, b] = edge;
+    let c = face
+        .node_ids
+        .into_iter()
+        .find(|node_id| *node_id != a && *node_id != b)
+        .ok_or(ConstrainedCavityBoundarySplitError::MissingBoundaryFace {
+            node_ids: sorted_face(face.node_ids),
+        })?;
+    Ok([
+        edge_split_child_boundary_face(
+            face,
+            [a, split_node_id, c],
+            split_node_id,
+            sorted_split_edge,
+            source_edge_id,
+            &source_edges,
+        ),
+        edge_split_child_boundary_face(
+            face,
+            [split_node_id, b, c],
+            split_node_id,
+            sorted_split_edge,
+            source_edge_id,
+            &source_edges,
+        ),
+    ])
+}
+
+fn split_constrained_cavity_boundary_faces_on_edge(
+    faces: &[ConstrainedCavityBoundaryFace],
+    face_node_ids: [u32; 3],
+    edge: [u32; 2],
+    split_node_id: u32,
+) -> Result<Vec<ConstrainedCavityBoundaryFace>, ConstrainedCavityBoundarySplitError> {
+    let target = sorted_face(face_node_ids);
+    let split_edge = sorted_edge(edge);
+    let mut split_faces = Vec::<ConstrainedCavityBoundaryFace>::with_capacity(faces.len() + 1);
+    let mut found = false;
+    for face in faces {
+        if sorted_face(face.node_ids) == target {
+            found = true;
+        }
+        if face_edges(face.node_ids)
+            .into_iter()
+            .any(|candidate| sorted_edge(candidate) == split_edge)
+        {
+            split_faces.extend(split_constrained_cavity_boundary_face_on_edge(
+                face,
+                edge,
+                split_node_id,
+            )?);
+        } else {
+            split_faces.push(face.clone());
+        }
+    }
+    if !found {
+        return Err(ConstrainedCavityBoundarySplitError::MissingBoundaryFace { node_ids: target });
+    }
+    Ok(split_faces)
+}
+
 fn split_child_boundary_face(
     parent: &ConstrainedCavityBoundaryFace,
     node_ids: [u32; 3],
@@ -861,6 +953,33 @@ fn split_child_boundary_face(
                 .get(&sorted_edge(edge))
                 .copied()
                 .flatten()
+        }),
+        region_ids: parent.region_ids.clone(),
+    }
+}
+
+fn edge_split_child_boundary_face(
+    parent: &ConstrainedCavityBoundaryFace,
+    node_ids: [u32; 3],
+    split_node_id: u32,
+    split_edge: [u32; 2],
+    split_edge_source_id: Option<u32>,
+    perimeter_source_edges: &BTreeMap<[u32; 2], Option<u32>>,
+) -> ConstrainedCavityBoundaryFace {
+    ConstrainedCavityBoundaryFace {
+        node_ids,
+        source_face_id: parent.source_face_id,
+        source_edge_ids: face_edges(node_ids).map(|edge| {
+            let sorted = sorted_edge(edge);
+            if edge.contains(&split_node_id)
+                && edge
+                    .into_iter()
+                    .any(|node_id| node_id != split_node_id && split_edge.contains(&node_id))
+            {
+                split_edge_source_id
+            } else {
+                perimeter_source_edges.get(&sorted).copied().flatten()
+            }
         }),
         region_ids: parent.region_ids.clone(),
     }
@@ -1229,6 +1348,10 @@ pub(crate) fn diagnostic_boundary_node_completion(
         split_cap_pass_count: 0,
         max_split_cap_scaled_jacobian: 0.0,
         split_cap_scaled_jacobian_bins: BTreeMap::new(),
+        edge_split_cap_candidate_count: 0,
+        edge_split_cap_pass_count: 0,
+        max_edge_split_cap_scaled_jacobian: 0.0,
+        edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     loop {
@@ -1285,6 +1408,17 @@ pub(crate) fn diagnostic_boundary_node_completion(
                 .entry(bin)
                 .or_default() += count;
         }
+        aggregate.edge_split_cap_candidate_count += diagnostic.edge_split_cap_candidate_count;
+        aggregate.edge_split_cap_pass_count += diagnostic.edge_split_cap_pass_count;
+        aggregate.max_edge_split_cap_scaled_jacobian = aggregate
+            .max_edge_split_cap_scaled_jacobian
+            .max(diagnostic.max_edge_split_cap_scaled_jacobian);
+        for (bin, count) in diagnostic.edge_split_cap_scaled_jacobian_bins {
+            *aggregate
+                .edge_split_cap_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
         for (reason, count) in diagnostic.rejected_by_reason {
             *aggregate.rejected_by_reason.entry(reason).or_default() += count;
         }
@@ -1317,6 +1451,10 @@ pub(crate) fn diagnostic_boundary_node_completion(
             split_cap_pass_count: 0,
             max_split_cap_scaled_jacobian: 0.0,
             split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            edge_split_cap_candidate_count: 0,
+            edge_split_cap_pass_count: 0,
+            max_edge_split_cap_scaled_jacobian: 0.0,
+            edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
             rejected_by_reason: BTreeMap::new(),
         });
     }
@@ -1451,6 +1589,10 @@ fn diagnostic_boundary_face_completion(
     let mut split_cap_pass_count = 0_usize;
     let mut max_split_cap_scaled_jacobian = 0.0_f64;
     let mut split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut edge_split_cap_candidate_count = 0_usize;
+    let mut edge_split_cap_pass_count = 0_usize;
+    let mut max_edge_split_cap_scaled_jacobian = 0.0_f64;
+    let mut edge_split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut rejected_by_reason = BTreeMap::<&'static str, usize>::new();
     let mut saw_non_duplicate = false;
     for node_id in cavity_boundary_node_ids(cavity) {
@@ -1513,6 +1655,22 @@ fn diagnostic_boundary_face_completion(
                         split_cap_pass_count += 1;
                     }
                 }
+                if let Some(edge_split_min_quality) = diagnostic_edge_split_cap_min_scaled_jacobian(
+                    face,
+                    node_id,
+                    boundary_nodes,
+                    options,
+                ) {
+                    edge_split_cap_candidate_count += 1;
+                    max_edge_split_cap_scaled_jacobian =
+                        max_edge_split_cap_scaled_jacobian.max(edge_split_min_quality);
+                    *edge_split_cap_scaled_jacobian_bins
+                        .entry(diagnostic_scaled_jacobian_bin(edge_split_min_quality))
+                        .or_default() += 1;
+                    if edge_split_min_quality >= options.min_scaled_jacobian {
+                        edge_split_cap_pass_count += 1;
+                    }
+                }
                 *rejected_by_reason
                     .entry(boundary_node_refill_rejection_reason(reason))
                     .or_default() += 1;
@@ -1541,6 +1699,10 @@ fn diagnostic_boundary_face_completion(
         split_cap_pass_count,
         max_split_cap_scaled_jacobian,
         split_cap_scaled_jacobian_bins,
+        edge_split_cap_candidate_count,
+        edge_split_cap_pass_count,
+        max_edge_split_cap_scaled_jacobian,
+        edge_split_cap_scaled_jacobian_bins,
         rejected_by_reason,
     }
 }
@@ -1561,6 +1723,37 @@ fn diagnostic_split_cap_min_scaled_jacobian(
         .filter_map(|split_node| {
             split_completion_tets_for_node(
                 face,
+                cap_node_id,
+                &split_node,
+                boundary_nodes,
+                diagnostic_options,
+            )
+            .map(|tets| {
+                tets.iter()
+                    .map(|tet| tet.exact_scaled_jacobian)
+                    .fold(f64::INFINITY, f64::min)
+            })
+        })
+        .max_by(|left, right| left.total_cmp(right))
+}
+
+#[cfg(test)]
+fn diagnostic_edge_split_cap_min_scaled_jacobian(
+    face: [u32; 3],
+    cap_node_id: u32,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    options: ConstrainedCavityRefillOptions,
+) -> Option<f64> {
+    let diagnostic_options = ConstrainedCavityRefillOptions {
+        min_scaled_jacobian: 0.0,
+        ..options
+    };
+    boundary_face_edge_split_node_candidates(face, boundary_nodes)
+        .into_iter()
+        .filter_map(|(edge, split_node)| {
+            edge_split_completion_tets_for_node(
+                face,
+                edge,
                 cap_node_id,
                 &split_node,
                 boundary_nodes,
@@ -1742,7 +1935,17 @@ fn complete_missing_boundary_face_tets(
             continue;
         }
 
-        let Some((split_cavity, split_node, split_tets)) =
+        let split_completion = if let Some(completion) =
+            best_boundary_face_edge_split_completion_for_faces(
+                &boundary_delta.missing,
+                &refined_cavity,
+                &refined_boundary_nodes,
+                boundary_triangles,
+                &refill_tets,
+                options,
+            )? {
+            Some(completion)
+        } else {
             best_boundary_face_split_completion_for_faces(
                 &boundary_delta.missing,
                 &refined_cavity,
@@ -1751,7 +1954,8 @@ fn complete_missing_boundary_face_tets(
                 &refill_tets,
                 options,
             )?
-        else {
+        };
+        let Some((split_cavity, split_node, split_tets)) = split_completion else {
             return Ok(Err("boundary_node_completion_no_candidate"));
         };
         refined_boundary_nodes.insert(split_node.node_id, split_node.coordinates_m);
@@ -1823,6 +2027,8 @@ fn best_boundary_face_split_completion_for_faces(
     )>,
     ConstrainedCavityValidationError,
 > {
+    let current_delta = refill_boundary_face_delta(cavity, refill_tets)?;
+    let current_delta_count = current_delta.missing.len() + current_delta.unexpected.len();
     let mut best = None::<(
         ConstrainedCavity,
         ConstrainedCavityNode,
@@ -1841,6 +2047,14 @@ fn best_boundary_face_split_completion_for_faces(
         else {
             continue;
         };
+        let mut candidate_tets = refill_tets.to_vec();
+        candidate_tets.extend(split_tets.clone());
+        let candidate_delta = refill_boundary_face_delta(&split_cavity, &candidate_tets)?;
+        let candidate_delta_count =
+            candidate_delta.missing.len() + candidate_delta.unexpected.len();
+        if candidate_delta_count >= current_delta_count {
+            continue;
+        }
         let min_quality = split_tets
             .iter()
             .map(|tet| tet.exact_scaled_jacobian)
@@ -1857,6 +2071,165 @@ fn best_boundary_face_split_completion_for_faces(
             (split_cavity, split_node, split_tets)
         }),
     )
+}
+
+fn best_boundary_face_edge_split_completion_for_faces(
+    faces: &[[u32; 3]],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    refill_tets: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<
+    Option<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+    )>,
+    ConstrainedCavityValidationError,
+> {
+    let current_delta = refill_boundary_face_delta(cavity, refill_tets)?;
+    let current_delta_count = current_delta.missing.len() + current_delta.unexpected.len();
+    let mut best = None::<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+        f64,
+        usize,
+    )>;
+    for face in faces {
+        let Some((split_cavity, split_node, split_tets)) =
+            best_boundary_face_edge_split_completion(
+                *face,
+                cavity,
+                boundary_nodes,
+                boundary_triangles,
+                refill_tets,
+                options,
+            )?
+        else {
+            continue;
+        };
+        let mut candidate_tets = refill_tets.to_vec();
+        candidate_tets.extend(split_tets.clone());
+        let candidate_delta = refill_boundary_face_delta(&split_cavity, &candidate_tets)?;
+        let candidate_delta_count =
+            candidate_delta.missing.len() + candidate_delta.unexpected.len();
+        if candidate_delta_count >= current_delta_count {
+            continue;
+        }
+        let min_quality = split_tets
+            .iter()
+            .map(|tet| tet.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, _, best_quality, best_delta_count)| {
+                candidate_delta_count < *best_delta_count
+                    || (candidate_delta_count == *best_delta_count && min_quality > *best_quality)
+            })
+        {
+            best = Some((
+                split_cavity,
+                split_node,
+                split_tets,
+                min_quality,
+                candidate_delta_count,
+            ));
+        }
+    }
+    Ok(best
+        .map(|(split_cavity, split_node, split_tets, _, _)| (split_cavity, split_node, split_tets)))
+}
+
+fn best_boundary_face_edge_split_completion(
+    face: [u32; 3],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    refill_tets: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<
+    Option<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+    )>,
+    ConstrainedCavityValidationError,
+> {
+    let split_candidates = boundary_face_edge_split_node_candidates(face, boundary_nodes);
+    let mut best = None::<(
+        [u32; 2],
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+        f64,
+    )>;
+    for cap_node_id in cavity_boundary_node_ids(cavity) {
+        if face.contains(&cap_node_id) {
+            continue;
+        }
+        for (edge, split_node) in &split_candidates {
+            let Some(child_tets) = edge_split_completion_tets_for_node(
+                face,
+                *edge,
+                cap_node_id,
+                split_node,
+                boundary_nodes,
+                options,
+            ) else {
+                continue;
+            };
+            if child_tets.iter().any(|tet| {
+                let tet_points = tet.node_ids.map(|node_id| {
+                    if node_id == split_node.node_id {
+                        split_node.coordinates_m
+                    } else {
+                        boundary_nodes[&node_id]
+                    }
+                });
+                point_in_closed_triangle_surface(
+                    tet_centroid(tet_points),
+                    boundary_triangles,
+                    MeshingTolerance::default(),
+                ) != PointInClosedSurface::Inside
+            }) {
+                continue;
+            }
+            if child_tets.iter().any(|tet| {
+                refill_tets.iter().any(|existing| {
+                    sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+                })
+            }) {
+                continue;
+            }
+            let min_quality = child_tets
+                .iter()
+                .map(|tet| tet.exact_scaled_jacobian)
+                .fold(f64::INFINITY, f64::min);
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, _, best_quality)| min_quality > *best_quality)
+            {
+                best = Some((*edge, split_node.clone(), child_tets, min_quality));
+            }
+        }
+    }
+    let Some((edge, split_node, split_tets, _)) = best else {
+        return Ok(None);
+    };
+    let split_faces = split_constrained_cavity_boundary_faces_on_edge(
+        &cavity.boundary_faces,
+        face,
+        edge,
+        split_node.node_id,
+    )
+    .map_err(|_| ConstrainedCavityValidationError::MissingBoundaryFace {
+        node_ids: sorted_face(face),
+    })?;
+    let mut split_cavity = cavity.clone();
+    split_cavity.boundary_faces = split_faces;
+    validate_constrained_cavity(&split_cavity)?;
+    Ok(Some((split_cavity, split_node, split_tets)))
 }
 
 fn best_boundary_face_split_completion(
@@ -1994,6 +2367,48 @@ fn boundary_face_split_node_candidates(
         .collect()
 }
 
+fn boundary_face_edge_split_node_candidates(
+    face: [u32; 3],
+    boundary_nodes: &BTreeMap<u32, Point3>,
+) -> Vec<([u32; 2], ConstrainedCavityNode)> {
+    face_edges(face)
+        .into_iter()
+        .flat_map(|edge| {
+            [0.5, 0.25, 0.75].into_iter().map(move |fraction| {
+                (
+                    edge,
+                    boundary_edge_split_node(edge, boundary_nodes, fraction),
+                )
+            })
+        })
+        .collect()
+}
+
+fn boundary_edge_split_node(
+    edge: [u32; 2],
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    fraction: f64,
+) -> ConstrainedCavityNode {
+    let points = edge.map(|node_id| boundary_nodes[&node_id]);
+    let mut node_id = boundary_nodes
+        .keys()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    while boundary_nodes.contains_key(&node_id) {
+        node_id = node_id.saturating_add(1);
+    }
+    ConstrainedCavityNode {
+        node_id,
+        coordinates_m: [
+            points[0][0] * (1.0 - fraction) + points[1][0] * fraction,
+            points[0][1] * (1.0 - fraction) + points[1][1] * fraction,
+            points[0][2] * (1.0 - fraction) + points[1][2] * fraction,
+        ],
+    }
+}
+
 fn boundary_face_split_node(
     face: [u32; 3],
     boundary_nodes: &BTreeMap<u32, Point3>,
@@ -2045,6 +2460,43 @@ fn split_completion_tets_for_node(
             split_node.coordinates_m,
             boundary_nodes[&cap_node_id],
         ];
+        let tet = raw_refill_tet_with_rejection_reason(node_ids, points, options).ok()?;
+        if child_tets
+            .iter()
+            .any(|existing| sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids))
+        {
+            return None;
+        }
+        child_tets.push(tet);
+    }
+    Some(child_tets)
+}
+
+fn edge_split_completion_tets_for_node(
+    face: [u32; 3],
+    edge: [u32; 2],
+    cap_node_id: u32,
+    split_node: &ConstrainedCavityNode,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    options: ConstrainedCavityRefillOptions,
+) -> Option<Vec<ConstrainedCavityRefillTet>> {
+    let [a, b] = edge;
+    let c = face
+        .into_iter()
+        .find(|node_id| *node_id != a && *node_id != b)?;
+    let child_specs = [
+        [a, split_node.node_id, c, cap_node_id],
+        [split_node.node_id, b, c, cap_node_id],
+    ];
+    let mut child_tets = Vec::<ConstrainedCavityRefillTet>::with_capacity(2);
+    for node_ids in child_specs {
+        let points = node_ids.map(|node_id| {
+            if node_id == split_node.node_id {
+                split_node.coordinates_m
+            } else {
+                boundary_nodes[&node_id]
+            }
+        });
         let tet = raw_refill_tet_with_rejection_reason(node_ids, points, options).ok()?;
         if child_tets
             .iter()
@@ -2877,6 +3329,64 @@ mod tests {
     }
 
     #[test]
+    fn boundary_face_edge_split_preserves_source_face_regions_and_split_edge_provenance() {
+        let face = face_with_provenance(
+            [0, 1, 2],
+            10,
+            [Some(100), Some(101), Some(102)],
+            &["fixed", "loaded"],
+        );
+
+        let children = split_constrained_cavity_boundary_face_on_edge(&face, [0, 1], 9)
+            .expect("face edge should split");
+
+        assert_eq!(children[0].node_ids, [0, 9, 2]);
+        assert_eq!(children[1].node_ids, [9, 1, 2]);
+        assert_eq!(children[0].source_edge_ids, [Some(100), None, Some(102)]);
+        assert_eq!(children[1].source_edge_ids, [Some(100), Some(101), None]);
+        for child in &children {
+            assert_eq!(child.source_face_id, Some(10));
+            assert_eq!(
+                sorted_region_ids(&child.region_ids),
+                vec!["fixed".to_string(), "loaded".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn boundary_face_edge_split_list_replaces_conforming_edge_pair() {
+        let cavity = provenance_cavity();
+
+        let split_faces = split_constrained_cavity_boundary_faces_on_edge(
+            &cavity.boundary_faces,
+            [2, 1, 0],
+            [1, 0],
+            9,
+        )
+        .expect("target face edge should split");
+
+        assert_eq!(split_faces.len(), cavity.boundary_faces.len() + 2);
+        assert!(!split_faces
+            .iter()
+            .any(|face| sorted_face(face.node_ids) == [0, 1, 2]));
+        assert!(!split_faces
+            .iter()
+            .any(|face| sorted_face(face.node_ids) == [0, 1, 3]));
+        assert_eq!(
+            split_faces
+                .iter()
+                .filter(|face| face.node_ids.contains(&9))
+                .count(),
+            4
+        );
+        for untouched in cavity.boundary_faces.iter().skip(2) {
+            assert!(split_faces
+                .iter()
+                .any(|face| sorted_face(face.node_ids) == sorted_face(untouched.node_ids)));
+        }
+    }
+
+    #[test]
     fn boundary_face_split_rejects_reused_or_missing_split_targets() {
         let cavity = provenance_cavity();
         let face = &cavity.boundary_faces[0];
@@ -3436,6 +3946,65 @@ mod tests {
     }
 
     #[test]
+    fn boundary_face_edge_split_completion_reports_inserted_node_and_refined_boundary() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let options = refill_options();
+
+        let (refined_cavity, inserted_node, split_tets) = best_boundary_face_edge_split_completion(
+            [0, 1, 2],
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            &[],
+            options,
+        )
+        .expect("edge-split completion should evaluate")
+        .expect("edge-split completion should generate child cap tets");
+
+        assert_eq!(inserted_node.node_id, 4);
+        assert_eq!(inserted_node.coordinates_m[2], 0.0);
+        assert!(
+            (inserted_node.coordinates_m[0] == 0.0 && inserted_node.coordinates_m[1] > 0.0)
+                || (inserted_node.coordinates_m[1] == 0.0 && inserted_node.coordinates_m[0] > 0.0)
+                || (inserted_node.coordinates_m[0] + inserted_node.coordinates_m[1] - 1.0).abs()
+                    <= 1.0e-12
+        );
+        assert_eq!(split_tets.len(), 2);
+        assert!(split_tets
+            .iter()
+            .all(|tet| tet.node_ids.contains(&inserted_node.node_id)));
+        assert!(!refined_cavity
+            .boundary_faces
+            .iter()
+            .any(|face| sorted_face(face.node_ids) == [0, 1, 2]));
+        assert_eq!(
+            refined_cavity
+                .boundary_faces
+                .iter()
+                .filter(|face| face.node_ids.contains(&inserted_node.node_id))
+                .count(),
+            4
+        );
+        let refill = refill_from_tets(
+            &refined_cavity,
+            split_tets,
+            options.volume_relative_tolerance,
+        )
+        .expect("edge-split child tets should preserve the refined boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("edge-split completion should preserve the original target volume");
+    }
+
+    #[test]
     fn boundary_face_split_completion_prefers_higher_quality_split_point() {
         let cavity = ConstrainedCavity {
             removed_tet_ids: vec![1],
@@ -3560,6 +4129,10 @@ mod tests {
         assert_eq!(diagnostic.split_cap_pass_count, 0);
         assert!(diagnostic.max_split_cap_scaled_jacobian < 0.95);
         assert!(!diagnostic.split_cap_scaled_jacobian_bins.is_empty());
+        assert!(diagnostic.edge_split_cap_candidate_count > 0);
+        assert_eq!(diagnostic.edge_split_cap_pass_count, 0);
+        assert!(diagnostic.max_edge_split_cap_scaled_jacobian < 0.95);
+        assert!(!diagnostic.edge_split_cap_scaled_jacobian_bins.is_empty());
         assert!(!diagnostic.rejected_by_reason.is_empty());
     }
 
