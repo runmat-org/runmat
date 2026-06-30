@@ -15,9 +15,10 @@ use crate::{
         diagnostic_boundary_missing_face_clusters, diagnostic_boundary_node_completion,
         diagnostic_boundary_patch_steiner_exact_cover, diagnostic_boundary_steiner_exact_cover,
         diagnostic_interior_star_quality, diagnostic_missing_face_local_cap_quality,
-        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
-        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
-        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
+        diagnostic_missing_face_local_cap_stitch, evaluate_constrained_cavity_refill_candidates,
+        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
+        ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3840,6 +3841,20 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_local_cap_rejected_by_reason =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_max_quality = 0.0_f64;
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_found = 0_usize;
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_reason =
+            BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_missing_face_count = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_missing_face_edge_component_count =
             BTreeMap::<usize, usize>::new();
@@ -4270,6 +4285,37 @@ mod tests {
                                     trimmed_seed_star_shell_trim_local_cap_max_quality =
                                         trimmed_seed_star_shell_trim_local_cap_max_quality
                                             .max(local_cap.max_scaled_jacobian);
+                                }
+                                if let Ok(local_cap_stitch) =
+                                    diagnostic_missing_face_local_cap_stitch(
+                                        &shell_trim_cavity,
+                                        &shell_trim_boundary_nodes,
+                                        refill_options,
+                                    )
+                                {
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces
+                                        .entry(local_cap_stitch.capped_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes
+                                        .entry(local_cap_stitch.inserted_node_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_candidates
+                                        .entry(local_cap_stitch.candidate_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets
+                                        .entry(local_cap_stitch.selected_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts
+                                        .entry(local_cap_stitch.search_attempt_count)
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_local_cap_stitch_found +=
+                                        usize::from(local_cap_stitch.found_cover);
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_reason
+                                        .entry(local_cap_stitch.reason.to_string())
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality =
+                                        trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality
+                                            .max(local_cap_stitch.max_min_scaled_jacobian);
                                 }
                                 if let Ok(clusters) = diagnostic_boundary_missing_face_clusters(
                                     &shell_trim_cavity,
@@ -5040,6 +5086,17 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_candidates,
             trimmed_seed_star_shell_trim_local_cap_max_quality,
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces,
+            trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes,
+            trimmed_seed_star_shell_trim_local_cap_stitch_candidates,
+            trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets,
+            trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts,
+            trimmed_seed_star_shell_trim_local_cap_stitch_found,
+            trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality,
+            trimmed_seed_star_shell_trim_local_cap_stitch_reason,
         );
         eprintln!(
             "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?} common_nodes={:?} common_node_sources={:?}",

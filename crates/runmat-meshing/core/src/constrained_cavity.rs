@@ -183,6 +183,20 @@ pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
+    pub missing_face_count: usize,
+    pub capped_face_count: usize,
+    pub inserted_node_count: usize,
+    pub candidate_tet_count: usize,
+    pub selected_tet_count: usize,
+    pub search_attempt_count: usize,
+    pub found_cover: bool,
+    pub reason: &'static str,
+    pub max_min_scaled_jacobian: f64,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
     pub missing_face_count: usize,
     pub edge_component_count: usize,
@@ -4042,6 +4056,165 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_missing_face_local_cap_stitch(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let boundary_node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let points = boundary_node_ids
+        .iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: boundary_node_map[node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut boundary_refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            boundary_refill_tets.push(tet);
+        }
+    }
+    let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tets)
+        .map_err(ConstrainedCavityRefillError::Validation)?;
+    let mut diagnostic = MissingFaceLocalCapStitchDiagnostic {
+        missing_face_count: missing_faces.len(),
+        capped_face_count: 0,
+        inserted_node_count: 0,
+        candidate_tet_count: 0,
+        selected_tet_count: 0,
+        search_attempt_count: 0,
+        found_cover: false,
+        reason: "not_evaluated",
+        max_min_scaled_jacobian: 0.0,
+    };
+    if missing_faces.is_empty() {
+        diagnostic.reason = "no_missing_faces";
+        return Ok(diagnostic);
+    }
+    let Some(cavity_centroid) = cavity_boundary_node_centroid(cavity, &boundary_node_map) else {
+        diagnostic.reason = "empty_boundary";
+        return Ok(diagnostic);
+    };
+
+    let mut node_points = boundary_node_ids
+        .iter()
+        .map(|node_id| (*node_id, boundary_node_map[node_id]))
+        .collect::<BTreeMap<_, _>>();
+    let mut candidate_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
+    let mut next_node_id = next_cavity_node_id(cavity);
+    for face in &missing_faces {
+        let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
+            continue;
+        };
+        let Some((coordinates_m, cap_tet)) = best_local_cap_for_face(
+            *face,
+            surface_point,
+            cavity_centroid,
+            next_node_id,
+            &boundary_node_map,
+            &boundary_triangles,
+            options,
+        ) else {
+            continue;
+        };
+        while node_points.contains_key(&next_node_id) {
+            next_node_id = next_node_id.saturating_add(1);
+        }
+        node_points.insert(next_node_id, coordinates_m);
+        inserted_nodes.push(ConstrainedCavityNode {
+            node_id: next_node_id,
+            coordinates_m,
+        });
+        candidate_tets.push(cap_tet);
+        diagnostic.capped_face_count += 1;
+        next_node_id = next_node_id.saturating_add(1);
+    }
+    diagnostic.inserted_node_count = inserted_nodes.len();
+    if diagnostic.capped_face_count < diagnostic.missing_face_count {
+        diagnostic.reason = "incomplete_local_caps";
+        diagnostic.candidate_tet_count = candidate_tets.len();
+        return Ok(diagnostic);
+    }
+
+    let connector_points = node_points
+        .iter()
+        .map(|(node_id, coordinates_m)| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: *coordinates_m,
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut seen_tets = candidate_tets
+        .iter()
+        .map(|tet| sorted_tet_nodes(tet.node_ids))
+        .collect::<BTreeSet<_>>();
+    for tet in tetrahedralize_points(&connector_points) {
+        let node_ids = tet.vertices.map(|index| connector_points[index].node_id);
+        if !seen_tets.insert(sorted_tet_nodes(node_ids)) {
+            continue;
+        }
+        let tet_points = tet
+            .vertices
+            .map(|index| connector_points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            candidate_tets.push(tet);
+        }
+    }
+    diagnostic.candidate_tet_count = candidate_tets.len();
+    if candidate_tets.is_empty() {
+        diagnostic.reason = "no_candidate_tets";
+        return Ok(diagnostic);
+    }
+    if candidate_tets.len() > 1_024 {
+        diagnostic.reason = "over_candidate_limit";
+        return Ok(diagnostic);
+    }
+    let mut search =
+        BoundaryExactCoverSearch::new(cavity, &candidate_tets, options.volume_relative_tolerance);
+    let selected = search.search();
+    diagnostic.search_attempt_count = search.attempts;
+    let Some(selected) = selected else {
+        diagnostic.reason = "cover_not_found";
+        return Ok(diagnostic);
+    };
+    diagnostic.max_min_scaled_jacobian = selected
+        .iter()
+        .map(|index| candidate_tets[*index].exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
+    diagnostic.selected_tet_count = selected.len();
+    diagnostic.found_cover = true;
+    diagnostic.reason = "cover_found";
+    Ok(diagnostic)
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_boundary_missing_face_clusters(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
@@ -4192,6 +4365,49 @@ fn face_centroid(face: [u32; 3], node_coordinates: &BTreeMap<u32, [f64; 3]>) -> 
         (first[1] + second[1] + third[1]) / 3.0,
         (first[2] + second[2] + third[2]) / 3.0,
     ])
+}
+
+#[cfg(test)]
+fn best_local_cap_for_face(
+    face: [u32; 3],
+    surface_point: [f64; 3],
+    cavity_centroid: [f64; 3],
+    apex_node_id: u32,
+    node_coordinates: &BTreeMap<u32, [f64; 3]>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> Option<([f64; 3], ConstrainedCavityRefillTet)> {
+    local_cap_apex_candidates(face, surface_point, cavity_centroid, node_coordinates)
+        .into_iter()
+        .filter_map(|apex| {
+            let tet_points = [
+                node_coordinates[&face[0]],
+                node_coordinates[&face[1]],
+                node_coordinates[&face[2]],
+                apex,
+            ];
+            if point_in_closed_triangle_surface(
+                tet_centroid(tet_points),
+                boundary_triangles,
+                MeshingTolerance::default(),
+            ) != PointInClosedSurface::Inside
+            {
+                return None;
+            }
+            let tet = raw_refill_tet_with_rejection_reason(
+                [face[0], face[1], face[2], apex_node_id],
+                tet_points,
+                options,
+            )
+            .ok()?;
+            Some((apex, tet))
+        })
+        .max_by(|left, right| {
+            left.1
+                .exact_scaled_jacobian
+                .total_cmp(&right.1.exact_scaled_jacobian)
+                .then_with(|| right.1.aspect_ratio.total_cmp(&left.1.aspect_ratio))
+        })
 }
 
 #[cfg(test)]
@@ -5542,6 +5758,24 @@ mod tests {
         assert_eq!(diagnostic.candidate_count, 0);
         assert_eq!(diagnostic.max_scaled_jacobian, 0.0);
         assert!(diagnostic.rejected_by_reason.is_empty());
+    }
+
+    #[test]
+    fn missing_face_local_cap_stitch_reports_boundary_complete_fixture() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let diagnostic =
+            diagnostic_missing_face_local_cap_stitch(&cavity, &nodes, refill_options())
+                .expect("local cap stitch diagnostic should evaluate");
+
+        assert_eq!(diagnostic.missing_face_count, 0);
+        assert_eq!(diagnostic.capped_face_count, 0);
+        assert_eq!(diagnostic.inserted_node_count, 0);
+        assert_eq!(diagnostic.candidate_tet_count, 0);
+        assert_eq!(diagnostic.selected_tet_count, 0);
+        assert_eq!(diagnostic.search_attempt_count, 0);
+        assert!(!diagnostic.found_cover);
+        assert_eq!(diagnostic.reason, "no_missing_faces");
     }
 
     #[test]
