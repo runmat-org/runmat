@@ -1922,6 +1922,7 @@ pub mod vertex_utils {
         let mut vertices = Vec::new();
         for i in 1..x_data.len() {
             let include = match style {
+                crate::plots::line::LineStyle::None => false,
                 crate::plots::line::LineStyle::Solid => true,
                 crate::plots::line::LineStyle::Dashed => (i % 4) < 2, // on,on,off,off
                 crate::plots::line::LineStyle::Dotted => false,       // handled elsewhere as points
@@ -1987,6 +1988,7 @@ pub mod vertex_utils {
             .collect();
         for i in 0..pts.len() - 1 {
             let include = match style {
+                crate::plots::line::LineStyle::None => false,
                 crate::plots::line::LineStyle::Solid => true,
                 crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
                 crate::plots::line::LineStyle::Dotted => false,

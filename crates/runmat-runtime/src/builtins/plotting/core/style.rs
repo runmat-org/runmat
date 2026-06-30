@@ -547,6 +547,9 @@ fn parse_style_string(
             }
         }
     }
+    if options.line_style.is_none() && options.marker_kind.is_some() {
+        options.line_style = Some(LineStyle::None);
+    }
     Ok(options)
 }
 
@@ -626,6 +629,7 @@ fn parse_name_value_pairs(
 
 fn parse_line_style_name(opts: &LineStyleParseOptions, value: &str) -> BuiltinResult<LineStyle> {
     match value.trim() {
+        "none" => Ok(LineStyle::None),
         "-" => Ok(LineStyle::Solid),
         "--" => Ok(LineStyle::Dashed),
         ":" => Ok(LineStyle::Dotted),

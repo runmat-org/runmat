@@ -1188,6 +1188,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn parse_series_specs_treats_marker_only_linespec_as_no_line() {
+        let _guard = setup_plot_tests();
+        let args = vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            Value::String("x".into()),
+        ];
+        let (plans, order) = parse_series_specs(args).expect("parsed");
+        assert!(order.is_none());
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].appearance.line_style, LineStyle::None);
+        let marker = plans[0].appearance.marker.as_ref().expect("marker");
+        assert!(matches!(marker.kind, MarkerKind::Cross));
+        assert_eq!(marker.size, None);
+    }
+
+    #[test]
     fn plot_builtin_multi_series_cycles_color_and_keeps_solid_default_style() {
         let _guard = setup_plot_tests();
         let result = block_on(plot_builtin(vec![

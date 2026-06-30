@@ -4036,6 +4036,7 @@ fn apply_histogram_normalization(raw_counts: &[f64], edges: &[f64], norm: &str) 
 
 fn line_style_name(style: runmat_plot::plots::line::LineStyle) -> &'static str {
     match style {
+        runmat_plot::plots::line::LineStyle::None => "none",
         runmat_plot::plots::line::LineStyle::Solid => "-",
         runmat_plot::plots::line::LineStyle::Dashed => "--",
         runmat_plot::plots::line::LineStyle::Dotted => ":",
@@ -4045,6 +4046,7 @@ fn line_style_name(style: runmat_plot::plots::line::LineStyle) -> &'static str {
 
 fn parse_line_style_name_for_props(name: &str) -> runmat_plot::plots::line::LineStyle {
     match name.trim() {
+        "none" => runmat_plot::plots::line::LineStyle::None,
         "--" | "dashed" => runmat_plot::plots::line::LineStyle::Dashed,
         ":" | "dotted" => runmat_plot::plots::line::LineStyle::Dotted,
         "-." | "dashdot" => runmat_plot::plots::line::LineStyle::DashDot,

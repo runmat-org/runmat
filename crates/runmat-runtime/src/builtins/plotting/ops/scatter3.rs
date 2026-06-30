@@ -804,7 +804,12 @@ fn resolve_scatter3_style(
         )));
     }
 
-    if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
+    if args.style.line_style_explicit
+        && !matches!(
+            args.style.appearance.line_style,
+            LineStyle::Solid | LineStyle::None
+        )
+    {
         style.requires_cpu = true;
     }
     if args.style.line_style_order.is_some() {

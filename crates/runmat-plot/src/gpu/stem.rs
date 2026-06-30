@@ -173,6 +173,7 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 }
 fn line_style_code(style: LineStyle) -> u32 {
     match style {
+        LineStyle::None => 4,
         LineStyle::Solid => 0,
         LineStyle::Dashed => 1,
         LineStyle::Dotted => 2,

@@ -41,6 +41,7 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         z = zero(zsys);
         sys_ss = ss([0 1; -4 -0.5], [0; 1], [1 0], 0);
         pss = pole(sys_ss);
+        [pz_p, pz_z] = pzmap(zsys);
         [wn, zeta, dp] = damp(T);
         stable = isstable(T);
         ss = dcgain(T);
@@ -56,6 +57,11 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         assert(length(z) == 2);
         assert(any(abs(z + 1) < 1e-6));
         assert(any(abs(z + 2) < 1e-6));
+        assert(length(pz_p) == 1);
+        assert(abs(pz_p + 4) < 1e-6);
+        assert(length(pz_z) == 2);
+        assert(any(abs(pz_z + 1) < 1e-6));
+        assert(any(abs(pz_z + 2) < 1e-6));
         assert(length(pss) == 2);
         assert(length(wn) == length(dp));
         assert(length(zeta) == length(dp));
@@ -234,6 +240,15 @@ fn step_statement_form_plots_without_error() {
     let program = r#"
         H = tf(1, [1 1]);
         step(H);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn pzmap_statement_form_plots_without_error() {
+    let program = r#"
+        H = tf([1 2], [1 3 4]);
+        pzmap(H);
     "#;
     execute_source(program).unwrap();
 }

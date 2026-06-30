@@ -2834,6 +2834,7 @@ impl ScenePlot {
 
 fn parse_line_style(value: &str) -> crate::plots::LineStyle {
     match value {
+        "None" | "none" => crate::plots::LineStyle::None,
         "Dashed" => crate::plots::LineStyle::Dashed,
         "Dotted" => crate::plots::LineStyle::Dotted,
         "DashDot" => crate::plots::LineStyle::DashDot,
@@ -3020,6 +3021,7 @@ impl From<PlotType> for PlotKind {
 
 fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
     match name.to_ascii_lowercase().as_str() {
+        "none" => crate::plots::line::LineStyle::None,
         "dashed" => crate::plots::line::LineStyle::Dashed,
         "dotted" => crate::plots::line::LineStyle::Dotted,
         "dashdot" => crate::plots::line::LineStyle::DashDot,

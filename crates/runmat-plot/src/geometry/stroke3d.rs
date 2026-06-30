@@ -30,6 +30,7 @@ impl StrokeStyle3D {
 #[inline]
 pub fn line_style_includes_segment(segment: usize, style: LineStyle) -> bool {
     match style {
+        LineStyle::None => false,
         LineStyle::Solid => true,
         LineStyle::Dashed => (segment % 4) < 2,
         LineStyle::Dotted => segment.is_multiple_of(4),

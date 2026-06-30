@@ -15,6 +15,7 @@ fn should_draw(segment: u32, style: u32) -> bool {
     case 1u: { return (segment % 4u) < 2u; }
     case 2u: { return (segment % 4u) == 0u; }
     case 3u: { let m = segment % 6u; return (m < 2u) || (m == 3u); }
+    case 4u: { return false; }
     default: { return true; }
   }
 }
@@ -168,6 +169,7 @@ fn should_draw(segment: u32, style: u32) -> bool {
     case 1u: { return (segment % 4u) < 2u; }
     case 2u: { return (segment % 4u) == 0u; }
     case 3u: { let m = segment % 6u; return (m < 2u) || (m == 3u); }
+    case 4u: { return false; }
     default: { return true; }
   }
 }

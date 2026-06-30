@@ -560,7 +560,11 @@ fn parse_plot3_series_specs(
                 }
             }
         }
-        let parsed = parse_line_style_args(&style_tokens, &opts)?;
+        let mut parsed = parse_line_style_args(&style_tokens, &opts)?;
+        if parsed.appearance.marker.is_some() && parsed.appearance.line_style == LineStyle::None {
+            parsed.appearance.line_style = LineStyle::Solid;
+            parsed.line_style_explicit = false;
+        }
         if let Some(order) = parsed.line_style_order.clone() {
             line_style_order = Some(order);
         }
@@ -763,6 +767,7 @@ mod tests {
         assert_eq!(line.x_data, vec![1.0]);
         assert_eq!(line.y_data, vec![2.0]);
         assert_eq!(line.z_data, vec![3.0]);
+        assert_eq!(line.line_style, LineStyle::Solid);
     }
 
     #[test]
