@@ -6202,6 +6202,176 @@ pub(crate) fn diagnostic_node_cavity_reconnection_rejection_reason(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_node_cavity_reconnection_transitions(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let adjacent = connected_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    if adjacent.len() < 3 {
+        return Ok(BTreeMap::new());
+    }
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    if adjacent.len() <= face_closure.len() {
+        return Ok(BTreeMap::new());
+    }
+
+    let base = face_closure.into_iter().collect::<BTreeSet<_>>();
+    let extra = bounded_node_cavity_extra_indices(
+        adjacent
+            .iter()
+            .copied()
+            .filter(|index| !base.contains(index))
+            .collect::<Vec<_>>(),
+        tets,
+    );
+    let mut candidate_groups = vec![adjacent];
+    for extra_index in &extra {
+        let mut group = base.clone();
+        group.insert(*extra_index);
+        candidate_groups.push(group.into_iter().collect());
+    }
+    for left in 0..extra.len() {
+        for right in (left + 1)..extra.len() {
+            let mut group = base.clone();
+            group.insert(extra[left]);
+            group.insert(extra[right]);
+            candidate_groups.push(group.into_iter().collect());
+        }
+    }
+    diagnostic_cavity_group_reconnection_transitions(
+        candidate_groups,
+        tets,
+        node_points,
+        options,
+        "node_cavity",
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_cavity_reconnection_transitions(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let adjacent = boundary_adjacent_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    let expanded = boundary_adjacent_bad_tet_cavity_with_node_closure_layers(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+        2,
+    );
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    let candidate_groups =
+        boundary_adjacent_cavity_candidate_groups(face_closure, adjacent, expanded, tets);
+    diagnostic_cavity_group_reconnection_transitions(
+        candidate_groups,
+        tets,
+        node_points,
+        options,
+        "boundary_cavity",
+    )
+}
+
+#[cfg(test)]
+fn diagnostic_cavity_group_reconnection_transitions(
+    candidate_groups: Vec<Vec<usize>>,
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+    prefix: &'static str,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let mut transitions = BTreeMap::<&'static str, usize>::new();
+    for group in candidate_groups {
+        if group.len() < 3 || group.len() > 40 {
+            continue;
+        }
+        let original_below_count = count_exact_quality_violations(
+            group.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact = min_exact_scaled_jacobian(group.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(&group, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.tets.iter(), options.min_scaled_jacobian);
+        let candidate_min_exact = min_exact_scaled_jacobian(candidates.tets.iter());
+        let Some(bucket) = diagnostic_reconnection_transition_bucket(
+            prefix,
+            !candidates.inserted_nodes.is_empty(),
+            candidate_below_count,
+            candidate_min_exact,
+            original_below_count,
+            original_min_exact,
+        ) else {
+            continue;
+        };
+        *transitions.entry(bucket).or_default() += 1;
+    }
+    Ok(transitions)
+}
+
+#[cfg(test)]
+fn diagnostic_reconnection_transition_bucket(
+    prefix: &'static str,
+    inserted_nodes: bool,
+    candidate_below_count: usize,
+    candidate_min_exact: f64,
+    original_below_count: usize,
+    original_min_exact: f64,
+) -> Option<&'static str> {
+    if !cavity_reconnection_improves_quality(
+        candidate_below_count,
+        candidate_min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        return None;
+    }
+    Some(
+        match (
+            prefix,
+            inserted_nodes,
+            candidate_below_count < original_below_count,
+        ) {
+            ("boundary_cavity", true, true) => "boundary_cavity_inserted_count_reduction",
+            ("boundary_cavity", true, false) => "boundary_cavity_inserted_quality_only",
+            ("boundary_cavity", false, true) => "boundary_cavity_plain_count_reduction",
+            ("boundary_cavity", false, false) => "boundary_cavity_plain_quality_only",
+            (_, true, true) => "node_cavity_inserted_count_reduction",
+            (_, true, false) => "node_cavity_inserted_quality_only",
+            (_, false, true) => "node_cavity_plain_count_reduction",
+            (_, false, false) => "node_cavity_plain_quality_only",
+        },
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_bad_cavity_sizes(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -11680,6 +11850,38 @@ mod tests {
         assert!(!cavity_reconnection_improves_quality(2, 0.10, 2, 0.10));
         assert!(!cavity_reconnection_improves_quality(2, 0.09, 2, 0.10));
         assert!(!cavity_reconnection_improves_quality(3, 0.20, 2, 0.10));
+    }
+
+    #[test]
+    fn diagnostic_reconnection_transition_buckets_track_source_and_improvement() {
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("boundary_cavity", true, 1, 0.05, 2, 0.10),
+            Some("boundary_cavity_inserted_count_reduction")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("boundary_cavity", true, 2, 0.12, 2, 0.10),
+            Some("boundary_cavity_inserted_quality_only")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("boundary_cavity", false, 1, 0.05, 2, 0.10),
+            Some("boundary_cavity_plain_count_reduction")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("boundary_cavity", false, 2, 0.12, 2, 0.10),
+            Some("boundary_cavity_plain_quality_only")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("node_cavity", true, 1, 0.05, 2, 0.10),
+            Some("node_cavity_inserted_count_reduction")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("node_cavity", false, 2, 0.12, 2, 0.10),
+            Some("node_cavity_plain_quality_only")
+        );
+        assert_eq!(
+            diagnostic_reconnection_transition_bucket("node_cavity", true, 2, 0.10, 2, 0.10),
+            None
+        );
     }
 
     #[test]

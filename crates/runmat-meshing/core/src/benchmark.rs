@@ -2316,9 +2316,11 @@ mod tests {
         sizing::{MeshSizingField, SizingSample, SizingSampleApplication},
         tet_candidate::{
             diagnostic_bad_cavity_sizes, diagnostic_boundary_cavity_reconnection_rejection_reason,
+            diagnostic_boundary_cavity_reconnection_transitions,
             diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
             diagnostic_node_cavity_reconnection_rejection_reason,
+            diagnostic_node_cavity_reconnection_transitions,
             diagnostic_small_cavity_boundary_mismatch_shapes,
             diagnostic_small_cavity_boundary_split_rejection_reasons,
             diagnostic_small_cavity_exact_cover_rejection_reasons,
@@ -3107,6 +3109,10 @@ mod tests {
         let mut bad_edge_reconnection_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_boundary_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_node_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
+        let mut bad_boundary_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
+        let mut bad_node_cavity_transition_sample_count = 0_usize;
+        let mut bad_boundary_cavity_transition_sample_count = 0_usize;
         let mut bad_one_ring_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_face_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_node_cavity_size_histogram = BTreeMap::<usize, usize>::new();
@@ -3207,6 +3213,23 @@ mod tests {
             *bad_node_cavity_rejected_by_reason
                 .entry(node_cavity_reason.to_string())
                 .or_default() += 1;
+            if bad_node_cavity_transition_sample_count < 8 {
+                bad_node_cavity_transition_sample_count += 1;
+                for (transition, count) in diagnostic_node_cavity_reconnection_transitions(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &face_index_adjacency,
+                    &node_index_adjacency,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("node cavity transition diagnostic should evaluate")
+                {
+                    *bad_node_cavity_reconnection_transitions
+                        .entry(transition.to_string())
+                        .or_default() += count;
+                }
+            }
             let boundary_cavity_reason = diagnostic_boundary_cavity_reconnection_rejection_reason(
                 tet_index,
                 &preparation.tet_candidates.tets,
@@ -3219,6 +3242,23 @@ mod tests {
             *bad_boundary_cavity_rejected_by_reason
                 .entry(boundary_cavity_reason.to_string())
                 .or_default() += 1;
+            if bad_boundary_cavity_transition_sample_count < 8 {
+                bad_boundary_cavity_transition_sample_count += 1;
+                for (transition, count) in diagnostic_boundary_cavity_reconnection_transitions(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &face_index_adjacency,
+                    &node_index_adjacency,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("boundary cavity transition diagnostic should evaluate")
+                {
+                    *bad_boundary_cavity_reconnection_transitions
+                        .entry(transition.to_string())
+                        .or_default() += count;
+                }
+            }
             let (one_ring_size, face_cavity_size, node_cavity_size) = diagnostic_bad_cavity_sizes(
                 tet_index,
                 &preparation.tet_candidates.tets,
@@ -3379,6 +3419,14 @@ mod tests {
         eprintln!(
             "annular recovery bad_boundary_cavity_rejected_by_reason={:?}",
             bad_boundary_cavity_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_node_cavity_reconnection_transition_sample={} transitions={:?}",
+            bad_node_cavity_transition_sample_count, bad_node_cavity_reconnection_transitions
+        );
+        eprintln!(
+            "annular recovery bad_boundary_cavity_reconnection_transition_sample={} transitions={:?}",
+            bad_boundary_cavity_transition_sample_count, bad_boundary_cavity_reconnection_transitions
         );
         eprintln!(
             "annular recovery bad_cavity_size_histograms one_ring={:?} face_closure={:?} node_closure={:?}",
