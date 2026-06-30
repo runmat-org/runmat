@@ -154,6 +154,25 @@ pub(crate) struct BoundarySteinerExactCoverDiagnostic {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BoundaryPatchSteinerExactCoverDiagnostic {
+    pub boundary_node_count: usize,
+    pub boundary_face_count: usize,
+    pub missing_face_count: usize,
+    pub patch_count: usize,
+    pub steiner_node_count: usize,
+    pub candidate_count: usize,
+    pub zero_candidate_boundary_face_count: usize,
+    pub min_boundary_face_candidate_count: usize,
+    pub max_boundary_face_candidate_count: usize,
+    pub selected_tet_count: usize,
+    pub search_attempt_count: usize,
+    pub found_cover: bool,
+    pub reason: &'static str,
+    pub max_min_scaled_jacobian: f64,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
     pub missing_face_count: usize,
     pub edge_component_count: usize,
@@ -3722,6 +3741,192 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_boundary_patch_steiner_exact_cover(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<BoundaryPatchSteinerExactCoverDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let boundary_node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut diagnostic = BoundaryPatchSteinerExactCoverDiagnostic {
+        boundary_node_count: boundary_node_ids.len(),
+        boundary_face_count: cavity.boundary_faces.len(),
+        missing_face_count: 0,
+        patch_count: 0,
+        steiner_node_count: 0,
+        candidate_count: 0,
+        zero_candidate_boundary_face_count: 0,
+        min_boundary_face_candidate_count: 0,
+        max_boundary_face_candidate_count: 0,
+        selected_tet_count: 0,
+        search_attempt_count: 0,
+        found_cover: false,
+        reason: "not_evaluated",
+        max_min_scaled_jacobian: 0.0,
+    };
+    if boundary_node_ids.len() < 4 {
+        diagnostic.reason = "too_few_boundary_nodes";
+        return Ok(diagnostic);
+    }
+
+    let points = boundary_node_ids
+        .iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: boundary_node_map[node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut boundary_refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            boundary_refill_tets.push(tet);
+        }
+    }
+    let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tets)
+        .map_err(ConstrainedCavityRefillError::Validation)?;
+    diagnostic.missing_face_count = missing_faces.len();
+    if missing_faces.is_empty() {
+        diagnostic.reason = "no_missing_faces";
+        return Ok(diagnostic);
+    }
+    let Some(cavity_centroid) = cavity_boundary_node_centroid(cavity, &boundary_node_map) else {
+        diagnostic.reason = "empty_boundary";
+        return Ok(diagnostic);
+    };
+
+    let components = missing_face_components(&missing_faces, MissingFaceLink::Node);
+    diagnostic.patch_count = components.len();
+    let mut node_points = boundary_node_ids
+        .iter()
+        .map(|node_id| (*node_id, boundary_node_map[node_id]))
+        .collect::<BTreeMap<_, _>>();
+    let mut node_ids = boundary_node_ids.clone();
+    let mut next_node_id = next_cavity_node_id(cavity);
+    for component in components {
+        let mut patch_node_ids = BTreeSet::<u32>::new();
+        for face_index in component {
+            patch_node_ids.extend(missing_faces[face_index]);
+        }
+        let Some(surface_point) = centroid_of_node_set(&patch_node_ids, &boundary_node_map) else {
+            continue;
+        };
+        let Some(point) =
+            patch_steiner_point_inside_cavity(surface_point, cavity_centroid, &boundary_triangles)
+        else {
+            continue;
+        };
+        while node_points.contains_key(&next_node_id) {
+            next_node_id = next_node_id.saturating_add(1);
+        }
+        node_points.insert(next_node_id, point);
+        node_ids.push(next_node_id);
+        diagnostic.steiner_node_count += 1;
+        next_node_id = next_node_id.saturating_add(1);
+    }
+    if diagnostic.steiner_node_count == 0 {
+        diagnostic.reason = "no_valid_patch_steiner_points";
+        return Ok(diagnostic);
+    }
+
+    let mut candidates = Vec::<ConstrainedCavityRefillTet>::new();
+    for first in 0..node_ids.len() {
+        for second in (first + 1)..node_ids.len() {
+            for third in (second + 1)..node_ids.len() {
+                for fourth in (third + 1)..node_ids.len() {
+                    let tet_node_ids = [
+                        node_ids[first],
+                        node_ids[second],
+                        node_ids[third],
+                        node_ids[fourth],
+                    ];
+                    let points = tet_node_ids.map(|node_id| node_points[&node_id]);
+                    if point_in_closed_triangle_surface(
+                        tet_centroid(points),
+                        &boundary_triangles,
+                        MeshingTolerance::default(),
+                    ) != PointInClosedSurface::Inside
+                    {
+                        continue;
+                    }
+                    if let Ok(tet) =
+                        raw_refill_tet_with_rejection_reason(tet_node_ids, points, options)
+                    {
+                        candidates.push(tet);
+                    }
+                }
+            }
+        }
+    }
+    diagnostic.candidate_count = candidates.len();
+    let face_candidate_counts = boundary_faces
+        .iter()
+        .map(|face| {
+            candidates
+                .iter()
+                .filter(|candidate| {
+                    tet_faces(candidate.node_ids)
+                        .map(sorted_face)
+                        .contains(face)
+                })
+                .count()
+        })
+        .collect::<Vec<_>>();
+    diagnostic.zero_candidate_boundary_face_count = face_candidate_counts
+        .iter()
+        .filter(|count| **count == 0)
+        .count();
+    diagnostic.min_boundary_face_candidate_count =
+        face_candidate_counts.iter().copied().min().unwrap_or(0);
+    diagnostic.max_boundary_face_candidate_count =
+        face_candidate_counts.iter().copied().max().unwrap_or(0);
+    if candidates.is_empty() {
+        diagnostic.reason = "no_candidate_tets";
+        return Ok(diagnostic);
+    }
+    if candidates.len() > 1_024 {
+        diagnostic.reason = "over_candidate_limit";
+        return Ok(diagnostic);
+    }
+    let mut search =
+        BoundaryExactCoverSearch::new(cavity, &candidates, options.volume_relative_tolerance);
+    let selected = search.search();
+    diagnostic.search_attempt_count = search.attempts;
+    let Some(selected) = selected else {
+        diagnostic.reason = "cover_not_found";
+        return Ok(diagnostic);
+    };
+    diagnostic.max_min_scaled_jacobian = selected
+        .iter()
+        .map(|index| candidates[*index].exact_scaled_jacobian)
+        .fold(f64::INFINITY, f64::min);
+    diagnostic.selected_tet_count = selected.len();
+    diagnostic.found_cover = true;
+    diagnostic.reason = "cover_found";
+    Ok(diagnostic)
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_boundary_missing_face_clusters(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
@@ -3837,6 +4042,61 @@ fn missing_face_component_common_node_ids(faces: &[[u32; 3]], component: &[usize
         common.retain(|node_id| face_nodes.contains(node_id));
     }
     common.into_iter().collect()
+}
+
+#[cfg(test)]
+fn centroid_of_node_set(
+    node_ids: &BTreeSet<u32>,
+    node_coordinates: &BTreeMap<u32, [f64; 3]>,
+) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0; 3];
+    for node_id in node_ids {
+        let point = node_coordinates.get(node_id)?;
+        centroid[0] += point[0];
+        centroid[1] += point[1];
+        centroid[2] += point[2];
+    }
+    let scale = 1.0 / node_ids.len() as f64;
+    Some([
+        centroid[0] * scale,
+        centroid[1] * scale,
+        centroid[2] * scale,
+    ])
+}
+
+#[cfg(test)]
+fn patch_steiner_point_inside_cavity(
+    surface_point: [f64; 3],
+    cavity_centroid: [f64; 3],
+    boundary_triangles: &[Triangle3],
+) -> Option<[f64; 3]> {
+    if point_in_closed_triangle_surface(
+        surface_point,
+        boundary_triangles,
+        MeshingTolerance::default(),
+    ) == PointInClosedSurface::Inside
+    {
+        return Some(surface_point);
+    }
+    [0.05, 0.1, 0.2, 0.35, 0.5]
+        .into_iter()
+        .map(|fraction| {
+            [
+                surface_point[0] + (cavity_centroid[0] - surface_point[0]) * fraction,
+                surface_point[1] + (cavity_centroid[1] - surface_point[1]) * fraction,
+                surface_point[2] + (cavity_centroid[2] - surface_point[2]) * fraction,
+            ]
+        })
+        .find(|point| {
+            point_in_closed_triangle_surface(
+                *point,
+                boundary_triangles,
+                MeshingTolerance::default(),
+            ) == PointInClosedSurface::Inside
+        })
 }
 
 #[cfg(test)]
@@ -5004,6 +5264,57 @@ mod tests {
         assert!(diagnostic.search_attempt_count > 0);
         assert_eq!(diagnostic.reason, "cover_not_found");
         assert_eq!(diagnostic.selected_tet_count, 0);
+    }
+
+    #[test]
+    fn boundary_patch_steiner_exact_cover_diagnostic_reports_boundary_complete_fixture() {
+        let mut cavity = unit_tet_cavity();
+        let split_specs = [
+            ([0, 2, 1], 4),
+            ([0, 1, 3], 5),
+            ([1, 2, 3], 6),
+            ([2, 0, 3], 7),
+        ];
+        for (face, split_node_id) in split_specs {
+            cavity.boundary_faces = split_constrained_cavity_boundary_faces(
+                &cavity.boundary_faces,
+                face,
+                split_node_id,
+            )
+            .expect("fixture face should split");
+        }
+        let mut nodes = unit_tet_nodes();
+        nodes.extend([
+            ConstrainedCavityNode {
+                node_id: 4,
+                coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 5,
+                coordinates_m: [1.0 / 3.0, 0.0, 1.0 / 3.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 6,
+                coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 7,
+                coordinates_m: [0.0, 1.0 / 3.0, 1.0 / 3.0],
+            },
+        ]);
+
+        let diagnostic =
+            diagnostic_boundary_patch_steiner_exact_cover(&cavity, &nodes, refill_options())
+                .expect("patch Steiner exact-cover diagnostic should evaluate");
+
+        assert_eq!(diagnostic.boundary_node_count, 8);
+        assert_eq!(diagnostic.boundary_face_count, 12);
+        assert_eq!(diagnostic.missing_face_count, 0);
+        assert_eq!(diagnostic.patch_count, 0);
+        assert_eq!(diagnostic.steiner_node_count, 0);
+        assert_eq!(diagnostic.candidate_count, 0);
+        assert_eq!(diagnostic.search_attempt_count, 0);
+        assert_eq!(diagnostic.reason, "no_missing_faces");
     }
 
     #[test]
