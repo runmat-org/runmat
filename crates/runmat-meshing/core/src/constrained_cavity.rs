@@ -3315,6 +3315,7 @@ struct BoundaryExactCoverSearch<'a> {
     boundary_faces: BTreeSet<[u32; 3]>,
     target_volume_m3: f64,
     volume_tolerance_m3: f64,
+    max_attempt_count: usize,
     attempts: usize,
 }
 
@@ -3323,6 +3324,15 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         cavity: &ConstrainedCavity,
         candidates: &'a [ConstrainedCavityRefillTet],
         volume_relative_tolerance: f64,
+    ) -> Self {
+        Self::with_attempt_limit(cavity, candidates, volume_relative_tolerance, 5_000)
+    }
+
+    fn with_attempt_limit(
+        cavity: &ConstrainedCavity,
+        candidates: &'a [ConstrainedCavityRefillTet],
+        volume_relative_tolerance: f64,
+        max_attempt_count: usize,
     ) -> Self {
         Self {
             candidates,
@@ -3337,6 +3347,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
                 .collect(),
             target_volume_m3: cavity.target_volume_m3,
             volume_tolerance_m3: cavity.target_volume_m3.max(1.0e-18) * volume_relative_tolerance,
+            max_attempt_count,
             attempts: 0,
         }
     }
@@ -3352,7 +3363,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         selected: &mut Vec<usize>,
     ) -> Option<Vec<usize>> {
         self.attempts += 1;
-        if self.attempts > 5_000
+        if self.attempts > self.max_attempt_count
             || current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3
         {
             return None;
@@ -4265,12 +4276,16 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         diagnostic.reason = "over_candidate_limit";
         return Ok(diagnostic);
     }
-    let mut search =
-        BoundaryExactCoverSearch::new(cavity, &candidate_tets, options.volume_relative_tolerance);
+    let mut search = BoundaryExactCoverSearch::with_attempt_limit(
+        cavity,
+        &candidate_tets,
+        options.volume_relative_tolerance,
+        25_000,
+    );
     let selected = search.search();
     diagnostic.search_attempt_count = search.attempts;
     let Some(selected) = selected else {
-        diagnostic.reason = if diagnostic.search_attempt_count > 5_000 {
+        diagnostic.reason = if diagnostic.search_attempt_count > 25_000 {
             "search_exhausted"
         } else {
             "cover_not_found"
@@ -5828,6 +5843,36 @@ mod tests {
             .expect("unpaired interior face should request connector candidates");
 
         assert_eq!(candidates, vec![2]);
+    }
+
+    #[test]
+    fn exact_cover_search_uses_configured_attempt_limit() {
+        let cavity = two_tet_bipyramid_cavity();
+        let candidates = vec![
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 2, 3],
+                volume_m3: 1.0 / 6.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.4,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 2, 1, 4],
+                volume_m3: 1.0 / 6.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.4,
+            },
+        ];
+        let mut low_limit_search =
+            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 2);
+
+        assert!(low_limit_search.search().is_none());
+        assert!(low_limit_search.attempts > 2);
+
+        let mut sufficient_limit_search =
+            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 3);
+
+        assert_eq!(sufficient_limit_search.search(), Some(vec![0, 1]));
+        assert_eq!(sufficient_limit_search.attempts, 3);
     }
 
     #[test]
