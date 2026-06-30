@@ -6296,6 +6296,129 @@ pub(crate) fn diagnostic_boundary_cavity_reconnection_transitions(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_cavity_decomposition_transitions(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let face_closure =
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
+    let node_closure = connected_bad_tet_cavity_with_node_closure(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+    );
+    let boundary_closure = boundary_adjacent_bad_tet_cavity_with_node_closure_layers(
+        tet_index,
+        tets,
+        face_adjacency,
+        node_adjacency,
+        options,
+        2,
+    );
+    let mut transitions = BTreeMap::<&'static str, usize>::new();
+    *transitions
+        .entry(diagnostic_decomposition_size_bucket(
+            "face_closure",
+            face_closure.len(),
+        ))
+        .or_default() += 1;
+    *transitions
+        .entry(diagnostic_decomposition_size_bucket(
+            "node_closure",
+            node_closure.len(),
+        ))
+        .or_default() += 1;
+    *transitions
+        .entry(diagnostic_decomposition_size_bucket(
+            "boundary_closure",
+            boundary_closure.len(),
+        ))
+        .or_default() += 1;
+    let candidate_groups = boundary_adjacent_cavity_candidate_groups(
+        face_closure,
+        node_closure,
+        boundary_closure,
+        tets,
+    );
+    if candidate_groups.is_empty() {
+        *transitions.entry("no_candidate_group").or_default() += 1;
+    }
+    let mut seen_subgroups = BTreeSet::<Vec<usize>>::new();
+    for group in candidate_groups {
+        if group.len() < 4 || group.len() > 24 {
+            continue;
+        }
+        *transitions.entry("candidate_group").or_default() += 1;
+        for subgroup in proper_connected_subcavity_groups(&group, tets) {
+            if subgroup.len() < 3 || !seen_subgroups.insert(subgroup.clone()) {
+                continue;
+            }
+            *transitions.entry("proper_subgroup").or_default() += 1;
+            let original_below_count = count_exact_quality_violations(
+                subgroup.iter().map(|index| &tets[*index]),
+                options.min_scaled_jacobian,
+            );
+            let original_min_exact =
+                min_exact_scaled_jacobian(subgroup.iter().map(|index| &tets[*index]));
+            let Some(candidates) = face_neighbor_cavity_reconnection_candidates(
+                &subgroup,
+                tets,
+                node_points,
+                options,
+            )?
+            else {
+                *transitions
+                    .entry("proper_subgroup_no_candidate")
+                    .or_default() += 1;
+                continue;
+            };
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+            let bucket = if candidate_below_count < original_below_count {
+                "proper_subgroup_count_reduction"
+            } else if candidate_below_count == original_below_count
+                && candidate_min_exact > original_min_exact + 1.0e-12
+            {
+                "proper_subgroup_quality_only"
+            } else {
+                "proper_subgroup_no_improvement"
+            };
+            *transitions.entry(bucket).or_default() += 1;
+        }
+    }
+    if !transitions.contains_key("proper_subgroup") {
+        *transitions.entry("no_proper_subgroup").or_default() += 1;
+    }
+    Ok(transitions)
+}
+
+#[cfg(test)]
+fn diagnostic_decomposition_size_bucket(prefix: &'static str, size: usize) -> &'static str {
+    match (prefix, size) {
+        ("face_closure", 0) => "face_closure_size_0",
+        ("face_closure", 1..=3) => "face_closure_size_lt4",
+        ("face_closure", 4..=24) => "face_closure_size_bounded",
+        ("face_closure", _) => "face_closure_size_over24",
+        ("node_closure", 0) => "node_closure_size_0",
+        ("node_closure", 1..=3) => "node_closure_size_lt4",
+        ("node_closure", 4..=24) => "node_closure_size_bounded",
+        ("node_closure", _) => "node_closure_size_over24",
+        ("boundary_closure", 0) => "boundary_closure_size_0",
+        ("boundary_closure", 1..=3) => "boundary_closure_size_lt4",
+        ("boundary_closure", 4..=24) => "boundary_closure_size_bounded",
+        ("boundary_closure", _) => "boundary_closure_size_over24",
+        _ => "unknown_closure_size",
+    }
+}
+
+#[cfg(test)]
 fn diagnostic_cavity_group_reconnection_transitions(
     candidate_groups: Vec<Vec<usize>>,
     tets: &[TetCandidate],
@@ -9361,6 +9484,86 @@ fn boundary_adjacent_cavity_candidate_groups(
         }
     }
     groups
+}
+
+#[cfg(test)]
+fn proper_connected_subcavity_groups(group: &[usize], tets: &[TetCandidate]) -> Vec<Vec<usize>> {
+    let group_set = group.iter().copied().collect::<BTreeSet<_>>();
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut seen = BTreeSet::<Vec<usize>>::new();
+    let mut push_components = |removed: BTreeSet<usize>| {
+        let remaining = group_set
+            .iter()
+            .copied()
+            .filter(|index| !removed.contains(index))
+            .collect::<BTreeSet<_>>();
+        for mut component in face_connected_components_within(&remaining, tets) {
+            component.sort_unstable();
+            if component.len() >= 3
+                && component.len() < group.len()
+                && seen.insert(component.clone())
+            {
+                groups.push(component);
+            }
+        }
+    };
+    for index in group {
+        push_components(BTreeSet::from([*index]));
+    }
+    for left in 0..group.len() {
+        for right in (left + 1)..group.len() {
+            push_components(BTreeSet::from([group[left], group[right]]));
+        }
+    }
+    groups
+}
+
+#[cfg(test)]
+fn face_connected_components_within(
+    indices: &BTreeSet<usize>,
+    tets: &[TetCandidate],
+) -> Vec<Vec<usize>> {
+    let mut face_owners = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for index in indices {
+        for face in tet_node_faces(tets[*index].node_ids).map(sorted_node_face) {
+            face_owners.entry(face).or_default().push(*index);
+        }
+    }
+    let mut graph = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for index in indices {
+        graph.entry(*index).or_default();
+    }
+    for owners in face_owners.values() {
+        for left in owners {
+            for right in owners {
+                if left != right {
+                    graph.entry(*left).or_default().insert(*right);
+                }
+            }
+        }
+    }
+    let mut components = Vec::<Vec<usize>>::new();
+    let mut visited = BTreeSet::<usize>::new();
+    for start in indices {
+        if !visited.insert(*start) {
+            continue;
+        }
+        let mut component = Vec::<usize>::new();
+        let mut pending = vec![*start];
+        while let Some(index) = pending.pop() {
+            component.push(index);
+            if let Some(neighbors) = graph.get(&index) {
+                for neighbor in neighbors {
+                    if visited.insert(*neighbor) {
+                        pending.push(*neighbor);
+                    }
+                }
+            }
+        }
+        component.sort_unstable();
+        components.push(component);
+    }
+    components
 }
 
 fn best_node_adjacent_cavity_reconnection(
@@ -14367,6 +14570,31 @@ mod tests {
                 .filter(|index| *index >= 4)
                 .all(|index| allowed_extras.contains(&index))
         }));
+    }
+
+    #[test]
+    fn proper_subcavity_groups_keep_face_connected_components() {
+        let tets = [[0, 1, 2, 3], [0, 1, 2, 4], [0, 1, 4, 5], [0, 1, 5, 6]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| TetCandidate {
+                tet_id: tet_id as u32,
+                component_id: 0,
+                node_ids,
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.1,
+            })
+            .collect::<Vec<_>>();
+
+        let groups = proper_connected_subcavity_groups(&[0, 1, 2, 3], &tets);
+
+        assert!(groups.contains(&vec![0, 1, 2]));
+        assert!(groups.contains(&vec![1, 2, 3]));
+        assert!(groups.iter().all(|group| group.len() < 4));
+        assert!(groups.iter().all(|group| group.len() >= 3));
     }
 
     #[test]
