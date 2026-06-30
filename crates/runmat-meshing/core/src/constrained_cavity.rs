@@ -3493,6 +3493,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
                             *candidate_index,
                             *face,
                             face_counts,
+                            selected,
                         )
                 })
                 .collect::<Vec<_>>();
@@ -3514,7 +3515,12 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             let mut candidates = (0..self.candidates.len())
                 .filter(|candidate_index| {
                     !selected.contains(candidate_index)
-                        && self.candidate_can_be_added_for_face(*candidate_index, face, face_counts)
+                        && self.candidate_can_be_added_for_face(
+                            *candidate_index,
+                            face,
+                            face_counts,
+                            selected,
+                        )
                 })
                 .collect::<Vec<_>>();
             self.sort_cover_candidates(&mut candidates);
@@ -3533,6 +3539,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         candidate_index: usize,
         face: [u32; 3],
         face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
     ) -> bool {
         self.candidate_faces[candidate_index].contains(&face)
             && self.candidate_faces[candidate_index]
@@ -3545,6 +3552,42 @@ impl<'a> BoundaryExactCoverSearch<'a> {
                         count < 2
                     }
                 })
+            && self.candidate_faces[candidate_index]
+                .iter()
+                .all(|candidate_face| {
+                    let count = face_counts.get(candidate_face).copied().unwrap_or(0);
+                    self.boundary_faces.contains(candidate_face)
+                        || count == 1
+                        || self.interior_face_has_future_mate(
+                            candidate_index,
+                            *candidate_face,
+                            face_counts,
+                            selected,
+                        )
+                })
+    }
+
+    fn interior_face_has_future_mate(
+        &self,
+        candidate_index: usize,
+        face: [u32; 3],
+        face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
+    ) -> bool {
+        (0..self.candidates.len()).any(|mate_index| {
+            !selected.contains(&mate_index)
+                && mate_index != candidate_index
+                && self.candidate_faces[mate_index].contains(&face)
+                && self.candidate_faces[mate_index].iter().all(|mate_face| {
+                    let count = face_counts.get(mate_face).copied().unwrap_or(0)
+                        + usize::from(self.candidate_faces[candidate_index].contains(mate_face));
+                    if self.boundary_faces.contains(mate_face) {
+                        count == 0
+                    } else {
+                        count < 2
+                    }
+                })
+        })
     }
 
     fn sort_cover_candidates(&self, candidates: &mut [usize]) {
@@ -5925,6 +5968,24 @@ mod tests {
                 aspect_ratio: 1.0,
                 exact_scaled_jacobian: 0.3,
             },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 8, 9],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [1, 6, 8, 10],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 6, 8, 11],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
         ];
         let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
         let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
@@ -5937,6 +5998,60 @@ mod tests {
             .expect("unpaired interior face should request connector candidates");
 
         assert_eq!(candidates, vec![2]);
+    }
+
+    #[test]
+    fn exact_cover_search_prunes_orphan_interior_faces() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: vec![ConstrainedCavityBoundaryFace {
+                node_ids: [0, 1, 2],
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: Vec::new(),
+            }],
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let candidates = vec![
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 2, 3],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.5,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 2, 4],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.4,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 4, 5],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [1, 2, 4, 6],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 2, 4, 7],
+                volume_m3: 0.2,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.3,
+            },
+        ];
+        let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+
+        let candidates = search
+            .next_cover_candidates(&BTreeMap::new(), &[])
+            .expect("boundary face should request cover candidates");
+
+        assert_eq!(candidates, vec![1]);
     }
 
     #[test]
