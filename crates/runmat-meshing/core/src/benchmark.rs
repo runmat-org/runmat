@@ -2319,6 +2319,7 @@ mod tests {
             diagnostic_boundary_cavity_reconnection_transitions,
             diagnostic_boundary_recovery_node_relocation_transitions,
             diagnostic_cavity_decomposition_transitions,
+            diagnostic_constrained_seed_star_refill_candidates,
             diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
             diagnostic_missing_face_owner_closure_transitions,
@@ -3151,6 +3152,15 @@ mod tests {
         let mut bad_face_boundary_split_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_constrained_seed_star_refill_rejected_by_reason =
             BTreeMap::<String, usize>::new();
+        let mut bad_constrained_seed_star_group_count = 0_usize;
+        let mut bad_constrained_seed_star_valid_cavity_count = 0_usize;
+        let mut bad_constrained_seed_star_interior_candidate_count = 0_usize;
+        let mut bad_constrained_seed_star_relaxed_candidate_count = 0_usize;
+        let mut bad_constrained_seed_star_relaxed_pass_count = 0_usize;
+        let mut bad_constrained_seed_star_max_min_quality = 0.0_f64;
+        let mut bad_constrained_seed_star_quality_bins = BTreeMap::<String, usize>::new();
+        let mut bad_constrained_seed_star_candidate_rejected_by_reason =
+            BTreeMap::<String, usize>::new();
         let mut bad_one_ring_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut bad_face_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
         let mut bad_one_ring_missing_face_topology =
@@ -3453,6 +3463,37 @@ mod tests {
             *bad_constrained_seed_star_refill_rejected_by_reason
                 .entry(constrained_seed_star_reason.to_string())
                 .or_default() += 1;
+            let constrained_seed_star_candidates =
+                diagnostic_constrained_seed_star_refill_candidates(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &node_index_adjacency,
+                    &interior_node_ids,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("constrained seed-star candidate diagnostic should evaluate");
+            bad_constrained_seed_star_group_count += constrained_seed_star_candidates.group_count;
+            bad_constrained_seed_star_valid_cavity_count +=
+                constrained_seed_star_candidates.valid_cavity_count;
+            bad_constrained_seed_star_interior_candidate_count +=
+                constrained_seed_star_candidates.interior_candidate_count;
+            bad_constrained_seed_star_relaxed_candidate_count +=
+                constrained_seed_star_candidates.relaxed_star_candidate_count;
+            bad_constrained_seed_star_relaxed_pass_count +=
+                constrained_seed_star_candidates.relaxed_star_pass_count;
+            bad_constrained_seed_star_max_min_quality = bad_constrained_seed_star_max_min_quality
+                .max(constrained_seed_star_candidates.max_min_scaled_jacobian);
+            for (bin, count) in constrained_seed_star_candidates.min_scaled_jacobian_bins {
+                *bad_constrained_seed_star_quality_bins
+                    .entry(bin)
+                    .or_default() += count;
+            }
+            for (reason, count) in constrained_seed_star_candidates.rejected_by_reason {
+                *bad_constrained_seed_star_candidate_rejected_by_reason
+                    .entry(reason)
+                    .or_default() += count;
+            }
             let (one_ring_missing_class, face_missing_class) =
                 diagnostic_small_cavity_missing_face_classes(
                     tet_index,
@@ -3566,6 +3607,17 @@ mod tests {
         eprintln!(
             "annular recovery bad_constrained_seed_star_refill_rejected_by_reason={:?}",
             bad_constrained_seed_star_refill_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
+            bad_constrained_seed_star_group_count,
+            bad_constrained_seed_star_valid_cavity_count,
+            bad_constrained_seed_star_interior_candidate_count,
+            bad_constrained_seed_star_relaxed_candidate_count,
+            bad_constrained_seed_star_relaxed_pass_count,
+            bad_constrained_seed_star_max_min_quality,
+            bad_constrained_seed_star_quality_bins,
+            bad_constrained_seed_star_candidate_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_small_cavity_missing_face_class one_ring={:?} face_closure={:?}",

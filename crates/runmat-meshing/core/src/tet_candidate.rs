@@ -20,6 +20,9 @@ use crate::{
     volume_candidate::{VolumeCandidateComponent, VolumeCandidateSet},
 };
 
+#[cfg(test)]
+use crate::constrained_cavity::diagnostic_interior_star_quality;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TetCandidateOptions {
     pub min_volume_m3: f64,
@@ -4382,6 +4385,19 @@ fn best_constrained_interior_seed_star_refill(
 }
 
 #[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ConstrainedSeedStarCandidateDiagnostic {
+    pub group_count: usize,
+    pub valid_cavity_count: usize,
+    pub interior_candidate_count: usize,
+    pub relaxed_star_candidate_count: usize,
+    pub relaxed_star_pass_count: usize,
+    pub max_min_scaled_jacobian: f64,
+    pub min_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub rejected_by_reason: BTreeMap<String, usize>,
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_constrained_seed_star_refill_rejection_reason(
     tet_index: usize,
     tets: &[TetCandidate],
@@ -4461,6 +4477,132 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_rejection_reason(
     } else {
         Ok("constrained_seed_star_refill_no_interior_seed")
     }
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    interior_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<ConstrainedSeedStarCandidateDiagnostic, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut diagnostic = ConstrainedSeedStarCandidateDiagnostic {
+        group_count: 0,
+        valid_cavity_count: 0,
+        interior_candidate_count: 0,
+        relaxed_star_candidate_count: 0,
+        relaxed_star_pass_count: 0,
+        max_min_scaled_jacobian: 0.0,
+        min_scaled_jacobian_bins: BTreeMap::new(),
+        rejected_by_reason: BTreeMap::new(),
+    };
+    for interior_node_id in tet
+        .node_ids
+        .into_iter()
+        .filter(|node_id| interior_node_ids.contains(node_id))
+    {
+        let Some(adjacent) = node_adjacency.get(&interior_node_id) else {
+            continue;
+        };
+        if !adjacent.contains(&tet_index) || adjacent.len() < 5 {
+            continue;
+        }
+        let mut candidate_groups = vec![adjacent.clone()];
+        candidate_groups.extend(
+            interior_seed_star_face_components(interior_node_id, adjacent, tets)
+                .into_iter()
+                .filter(|component| component.len() != adjacent.len()),
+        );
+        let mut seen_groups = BTreeSet::<Vec<usize>>::new();
+        for group in candidate_groups {
+            if !seen_groups.insert(group.clone()) || !group.contains(&tet_index) || group.len() < 5
+            {
+                continue;
+            }
+            diagnostic.group_count += 1;
+            let cavity = match constrained_cavity_from_selected_tets_with_anchor_trim(
+                tets,
+                &group,
+                tet_index,
+                vec![],
+            ) {
+                Ok(Some(cavity)) => cavity,
+                Ok(None) => {
+                    *diagnostic
+                        .rejected_by_reason
+                        .entry("empty_trimmed_cavity".to_string())
+                        .or_default() += 1;
+                    continue;
+                }
+                Err(err) => {
+                    *diagnostic
+                        .rejected_by_reason
+                        .entry(
+                            diagnostic_constrained_seed_star_cavity_extraction_bucket(&err)
+                                .to_string(),
+                        )
+                        .or_default() += 1;
+                    continue;
+                }
+            };
+            diagnostic.valid_cavity_count += 1;
+            let boundary_node_ids = cavity
+                .boundary_faces
+                .iter()
+                .flat_map(|face| face.node_ids)
+                .collect::<BTreeSet<_>>();
+            let boundary_nodes = boundary_node_ids
+                .iter()
+                .map(|node_id| {
+                    Ok(ConstrainedCavityNode {
+                        node_id: *node_id,
+                        coordinates_m: *node_points
+                            .get(node_id)
+                            .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                    })
+                })
+                .collect::<Result<Vec<_>, TetCandidateError>>()?;
+            let interior_candidates = constrained_seed_star_refill_interior_candidates(
+                tets,
+                tet_index,
+                &group,
+                &boundary_node_ids,
+                node_points,
+            )?;
+            diagnostic.interior_candidate_count += interior_candidates.len();
+            let star_diagnostic = diagnostic_interior_star_quality(
+                &cavity,
+                &boundary_nodes,
+                &interior_candidates,
+                ConstrainedCavityRefillOptions {
+                    min_volume_m3: options.min_volume_m3,
+                    max_aspect_ratio: options.max_aspect_ratio,
+                    min_scaled_jacobian: options.min_scaled_jacobian,
+                    volume_relative_tolerance: 1.0e-9,
+                    min_protected_node_distance_m: 0.0,
+                },
+            )
+            .map_err(|_| TetCandidateError::InvalidOptions)?;
+            diagnostic.relaxed_star_candidate_count += star_diagnostic.candidate_count;
+            diagnostic.relaxed_star_pass_count += star_diagnostic.pass_count;
+            diagnostic.max_min_scaled_jacobian = diagnostic
+                .max_min_scaled_jacobian
+                .max(star_diagnostic.max_min_scaled_jacobian);
+            for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
+                *diagnostic.min_scaled_jacobian_bins.entry(bin).or_default() += count;
+            }
+            for (reason, count) in star_diagnostic.rejected_by_reason {
+                *diagnostic
+                    .rejected_by_reason
+                    .entry(reason.to_string())
+                    .or_default() += count;
+            }
+        }
+    }
+    Ok(diagnostic)
 }
 
 #[cfg(test)]
@@ -13674,6 +13816,24 @@ mod tests {
         )
         .expect("diagnostic should evaluate");
         assert_eq!(reason, "constrained_seed_star_refill_reconnectable");
+        let candidate_diagnostic = diagnostic_constrained_seed_star_refill_candidates(
+            0,
+            &tets,
+            &node_adjacency,
+            &interior_node_ids,
+            &node_points,
+            options,
+        )
+        .expect("candidate diagnostic should evaluate");
+        assert_eq!(candidate_diagnostic.group_count, 1);
+        assert_eq!(candidate_diagnostic.valid_cavity_count, 1);
+        assert!(candidate_diagnostic.interior_candidate_count >= 2);
+        assert!(candidate_diagnostic.relaxed_star_candidate_count >= 1);
+        assert!(candidate_diagnostic.relaxed_star_pass_count >= 1);
+        assert!(
+            candidate_diagnostic.max_min_scaled_jacobian >= options.min_scaled_jacobian,
+            "diagnostic should expose the relaxed candidate quality"
+        );
 
         let (indices, candidates, inserted_nodes) = best_constrained_interior_seed_star_refill(
             0,
