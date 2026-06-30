@@ -3840,12 +3840,16 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_local_cap_failed_faces =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_candidate_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_rejected_by_reason =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_max_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_local_cap_max_failed_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_local_cap_failed_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_failed_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes =
@@ -4301,9 +4305,19 @@ mod tests {
                                     *trimmed_seed_star_shell_trim_local_cap_candidates
                                         .entry(local_cap.candidate_count)
                                         .or_default() += 1;
+                                    for (source, count) in local_cap.candidate_source_bins {
+                                        *trimmed_seed_star_shell_trim_local_cap_candidate_source_bins
+                                            .entry(source)
+                                            .or_default() += count;
+                                    }
                                     for (bin, count) in local_cap.failed_face_scaled_jacobian_bins {
                                         *trimmed_seed_star_shell_trim_local_cap_failed_quality_bins
                                             .entry(bin)
+                                            .or_default() += count;
+                                    }
+                                    for (source, count) in local_cap.failed_face_source_bins {
+                                        *trimmed_seed_star_shell_trim_local_cap_failed_source_bins
+                                            .entry(source)
                                             .or_default() += count;
                                     }
                                     for (reason, count) in local_cap.rejected_by_reason {
@@ -5140,14 +5154,16 @@ mod tests {
             trimmed_seed_star_shell_trim_patch_steiner_exact_cover_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_local_cap missing_faces={:?} pass_faces={:?} failed_faces={:?} candidates={:?} max_quality={:.6} max_failed_quality={:.6} failed_quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_local_cap missing_faces={:?} pass_faces={:?} failed_faces={:?} candidates={:?} candidate_sources={:?} max_quality={:.6} max_failed_quality={:.6} failed_quality_bins={:?} failed_sources={:?} rejected_by_reason={:?}",
             trimmed_seed_star_shell_trim_local_cap_missing_faces,
             trimmed_seed_star_shell_trim_local_cap_pass_faces,
             trimmed_seed_star_shell_trim_local_cap_failed_faces,
             trimmed_seed_star_shell_trim_local_cap_candidates,
+            trimmed_seed_star_shell_trim_local_cap_candidate_source_bins,
             trimmed_seed_star_shell_trim_local_cap_max_quality,
             trimmed_seed_star_shell_trim_local_cap_max_failed_quality,
             trimmed_seed_star_shell_trim_local_cap_failed_quality_bins,
+            trimmed_seed_star_shell_trim_local_cap_failed_source_bins,
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(

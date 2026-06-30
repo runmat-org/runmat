@@ -178,9 +178,11 @@ pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
     pub pass_face_count: usize,
     pub failed_face_count: usize,
     pub candidate_count: usize,
+    pub candidate_source_bins: BTreeMap<&'static str, usize>,
     pub max_scaled_jacobian: f64,
     pub max_failed_face_scaled_jacobian: f64,
     pub failed_face_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub failed_face_source_bins: BTreeMap<&'static str, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -4270,9 +4272,11 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         pass_face_count: 0,
         failed_face_count: 0,
         candidate_count: 0,
+        candidate_source_bins: BTreeMap::new(),
         max_scaled_jacobian: 0.0,
         max_failed_face_scaled_jacobian: 0.0,
         failed_face_scaled_jacobian_bins: BTreeMap::new(),
+        failed_face_source_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     if missing_faces.is_empty() {
@@ -4288,6 +4292,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         };
         let mut face_passed = false;
         let mut best_failed_face_quality = 0.0_f64;
+        let mut best_failed_face_source = None::<&'static str>;
         for apex in
             local_cap_apex_candidates(face, surface_point, cavity_centroid, &boundary_node_map)
         {
@@ -4295,7 +4300,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 boundary_node_map[&face[0]],
                 boundary_node_map[&face[1]],
                 boundary_node_map[&face[2]],
-                apex,
+                apex.coordinates_m,
             ];
             if point_in_closed_triangle_surface(
                 tet_centroid(tet_points),
@@ -4313,6 +4318,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 next_node_id = next_node_id.saturating_add(1);
             }
             diagnostic.candidate_count += 1;
+            *diagnostic
+                .candidate_source_bins
+                .entry(apex.source)
+                .or_default() += 1;
             let exact_scaled_jacobian = tet_scaled_jacobian(tet_points);
             match raw_refill_tet_with_rejection_reason(
                 [face[0], face[1], face[2], next_node_id],
@@ -4327,8 +4336,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 }
                 Err(reason) => {
                     if exact_scaled_jacobian.is_finite() {
-                        best_failed_face_quality =
-                            best_failed_face_quality.max(exact_scaled_jacobian);
+                        if exact_scaled_jacobian > best_failed_face_quality {
+                            best_failed_face_quality = exact_scaled_jacobian;
+                            best_failed_face_source = Some(apex.source);
+                        }
                     }
                     *diagnostic.rejected_by_reason.entry(reason).or_default() += 1;
                 }
@@ -4345,6 +4356,12 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 .failed_face_scaled_jacobian_bins
                 .entry(diagnostic_scaled_jacobian_bin(best_failed_face_quality))
                 .or_default() += 1;
+            if let Some(source) = best_failed_face_source {
+                *diagnostic
+                    .failed_face_source_bins
+                    .entry(source)
+                    .or_default() += 1;
+            }
         }
     }
     Ok(diagnostic)
@@ -4734,7 +4751,7 @@ fn best_local_cap_for_face(
                 node_coordinates[&face[0]],
                 node_coordinates[&face[1]],
                 node_coordinates[&face[2]],
-                apex,
+                apex.coordinates_m,
             ];
             if point_in_closed_triangle_surface(
                 tet_centroid(tet_points),
@@ -4750,7 +4767,7 @@ fn best_local_cap_for_face(
                 options,
             )
             .ok()?;
-            Some((apex, tet))
+            Some((apex.coordinates_m, tet))
         })
         .max_by(|left, right| {
             left.1
@@ -4758,6 +4775,13 @@ fn best_local_cap_for_face(
                 .total_cmp(&right.1.exact_scaled_jacobian)
                 .then_with(|| right.1.aspect_ratio.total_cmp(&left.1.aspect_ratio))
         })
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+struct LocalCapApexCandidate {
+    coordinates_m: [f64; 3],
+    source: &'static str,
 }
 
 #[cfg(test)]
@@ -4822,14 +4846,17 @@ fn local_cap_apex_candidates(
     surface_point: [f64; 3],
     cavity_centroid: [f64; 3],
     node_coordinates: &BTreeMap<u32, [f64; 3]>,
-) -> Vec<[f64; 3]> {
-    let mut candidates = Vec::<[f64; 3]>::new();
+) -> Vec<LocalCapApexCandidate> {
+    let mut candidates = Vec::<LocalCapApexCandidate>::new();
     for fraction in [0.03, 0.06, 0.1, 0.16, 0.25, 0.38, 0.55, 0.75] {
-        candidates.push([
-            surface_point[0] + (cavity_centroid[0] - surface_point[0]) * fraction,
-            surface_point[1] + (cavity_centroid[1] - surface_point[1]) * fraction,
-            surface_point[2] + (cavity_centroid[2] - surface_point[2]) * fraction,
-        ]);
+        candidates.push(LocalCapApexCandidate {
+            coordinates_m: [
+                surface_point[0] + (cavity_centroid[0] - surface_point[0]) * fraction,
+                surface_point[1] + (cavity_centroid[1] - surface_point[1]) * fraction,
+                surface_point[2] + (cavity_centroid[2] - surface_point[2]) * fraction,
+            ],
+            source: "centroid_inward",
+        });
     }
 
     let Some(first) = node_coordinates.get(&face[0]).copied() else {
@@ -4865,13 +4892,21 @@ fn local_cap_apex_candidates(
         unit_normal,
         [-unit_normal[0], -unit_normal[1], -unit_normal[2]],
     ] {
+        let source = if direction == unit_normal {
+            "normal_positive"
+        } else {
+            "normal_negative"
+        };
         for scale in [0.08, 0.14, 0.22, 0.35, 0.55, 0.85, 1.25] {
             let distance = max_edge_length * scale;
-            candidates.push([
-                surface_point[0] + direction[0] * distance,
-                surface_point[1] + direction[1] * distance,
-                surface_point[2] + direction[2] * distance,
-            ]);
+            candidates.push(LocalCapApexCandidate {
+                coordinates_m: [
+                    surface_point[0] + direction[0] * distance,
+                    surface_point[1] + direction[1] * distance,
+                    surface_point[2] + direction[2] * distance,
+                ],
+                source,
+            });
         }
     }
     candidates
@@ -6382,9 +6417,11 @@ mod tests {
         assert_eq!(diagnostic.pass_face_count, 0);
         assert_eq!(diagnostic.failed_face_count, 0);
         assert_eq!(diagnostic.candidate_count, 0);
+        assert!(diagnostic.candidate_source_bins.is_empty());
         assert_eq!(diagnostic.max_scaled_jacobian, 0.0);
         assert_eq!(diagnostic.max_failed_face_scaled_jacobian, 0.0);
         assert!(diagnostic.failed_face_scaled_jacobian_bins.is_empty());
+        assert!(diagnostic.failed_face_source_bins.is_empty());
         assert!(diagnostic.rejected_by_reason.is_empty());
     }
 
