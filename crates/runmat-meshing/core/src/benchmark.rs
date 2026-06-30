@@ -3670,12 +3670,16 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_worst_corner_bins =
             BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_completion_rejected_cap_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_completion_max_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_completion_split_cap_apex_source_bins =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_edge_split_cap_passes = 0_usize;
@@ -3684,12 +3688,16 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_edge_split_cap_worst_corner_bins =
             BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_completion_edge_split_cap_apex_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_three_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_three_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_completion_max_three_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_three_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_three_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_completion_three_edge_split_cap_apex_source_bins =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_candidate_count = 0_usize;
@@ -3731,12 +3739,16 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_worst_corner_bins =
             BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_rejected_cap_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_max_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_completion_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_split_cap_apex_source_bins =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_passes = 0_usize;
@@ -3745,12 +3757,16 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_worst_corner_bins =
             BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_apex_source_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_max_three_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_apex_source_bins =
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_rejected_by_reason =
             BTreeMap::<String, usize>::new();
@@ -4161,6 +4177,11 @@ mod tests {
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
+                                                accumulate_node_source_histogram(
+                                                    &mut trimmed_seed_star_shell_trim_completion_rejected_cap_source_bins,
+                                                    diagnostic.rejected_cap_node_ids,
+                                                    &node_sources,
+                                                );
                                                 trimmed_seed_star_shell_trim_completion_split_cap_candidates +=
                                                     diagnostic.split_cap_candidate_count;
                                                 trimmed_seed_star_shell_trim_completion_split_cap_passes +=
@@ -4182,6 +4203,11 @@ mod tests {
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
+                                                accumulate_node_source_histogram(
+                                                    &mut trimmed_seed_star_shell_trim_completion_split_cap_apex_source_bins,
+                                                    diagnostic.split_cap_apex_limited_node_ids,
+                                                    &node_sources,
+                                                );
                                                 trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates +=
                                                     diagnostic.edge_split_cap_candidate_count;
                                                 trimmed_seed_star_shell_trim_completion_edge_split_cap_passes +=
@@ -4203,6 +4229,11 @@ mod tests {
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
+                                                accumulate_node_source_histogram(
+                                                    &mut trimmed_seed_star_shell_trim_completion_edge_split_cap_apex_source_bins,
+                                                    diagnostic.edge_split_cap_apex_limited_node_ids,
+                                                    &node_sources,
+                                                );
                                                 trimmed_seed_star_shell_trim_completion_three_edge_split_cap_candidates +=
                                                     diagnostic.three_edge_split_cap_candidate_count;
                                                 trimmed_seed_star_shell_trim_completion_three_edge_split_cap_passes +=
@@ -4227,6 +4258,12 @@ mod tests {
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
+                                                accumulate_node_source_histogram(
+                                                    &mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_apex_source_bins,
+                                                    diagnostic
+                                                        .three_edge_split_cap_apex_limited_node_ids,
+                                                    &node_sources,
+                                                );
                                                 for (reason, count) in diagnostic.rejected_by_reason
                                                 {
                                                     *trimmed_seed_star_shell_trim_completion_rejected_by_reason
@@ -4422,6 +4459,11 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    accumulate_node_source_histogram(
+                                        &mut trimmed_seed_star_completion_rejected_cap_source_bins,
+                                        diagnostic.rejected_cap_node_ids,
+                                        &node_sources,
+                                    );
                                     trimmed_seed_star_completion_split_cap_candidates +=
                                         diagnostic.split_cap_candidate_count;
                                     trimmed_seed_star_completion_split_cap_passes +=
@@ -4441,6 +4483,11 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    accumulate_node_source_histogram(
+                                        &mut trimmed_seed_star_completion_split_cap_apex_source_bins,
+                                        diagnostic.split_cap_apex_limited_node_ids,
+                                        &node_sources,
+                                    );
                                     trimmed_seed_star_completion_edge_split_cap_candidates +=
                                         diagnostic.edge_split_cap_candidate_count;
                                     trimmed_seed_star_completion_edge_split_cap_passes +=
@@ -4462,6 +4509,11 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    accumulate_node_source_histogram(
+                                        &mut trimmed_seed_star_completion_edge_split_cap_apex_source_bins,
+                                        diagnostic.edge_split_cap_apex_limited_node_ids,
+                                        &node_sources,
+                                    );
                                     trimmed_seed_star_completion_three_edge_split_cap_candidates +=
                                         diagnostic.three_edge_split_cap_candidate_count;
                                     trimmed_seed_star_completion_three_edge_split_cap_passes +=
@@ -4486,6 +4538,11 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    accumulate_node_source_histogram(
+                                        &mut trimmed_seed_star_completion_three_edge_split_cap_apex_source_bins,
+                                        diagnostic.three_edge_split_cap_apex_limited_node_ids,
+                                        &node_sources,
+                                    );
                                     for (reason, count) in diagnostic.rejected_by_reason {
                                         *trimmed_seed_star_completion_rejected_by_reason
                                             .entry(reason.to_string())
@@ -4637,7 +4694,7 @@ mod tests {
             trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} rejected_cap_source_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} split_cap_apex_source_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} edge_split_cap_apex_source_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_apex_source_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_completion_reason,
             trimmed_seed_star_completion_missing_faces,
             trimmed_seed_star_completion_cap_candidates,
@@ -4648,21 +4705,25 @@ mod tests {
             trimmed_seed_star_completion_max_cap_height_ratio,
             trimmed_seed_star_completion_cap_height_ratio_bins,
             trimmed_seed_star_completion_worst_corner_bins,
+            trimmed_seed_star_completion_rejected_cap_source_bins,
             trimmed_seed_star_completion_split_cap_candidates,
             trimmed_seed_star_completion_split_cap_passes,
             trimmed_seed_star_completion_max_split_cap_quality,
             trimmed_seed_star_completion_split_cap_quality_bins,
             trimmed_seed_star_completion_split_cap_worst_corner_bins,
+            trimmed_seed_star_completion_split_cap_apex_source_bins,
             trimmed_seed_star_completion_edge_split_cap_candidates,
             trimmed_seed_star_completion_edge_split_cap_passes,
             trimmed_seed_star_completion_max_edge_split_cap_quality,
             trimmed_seed_star_completion_edge_split_cap_quality_bins,
             trimmed_seed_star_completion_edge_split_cap_worst_corner_bins,
+            trimmed_seed_star_completion_edge_split_cap_apex_source_bins,
             trimmed_seed_star_completion_three_edge_split_cap_candidates,
             trimmed_seed_star_completion_three_edge_split_cap_passes,
             trimmed_seed_star_completion_max_three_edge_split_cap_quality,
             trimmed_seed_star_completion_three_edge_split_cap_quality_bins,
             trimmed_seed_star_completion_three_edge_split_cap_worst_corner_bins,
+            trimmed_seed_star_completion_three_edge_split_cap_apex_source_bins,
             trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
@@ -4698,7 +4759,7 @@ mod tests {
             trimmed_seed_star_shell_trim_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} rejected_cap_source_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} split_cap_apex_source_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} edge_split_cap_apex_source_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_apex_source_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_shell_trim_completion_reason,
             trimmed_seed_star_shell_trim_completion_missing_faces,
             trimmed_seed_star_shell_trim_completion_cap_candidates,
@@ -4709,21 +4770,25 @@ mod tests {
             trimmed_seed_star_shell_trim_completion_max_cap_height_ratio,
             trimmed_seed_star_shell_trim_completion_cap_height_ratio_bins,
             trimmed_seed_star_shell_trim_completion_worst_corner_bins,
+            trimmed_seed_star_shell_trim_completion_rejected_cap_source_bins,
             trimmed_seed_star_shell_trim_completion_split_cap_candidates,
             trimmed_seed_star_shell_trim_completion_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_split_cap_quality_bins,
             trimmed_seed_star_shell_trim_completion_split_cap_worst_corner_bins,
+            trimmed_seed_star_shell_trim_completion_split_cap_apex_source_bins,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_edge_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_quality_bins,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_worst_corner_bins,
+            trimmed_seed_star_shell_trim_completion_edge_split_cap_apex_source_bins,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_candidates,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_three_edge_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_quality_bins,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_worst_corner_bins,
+            trimmed_seed_star_shell_trim_completion_three_edge_split_cap_apex_source_bins,
             trimmed_seed_star_shell_trim_completion_rejected_by_reason,
         );
         eprintln!(
@@ -4808,6 +4873,21 @@ mod tests {
             TetCandidateNodeSource::Surface => "surface",
             TetCandidateNodeSource::BoundaryRecovery => "boundary_recovery",
             TetCandidateNodeSource::InteriorSeed => "interior_seed",
+        }
+    }
+
+    fn accumulate_node_source_histogram(
+        target: &mut BTreeMap<&'static str, usize>,
+        node_ids: BTreeMap<u32, usize>,
+        node_sources: &BTreeMap<u32, TetCandidateNodeSource>,
+    ) {
+        for (node_id, count) in node_ids {
+            let Some(source) = node_sources.get(&node_id).copied() else {
+                continue;
+            };
+            *target
+                .entry(diagnostic_node_source_label(source))
+                .or_default() += count;
         }
     }
 
