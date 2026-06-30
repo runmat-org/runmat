@@ -1856,7 +1856,7 @@ fn boundary_face_split_node_candidates(
     face: [u32; 3],
     boundary_nodes: &BTreeMap<u32, Point3>,
 ) -> Vec<ConstrainedCavityNode> {
-    [
+    let mut barycentric_candidates = [
         [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
         [0.5, 0.25, 0.25],
         [0.25, 0.5, 0.25],
@@ -1872,8 +1872,32 @@ fn boundary_face_split_node_candidates(
         [0.25, 0.05, 0.70],
     ]
     .into_iter()
-    .map(|barycentric| boundary_face_split_node(face, boundary_nodes, barycentric))
-    .collect()
+    .collect::<Vec<_>>();
+    for first in 1..10 {
+        for second in 1..(10 - first) {
+            let third = 10 - first - second;
+            if third == 0 {
+                continue;
+            }
+            let barycentric = [
+                first as f64 / 10.0,
+                second as f64 / 10.0,
+                third as f64 / 10.0,
+            ];
+            if !barycentric_candidates.iter().any(|candidate| {
+                candidate
+                    .iter()
+                    .zip(barycentric)
+                    .all(|(left, right)| (*left - right).abs() <= 1.0e-12)
+            }) {
+                barycentric_candidates.push(barycentric);
+            }
+        }
+    }
+    barycentric_candidates
+        .into_iter()
+        .map(|barycentric| boundary_face_split_node(face, boundary_nodes, barycentric))
+        .collect()
 }
 
 fn boundary_face_split_node(
@@ -3345,6 +3369,30 @@ mod tests {
             "split search should improve on the centroid split: selected={selected_min_quality} centroid={centroid_min_quality}"
         );
         assert_ne!(inserted_node.coordinates_m, centroid_node.coordinates_m);
+    }
+
+    #[test]
+    fn boundary_face_split_candidates_include_bounded_interior_lattice() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+
+        let candidates = boundary_face_split_node_candidates([0, 1, 2], &boundary_nodes);
+
+        assert!(candidates.len() >= 40);
+        assert!(candidates.len() <= 64);
+        assert!(candidates.iter().all(|node| node.node_id == 4));
+        assert!(candidates.iter().all(|node| {
+            node.coordinates_m[0] > 0.0
+                && node.coordinates_m[1] > 0.0
+                && node.coordinates_m[2] == 0.0
+                && node.coordinates_m[0] + node.coordinates_m[1] < 1.0
+        }));
+        assert!(candidates.iter().any(|node| {
+            (node.coordinates_m[0] - 0.1).abs() <= 1.0e-12
+                && (node.coordinates_m[1] - 0.1).abs() <= 1.0e-12
+        }));
     }
 
     #[test]
