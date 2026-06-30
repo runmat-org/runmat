@@ -120,6 +120,9 @@ pub(crate) struct BoundaryExactCoverDiagnostic {
     pub boundary_node_count: usize,
     pub boundary_face_count: usize,
     pub candidate_count: usize,
+    pub zero_candidate_boundary_face_count: usize,
+    pub min_boundary_face_candidate_count: usize,
+    pub max_boundary_face_candidate_count: usize,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3313,6 +3316,9 @@ pub(crate) fn diagnostic_boundary_exact_cover(
         boundary_node_count: node_ids.len(),
         boundary_face_count: cavity.boundary_faces.len(),
         candidate_count: 0,
+        zero_candidate_boundary_face_count: 0,
+        min_boundary_face_candidate_count: 0,
+        max_boundary_face_candidate_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -3368,6 +3374,27 @@ pub(crate) fn diagnostic_boundary_exact_cover(
         }
     }
     diagnostic.candidate_count = candidates.len();
+    let face_candidate_counts = boundary_faces
+        .iter()
+        .map(|face| {
+            candidates
+                .iter()
+                .filter(|candidate| {
+                    tet_faces(candidate.node_ids)
+                        .map(sorted_face)
+                        .contains(face)
+                })
+                .count()
+        })
+        .collect::<Vec<_>>();
+    diagnostic.zero_candidate_boundary_face_count = face_candidate_counts
+        .iter()
+        .filter(|count| **count == 0)
+        .count();
+    diagnostic.min_boundary_face_candidate_count =
+        face_candidate_counts.iter().copied().min().unwrap_or(0);
+    diagnostic.max_boundary_face_candidate_count =
+        face_candidate_counts.iter().copied().max().unwrap_or(0);
     if candidates.is_empty() {
         diagnostic.reason = "no_candidate_tets";
         return Ok(diagnostic);
@@ -4474,6 +4501,12 @@ mod tests {
         assert_eq!(diagnostic.boundary_node_count, 5);
         assert_eq!(diagnostic.boundary_face_count, 6);
         assert!(diagnostic.candidate_count > 0);
+        assert_eq!(diagnostic.zero_candidate_boundary_face_count, 0);
+        assert!(diagnostic.min_boundary_face_candidate_count > 0);
+        assert!(
+            diagnostic.max_boundary_face_candidate_count
+                >= diagnostic.min_boundary_face_candidate_count
+        );
         assert!(diagnostic.search_attempt_count > 0);
         assert!(diagnostic.found_cover);
         assert_eq!(diagnostic.reason, "cover_found");

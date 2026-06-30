@@ -3753,6 +3753,12 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_exact_cover_candidates =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_zero_face_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_min_face_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_max_face_candidates =
+            BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_exact_cover_selected_tets =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_exact_cover_search_attempts =
@@ -4057,6 +4063,15 @@ mod tests {
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_exact_cover_candidates
                                         .entry(exact_cover.candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_zero_face_candidates
+                                        .entry(exact_cover.zero_candidate_boundary_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_min_face_candidates
+                                        .entry(exact_cover.min_boundary_face_candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_max_face_candidates
+                                        .entry(exact_cover.max_boundary_face_candidate_count)
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_exact_cover_selected_tets
                                         .entry(exact_cover.selected_tet_count)
@@ -4660,9 +4675,12 @@ mod tests {
             trimmed_seed_star_shell_trim_interior_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_exact_cover boundary_nodes={:?} candidates={:?} selected_tets={:?} search_attempts={:?} found={} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_exact_cover boundary_nodes={:?} candidates={:?} zero_face_candidates={:?} min_face_candidates={:?} max_face_candidates={:?} selected_tets={:?} search_attempts={:?} found={} reason={:?}",
             trimmed_seed_star_shell_trim_exact_cover_boundary_nodes,
             trimmed_seed_star_shell_trim_exact_cover_candidates,
+            trimmed_seed_star_shell_trim_exact_cover_zero_face_candidates,
+            trimmed_seed_star_shell_trim_exact_cover_min_face_candidates,
+            trimmed_seed_star_shell_trim_exact_cover_max_face_candidates,
             trimmed_seed_star_shell_trim_exact_cover_selected_tets,
             trimmed_seed_star_shell_trim_exact_cover_search_attempts,
             trimmed_seed_star_shell_trim_exact_cover_found,
