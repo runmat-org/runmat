@@ -5315,6 +5315,11 @@ fn local_cap_apex_candidates(
     if !max_edge_length.is_finite() || max_edge_length <= 0.0 {
         return candidates;
     }
+    let inward = [
+        cavity_centroid[0] - surface_point[0],
+        cavity_centroid[1] - surface_point[1],
+        cavity_centroid[2] - surface_point[2],
+    ];
     for direction in [
         unit_normal,
         [-unit_normal[0], -unit_normal[1], -unit_normal[2]],
@@ -5346,6 +5351,69 @@ fn local_cap_apex_candidates(
                 "normal_optimized_negative"
             },
         ));
+    }
+    if let Some(inward_direction) = normalize(inward) {
+        let in_plane_targets = [
+            first,
+            second,
+            third,
+            midpoint(first, second),
+            midpoint(second, third),
+            midpoint(third, first),
+        ];
+        let mut seen_directions = Vec::<[f64; 3]>::new();
+        for target in in_plane_targets {
+            let projected = [
+                target[0] - surface_point[0],
+                target[1] - surface_point[1],
+                target[2] - surface_point[2],
+            ];
+            let normal_projection = dot(projected, unit_normal);
+            let in_plane = [
+                projected[0] - unit_normal[0] * normal_projection,
+                projected[1] - unit_normal[1] * normal_projection,
+                projected[2] - unit_normal[2] * normal_projection,
+            ];
+            let Some(in_plane_direction) = normalize(in_plane) else {
+                continue;
+            };
+            if seen_directions
+                .iter()
+                .any(|seen| dot(*seen, in_plane_direction).abs() > 0.98)
+            {
+                continue;
+            }
+            seen_directions.push(in_plane_direction);
+            for inward_scale in [0.08, 0.16, 0.28, 0.42] {
+                for lateral_scale in [0.12, 0.24, 0.38] {
+                    candidates.push(LocalCapApexCandidate {
+                        coordinates_m: [
+                            surface_point[0]
+                                + inward_direction[0] * max_edge_length * inward_scale
+                                + in_plane_direction[0] * max_edge_length * lateral_scale,
+                            surface_point[1]
+                                + inward_direction[1] * max_edge_length * inward_scale
+                                + in_plane_direction[1] * max_edge_length * lateral_scale,
+                            surface_point[2]
+                                + inward_direction[2] * max_edge_length * inward_scale
+                                + in_plane_direction[2] * max_edge_length * lateral_scale,
+                        ],
+                        source: "inplane_inward",
+                    });
+                    candidates.push(LocalCapApexCandidate {
+                        coordinates_m: [
+                            surface_point[0] + inward_direction[0] * max_edge_length * inward_scale
+                                - in_plane_direction[0] * max_edge_length * lateral_scale,
+                            surface_point[1] + inward_direction[1] * max_edge_length * inward_scale
+                                - in_plane_direction[1] * max_edge_length * lateral_scale,
+                            surface_point[2] + inward_direction[2] * max_edge_length * inward_scale
+                                - in_plane_direction[2] * max_edge_length * lateral_scale,
+                        ],
+                        source: "inplane_inward",
+                    });
+                }
+            }
+        }
     }
     candidates
 }
@@ -5400,12 +5468,26 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 }
 
 #[cfg(test)]
+fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+#[cfg(test)]
 fn normalize(vector: [f64; 3]) -> Option<[f64; 3]> {
     let norm = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
     if !norm.is_finite() || norm <= 0.0 {
         return None;
     }
     Some([vector[0] / norm, vector[1] / norm, vector[2] / norm])
+}
+
+#[cfg(test)]
+fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        (left[0] + right[0]) * 0.5,
+        (left[1] + right[1]) * 0.5,
+        (left[2] + right[2]) * 0.5,
+    ]
 }
 
 #[cfg(test)]
@@ -6945,6 +7027,28 @@ mod tests {
 
         assert!(best_optimized_positive >= best_discrete_positive);
         assert!(best_optimized_negative >= best_discrete_negative);
+    }
+
+    #[test]
+    fn local_cap_apex_candidates_include_inplane_inward_offsets() {
+        let face = [0, 1, 2];
+        let nodes = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.2, 0.8, 0.0]),
+        ]);
+        let surface_point = face_centroid(face, &nodes).expect("face should have a centroid");
+        let candidates = local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes);
+        let inplane_candidates = candidates
+            .iter()
+            .filter(|candidate| candidate.source == "inplane_inward")
+            .collect::<Vec<_>>();
+
+        assert!(!inplane_candidates.is_empty());
+        assert!(inplane_candidates.iter().any(|candidate| {
+            candidate.coordinates_m[2] > surface_point[2]
+                && (candidate.coordinates_m[0] - surface_point[0]).abs() > 1.0e-6
+        }));
     }
 
     #[test]
