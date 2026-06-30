@@ -98,6 +98,7 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub rejected_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub max_rejected_cap_height_ratio: f64,
     pub rejected_cap_height_ratio_bins: BTreeMap<String, usize>,
+    pub rejected_scaled_jacobian_worst_corner_bins: BTreeMap<&'static str, usize>,
     pub split_cap_candidate_count: usize,
     pub split_cap_pass_count: usize,
     pub max_split_cap_scaled_jacobian: f64,
@@ -1109,6 +1110,7 @@ pub(crate) fn diagnostic_boundary_node_completion(
         rejected_scaled_jacobian_bins: BTreeMap::new(),
         max_rejected_cap_height_ratio: 0.0,
         rejected_cap_height_ratio_bins: BTreeMap::new(),
+        rejected_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         split_cap_candidate_count: 0,
         split_cap_pass_count: 0,
         max_split_cap_scaled_jacobian: 0.0,
@@ -1152,6 +1154,12 @@ pub(crate) fn diagnostic_boundary_node_completion(
                 .entry(bin)
                 .or_default() += count;
         }
+        for (bin, count) in diagnostic.rejected_scaled_jacobian_worst_corner_bins {
+            *aggregate
+                .rejected_scaled_jacobian_worst_corner_bins
+                .entry(bin)
+                .or_default() += count;
+        }
         aggregate.split_cap_candidate_count += diagnostic.split_cap_candidate_count;
         aggregate.split_cap_pass_count += diagnostic.split_cap_pass_count;
         aggregate.max_split_cap_scaled_jacobian = aggregate
@@ -1190,6 +1198,7 @@ pub(crate) fn diagnostic_boundary_node_completion(
             rejected_scaled_jacobian_bins: BTreeMap::new(),
             max_rejected_cap_height_ratio: 0.0,
             rejected_cap_height_ratio_bins: BTreeMap::new(),
+            rejected_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
             split_cap_candidate_count: 0,
             split_cap_pass_count: 0,
             max_split_cap_scaled_jacobian: 0.0,
@@ -1218,6 +1227,7 @@ fn diagnostic_boundary_face_completion(
     let mut rejected_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut max_rejected_cap_height_ratio = 0.0_f64;
     let mut rejected_cap_height_ratio_bins = BTreeMap::<String, usize>::new();
+    let mut rejected_scaled_jacobian_worst_corner_bins = BTreeMap::<&'static str, usize>::new();
     let mut split_cap_candidate_count = 0_usize;
     let mut split_cap_pass_count = 0_usize;
     let mut max_split_cap_scaled_jacobian = 0.0_f64;
@@ -1257,6 +1267,9 @@ fn diagnostic_boundary_face_completion(
                         max_rejected_scaled_jacobian.max(exact_scaled_jacobian);
                     *rejected_scaled_jacobian_bins
                         .entry(diagnostic_scaled_jacobian_bin(exact_scaled_jacobian))
+                        .or_default() += 1;
+                    *rejected_scaled_jacobian_worst_corner_bins
+                        .entry(diagnostic_scaled_jacobian_worst_corner_label(points))
                         .or_default() += 1;
                 }
                 let cap_height_ratio =
@@ -1304,6 +1317,7 @@ fn diagnostic_boundary_face_completion(
         rejected_scaled_jacobian_bins,
         max_rejected_cap_height_ratio,
         rejected_cap_height_ratio_bins,
+        rejected_scaled_jacobian_worst_corner_bins,
         split_cap_candidate_count,
         split_cap_pass_count,
         max_split_cap_scaled_jacobian,
@@ -1414,6 +1428,43 @@ fn diagnostic_height_ratio_bin(value: f64) -> String {
         "lt_0_25".to_string()
     } else {
         "gte_0_25".to_string()
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_scaled_jacobian_worst_corner_label(points: [Point3; 4]) -> &'static str {
+    let corners = [
+        (0_usize, points[0], points[1], points[2], points[3]),
+        (1_usize, points[1], points[0], points[3], points[2]),
+        (2_usize, points[2], points[0], points[1], points[3]),
+        (3_usize, points[3], points[0], points[2], points[1]),
+    ];
+    let worst_corner = corners
+        .into_iter()
+        .map(|(index, origin, first, second, third)| {
+            let first = crate::predicate::sub(first, origin);
+            let second = crate::predicate::sub(second, origin);
+            let third = crate::predicate::sub(third, origin);
+            let denominator = crate::predicate::norm(first)
+                * crate::predicate::norm(second)
+                * crate::predicate::norm(third);
+            let scaled_jacobian = if denominator <= f64::EPSILON {
+                0.0
+            } else {
+                (2.0_f64.sqrt()
+                    * crate::predicate::dot(first, crate::predicate::cross(second, third))
+                    / denominator)
+                    .abs()
+            };
+            (index, scaled_jacobian)
+        })
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index)
+        .unwrap_or(3);
+    if worst_corner == 3 {
+        "apex"
+    } else {
+        "face_vertex"
     }
 }
 
@@ -2816,6 +2867,9 @@ mod tests {
         assert!(!diagnostic.rejected_scaled_jacobian_bins.is_empty());
         assert!(diagnostic.max_rejected_cap_height_ratio > 0.0);
         assert!(!diagnostic.rejected_cap_height_ratio_bins.is_empty());
+        assert!(!diagnostic
+            .rejected_scaled_jacobian_worst_corner_bins
+            .is_empty());
         assert!(diagnostic.split_cap_candidate_count > 0);
         assert_eq!(diagnostic.split_cap_pass_count, 0);
         assert!(diagnostic.max_split_cap_scaled_jacobian < 0.95);
