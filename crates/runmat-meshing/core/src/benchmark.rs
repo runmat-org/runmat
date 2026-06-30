@@ -3550,6 +3550,12 @@ mod tests {
         let mut trimmed_seed_star_interior_max_min_quality = 0.0_f64;
         let mut trimmed_seed_star_interior_quality_bins = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_face_expansion_candidates = 0_usize;
+        let mut trimmed_seed_star_face_expansion_valid = 0_usize;
+        let mut trimmed_seed_star_face_expansion_refill_success = 0_usize;
+        let mut trimmed_seed_star_face_expansion_boundary_faces = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_face_expansion_rejected_by_reason =
+            BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3641,6 +3647,119 @@ mod tests {
                         ),
                     });
                     next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                    let selected_indices = trimmed_cavity
+                        .removed_tet_ids
+                        .iter()
+                        .filter_map(|tet_id| {
+                            preparation
+                                .tet_candidates
+                                .tets
+                                .iter()
+                                .position(|tet| tet.tet_id == *tet_id)
+                        })
+                        .collect::<BTreeSet<_>>();
+                    let mut expansion_indices = BTreeSet::<usize>::new();
+                    for index in &selected_indices {
+                        for face in
+                            diagnostic_tet_faces(preparation.tet_candidates.tets[*index].node_ids)
+                        {
+                            if let Some(face_neighbors) =
+                                face_index_adjacency.get(&diagnostic_sorted_face(face))
+                            {
+                                for neighbor in face_neighbors {
+                                    if !selected_indices.contains(neighbor) {
+                                        expansion_indices.insert(*neighbor);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for expansion_index in expansion_indices {
+                        let mut expanded = selected_indices.iter().copied().collect::<Vec<_>>();
+                        expanded.push(expansion_index);
+                        expanded.sort_unstable();
+                        trimmed_seed_star_face_expansion_candidates += 1;
+                        let expanded_cavity = match constrained_cavity_from_selected_tets(
+                            &preparation.tet_candidates.tets,
+                            &expanded,
+                            vec![],
+                        ) {
+                            Ok(cavity) => cavity,
+                            Err(err) => {
+                                *trimmed_seed_star_face_expansion_rejected_by_reason
+                                    .entry(diagnostic_cavity_extraction_reason(&err).to_string())
+                                    .or_default() += 1;
+                                continue;
+                            }
+                        };
+                        trimmed_seed_star_face_expansion_valid += 1;
+                        *trimmed_seed_star_face_expansion_boundary_faces
+                            .entry(expanded_cavity.boundary_faces.len())
+                            .or_default() += 1;
+                        let expanded_boundary_node_ids =
+                            diagnostic_cavity_node_ids(&expanded_cavity);
+                        let expanded_boundary_nodes = expanded_boundary_node_ids
+                            .iter()
+                            .map(|node_id| {
+                                Ok(ConstrainedCavityNode {
+                                    node_id: *node_id,
+                                    coordinates_m: *node_points
+                                        .get(node_id)
+                                        .ok_or_else(|| format!("missing node {node_id}"))?,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, String>>()
+                            .expect("diagnostic boundary nodes should exist");
+                        let mut expanded_interior_candidates = Vec::<ConstrainedCavityNode>::new();
+                        if !expanded_boundary_node_ids.contains(seed_node_id) {
+                            if let Some(current_point) = node_points.get(seed_node_id).copied() {
+                                expanded_interior_candidates.push(ConstrainedCavityNode {
+                                    node_id: *seed_node_id,
+                                    coordinates_m: current_point,
+                                });
+                            }
+                        }
+                        if let Some(centroid) =
+                            diagnostic_boundary_centroid(&expanded_boundary_nodes)
+                        {
+                            expanded_interior_candidates.push(ConstrainedCavityNode {
+                                node_id: next_diagnostic_node_id,
+                                coordinates_m: centroid,
+                            });
+                            next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                        }
+                        expanded_interior_candidates.push(ConstrainedCavityNode {
+                            node_id: next_diagnostic_node_id,
+                            coordinates_m: diagnostic_tet_centroid(
+                                &preparation.tet_candidates.tets[anchor_tet_index],
+                                &node_points,
+                            ),
+                        });
+                        next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                        match evaluate_constrained_cavity_refill_candidates(
+                            &expanded_cavity,
+                            &expanded_boundary_nodes,
+                            &expanded_interior_candidates,
+                            refill_options,
+                        ) {
+                            Ok(evaluation) => {
+                                if evaluation.refill.is_some() {
+                                    trimmed_seed_star_face_expansion_refill_success += 1;
+                                } else {
+                                    for (reason, count) in evaluation.rejected_by_reason {
+                                        *trimmed_seed_star_face_expansion_rejected_by_reason
+                                            .entry(reason)
+                                            .or_default() += count;
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                *trimmed_seed_star_face_expansion_rejected_by_reason
+                                    .entry(diagnostic_refill_error_reason(&err).to_string())
+                                    .or_default() += 1;
+                            }
+                        }
+                    }
                     if let Ok(star_diagnostic) = diagnostic_interior_star_quality(
                         &trimmed_cavity,
                         &boundary_nodes,
@@ -3948,6 +4067,14 @@ mod tests {
             trimmed_seed_star_interior_max_min_quality,
             trimmed_seed_star_interior_quality_bins,
             trimmed_seed_star_interior_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_face_expansion candidates={} valid={} refill_success={} boundary_faces={:?} rejected_by_reason={:?}",
+            trimmed_seed_star_face_expansion_candidates,
+            trimmed_seed_star_face_expansion_valid,
+            trimmed_seed_star_face_expansion_refill_success,
+            trimmed_seed_star_face_expansion_boundary_faces,
+            trimmed_seed_star_face_expansion_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",
