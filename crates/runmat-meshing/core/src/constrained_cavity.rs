@@ -1016,6 +1016,14 @@ fn boundary_node_refill_candidate(
     ) {
         Ok(refill) => Ok(Ok(refill)),
         Err(_) => {
+            if let Some(refill) = boundary_node_exact_cover_refill_candidate(
+                cavity,
+                boundary_nodes,
+                &boundary_triangles,
+                options,
+            )? {
+                return Ok(Ok(refill));
+            }
             let (completed_cavity, completed_tets, inserted_nodes) =
                 match complete_missing_boundary_face_tets(
                     cavity,
@@ -1730,6 +1738,182 @@ fn missing_refill_boundary_faces(
 struct RefillBoundaryFaceDelta {
     missing: Vec<[u32; 3]>,
     unexpected: Vec<[u32; 3]>,
+}
+
+struct BoundaryExactCoverSearch<'a> {
+    candidates: &'a [ConstrainedCavityRefillTet],
+    candidate_faces: Vec<[[u32; 3]; 4]>,
+    boundary_faces: BTreeSet<[u32; 3]>,
+    target_volume_m3: f64,
+    volume_tolerance_m3: f64,
+    attempts: usize,
+}
+
+impl<'a> BoundaryExactCoverSearch<'a> {
+    fn new(
+        cavity: &ConstrainedCavity,
+        candidates: &'a [ConstrainedCavityRefillTet],
+        volume_relative_tolerance: f64,
+    ) -> Self {
+        Self {
+            candidates,
+            candidate_faces: candidates
+                .iter()
+                .map(|candidate| tet_faces(candidate.node_ids).map(sorted_face))
+                .collect(),
+            boundary_faces: cavity
+                .boundary_faces
+                .iter()
+                .map(|face| sorted_face(face.node_ids))
+                .collect(),
+            target_volume_m3: cavity.target_volume_m3,
+            volume_tolerance_m3: cavity.target_volume_m3.max(1.0e-18) * volume_relative_tolerance,
+            attempts: 0,
+        }
+    }
+
+    fn search(&mut self) -> Option<Vec<usize>> {
+        self.search_from(0.0, &mut BTreeMap::new(), &mut Vec::new())
+    }
+
+    fn search_from(
+        &mut self,
+        current_volume_m3: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+    ) -> Option<Vec<usize>> {
+        self.attempts += 1;
+        if self.attempts > 5_000
+            || current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3
+        {
+            return None;
+        }
+        let Some(target_face) = self
+            .boundary_faces
+            .iter()
+            .find(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
+            .copied()
+        else {
+            let boundary_ok = self
+                .boundary_faces
+                .iter()
+                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+            let interior_ok = face_counts
+                .iter()
+                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
+            if boundary_ok
+                && interior_ok
+                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
+            {
+                return Some(selected.clone());
+            }
+            return None;
+        };
+        for candidate_index in 0..self.candidates.len() {
+            if selected.contains(&candidate_index)
+                || !self.candidate_faces[candidate_index].contains(&target_face)
+                || !self.candidate_faces[candidate_index].iter().all(|face| {
+                    let count = face_counts.get(face).copied().unwrap_or(0);
+                    if self.boundary_faces.contains(face) {
+                        count == 0
+                    } else {
+                        count < 2
+                    }
+                })
+            {
+                continue;
+            }
+            for face in self.candidate_faces[candidate_index] {
+                *face_counts.entry(face).or_default() += 1;
+            }
+            selected.push(candidate_index);
+            if let Some(result) = self.search_from(
+                current_volume_m3 + self.candidates[candidate_index].volume_m3,
+                face_counts,
+                selected,
+            ) {
+                return Some(result);
+            }
+            selected.pop();
+            for face in self.candidate_faces[candidate_index] {
+                if let Some(count) = face_counts.get_mut(&face) {
+                    *count -= 1;
+                    if *count == 0 {
+                        face_counts.remove(&face);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+fn boundary_node_exact_cover_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
+    let node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if node_ids.len() < 4 || node_ids.len() > 8 || cavity.boundary_faces.len() > 16 {
+        return Ok(None);
+    }
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut candidates = Vec::<ConstrainedCavityRefillTet>::new();
+    for first in 0..node_ids.len() {
+        for second in (first + 1)..node_ids.len() {
+            for third in (second + 1)..node_ids.len() {
+                for fourth in (third + 1)..node_ids.len() {
+                    let tet_node_ids = [
+                        node_ids[first],
+                        node_ids[second],
+                        node_ids[third],
+                        node_ids[fourth],
+                    ];
+                    if !tet_faces(tet_node_ids)
+                        .map(sorted_face)
+                        .iter()
+                        .any(|face| boundary_faces.contains(face))
+                    {
+                        continue;
+                    }
+                    let points = tet_node_ids.map(|node_id| boundary_nodes[&node_id]);
+                    if point_in_closed_triangle_surface(
+                        tet_centroid(points),
+                        boundary_triangles,
+                        MeshingTolerance::default(),
+                    ) != PointInClosedSurface::Inside
+                    {
+                        continue;
+                    }
+                    if let Ok(tet) =
+                        raw_refill_tet_with_rejection_reason(tet_node_ids, points, options)
+                    {
+                        candidates.push(tet);
+                    }
+                }
+            }
+        }
+    }
+    if candidates.is_empty() || candidates.len() > 80 {
+        return Ok(None);
+    }
+    let mut search =
+        BoundaryExactCoverSearch::new(cavity, &candidates, options.volume_relative_tolerance);
+    let Some(selected_indices) = search.search() else {
+        return Ok(None);
+    };
+    let selected_tets = selected_indices
+        .into_iter()
+        .map(|index| candidates[index].clone())
+        .collect::<Vec<_>>();
+    refill_from_tets(cavity, selected_tets, options.volume_relative_tolerance).map(Some)
 }
 
 fn refill_boundary_face_delta(
@@ -2673,6 +2857,36 @@ mod tests {
         .expect_err("strict quality should reject every cap tet");
 
         assert_eq!(rejected, "boundary_node_completion_no_candidate");
+    }
+
+    #[test]
+    fn boundary_node_exact_cover_recovers_bipyramid_cavity() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let options = refill_options();
+
+        let refill = boundary_node_exact_cover_refill_candidate(
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            options,
+        )
+        .expect("exact cover should evaluate")
+        .expect("exact cover should recover the cavity");
+
+        assert_eq!(refill.tets.len(), 2);
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("exact cover should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("exact cover should preserve volume");
     }
 
     #[test]
