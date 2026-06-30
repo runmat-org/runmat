@@ -747,6 +747,14 @@ pub fn set_figure_visible(
     Ok((!was_visible && now_visible, figure_clone))
 }
 
+pub fn set_figure_position(handle: FigureHandle, position: [f64; 4]) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_position(position);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_figure_background_color(handle: FigureHandle, color: Vec4) -> Result<(), FigureError> {
     let ((), figure_clone) = with_figure_mut(handle, |state| {
         state.figure.set_background_color(color);

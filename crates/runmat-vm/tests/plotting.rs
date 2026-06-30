@@ -34,6 +34,23 @@ fn figure_dot_property_access_routes_to_graphics_get() {
 }
 
 #[test]
+fn figure_position_property_pair_round_trips_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f = figure('Position', [100 100 1000 700]); \
+        p = get(f, 'Position'); \
+        if p(1) ~= 100 || p(2) ~= 100 || p(3) ~= 1000 || p(4) ~= 700; \
+            error('initial figure position mismatch'); \
+        end; \
+        set(f, 'Position', [10 20 300 400]); \
+        p2 = f.Position; \
+        if p2(1) ~= 10 || p2(2) ~= 20 || p2(3) ~= 300 || p2(4) ~= 400; \
+            error('updated figure position mismatch'); \
+        end;";
+    execute_source(input).expect("execute figure Position property script");
+}
+
+#[test]
 fn grid_minor_command_form_sets_minor_grid_property() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

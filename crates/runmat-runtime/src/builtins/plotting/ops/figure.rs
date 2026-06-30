@@ -37,7 +37,7 @@ const FIGURE_INPUTS_PAIRS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     arity: BuiltinParamArity::Variadic,
     default: None,
     description:
-        "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', or 'Color'.",
+        "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', 'Position', or 'Color'.",
 }];
 
 const FIGURE_INPUTS_HANDLE_PAIRS: [BuiltinParamDescriptor; 2] = [
@@ -214,6 +214,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, figure_handles, reset_hold_state_for_run,
     };
+    use runmat_builtins::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -268,6 +269,62 @@ mod tests {
         assert!(!figure.number_title);
         assert!(!figure.visible);
         assert_eq!(figure.background_color, glam::Vec4::new(0.0, 0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn figure_accepts_position_property_pair() {
+        let _guard = setup();
+        let position = Tensor::new(vec![100.0, 100.0, 1000.0, 700.0], vec![1, 4]).unwrap();
+        let handle = figure_builtin(vec![
+            Value::String("Position".into()),
+            Value::Tensor(position),
+        ])
+        .unwrap();
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(
+            handle as u32,
+        ))
+        .expect("figure should exist");
+        assert_eq!(figure.position, [100.0, 100.0, 1000.0, 700.0]);
+
+        let value = crate::builtins::plotting::get::get_builtin(vec![
+            Value::Num(handle),
+            Value::String("Position".into()),
+        ])
+        .expect("get position");
+        let tensor = Tensor::try_from(&value).expect("position tensor");
+        assert_eq!(tensor.data, vec![100.0, 100.0, 1000.0, 700.0]);
+    }
+
+    #[test]
+    fn figure_accepts_position_column_vector() {
+        let _guard = setup();
+        let position = Tensor::new(vec![10.0, 20.0, 300.0, 400.0], vec![4, 1]).unwrap();
+        let handle = figure_builtin(vec![
+            Value::String("Position".into()),
+            Value::Tensor(position),
+        ])
+        .unwrap();
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(
+            handle as u32,
+        ))
+        .expect("figure should exist");
+        assert_eq!(figure.position, [10.0, 20.0, 300.0, 400.0]);
+    }
+
+    #[test]
+    fn figure_rejects_position_matrix_shape() {
+        let _guard = setup();
+        let position = Tensor::new(vec![10.0, 20.0, 300.0, 400.0], vec![2, 2]).unwrap();
+        let err = figure_builtin(vec![
+            Value::String("Position".into()),
+            Value::Tensor(position),
+        ])
+        .expect_err("2-by-2 Position matrix should fail");
+        assert!(
+            err.to_string()
+                .contains("Position must be a 4-element numeric vector"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

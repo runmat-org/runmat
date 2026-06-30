@@ -27,6 +27,7 @@ pub struct Figure {
     pub name: Option<String>,
     pub number_title: bool,
     pub visible: bool,
+    pub position: [f64; 4],
     pub title: Option<String>,
     pub sg_title: Option<String>,
     pub x_label: Option<String>,
@@ -242,6 +243,7 @@ impl Figure {
             name: None,
             number_title: true,
             visible: true,
+            position: [0.0, 0.0, 560.0, 420.0],
             title: None,
             sg_title: None,
             x_label: None,
@@ -375,6 +377,11 @@ impl Figure {
 
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
+        self.dirty = true;
+    }
+
+    pub fn set_position(&mut self, position: [f64; 4]) {
+        self.position = position;
         self.dirty = true;
     }
 

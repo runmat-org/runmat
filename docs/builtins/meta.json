@@ -21915,7 +21915,7 @@
               "ty": "PropertyName",
               "arity": "Variadic",
               "default": null,
-              "description": "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', or 'Color'."
+              "description": "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', 'Position', or 'Color'."
             }
           ],
           "outputs": [

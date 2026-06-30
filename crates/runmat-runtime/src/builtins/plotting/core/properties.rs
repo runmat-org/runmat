@@ -8,7 +8,7 @@ use super::state::{
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
     figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
     select_axes_for_figure, set_axes_style_for_axes, set_figure_background_color, set_figure_name,
-    set_figure_number_title, set_figure_visible, set_legend_for_axes,
+    set_figure_number_title, set_figure_position, set_figure_visible, set_legend_for_axes,
     set_sg_title_properties_for_figure, set_text_annotation_properties_for_axes,
     set_text_properties_for_axes, FigureHandle, PlotObjectKind,
 };
@@ -335,6 +335,7 @@ fn get_figure_property(
             );
             st.insert("NumberTitle", Value::Bool(figure.number_title));
             st.insert("Visible", Value::Bool(figure.visible));
+            st.insert("Position", figure_position_value(figure.position));
             st.insert(
                 "Color",
                 Value::String(color_to_short_name(figure.background_color)),
@@ -356,6 +357,7 @@ fn get_figure_property(
         Some("name") => Ok(Value::String(figure.name.unwrap_or_default())),
         Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
         Some("visible") => Ok(Value::Bool(figure.visible)),
+        Some("position") => Ok(figure_position_value(figure.position)),
         Some("color") => Ok(Value::String(color_to_short_name(figure.background_color))),
         Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
@@ -1197,6 +1199,12 @@ fn apply_figure_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(true)
         }
+        "position" => {
+            let position = parse_figure_position(value, builtin)?;
+            set_figure_position(figure_handle, position)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
         "color" => {
             let color = parse_color_value(&opts, value)?;
             set_figure_background_color(figure_handle, color)
@@ -1254,6 +1262,9 @@ pub(crate) fn validate_figure_property_value(
             value_as_bool(property_value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?;
+        }
+        "position" => {
+            let _ = parse_figure_position(property_value, builtin)?;
         }
         "color" => {
             let _ = parse_color_value(&opts, property_value)?;
@@ -1484,6 +1495,47 @@ fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> Str
     st.insert("Parent", child_parent_handle(figure, axes_index));
     st.insert("Children", handles_value(Vec::new()));
     st
+}
+
+fn figure_position_value(position: [f64; 4]) -> Value {
+    Value::Tensor(Tensor {
+        rows: 1,
+        cols: 4,
+        shape: vec![1, 4],
+        data: position.to_vec(),
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<[f64; 4]> {
+    let values = match value {
+        Value::Tensor(t) if t.data.len() == 4 && is_figure_position_vector_shape(t) => &t.data,
+        _ => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: Position must be a 4-element numeric vector"),
+            ))
+        }
+    };
+    let mut position = [0.0; 4];
+    position.copy_from_slice(values);
+    if !position.iter().all(|value| value.is_finite()) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: Position values must be finite"),
+        ));
+    }
+    if position[2] <= 0.0 || position[3] <= 0.0 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: Position width and height must be positive"),
+        ));
+    }
+    Ok(position)
+}
+
+fn is_figure_position_vector_shape(tensor: &Tensor) -> bool {
+    tensor.shape.len() <= 1 || (tensor.shape.len() == 2 && (tensor.rows == 1 || tensor.cols == 1))
 }
 
 fn text_position_value(position: glam::Vec3) -> Value {

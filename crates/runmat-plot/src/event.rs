@@ -589,6 +589,10 @@ impl FigureScene {
         figure.name = self.metadata.name;
         figure.number_title = self.metadata.number_title;
         figure.visible = self.metadata.visible;
+        if let Some(position) = self.metadata.position {
+            validate_figure_position(position)?;
+            figure.set_position(position);
+        }
         figure.sg_title = self.metadata.sg_title;
         figure.sg_title_style = self
             .metadata
@@ -665,6 +669,16 @@ impl FigureScene {
         }
         Ok(())
     }
+}
+
+fn validate_figure_position(position: [f64; 4]) -> Result<(), String> {
+    if !position.iter().all(|value| value.is_finite()) {
+        return Err("figure scene metadata Position values must be finite".to_string());
+    }
+    if position[2] <= 0.0 || position[3] <= 0.0 {
+        return Err("figure scene metadata Position width and height must be positive".to_string());
+    }
+    Ok(())
 }
 
 fn append_geometry_scene_chunks(
@@ -866,6 +880,8 @@ pub struct FigureMetadata {
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub visible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sg_title: Option<String>,
@@ -907,6 +923,7 @@ impl FigureMetadata {
             name: figure.name.clone(),
             number_title: figure.number_title,
             visible: figure.visible,
+            position: Some(figure.position),
             title: figure.title.clone(),
             sg_title: figure.sg_title.clone(),
             sg_title_style: figure
@@ -3530,6 +3547,7 @@ mod tests {
         figure.set_name("Roundtrip");
         figure.set_number_title(false);
         figure.set_visible(false);
+        figure.set_position([100.0, 100.0, 1000.0, 700.0]);
         let mut line = LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap();
         line.label = Some("line".to_string());
         figure.add_line_plot_on_axes(line, 0);
@@ -3545,6 +3563,7 @@ mod tests {
         assert_eq!(rebuilt.name.as_deref(), Some("Roundtrip"));
         assert!(!rebuilt.number_title);
         assert!(!rebuilt.visible);
+        assert_eq!(rebuilt.position, [100.0, 100.0, 1000.0, 700.0]);
     }
 
     #[test]
@@ -3588,6 +3607,23 @@ mod tests {
             "unsupported figure scene schema version {}",
             FigureScene::SCHEMA_VERSION + 1
         )));
+    }
+
+    #[test]
+    fn figure_scene_rejects_invalid_position_metadata() {
+        let mut scene = FigureScene::capture(&Figure::new());
+        scene.metadata.position = Some([0.0, 0.0, 0.0, 400.0]);
+        let err = scene
+            .clone()
+            .into_figure()
+            .expect_err("zero-width position must fail");
+        assert!(err.contains("Position width and height must be positive"));
+
+        scene.metadata.position = Some([0.0, f64::NAN, 300.0, 400.0]);
+        let err = scene
+            .into_figure()
+            .expect_err("non-finite position must fail");
+        assert!(err.contains("Position values must be finite"));
     }
 
     #[test]
