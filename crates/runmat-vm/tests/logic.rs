@@ -3,10 +3,12 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-fn logical_truth(value: &runmat_builtins::Value) -> bool {
+use runmat_builtins::Value;
+
+fn logical_truth(value: &Value) -> bool {
     match value {
-        runmat_builtins::Value::Bool(value) => *value,
-        runmat_builtins::Value::Num(value) => *value != 0.0,
+        Value::Bool(value) => *value,
+        Value::Num(value) => *value != 0.0,
         other => panic!("expected logical value, got {other:?}"),
     }
 }
@@ -41,5 +43,26 @@ fn issparse_reports_sparse_storage_through_vm_dispatch() {
     .unwrap();
     assert!(logical_truth(&vars[1]));
     assert!(!logical_truth(&vars[2]));
+    assert!(!logical_truth(&vars[3]));
+}
+
+#[test]
+fn full_densifies_sparse_storage_through_vm_dispatch() {
+    let vars = execute_source(
+        "s = sparse([1 3 2], [1 1 2], [10 30 20], 3, 2); a = full(s); b = full([1 0; 0 2]); c = issparse(a);",
+    )
+    .unwrap();
+    assert!(matches!(
+        &vars[1],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![3, 2]
+                && tensor.data == vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.data == vec![1.0, 0.0, 0.0, 2.0]
+    ));
     assert!(!logical_truth(&vars[3]));
 }

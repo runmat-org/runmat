@@ -45,6 +45,11 @@
       "description": "Dense arrays are not sparse",
       "input": "A = [0 4; 0 0];\ntf = issparse(A)",
       "output": "tf =\n     0"
+    },
+    {
+      "description": "Full conversion clears sparse storage",
+      "input": "S = sparse(3, 2);\nA = full(S);\n[issparse(S), issparse(A)]",
+      "output": "ans = [1 0]"
     }
   ],
   "faqs": [
@@ -62,6 +67,10 @@
     }
   ],
   "links": [
+    {
+      "label": "full",
+      "url": "./full"
+    },
     {
       "label": "nnz",
       "url": "./nnz"
