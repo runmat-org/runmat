@@ -1,0 +1,22 @@
+{
+  "title": "rmmissing",
+  "category": "missing",
+  "keywords": ["rmmissing", "missing", "NaN", "string", "table"],
+  "summary": "Remove missing elements, rows, or columns.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs are gathered before removal."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`rmmissing(A)` removes entries containing missing values. For matrices and tables it removes rows by default; passing dimension `2` removes columns.",
+  "behaviors": [
+    "Vectors remove individual missing elements while preserving row or column orientation.",
+    "Matrices remove rows by default and columns when `dim` is `2` or the option is `\"columns\"`.",
+    "Tables remove rows with any missing variable entry by default, preserving variable names and row names.",
+    "Two-output calls return the result and a logical mask indicating removed rows, columns, or vector elements."
+  ],
+  "examples": [
+    {"description": "Remove missing columns", "input": "B = rmmissing([1 NaN 3; 4 5 6], 2)", "output": "B = [1 3; 4 6]"}
+  ],
+  "links": [{"label": "ismissing", "url": "./ismissing"}, {"label": "fillmissing", "url": "./fillmissing"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

@@ -298,7 +298,7 @@ struct ParsedArguments {
     descriptor(crate::builtins::math::reduction::median::MEDIAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::median"
 )]
-async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => median_gpu(handle, &parsed).await,

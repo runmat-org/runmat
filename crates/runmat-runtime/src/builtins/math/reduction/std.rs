@@ -501,7 +501,7 @@ enum NormParse {
     descriptor(crate::builtins::math::reduction::std::STD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::std"
 )]
-async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
     let raw = match value {

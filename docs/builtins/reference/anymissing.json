@@ -1,0 +1,20 @@
+{
+  "title": "anymissing",
+  "category": "missing",
+  "keywords": ["anymissing", "missing", "NaN", "table"],
+  "summary": "Return true when an input contains at least one missing value.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs are gathered before inspection."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`anymissing(A)` is the scalar predicate companion to `ismissing`; it is true when any entry of `A` is missing.",
+  "behaviors": [
+    "Numeric `NaN`, missing strings, missing cells, structs with missing fields, and tables with any missing variable entry all return true.",
+    "Nonmissing numeric, logical, integer, and string values return false."
+  ],
+  "examples": [
+    {"description": "Test for any missing value", "input": "tf = anymissing([1 NaN 3])", "output": "tf = true"}
+  ],
+  "links": [{"label": "ismissing", "url": "./ismissing"}, {"label": "missing", "url": "./missing"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

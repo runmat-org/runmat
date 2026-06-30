@@ -352,7 +352,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::math::reduction::sum::SUM_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
-async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest).await?;
     let raw_result = match value {

@@ -484,7 +484,7 @@ enum MeanAxes {
     descriptor(crate::builtins::math::reduction::mean::MEAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like

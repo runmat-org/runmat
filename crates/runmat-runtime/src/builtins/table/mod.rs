@@ -3042,7 +3042,7 @@ pub fn table_from_columns(names: Vec<String>, columns: Vec<Value>) -> BuiltinRes
     table_from_columns_with_properties(names, columns, None)
 }
 
-fn table_from_columns_with_properties(
+pub(crate) fn table_from_columns_with_properties(
     names: Vec<String>,
     columns: Vec<Value>,
     row_names: Option<Vec<String>>,
@@ -3527,7 +3527,7 @@ fn one_based_to_zero(value: f64, len: usize, context: &str) -> BuiltinResult<usi
     Ok(idx)
 }
 
-fn selected_row_names(
+pub(crate) fn selected_row_names(
     object: &ObjectInstance,
     rows: &[usize],
 ) -> BuiltinResult<Option<Vec<String>>> {
@@ -3546,7 +3546,7 @@ fn selected_row_names(
     ))
 }
 
-fn value_row_count(value: &Value) -> BuiltinResult<usize> {
+pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.rows()),
         Value::ComplexTensor(tensor) => Ok(tensor.rows),
@@ -3567,7 +3567,7 @@ fn value_row_count(value: &Value) -> BuiltinResult<usize> {
     }
 }
 
-fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
+pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
             let cols = tensor.cols();

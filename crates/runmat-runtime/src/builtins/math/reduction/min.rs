@@ -441,7 +441,7 @@ impl MinEvaluation {
     descriptor(crate::builtins::math::reduction::min::MIN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
