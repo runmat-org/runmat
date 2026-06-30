@@ -96,6 +96,8 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub duplicate_candidate_count: usize,
     pub max_rejected_scaled_jacobian: f64,
     pub rejected_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub max_rejected_cap_height_ratio: f64,
+    pub rejected_cap_height_ratio_bins: BTreeMap<String, usize>,
     pub split_cap_candidate_count: usize,
     pub split_cap_pass_count: usize,
     pub max_split_cap_scaled_jacobian: f64,
@@ -1105,6 +1107,8 @@ pub(crate) fn diagnostic_boundary_node_completion(
         duplicate_candidate_count: 0,
         max_rejected_scaled_jacobian: 0.0,
         rejected_scaled_jacobian_bins: BTreeMap::new(),
+        max_rejected_cap_height_ratio: 0.0,
+        rejected_cap_height_ratio_bins: BTreeMap::new(),
         split_cap_candidate_count: 0,
         split_cap_pass_count: 0,
         max_split_cap_scaled_jacobian: 0.0,
@@ -1133,9 +1137,18 @@ pub(crate) fn diagnostic_boundary_node_completion(
         aggregate.max_rejected_scaled_jacobian = aggregate
             .max_rejected_scaled_jacobian
             .max(diagnostic.max_rejected_scaled_jacobian);
+        aggregate.max_rejected_cap_height_ratio = aggregate
+            .max_rejected_cap_height_ratio
+            .max(diagnostic.max_rejected_cap_height_ratio);
         for (bin, count) in diagnostic.rejected_scaled_jacobian_bins {
             *aggregate
                 .rejected_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
+        for (bin, count) in diagnostic.rejected_cap_height_ratio_bins {
+            *aggregate
+                .rejected_cap_height_ratio_bins
                 .entry(bin)
                 .or_default() += count;
         }
@@ -1175,6 +1188,8 @@ pub(crate) fn diagnostic_boundary_node_completion(
             duplicate_candidate_count: 0,
             max_rejected_scaled_jacobian: 0.0,
             rejected_scaled_jacobian_bins: BTreeMap::new(),
+            max_rejected_cap_height_ratio: 0.0,
+            rejected_cap_height_ratio_bins: BTreeMap::new(),
             split_cap_candidate_count: 0,
             split_cap_pass_count: 0,
             max_split_cap_scaled_jacobian: 0.0,
@@ -1201,6 +1216,8 @@ fn diagnostic_boundary_face_completion(
     let mut duplicate_candidate_count = 0_usize;
     let mut max_rejected_scaled_jacobian = 0.0_f64;
     let mut rejected_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut max_rejected_cap_height_ratio = 0.0_f64;
+    let mut rejected_cap_height_ratio_bins = BTreeMap::<String, usize>::new();
     let mut split_cap_candidate_count = 0_usize;
     let mut split_cap_pass_count = 0_usize;
     let mut max_split_cap_scaled_jacobian = 0.0_f64;
@@ -1242,6 +1259,15 @@ fn diagnostic_boundary_face_completion(
                         .entry(diagnostic_scaled_jacobian_bin(exact_scaled_jacobian))
                         .or_default() += 1;
                 }
+                let cap_height_ratio =
+                    diagnostic_face_apex_height_ratio(face, node_id, boundary_nodes);
+                if cap_height_ratio.is_finite() {
+                    max_rejected_cap_height_ratio =
+                        max_rejected_cap_height_ratio.max(cap_height_ratio);
+                    *rejected_cap_height_ratio_bins
+                        .entry(diagnostic_height_ratio_bin(cap_height_ratio))
+                        .or_default() += 1;
+                }
                 if let Some(split_min_quality) =
                     diagnostic_split_cap_min_scaled_jacobian(face, node_id, boundary_nodes, options)
                 {
@@ -1276,6 +1302,8 @@ fn diagnostic_boundary_face_completion(
         duplicate_candidate_count,
         max_rejected_scaled_jacobian,
         rejected_scaled_jacobian_bins,
+        max_rejected_cap_height_ratio,
+        rejected_cap_height_ratio_bins,
         split_cap_candidate_count,
         split_cap_pass_count,
         max_split_cap_scaled_jacobian,
@@ -1326,6 +1354,66 @@ fn diagnostic_scaled_jacobian_bin(value: f64) -> String {
         "lt_0_15".to_string()
     } else {
         "gte_0_15".to_string()
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_face_apex_height_ratio(
+    face: [u32; 3],
+    apex_node_id: u32,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+) -> f64 {
+    let triangle = face.map(|node_id| boundary_nodes[&node_id]);
+    let apex = boundary_nodes[&apex_node_id];
+    let longest_edge = crate::predicate::distance(triangle[0], triangle[1])
+        .max(crate::predicate::distance(triangle[1], triangle[2]))
+        .max(crate::predicate::distance(triangle[2], triangle[0]));
+    if !longest_edge.is_finite() || longest_edge <= f64::EPSILON {
+        return 0.0;
+    }
+    let edge_ab = [
+        triangle[1][0] - triangle[0][0],
+        triangle[1][1] - triangle[0][1],
+        triangle[1][2] - triangle[0][2],
+    ];
+    let edge_ac = [
+        triangle[2][0] - triangle[0][0],
+        triangle[2][1] - triangle[0][1],
+        triangle[2][2] - triangle[0][2],
+    ];
+    let normal = [
+        edge_ab[1] * edge_ac[2] - edge_ab[2] * edge_ac[1],
+        edge_ab[2] * edge_ac[0] - edge_ab[0] * edge_ac[2],
+        edge_ab[0] * edge_ac[1] - edge_ab[1] * edge_ac[0],
+    ];
+    let normal_length =
+        (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if !normal_length.is_finite() || normal_length <= f64::EPSILON {
+        return 0.0;
+    }
+    let apex_delta = [
+        apex[0] - triangle[0][0],
+        apex[1] - triangle[0][1],
+        apex[2] - triangle[0][2],
+    ];
+    let signed_height =
+        (apex_delta[0] * normal[0] + apex_delta[1] * normal[1] + apex_delta[2] * normal[2])
+            / normal_length;
+    signed_height.abs() / longest_edge
+}
+
+#[cfg(test)]
+fn diagnostic_height_ratio_bin(value: f64) -> String {
+    if value < 0.01 {
+        "lt_0_01".to_string()
+    } else if value < 0.05 {
+        "lt_0_05".to_string()
+    } else if value < 0.10 {
+        "lt_0_10".to_string()
+    } else if value < 0.25 {
+        "lt_0_25".to_string()
+    } else {
+        "gte_0_25".to_string()
     }
 }
 
@@ -2726,6 +2814,8 @@ mod tests {
         assert_eq!(diagnostic.cap_candidate_count, 0);
         assert!(diagnostic.max_rejected_scaled_jacobian < 0.95);
         assert!(!diagnostic.rejected_scaled_jacobian_bins.is_empty());
+        assert!(diagnostic.max_rejected_cap_height_ratio > 0.0);
+        assert!(!diagnostic.rejected_cap_height_ratio_bins.is_empty());
         assert!(diagnostic.split_cap_candidate_count > 0);
         assert_eq!(diagnostic.split_cap_pass_count, 0);
         assert!(diagnostic.max_split_cap_scaled_jacobian < 0.95);

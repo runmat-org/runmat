@@ -3451,6 +3451,9 @@ mod tests {
         let mut trimmed_seed_star_completion_max_rejected_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_rejected_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_max_cap_height_ratio = 0.0_f64;
+        let mut trimmed_seed_star_completion_cap_height_ratio_bins =
+            BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_completion_max_split_cap_quality = 0.0_f64;
@@ -3586,8 +3589,16 @@ mod tests {
                                     trimmed_seed_star_completion_max_rejected_quality =
                                         trimmed_seed_star_completion_max_rejected_quality
                                             .max(diagnostic.max_rejected_scaled_jacobian);
+                                    trimmed_seed_star_completion_max_cap_height_ratio =
+                                        trimmed_seed_star_completion_max_cap_height_ratio
+                                            .max(diagnostic.max_rejected_cap_height_ratio);
                                     for (bin, count) in diagnostic.rejected_scaled_jacobian_bins {
                                         *trimmed_seed_star_completion_rejected_quality_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
+                                    for (bin, count) in diagnostic.rejected_cap_height_ratio_bins {
+                                        *trimmed_seed_star_completion_cap_height_ratio_bins
                                             .entry(bin)
                                             .or_default() += count;
                                     }
@@ -3754,7 +3765,7 @@ mod tests {
             trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_completion_reason,
             trimmed_seed_star_completion_missing_faces,
             trimmed_seed_star_completion_cap_candidates,
@@ -3762,6 +3773,8 @@ mod tests {
             trimmed_seed_star_completion_duplicate_candidates,
             trimmed_seed_star_completion_max_rejected_quality,
             trimmed_seed_star_completion_rejected_quality_bins,
+            trimmed_seed_star_completion_max_cap_height_ratio,
+            trimmed_seed_star_completion_cap_height_ratio_bins,
             trimmed_seed_star_completion_split_cap_candidates,
             trimmed_seed_star_completion_split_cap_passes,
             trimmed_seed_star_completion_max_split_cap_quality,
