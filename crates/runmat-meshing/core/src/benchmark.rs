@@ -3823,6 +3823,7 @@ mod tests {
         };
         let mut ring_edges = BTreeSet::<[u32; 2]>::new();
         let mut ring_nodes = BTreeSet::<u32>::new();
+        let mut edge_to_tets = BTreeMap::<[u32; 2], Vec<usize>>::new();
         for index in adjacent {
             let Some(tet) = tets.get(*index) else {
                 return "missing_edge_tet";
@@ -3843,10 +3844,17 @@ mod tests {
             }
             ring_nodes.insert(opposite[0]);
             ring_nodes.insert(opposite[1]);
-            ring_edges.insert(diagnostic_sorted_edge([opposite[0], opposite[1]]));
+            let ring_edge = diagnostic_sorted_edge([opposite[0], opposite[1]]);
+            edge_to_tets.entry(ring_edge).or_default().push(*index);
+            ring_edges.insert(ring_edge);
         }
         if ring_nodes.len() != adjacent.len() {
-            return "non_manifold_ring_nodes";
+            return diagnostic_non_manifold_ring_node_reason(
+                adjacent.len(),
+                &ring_nodes,
+                &ring_edges,
+                &edge_to_tets,
+            );
         }
         if ring_edges.len() != adjacent.len() {
             return "non_manifold_ring_edges";
@@ -3855,6 +3863,39 @@ mod tests {
             return "open_ring";
         }
         "ring_valid_no_improving_reconnection"
+    }
+
+    fn diagnostic_non_manifold_ring_node_reason(
+        adjacent_count: usize,
+        ring_nodes: &BTreeSet<u32>,
+        ring_edges: &BTreeSet<[u32; 2]>,
+        edge_to_tets: &BTreeMap<[u32; 2], Vec<usize>>,
+    ) -> &'static str {
+        if edge_to_tets.values().any(|owners| owners.len() > 1) {
+            return "non_manifold_ring_nodes_duplicate_edge";
+        }
+        let mut degree = BTreeMap::<u32, usize>::new();
+        for edge in ring_edges {
+            *degree.entry(edge[0]).or_default() += 1;
+            *degree.entry(edge[1]).or_default() += 1;
+        }
+        if ring_nodes
+            .iter()
+            .any(|node_id| degree.get(node_id).copied().unwrap_or(0) > 2)
+        {
+            return "non_manifold_ring_nodes_branch";
+        }
+        if ring_nodes
+            .iter()
+            .any(|node_id| degree.get(node_id).copied().unwrap_or(0) < 2)
+        {
+            return "non_manifold_ring_nodes_dangling";
+        }
+        if ring_nodes.len() < adjacent_count {
+            "non_manifold_ring_nodes_reused"
+        } else {
+            "non_manifold_ring_nodes_excess"
+        }
     }
 
     fn diagnostic_order_ring_cycle(
@@ -3890,6 +3931,51 @@ mod tests {
             .get(&current)
             .is_some_and(|neighbors| neighbors.contains(&start))
             .then_some(ordered)
+    }
+
+    #[test]
+    fn edge_star_diagnostic_classifies_non_manifold_ring_node_shapes() {
+        let duplicate_edge_tets =
+            diagnostic_edge_star_tets(&[[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 2], [0, 1, 2, 3]]);
+        assert_eq!(
+            diagnostic_edge_star_rejection_reason(&[0, 1, 2, 3], [0, 1], &duplicate_edge_tets),
+            "non_manifold_ring_nodes_duplicate_edge"
+        );
+
+        let branch_tets = diagnostic_edge_star_tets(&[
+            [0, 1, 2, 3],
+            [0, 1, 3, 4],
+            [0, 1, 4, 2],
+            [0, 1, 3, 5],
+            [0, 1, 5, 2],
+        ]);
+        assert_eq!(
+            diagnostic_edge_star_rejection_reason(&[0, 1, 2, 3, 4], [0, 1], &branch_tets),
+            "non_manifold_ring_nodes_branch"
+        );
+
+        let dangling_tets = diagnostic_edge_star_tets(&[[0, 1, 2, 3], [0, 1, 4, 5], [0, 1, 6, 7]]);
+        assert_eq!(
+            diagnostic_edge_star_rejection_reason(&[0, 1, 2], [0, 1], &dangling_tets),
+            "non_manifold_ring_nodes_dangling"
+        );
+    }
+
+    fn diagnostic_edge_star_tets(node_ids: &[[u32; 4]]) -> Vec<crate::tet_candidate::TetCandidate> {
+        node_ids
+            .iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| crate::tet_candidate::TetCandidate {
+                tet_id: tet_id as u32,
+                component_id: 0,
+                node_ids: *node_ids,
+                source_surface_element_id: 0,
+                region_ids: Vec::new(),
+                volume_m3: 1.0,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 1.0,
+            })
+            .collect()
     }
 
     fn diagnostic_seed_star_components(
