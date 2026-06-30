@@ -14,10 +14,10 @@ use crate::{
         constrained_cavity_from_selected_tets_with_anchor_trim, diagnostic_boundary_exact_cover,
         diagnostic_boundary_missing_face_clusters, diagnostic_boundary_node_completion,
         diagnostic_boundary_patch_steiner_exact_cover, diagnostic_boundary_steiner_exact_cover,
-        diagnostic_interior_star_quality, evaluate_constrained_cavity_refill_candidates,
-        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
-        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
-        ConstrainedCavityValidationError,
+        diagnostic_interior_star_quality, diagnostic_missing_face_local_cap_quality,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3833,6 +3833,13 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_patch_steiner_exact_cover_reason =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_patch_steiner_exact_cover_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_shell_trim_local_cap_missing_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_pass_faces = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_candidates = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_rejected_by_reason =
+            BTreeMap::<&'static str, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_max_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_missing_face_count = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_missing_face_edge_component_count =
             BTreeMap::<usize, usize>::new();
@@ -4240,6 +4247,29 @@ mod tests {
                                     trimmed_seed_star_shell_trim_patch_steiner_exact_cover_max_min_quality =
                                         trimmed_seed_star_shell_trim_patch_steiner_exact_cover_max_min_quality
                                             .max(patch_steiner_cover.max_min_scaled_jacobian);
+                                }
+                                if let Ok(local_cap) = diagnostic_missing_face_local_cap_quality(
+                                    &shell_trim_cavity,
+                                    &shell_trim_boundary_nodes,
+                                    refill_options,
+                                ) {
+                                    *trimmed_seed_star_shell_trim_local_cap_missing_faces
+                                        .entry(local_cap.missing_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_pass_faces
+                                        .entry(local_cap.pass_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_candidates
+                                        .entry(local_cap.candidate_count)
+                                        .or_default() += 1;
+                                    for (reason, count) in local_cap.rejected_by_reason {
+                                        *trimmed_seed_star_shell_trim_local_cap_rejected_by_reason
+                                            .entry(reason)
+                                            .or_default() += count;
+                                    }
+                                    trimmed_seed_star_shell_trim_local_cap_max_quality =
+                                        trimmed_seed_star_shell_trim_local_cap_max_quality
+                                            .max(local_cap.max_scaled_jacobian);
                                 }
                                 if let Ok(clusters) = diagnostic_boundary_missing_face_clusters(
                                     &shell_trim_cavity,
@@ -5002,6 +5032,14 @@ mod tests {
             trimmed_seed_star_shell_trim_patch_steiner_exact_cover_found,
             trimmed_seed_star_shell_trim_patch_steiner_exact_cover_max_min_quality,
             trimmed_seed_star_shell_trim_patch_steiner_exact_cover_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_local_cap missing_faces={:?} pass_faces={:?} candidates={:?} max_quality={:.6} rejected_by_reason={:?}",
+            trimmed_seed_star_shell_trim_local_cap_missing_faces,
+            trimmed_seed_star_shell_trim_local_cap_pass_faces,
+            trimmed_seed_star_shell_trim_local_cap_candidates,
+            trimmed_seed_star_shell_trim_local_cap_max_quality,
+            trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(
             "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?} common_nodes={:?} common_node_sources={:?}",

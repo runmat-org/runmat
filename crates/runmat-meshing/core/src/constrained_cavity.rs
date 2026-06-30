@@ -173,6 +173,16 @@ pub(crate) struct BoundaryPatchSteinerExactCoverDiagnostic {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
+    pub missing_face_count: usize,
+    pub pass_face_count: usize,
+    pub candidate_count: usize,
+    pub max_scaled_jacobian: f64,
+    pub rejected_by_reason: BTreeMap<&'static str, usize>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
     pub missing_face_count: usize,
     pub edge_component_count: usize,
@@ -3927,6 +3937,111 @@ pub(crate) fn diagnostic_boundary_patch_steiner_exact_cover(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_missing_face_local_cap_quality(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<MissingFaceLocalCapQualityDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let boundary_node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let points = boundary_node_ids
+        .iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: boundary_node_map[node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut boundary_refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            boundary_refill_tets.push(tet);
+        }
+    }
+    let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tets)
+        .map_err(ConstrainedCavityRefillError::Validation)?;
+    let mut diagnostic = MissingFaceLocalCapQualityDiagnostic {
+        missing_face_count: missing_faces.len(),
+        pass_face_count: 0,
+        candidate_count: 0,
+        max_scaled_jacobian: 0.0,
+        rejected_by_reason: BTreeMap::new(),
+    };
+    if missing_faces.is_empty() {
+        return Ok(diagnostic);
+    }
+    let Some(cavity_centroid) = cavity_boundary_node_centroid(cavity, &boundary_node_map) else {
+        return Ok(diagnostic);
+    };
+    let mut next_node_id = next_cavity_node_id(cavity);
+    for face in missing_faces {
+        let Some(surface_point) = face_centroid(face, &boundary_node_map) else {
+            continue;
+        };
+        let mut face_passed = false;
+        for apex in
+            local_cap_apex_candidates(face, surface_point, cavity_centroid, &boundary_node_map)
+        {
+            let tet_points = [
+                boundary_node_map[&face[0]],
+                boundary_node_map[&face[1]],
+                boundary_node_map[&face[2]],
+                apex,
+            ];
+            if point_in_closed_triangle_surface(
+                tet_centroid(tet_points),
+                &boundary_triangles,
+                MeshingTolerance::default(),
+            ) != PointInClosedSurface::Inside
+            {
+                *diagnostic
+                    .rejected_by_reason
+                    .entry("cap_centroid_outside_cavity")
+                    .or_default() += 1;
+                continue;
+            }
+            while boundary_node_map.contains_key(&next_node_id) {
+                next_node_id = next_node_id.saturating_add(1);
+            }
+            diagnostic.candidate_count += 1;
+            match raw_refill_tet_with_rejection_reason(
+                [face[0], face[1], face[2], next_node_id],
+                tet_points,
+                options,
+            ) {
+                Ok(tet) => {
+                    diagnostic.max_scaled_jacobian = diagnostic
+                        .max_scaled_jacobian
+                        .max(tet.exact_scaled_jacobian);
+                    face_passed = true;
+                }
+                Err(reason) => {
+                    *diagnostic.rejected_by_reason.entry(reason).or_default() += 1;
+                }
+            }
+            next_node_id = next_node_id.saturating_add(1);
+        }
+        diagnostic.pass_face_count += usize::from(face_passed);
+    }
+    Ok(diagnostic)
+}
+
+#[cfg(test)]
 pub(crate) fn diagnostic_boundary_missing_face_clusters(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
@@ -4065,6 +4180,103 @@ fn centroid_of_node_set(
         centroid[1] * scale,
         centroid[2] * scale,
     ])
+}
+
+#[cfg(test)]
+fn face_centroid(face: [u32; 3], node_coordinates: &BTreeMap<u32, [f64; 3]>) -> Option<[f64; 3]> {
+    let first = node_coordinates.get(&face[0]).copied()?;
+    let second = node_coordinates.get(&face[1]).copied()?;
+    let third = node_coordinates.get(&face[2]).copied()?;
+    Some([
+        (first[0] + second[0] + third[0]) / 3.0,
+        (first[1] + second[1] + third[1]) / 3.0,
+        (first[2] + second[2] + third[2]) / 3.0,
+    ])
+}
+
+#[cfg(test)]
+fn local_cap_apex_candidates(
+    face: [u32; 3],
+    surface_point: [f64; 3],
+    cavity_centroid: [f64; 3],
+    node_coordinates: &BTreeMap<u32, [f64; 3]>,
+) -> Vec<[f64; 3]> {
+    let mut candidates = Vec::<[f64; 3]>::new();
+    for fraction in [0.03, 0.06, 0.1, 0.16, 0.25, 0.38, 0.55, 0.75] {
+        candidates.push([
+            surface_point[0] + (cavity_centroid[0] - surface_point[0]) * fraction,
+            surface_point[1] + (cavity_centroid[1] - surface_point[1]) * fraction,
+            surface_point[2] + (cavity_centroid[2] - surface_point[2]) * fraction,
+        ]);
+    }
+
+    let Some(first) = node_coordinates.get(&face[0]).copied() else {
+        return candidates;
+    };
+    let Some(second) = node_coordinates.get(&face[1]).copied() else {
+        return candidates;
+    };
+    let Some(third) = node_coordinates.get(&face[2]).copied() else {
+        return candidates;
+    };
+    let first_edge = [
+        second[0] - first[0],
+        second[1] - first[1],
+        second[2] - first[2],
+    ];
+    let second_edge = [
+        third[0] - first[0],
+        third[1] - first[1],
+        third[2] - first[2],
+    ];
+    let normal = cross(first_edge, second_edge);
+    let Some(unit_normal) = normalize(normal) else {
+        return candidates;
+    };
+    let max_edge_length = distance(first, second)
+        .max(distance(second, third))
+        .max(distance(third, first));
+    if !max_edge_length.is_finite() || max_edge_length <= 0.0 {
+        return candidates;
+    }
+    for direction in [
+        unit_normal,
+        [-unit_normal[0], -unit_normal[1], -unit_normal[2]],
+    ] {
+        for scale in [0.08, 0.14, 0.22, 0.35, 0.55, 0.85, 1.25] {
+            let distance = max_edge_length * scale;
+            candidates.push([
+                surface_point[0] + direction[0] * distance,
+                surface_point[1] + direction[1] * distance,
+                surface_point[2] + direction[2] * distance,
+            ]);
+        }
+    }
+    candidates
+}
+
+#[cfg(test)]
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+#[cfg(test)]
+fn normalize(vector: [f64; 3]) -> Option<[f64; 3]> {
+    let norm = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+    if !norm.is_finite() || norm <= 0.0 {
+        return None;
+    }
+    Some([vector[0] / norm, vector[1] / norm, vector[2] / norm])
+}
+
+#[cfg(test)]
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let delta = [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
+    (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt()
 }
 
 #[cfg(test)]
@@ -5315,6 +5527,21 @@ mod tests {
         assert_eq!(diagnostic.candidate_count, 0);
         assert_eq!(diagnostic.search_attempt_count, 0);
         assert_eq!(diagnostic.reason, "no_missing_faces");
+    }
+
+    #[test]
+    fn missing_face_local_cap_quality_reports_boundary_complete_fixture() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let diagnostic =
+            diagnostic_missing_face_local_cap_quality(&cavity, &nodes, refill_options())
+                .expect("local cap diagnostic should evaluate");
+
+        assert_eq!(diagnostic.missing_face_count, 0);
+        assert_eq!(diagnostic.pass_face_count, 0);
+        assert_eq!(diagnostic.candidate_count, 0);
+        assert_eq!(diagnostic.max_scaled_jacobian, 0.0);
+        assert!(diagnostic.rejected_by_reason.is_empty());
     }
 
     #[test]
