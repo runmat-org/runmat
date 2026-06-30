@@ -114,6 +114,8 @@ pub(crate) mod semilogy;
 pub(crate) mod set;
 #[path = "ops/sgtitle.rs"]
 pub(crate) mod sgtitle;
+#[path = "ops/sphere.rs"]
+pub(crate) mod sphere;
 #[path = "ops/stairs.rs"]
 pub(crate) mod stairs;
 #[path = "ops/stem.rs"]

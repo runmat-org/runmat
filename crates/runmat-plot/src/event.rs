@@ -319,6 +319,10 @@ pub enum ScenePlot {
         y: Vec<f64>,
         #[serde(deserialize_with = "deserialize_matrix_f64_lossy")]
         z: Vec<Vec<f64>>,
+        #[serde(default)]
+        x_grid: Option<Vec<Vec<f64>>>,
+        #[serde(default)]
+        y_grid: Option<Vec<Vec<f64>>>,
         colormap: String,
         shading_mode: String,
         wireframe: bool,
@@ -1579,6 +1583,46 @@ fn validate_surface_grid<T>(
     Ok(())
 }
 
+fn validate_matching_grid_shape<T, U>(
+    kind: &str,
+    reference: &[Vec<T>],
+    grid: &[Vec<U>],
+) -> Result<(), SceneExportError> {
+    if grid.len() != reference.len() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} row count ({}) must match surface row count ({})",
+            grid.len(),
+            reference.len()
+        )));
+    }
+    for (row_idx, (reference_row, row)) in reference.iter().zip(grid).enumerate() {
+        if row.len() != reference_row.len() {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} row {row_idx} length ({}) must match surface row length ({})",
+                row.len(),
+                reference_row.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_surface_coordinate_grids(
+    kind: &str,
+    x_grid: &[Vec<f64>],
+    y_grid: &[Vec<f64>],
+    z_grid: &[Vec<f64>],
+) -> Result<(), SceneExportError> {
+    if z_grid.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required grid rows"
+        )));
+    }
+    validate_matching_grid_shape(kind, z_grid, x_grid)?;
+    validate_matching_grid_shape(kind, z_grid, y_grid)?;
+    Ok(())
+}
+
 impl ScenePlot {
     async fn from_plot_for_export(
         plot: &PlotElement,
@@ -1802,6 +1846,8 @@ impl ScenePlot {
                     x,
                     y,
                     z,
+                    x_grid: surface.x_grid.clone(),
+                    y_grid: surface.y_grid.clone(),
                     colormap: format!("{:?}", surface.colormap),
                     shading_mode: format!("{:?}", surface.shading_mode),
                     wireframe: surface.wireframe,
@@ -1992,12 +2038,27 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_grid,
+                y_grid,
                 color_grid_rgba,
                 ..
             } => {
-                validate_surface_grid("surface grid scene data", x, y, z)?;
+                match (x_grid, y_grid) {
+                    (Some(x_grid), Some(y_grid)) => validate_surface_coordinate_grids(
+                        "surface coordinate grid scene data",
+                        x_grid,
+                        y_grid,
+                        z,
+                    )?,
+                    (None, None) => validate_surface_grid("surface grid scene data", x, y, z)?,
+                    _ => {
+                        return Err(SceneExportError::unexportable(
+                            "surface coordinate grid scene data must include both xGrid and yGrid",
+                        ));
+                    }
+                }
                 if let Some(color_grid) = color_grid_rgba {
-                    validate_surface_grid("surface color grid scene data", x, y, color_grid)?;
+                    validate_matching_grid_shape("surface color grid scene data", z, color_grid)?;
                 }
             }
             ScenePlot::Patch {
@@ -2210,6 +2271,8 @@ impl ScenePlot {
                 x: surface.x_data.clone(),
                 y: surface.y_data.clone(),
                 z: surface.z_data.clone().unwrap_or_default(),
+                x_grid: surface.x_grid.clone(),
+                y_grid: surface.y_grid.clone(),
                 colormap: format!("{:?}", surface.colormap),
                 shading_mode: format!("{:?}", surface.shading_mode),
                 wireframe: surface.wireframe,
@@ -2598,6 +2661,8 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_grid,
+                y_grid,
                 colormap,
                 shading_mode,
                 wireframe,
@@ -2610,7 +2675,18 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut surface = SurfacePlot::new(x, y, z)?;
+                let mut surface = match (x_grid, y_grid) {
+                    (Some(x_grid), Some(y_grid)) => {
+                        SurfacePlot::from_coordinate_grids(x_grid, y_grid, z)?
+                    }
+                    (None, None) => SurfacePlot::new(x, y, z)?,
+                    _ => {
+                        return Err(
+                            "surface scene must include both xGrid and yGrid for coordinate grids"
+                                .to_string(),
+                        );
+                    }
+                };
                 surface.colormap = parse_colormap(&colormap);
                 surface.shading_mode = parse_shading_mode(&shading_mode);
                 surface.wireframe = wireframe;
@@ -3338,6 +3414,8 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            x_grid: None,
+            y_grid: None,
             colormap: "Parula".to_string(),
             shading_mode: "Smooth".to_string(),
             wireframe: false,
@@ -3360,6 +3438,8 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+            x_grid: None,
+            y_grid: None,
             colormap: "Parula".to_string(),
             shading_mode: "Smooth".to_string(),
             wireframe: false,
@@ -3389,6 +3469,8 @@ mod tests {
                 x: vec![0.0, 1.0],
                 y: vec![10.0, 20.0, 30.0],
                 z: vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
+                x_grid: None,
+                y_grid: None,
                 colormap: "Parula".to_string(),
                 shading_mode: "None".to_string(),
                 wireframe: false,
@@ -4008,6 +4090,37 @@ mod tests {
             surface.color_grid.as_ref().unwrap()[0][0],
             Vec4::new(1.0, 0.0, 0.0, 1.0)
         );
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_parametric_surface_coordinate_grids() {
+        let mut figure = Figure::new();
+        let surface = SurfacePlot::from_coordinate_grids(
+            vec![vec![0.0, 0.5], vec![0.2, 0.8]],
+            vec![vec![0.0, 0.1], vec![0.7, 1.0]],
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+        )
+        .unwrap();
+        figure.add_surface_plot(surface);
+
+        let scene = FigureScene::capture(&figure);
+        let ScenePlot::Surface {
+            x_grid: Some(scene_x_grid),
+            y_grid: Some(scene_y_grid),
+            ..
+        } = &scene.plots[0]
+        else {
+            panic!("expected exported coordinate grids");
+        };
+        assert_eq!(scene_x_grid[1][0], 0.2);
+        assert_eq!(scene_y_grid[0][1], 0.1);
+
+        let rebuilt = scene.into_figure().expect("scene restore should succeed");
+        let PlotElement::Surface(surface) = rebuilt.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        assert_eq!(surface.x_grid.as_ref().unwrap()[1][1], 0.8);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[1][0], 0.7);
     }
 
     #[test]

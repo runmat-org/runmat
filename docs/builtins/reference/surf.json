@@ -32,12 +32,12 @@
     "unit": "builtins::plotting::surf::tests",
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`surf` creates shaded 3-D surfaces from vector axes plus height data or from explicit mesh coordinate matrices. It returns a surface handle and follows MATLAB-compatible argument and property behavior.",
+  "description": "`surf` creates shaded 3-D surfaces from vector axes plus height data, meshgrid coordinates, or full parametric coordinate matrices. It returns a surface handle and follows MATLAB-compatible argument and property behavior.",
   "behaviors": [
-    "`surf(Z)` uses implicit axes, while `surf(X, Y, Z)` accepts either vector axes or meshgrid-style coordinate matrices, following MATLAB `surf` call forms.",
+    "`surf(Z)` uses implicit axes, while `surf(X, Y, Z)` accepts vector axes, meshgrid-style coordinate matrices, or full parametric coordinate matrices, following MATLAB `surf` call forms.",
     "The returned value is a surface handle that can be inspected and updated through `get` and `set`.",
     "Surface plots naturally interact with `view`, `zlabel`, `colorbar`, `colormap`, and `shading` because they all operate on the same subplot-local axes state.",
-    "GPU-backed surface rendering is the preferred path when exported buffers and the shared plotting device are available; otherwise RunMat gathers once and renders the same surface semantics on the host path.",
+    "GPU-backed surface rendering is the preferred path when exported vector-axis buffers and the shared plotting device are available; full host coordinate matrices render through the same CPU surface path used for parametric surfaces.",
     "`surf` is the shaded/fill-oriented member of the surface family, while `mesh` emphasizes wireframe rendering and `surfc` adds contour overlays."
   ],
   "examples": [
@@ -124,9 +124,10 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surf.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/surf.rs"
   },
-  "gpu_residency": "`surf` preserves GPU residency on the happy path through the shared surface rendering pipeline. When a direct GPU render path is not available for the active input combination, RunMat gathers once and builds the same surface plot semantics on the fallback path.",
+  "gpu_residency": "`surf` preserves GPU residency on the vector-axis happy path through the shared surface rendering pipeline. When a direct GPU render path is not available for the active input combination, including full coordinate matrices, RunMat gathers once and builds the same surface plot semantics on the fallback path.",
   "gpu_behavior": [
     "The surface pipeline is shared across multiple plot families, which keeps `surf` aligned with image, contour-composite, and surface-style rendering behavior.",
+    "Vector-axis GPU inputs can remain on device when the renderer shares the provider context; full coordinate matrices use the host parametric-surface path after any required gather.",
     "Surface color limits and subplot-local metadata stay consistent regardless of whether the geometry is emitted from GPU buffers or host tensors."
   ]
 }

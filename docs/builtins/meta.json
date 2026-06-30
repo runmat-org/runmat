@@ -64928,6 +64928,207 @@
       ]
     },
     {
+      "name": "sphere",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "sphere()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "sphere(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": "20",
+              "description": "Number of surface faces per dimension; outputs have size (n+1)-by-(n+1)."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "X = sphere()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            }
+          ]
+        },
+        {
+          "label": "X = sphere(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": "20",
+              "description": "Number of surface faces per dimension; outputs have size (n+1)-by-(n+1)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            }
+          ]
+        },
+        {
+          "label": "[X,Y] = sphere()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates on the unit sphere."
+            }
+          ]
+        },
+        {
+          "label": "[X,Y] = sphere(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": "20",
+              "description": "Number of surface faces per dimension; outputs have size (n+1)-by-(n+1)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates on the unit sphere."
+            }
+          ]
+        },
+        {
+          "label": "[X,Y,Z] = sphere()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates on the unit sphere."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Z coordinates on the unit sphere."
+            }
+          ]
+        },
+        {
+          "label": "[X,Y,Z] = sphere(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": "20",
+              "description": "Number of surface faces per dimension; outputs have size (n+1)-by-(n+1)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates on the unit sphere."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates on the unit sphere."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Z coordinates on the unit sphere."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SPHERE.OUTPUT_COUNT",
+          "identifier": "RunMat:sphere:OutputCount",
+          "when": "More than three outputs are requested.",
+          "message": "sphere: too many output arguments; maximum is 3"
+        },
+        {
+          "code": "RM.SPHERE.ARG_COUNT",
+          "identifier": "RunMat:sphere:InvalidArgument",
+          "when": "More than one input argument is supplied.",
+          "message": "sphere: expected zero or one input argument"
+        },
+        {
+          "code": "RM.SPHERE.INVALID_N",
+          "identifier": "RunMat:sphere:InvalidArgument",
+          "when": "The n argument is not a finite non-negative integer scalar.",
+          "message": "sphere: n must be a finite non-negative integer scalar"
+        },
+        {
+          "code": "RM.SPHERE.N_TOO_LARGE",
+          "identifier": "RunMat:sphere:OutOfMemory",
+          "when": "The requested coordinate grid is too large for RunMat's bounded allocation policy.",
+          "message": "sphere: requested grid is too large"
+        },
+        {
+          "code": "RM.SPHERE.INTERNAL",
+          "identifier": "RunMat:sphere:Internal",
+          "when": "Coordinate tensor construction or plotting fails unexpectedly.",
+          "message": "sphere: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "surf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -64961,14 +65162,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z columns."
+              "description": "X axis vector or full coordinate matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z rows."
+              "description": "Y axis vector or full coordinate matrix matching Z."
             },
             {
               "name": "Z",
@@ -65024,14 +65225,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z columns."
+              "description": "X axis vector or full coordinate matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z rows."
+              "description": "Y axis vector or full coordinate matrix matching Z."
             },
             {
               "name": "Z",

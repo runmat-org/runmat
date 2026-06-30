@@ -81,6 +81,32 @@ fn polarplot_dispatches_and_sets_equal_axes() {
 }
 
 #[test]
+fn sphere_returns_coordinates_and_statement_form_plots() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        [X, Y, Z] = sphere(4); \
+        if size(X, 1) ~= 5 || size(X, 2) ~= 5; \
+            error('sphere X shape mismatch'); \
+        end; \
+        if size(Y, 1) ~= 5 || size(Z, 2) ~= 5; \
+            error('sphere Y/Z shape mismatch'); \
+        end; \
+        R = sqrt(X.^2 + Y.^2 + Z.^2); \
+        if max(abs(R(:) - 1)) > 1e-10; \
+            error('sphere coordinates are not unit radius'); \
+        end; \
+        h = surf(X, Y, Z); \
+        if ~ishandle(h); \
+            error('surf did not accept sphere coordinate grids'); \
+        end; \
+        sphere(4); \
+        if ~get(gca, 'AxisEqual'); \
+            error('sphere statement form did not enable equal axes'); \
+        end;";
+    execute_source(input).expect("execute sphere script");
+}
+
+#[test]
 fn bare_gca_can_set_axes_font_size() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

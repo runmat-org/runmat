@@ -20,13 +20,13 @@ use crate::builtins::common::spec::{
 
 use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
-    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
-    AxisSource,
+    axis_sources_to_host, extract_meshgrid_axes_from_xy_matrices,
+    parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values, AxisSource,
 };
 use super::perf::compute_surface_lod;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
+use super::style::{parse_surface_style_args, SurfaceStyle, SurfaceStyleDefaults};
 use crate::build_runtime_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
@@ -58,14 +58,14 @@ const SURF_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
+        description: "X axis vector or full coordinate matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
+        description: "Y axis vector or full coordinate matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -99,14 +99,14 @@ const SURF_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
+        description: "X axis vector or full coordinate matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
+        description: "Y axis vector or full coordinate matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -245,13 +245,6 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .grid_shape(BUILTIN_NAME)
         .map_err(map_surf_invalid_argument)?;
 
-    // Prefer a no-download path for vector-like gpuArray axes: keep X/Y on-device and pass
-    // their buffers through to the GPU vertex packer. If X/Y are meshgrid matrices, we still
-    // need to validate and extract axes on the host.
-    let (x_axis, y_axis) = surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME)
-        .await
-        .map_err(map_surf_invalid_argument)?;
-
     let style = Arc::new(
         parse_surface_style_args(
             "surf",
@@ -267,14 +260,20 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         )
         .map_err(map_surf_invalid_argument)?,
     );
-    let opts = PlotRenderOptions {
-        title: "Surface Plot",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: false,
-        ..Default::default()
-    };
 
+    // Prefer a no-download path for vector-like gpuArray axes: keep X/Y on-device and pass
+    // their buffers through to the GPU vertex packer. If X/Y are meshgrid matrices, we still
+    // need to validate and extract axes on the host.
+    if let Some(surface) = build_parametric_surface_cpu(&x, &y, &z_input, rows, cols, &style)
+        .map_err(map_surf_invalid_argument)?
+    {
+        return render_surface(surface).map_err(map_surf_internal);
+    }
+    let (x_axis, y_axis) =
+        match surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await {
+            Ok(axes) => axes,
+            Err(axis_err) => return Err(map_surf_invalid_argument(axis_err)),
+        };
     let mut surface = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
         match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
             Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
@@ -321,10 +320,21 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     };
 
     style.apply_to_plot(&mut surface);
+    render_surface(surface).map_err(map_surf_internal)
+}
+
+fn render_surface(surface: SurfacePlot) -> BuiltinResult<f64> {
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let opts = PlotRenderOptions {
+        title: "Surface Plot",
+        x_label: "X",
+        y_label: "Y",
+        axis_equal: false,
+        ..Default::default()
+    };
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface.take().expect("surf plot consumed once");
         let plot_index = figure.add_surface_plot_on_axes(surface, axes);
@@ -341,9 +351,39 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(map_surf_internal(err));
+        return Err(err);
     }
     Ok(handle)
+}
+
+fn build_parametric_surface_cpu(
+    x: &Value,
+    y: &Value,
+    z_input: &SurfaceDataInput,
+    rows: usize,
+    cols: usize,
+    style: &SurfaceStyle,
+) -> BuiltinResult<Option<SurfacePlot>> {
+    let (Value::Tensor(x), Value::Tensor(y)) = (x, y) else {
+        return Ok(None);
+    };
+    let SurfaceDataInput::Host(z) = z_input else {
+        return Ok(None);
+    };
+    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+        return Ok(None);
+    }
+    if extract_meshgrid_axes_from_xy_matrices(x, y, rows, cols, BUILTIN_NAME).is_ok() {
+        return Ok(None);
+    }
+
+    let x_grid = tensor_to_surface_grid_matlab_xy(x.clone(), rows, cols, BUILTIN_NAME)?;
+    let y_grid = tensor_to_surface_grid_matlab_xy(y.clone(), rows, cols, BUILTIN_NAME)?;
+    let z_grid = tensor_to_surface_grid_matlab_xy(z.clone(), rows, cols, BUILTIN_NAME)?;
+    let mut surface = SurfacePlot::from_coordinate_grids(x_grid, y_grid, z_grid)
+        .map_err(|err| plotting_error(BUILTIN_NAME, format!("surf: {err}")))?;
+    style.apply_to_plot(&mut surface);
+    Ok(Some(surface))
 }
 
 async fn build_surface_cpu(

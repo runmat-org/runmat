@@ -18,6 +18,9 @@ pub struct SurfacePlot {
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub z_data: Option<Vec<Vec<f64>>>, // Host data when available
+    /// Optional full coordinate grids for parametric surfaces where X/Y are not separable axes.
+    pub x_grid: Option<Vec<Vec<f64>>>,
+    pub y_grid: Option<Vec<Vec<f64>>>,
     /// Grid resolution for rendering/index generation (kept even for GPU-backed plots).
     x_len: usize,
     y_len: usize,
@@ -287,6 +290,52 @@ impl SurfacePlot {
             x_data,
             y_data,
             z_data: Some(z_data),
+            x_grid: None,
+            y_grid: None,
+            colormap: ColorMap::default(),
+            shading_mode: ShadingMode::default(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_limits: None,
+            color_grid: None,
+            lighting_enabled: true,
+            ambient_strength: 0.2,
+            diffuse_strength: 0.8,
+            specular_strength: 0.5,
+            shininess: 32.0,
+            label: None,
+            visible: true,
+            vertices: None,
+            indices: None,
+            bounds: None,
+            dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: None,
+            gpu_source: None,
+            gpu_color_grid_source: None,
+        })
+    }
+
+    /// Create a new surface plot from full X/Y/Z coordinate grids.
+    pub fn from_coordinate_grids(
+        x_grid: Vec<Vec<f64>>,
+        y_grid: Vec<Vec<f64>>,
+        z_grid: Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        validate_coordinate_grids(&x_grid, &y_grid, &z_grid)?;
+        let x_len = z_grid.len();
+        let y_len = z_grid.first().map_or(0, Vec::len);
+        Ok(Self {
+            x_data: (0..x_len).map(|i| i as f64 + 1.0).collect(),
+            y_data: (0..y_len).map(|i| i as f64 + 1.0).collect(),
+            z_data: Some(z_grid),
+            x_grid: Some(x_grid),
+            y_grid: Some(y_grid),
+            x_len,
+            y_len,
             colormap: ColorMap::default(),
             shading_mode: ShadingMode::default(),
             wireframe: false,
@@ -326,6 +375,8 @@ impl SurfacePlot {
             x_data: Vec::new(),
             y_data: Vec::new(),
             z_data: None,
+            x_grid: None,
+            y_grid: None,
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -518,14 +569,29 @@ impl SurfacePlot {
         let mut min_z = f32::INFINITY;
         let mut max_z = f32::NEG_INFINITY;
 
-        for &x in &self.x_data {
-            min_x = min_x.min(x as f32);
-            max_x = max_x.max(x as f32);
-        }
+        if let (Some(x_grid), Some(y_grid)) = (&self.x_grid, &self.y_grid) {
+            for row in x_grid {
+                for &x in row {
+                    min_x = min_x.min(x as f32);
+                    max_x = max_x.max(x as f32);
+                }
+            }
+            for row in y_grid {
+                for &y in row {
+                    min_y = min_y.min(y as f32);
+                    max_y = max_y.max(y as f32);
+                }
+            }
+        } else {
+            for &x in &self.x_data {
+                min_x = min_x.min(x as f32);
+                max_x = max_x.max(x as f32);
+            }
 
-        for &y in &self.y_data {
-            min_y = min_y.min(y as f32);
-            max_y = max_y.max(y as f32);
+            for &y in &self.y_data {
+                min_y = min_y.min(y as f32);
+                max_y = max_y.max(y as f32);
+            }
         }
 
         if let Some(rows) = &self.z_data {
@@ -565,13 +631,24 @@ impl SurfacePlot {
 
     /// Estimate memory usage in bytes
     pub fn estimated_memory_usage(&self) -> usize {
+        let coordinate_grid_size = self
+            .x_grid
+            .as_ref()
+            .zip(self.y_grid.as_ref())
+            .map_or(0, |(x, y)| {
+                x.iter().map(Vec::len).sum::<usize>() + y.iter().map(Vec::len).sum::<usize>()
+            });
         let data_size = std::mem::size_of::<f64>()
-            * (self.x_data.len()
-                + self.y_data.len()
+            * (coordinate_grid_size
+                + if coordinate_grid_size == 0 {
+                    self.x_data.len() + self.y_data.len()
+                } else {
+                    0
+                }
                 + self
                     .z_data
                     .as_ref()
-                    .map_or(0, |z| z.len() * self.y_data.len()));
+                    .map_or(0, |z| z.iter().map(Vec::len).sum()));
 
         let vertices_size = self
             .vertices
@@ -630,8 +707,9 @@ impl SurfacePlot {
             let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
 
             // Generate vertices for each grid point
-            for (i, &x) in self.x_data.iter().enumerate() {
-                for (j, &y) in self.y_data.iter().enumerate() {
+            for i in 0..self.x_len {
+                for j in 0..self.y_len {
+                    let (x, y) = self.coordinate_at(i, j);
                     let z = z_rows[i][j];
                     let z_pos = if self.flatten_z { 0.0 } else { z as f32 };
                     let position = Vec3::new(x as f32, y as f32, z_pos);
@@ -654,8 +732,8 @@ impl SurfacePlot {
                         normal: normal.to_array(),
                         color: color.to_array(),
                         tex_coords: [
-                            i as f32 / (self.x_data.len() - 1).max(1) as f32,
-                            j as f32 / (self.y_data.len() - 1).max(1) as f32,
+                            i as f32 / (self.x_len - 1).max(1) as f32,
+                            j as f32 / (self.y_len - 1).max(1) as f32,
                         ],
                     });
                 }
@@ -665,6 +743,13 @@ impl SurfacePlot {
             self.vertices = Some(vertices);
         }
         self.vertices.as_ref().unwrap()
+    }
+
+    fn coordinate_at(&self, i: usize, j: usize) -> (f64, f64) {
+        match (&self.x_grid, &self.y_grid) {
+            (Some(x_grid), Some(y_grid)) => (x_grid[i][j], y_grid[i][j]),
+            _ => (self.x_data[i], self.y_data[j]),
+        }
     }
 
     /// Generate indices for surface triangulation
@@ -906,6 +991,44 @@ impl SurfacePlot {
             }),
         }
     }
+}
+
+fn validate_coordinate_grids(
+    x_grid: &[Vec<f64>],
+    y_grid: &[Vec<f64>],
+    z_grid: &[Vec<f64>],
+) -> Result<(), String> {
+    if z_grid.is_empty() {
+        return Err("Z coordinate grid must not be empty".to_string());
+    }
+    if x_grid.len() != z_grid.len() || y_grid.len() != z_grid.len() {
+        return Err("X, Y, and Z coordinate grids must have the same row count".to_string());
+    }
+    let y_len = z_grid[0].len();
+    if y_len == 0 {
+        return Err("Z coordinate grid rows must not be empty".to_string());
+    }
+    for (idx, ((x_row, y_row), z_row)) in x_grid
+        .iter()
+        .zip(y_grid.iter())
+        .zip(z_grid.iter())
+        .enumerate()
+    {
+        if x_row.len() != y_len || y_row.len() != y_len || z_row.len() != y_len {
+            return Err(format!(
+                "X, Y, and Z coordinate grid row {idx} must all have length {y_len}"
+            ));
+        }
+        if x_row
+            .iter()
+            .chain(y_row.iter())
+            .chain(z_row.iter())
+            .any(|value| !value.is_finite())
+        {
+            return Err("X, Y, and Z coordinate grids must contain finite values".to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Surface plot performance and data statistics
