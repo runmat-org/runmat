@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets_with_anchor_trim,
-        evaluate_constrained_cavity_refill_candidates, ConstrainedCavityExtractionError,
-        ConstrainedCavityNode, ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityBoundaryFace, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     predicate::{
         add, distance, distance_squared, point_triangle_distance, ray_triangle_intersection, scale,
@@ -9260,6 +9261,95 @@ fn face_neighbor_cavity_reconnection_candidates(
     }
     let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
     if candidate_boundary_faces != boundary_faces {
+        return constrained_boundary_node_cavity_reconnection_candidates(
+            reference,
+            adjacent,
+            &boundary_faces,
+            &boundary_nodes,
+            original_volume,
+            node_points,
+            options,
+        );
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok(None);
+    }
+    Ok(Some(candidates))
+}
+
+fn constrained_boundary_node_cavity_reconnection_candidates(
+    reference: &TetCandidate,
+    adjacent: &[usize],
+    boundary_faces: &BTreeSet<[u32; 3]>,
+    boundary_nodes: &BTreeSet<u32>,
+    original_volume: f64,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let cavity = ConstrainedCavity {
+        removed_tet_ids: adjacent.iter().map(|index| *index as u32).collect(),
+        boundary_faces: boundary_faces
+            .iter()
+            .map(|face| ConstrainedCavityBoundaryFace {
+                node_ids: *face,
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: reference.region_ids.clone(),
+            })
+            .collect(),
+        protected_node_ids: Vec::new(),
+        target_volume_m3: original_volume,
+    };
+    let boundary_nodes = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let Ok(evaluation) = evaluate_constrained_cavity_refill_candidates(
+        &cavity,
+        &boundary_nodes,
+        &[],
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    ) else {
+        return Ok(None);
+    };
+    let Some(refill) = evaluation.refill else {
+        return Ok(None);
+    };
+    if !refill.inserted_nodes.is_empty() {
+        return Ok(None);
+    }
+    let candidates = refill
+        .tets
+        .into_iter()
+        .map(|tet| TetCandidate {
+            tet_id: 0,
+            component_id: reference.component_id,
+            node_ids: tet.node_ids,
+            source_surface_element_id: reference.source_surface_element_id,
+            region_ids: reference.region_ids.clone(),
+            volume_m3: tet.volume_m3,
+            aspect_ratio: tet.aspect_ratio,
+            exact_scaled_jacobian: tet.exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+    if boundary_faces_from_tets(&candidates) != *boundary_faces {
         return Ok(None);
     }
     let candidate_volume = candidates
@@ -13329,6 +13419,65 @@ mod tests {
         assert_eq!(repair.connected_reconnected_cavity_count, 0);
         assert_eq!(repair.face_neighbor_reconnected_cavity_count, 0);
         assert_eq!(repair.split_cavity_count, 0);
+    }
+
+    #[test]
+    fn constrained_boundary_node_fallback_preserves_bipyramid_cavity() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [0.0, 0.0, 1.0]),
+            (4, [0.0, 0.0, -1.0]),
+        ]);
+        let tets = vec![
+            raw_candidate_tet(
+                0,
+                0,
+                &["body".to_string()],
+                [0, 1, 2, 3],
+                [0, 1, 2, 3].map(|node_id| node_points[&node_id]),
+                options,
+            )
+            .expect("upper tet should be valid"),
+            raw_candidate_tet(
+                0,
+                0,
+                &["body".to_string()],
+                [0, 2, 1, 4],
+                [0, 2, 1, 4].map(|node_id| node_points[&node_id]),
+                options,
+            )
+            .expect("lower tet should be valid"),
+        ];
+        let boundary_faces = boundary_faces_from_tets(&tets);
+        let boundary_nodes = boundary_faces
+            .iter()
+            .flat_map(|face| face.iter().copied())
+            .collect::<BTreeSet<_>>();
+        let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+
+        let candidates = constrained_boundary_node_cavity_reconnection_candidates(
+            &tets[0],
+            &[0, 1],
+            &boundary_faces,
+            &boundary_nodes,
+            original_volume,
+            &node_points,
+            options,
+        )
+        .expect("fallback should evaluate")
+        .expect("fallback should refill the bipyramid cavity");
+
+        assert_eq!(boundary_faces_from_tets(&candidates), boundary_faces);
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() <= 1.0e-12);
+        assert!(candidates.iter().all(|tet| tet.region_ids == ["body"]));
     }
 
     #[test]
