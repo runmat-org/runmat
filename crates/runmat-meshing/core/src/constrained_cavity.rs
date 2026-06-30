@@ -207,6 +207,11 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub open_interior_component_size_histogram: BTreeMap<usize, usize>,
     pub candidate_with_orphan_interior_face_count: usize,
     pub candidate_without_orphan_interior_face_count: usize,
+    pub root_boundary_zero_raw_candidate_face_count: usize,
+    pub root_boundary_zero_addable_candidate_face_count: usize,
+    pub root_boundary_min_raw_candidate_count: usize,
+    pub root_boundary_min_addable_candidate_count: usize,
+    pub root_boundary_max_addable_candidate_count: usize,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3425,6 +3430,16 @@ struct BoundaryExactCoverSearch<'a> {
     attempts: usize,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundaryExactCoverRootAvailability {
+    zero_raw_candidate_face_count: usize,
+    zero_addable_candidate_face_count: usize,
+    min_raw_candidate_count: usize,
+    min_addable_candidate_count: usize,
+    max_addable_candidate_count: usize,
+}
+
 impl<'a> BoundaryExactCoverSearch<'a> {
     fn new(
         cavity: &ConstrainedCavity,
@@ -3460,6 +3475,50 @@ impl<'a> BoundaryExactCoverSearch<'a> {
 
     fn search(&mut self) -> Option<Vec<usize>> {
         self.search_from(0.0, &mut BTreeMap::new(), &mut Vec::new())
+    }
+
+    #[cfg(test)]
+    fn root_boundary_availability(&self) -> BoundaryExactCoverRootAvailability {
+        let face_counts = BTreeMap::<[u32; 3], usize>::new();
+        let selected = Vec::<usize>::new();
+        let mut zero_raw = 0_usize;
+        let mut zero_addable = 0_usize;
+        let mut min_raw = usize::MAX;
+        let mut min_addable = usize::MAX;
+        let mut max_addable = 0_usize;
+        for face in &self.boundary_faces {
+            let raw_count = self
+                .candidate_faces
+                .iter()
+                .filter(|candidate_faces| candidate_faces.contains(face))
+                .count();
+            let addable_count = (0..self.candidates.len())
+                .filter(|candidate_index| {
+                    self.candidate_can_be_added_for_face(
+                        *candidate_index,
+                        *face,
+                        &face_counts,
+                        &selected,
+                    )
+                })
+                .count();
+            zero_raw += usize::from(raw_count == 0);
+            zero_addable += usize::from(addable_count == 0);
+            min_raw = min_raw.min(raw_count);
+            min_addable = min_addable.min(addable_count);
+            max_addable = max_addable.max(addable_count);
+        }
+        if self.boundary_faces.is_empty() {
+            min_raw = 0;
+            min_addable = 0;
+        }
+        BoundaryExactCoverRootAvailability {
+            zero_raw_candidate_face_count: zero_raw,
+            zero_addable_candidate_face_count: zero_addable,
+            min_raw_candidate_count: min_raw,
+            min_addable_candidate_count: min_addable,
+            max_addable_candidate_count: max_addable,
+        }
     }
 
     fn search_from(
@@ -4469,6 +4528,11 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         open_interior_component_size_histogram: BTreeMap::new(),
         candidate_with_orphan_interior_face_count: 0,
         candidate_without_orphan_interior_face_count: 0,
+        root_boundary_zero_raw_candidate_face_count: 0,
+        root_boundary_zero_addable_candidate_face_count: 0,
+        root_boundary_min_raw_candidate_count: 0,
+        root_boundary_min_addable_candidate_count: 0,
+        root_boundary_max_addable_candidate_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4633,6 +4697,16 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         options.volume_relative_tolerance,
         25_000,
     );
+    let root_availability = search.root_boundary_availability();
+    diagnostic.root_boundary_zero_raw_candidate_face_count =
+        root_availability.zero_raw_candidate_face_count;
+    diagnostic.root_boundary_zero_addable_candidate_face_count =
+        root_availability.zero_addable_candidate_face_count;
+    diagnostic.root_boundary_min_raw_candidate_count = root_availability.min_raw_candidate_count;
+    diagnostic.root_boundary_min_addable_candidate_count =
+        root_availability.min_addable_candidate_count;
+    diagnostic.root_boundary_max_addable_candidate_count =
+        root_availability.max_addable_candidate_count;
     let selected = search.search();
     diagnostic.search_attempt_count = search.attempts;
     let Some(selected) = selected else {
@@ -4768,6 +4842,11 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         open_interior_component_size_histogram: BTreeMap::new(),
         candidate_with_orphan_interior_face_count: 0,
         candidate_without_orphan_interior_face_count: 0,
+        root_boundary_zero_raw_candidate_face_count: 0,
+        root_boundary_zero_addable_candidate_face_count: 0,
+        root_boundary_min_raw_candidate_count: 0,
+        root_boundary_min_addable_candidate_count: 0,
+        root_boundary_max_addable_candidate_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -4958,6 +5037,16 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         options.volume_relative_tolerance,
         25_000,
     );
+    let root_availability = search.root_boundary_availability();
+    diagnostic.root_boundary_zero_raw_candidate_face_count =
+        root_availability.zero_raw_candidate_face_count;
+    diagnostic.root_boundary_zero_addable_candidate_face_count =
+        root_availability.zero_addable_candidate_face_count;
+    diagnostic.root_boundary_min_raw_candidate_count = root_availability.min_raw_candidate_count;
+    diagnostic.root_boundary_min_addable_candidate_count =
+        root_availability.min_addable_candidate_count;
+    diagnostic.root_boundary_max_addable_candidate_count =
+        root_availability.max_addable_candidate_count;
     let selected = search.search();
     diagnostic.search_attempt_count = search.attempts;
     let Some(selected) = selected else {
@@ -6736,6 +6825,38 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("exact cover should preserve volume");
+    }
+
+    #[test]
+    fn exact_cover_root_availability_reports_boundary_face_candidates() {
+        let cavity = two_tet_bipyramid_cavity();
+        let lower = ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 3],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+        let upper = ConstrainedCavityRefillTet {
+            node_ids: [0, 2, 1, 4],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.4,
+        };
+        let candidates = [lower, upper];
+        let search = BoundaryExactCoverSearch::new(
+            &cavity,
+            &candidates,
+            refill_options().volume_relative_tolerance,
+        );
+        let availability = search.root_boundary_availability();
+
+        assert_eq!(availability.zero_raw_candidate_face_count, 0);
+        assert_eq!(availability.zero_addable_candidate_face_count, 0);
+        assert!(availability.min_raw_candidate_count > 0);
+        assert!(availability.min_addable_candidate_count > 0);
+        assert!(
+            availability.max_addable_candidate_count >= availability.min_addable_candidate_count
+        );
     }
 
     #[test]
