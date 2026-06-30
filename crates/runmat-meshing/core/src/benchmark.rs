@@ -2326,6 +2326,7 @@ mod tests {
             diagnostic_small_cavity_missing_face_topology,
             diagnostic_small_cavity_reconnection_rejection_reasons,
             diagnostic_small_cavity_star_insertion_rejection_reasons, TetCandidateOptions,
+            MAX_EDGE_STAR_RECONNECTION_SIZE,
         },
         topology::{BoundaryElementKind, VolumeElementKind},
     };
@@ -3814,7 +3815,7 @@ mod tests {
         if adjacent.len() < 3 {
             return "too_few_edge_tets";
         }
-        if adjacent.len() > 8 {
+        if adjacent.len() > MAX_EDGE_STAR_RECONNECTION_SIZE {
             return "edge_star_over_reconnection_limit";
         }
         let Some(reference) = adjacent.first().and_then(|index| tets.get(*index)) else {

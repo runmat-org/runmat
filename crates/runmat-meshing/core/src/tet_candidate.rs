@@ -4221,7 +4221,7 @@ enum InteriorSeedCollapseScope {
 
 const MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE: usize = 24;
 const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
-const MAX_EDGE_STAR_RECONNECTION_SIZE: usize = 18;
+pub(crate) const MAX_EDGE_STAR_RECONNECTION_SIZE: usize = 18;
 const MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES: usize = 8;
 
 fn interior_seed_collapse_scope_matches(
