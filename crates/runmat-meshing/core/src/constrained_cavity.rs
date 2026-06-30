@@ -103,14 +103,17 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub split_cap_pass_count: usize,
     pub max_split_cap_scaled_jacobian: f64,
     pub split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub split_cap_scaled_jacobian_worst_corner_bins: BTreeMap<&'static str, usize>,
     pub edge_split_cap_candidate_count: usize,
     pub edge_split_cap_pass_count: usize,
     pub max_edge_split_cap_scaled_jacobian: f64,
     pub edge_split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap<&'static str, usize>,
     pub three_edge_split_cap_candidate_count: usize,
     pub three_edge_split_cap_pass_count: usize,
     pub max_three_edge_split_cap_scaled_jacobian: f64,
     pub three_edge_split_cap_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub three_edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap<&'static str, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -1591,14 +1594,17 @@ pub(crate) fn diagnostic_boundary_node_completion(
         split_cap_pass_count: 0,
         max_split_cap_scaled_jacobian: 0.0,
         split_cap_scaled_jacobian_bins: BTreeMap::new(),
+        split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         edge_split_cap_candidate_count: 0,
         edge_split_cap_pass_count: 0,
         max_edge_split_cap_scaled_jacobian: 0.0,
         edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+        edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         three_edge_split_cap_candidate_count: 0,
         three_edge_split_cap_pass_count: 0,
         max_three_edge_split_cap_scaled_jacobian: 0.0,
         three_edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+        three_edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     loop {
@@ -1655,6 +1661,12 @@ pub(crate) fn diagnostic_boundary_node_completion(
                 .entry(bin)
                 .or_default() += count;
         }
+        for (bin, count) in diagnostic.split_cap_scaled_jacobian_worst_corner_bins {
+            *aggregate
+                .split_cap_scaled_jacobian_worst_corner_bins
+                .entry(bin)
+                .or_default() += count;
+        }
         aggregate.edge_split_cap_candidate_count += diagnostic.edge_split_cap_candidate_count;
         aggregate.edge_split_cap_pass_count += diagnostic.edge_split_cap_pass_count;
         aggregate.max_edge_split_cap_scaled_jacobian = aggregate
@@ -1663,6 +1675,12 @@ pub(crate) fn diagnostic_boundary_node_completion(
         for (bin, count) in diagnostic.edge_split_cap_scaled_jacobian_bins {
             *aggregate
                 .edge_split_cap_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
+        for (bin, count) in diagnostic.edge_split_cap_scaled_jacobian_worst_corner_bins {
+            *aggregate
+                .edge_split_cap_scaled_jacobian_worst_corner_bins
                 .entry(bin)
                 .or_default() += count;
         }
@@ -1675,6 +1693,12 @@ pub(crate) fn diagnostic_boundary_node_completion(
         for (bin, count) in diagnostic.three_edge_split_cap_scaled_jacobian_bins {
             *aggregate
                 .three_edge_split_cap_scaled_jacobian_bins
+                .entry(bin)
+                .or_default() += count;
+        }
+        for (bin, count) in diagnostic.three_edge_split_cap_scaled_jacobian_worst_corner_bins {
+            *aggregate
+                .three_edge_split_cap_scaled_jacobian_worst_corner_bins
                 .entry(bin)
                 .or_default() += count;
         }
@@ -1710,14 +1734,17 @@ pub(crate) fn diagnostic_boundary_node_completion(
             split_cap_pass_count: 0,
             max_split_cap_scaled_jacobian: 0.0,
             split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
             edge_split_cap_candidate_count: 0,
             edge_split_cap_pass_count: 0,
             max_edge_split_cap_scaled_jacobian: 0.0,
             edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
             three_edge_split_cap_candidate_count: 0,
             three_edge_split_cap_pass_count: 0,
             max_three_edge_split_cap_scaled_jacobian: 0.0,
             three_edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            three_edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
             rejected_by_reason: BTreeMap::new(),
         });
     }
@@ -1869,14 +1896,19 @@ fn diagnostic_boundary_face_completion(
     let mut split_cap_pass_count = 0_usize;
     let mut max_split_cap_scaled_jacobian = 0.0_f64;
     let mut split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut split_cap_scaled_jacobian_worst_corner_bins = BTreeMap::<&'static str, usize>::new();
     let mut edge_split_cap_candidate_count = 0_usize;
     let mut edge_split_cap_pass_count = 0_usize;
     let mut max_edge_split_cap_scaled_jacobian = 0.0_f64;
     let mut edge_split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut edge_split_cap_scaled_jacobian_worst_corner_bins =
+        BTreeMap::<&'static str, usize>::new();
     let mut three_edge_split_cap_candidate_count = 0_usize;
     let mut three_edge_split_cap_pass_count = 0_usize;
     let mut max_three_edge_split_cap_scaled_jacobian = 0.0_f64;
     let mut three_edge_split_cap_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    let mut three_edge_split_cap_scaled_jacobian_worst_corner_bins =
+        BTreeMap::<&'static str, usize>::new();
     let mut rejected_by_reason = BTreeMap::<&'static str, usize>::new();
     let mut saw_non_duplicate = false;
     for node_id in cavity_boundary_node_ids(cavity) {
@@ -1926,7 +1958,7 @@ fn diagnostic_boundary_face_completion(
                         .entry(diagnostic_height_ratio_bin(cap_height_ratio))
                         .or_default() += 1;
                 }
-                if let Some(split_min_quality) =
+                if let Some((split_min_quality, split_worst_corner)) =
                     diagnostic_split_cap_min_scaled_jacobian(face, node_id, boundary_nodes, options)
                 {
                     split_cap_candidate_count += 1;
@@ -1935,27 +1967,35 @@ fn diagnostic_boundary_face_completion(
                     *split_cap_scaled_jacobian_bins
                         .entry(diagnostic_scaled_jacobian_bin(split_min_quality))
                         .or_default() += 1;
+                    *split_cap_scaled_jacobian_worst_corner_bins
+                        .entry(split_worst_corner)
+                        .or_default() += 1;
                     if split_min_quality >= options.min_scaled_jacobian {
                         split_cap_pass_count += 1;
                     }
                 }
-                if let Some(edge_split_min_quality) = diagnostic_edge_split_cap_min_scaled_jacobian(
-                    face,
-                    node_id,
-                    boundary_nodes,
-                    options,
-                ) {
+                if let Some((edge_split_min_quality, edge_split_worst_corner)) =
+                    diagnostic_edge_split_cap_min_scaled_jacobian(
+                        face,
+                        node_id,
+                        boundary_nodes,
+                        options,
+                    )
+                {
                     edge_split_cap_candidate_count += 1;
                     max_edge_split_cap_scaled_jacobian =
                         max_edge_split_cap_scaled_jacobian.max(edge_split_min_quality);
                     *edge_split_cap_scaled_jacobian_bins
                         .entry(diagnostic_scaled_jacobian_bin(edge_split_min_quality))
                         .or_default() += 1;
+                    *edge_split_cap_scaled_jacobian_worst_corner_bins
+                        .entry(edge_split_worst_corner)
+                        .or_default() += 1;
                     if edge_split_min_quality >= options.min_scaled_jacobian {
                         edge_split_cap_pass_count += 1;
                     }
                 }
-                if let Some(three_edge_split_min_quality) =
+                if let Some((three_edge_split_min_quality, three_edge_split_worst_corner)) =
                     diagnostic_three_edge_split_cap_min_scaled_jacobian(
                         face,
                         node_id,
@@ -1968,6 +2008,9 @@ fn diagnostic_boundary_face_completion(
                         max_three_edge_split_cap_scaled_jacobian.max(three_edge_split_min_quality);
                     *three_edge_split_cap_scaled_jacobian_bins
                         .entry(diagnostic_scaled_jacobian_bin(three_edge_split_min_quality))
+                        .or_default() += 1;
+                    *three_edge_split_cap_scaled_jacobian_worst_corner_bins
+                        .entry(three_edge_split_worst_corner)
                         .or_default() += 1;
                     if three_edge_split_min_quality >= options.min_scaled_jacobian {
                         three_edge_split_cap_pass_count += 1;
@@ -2001,14 +2044,17 @@ fn diagnostic_boundary_face_completion(
         split_cap_pass_count,
         max_split_cap_scaled_jacobian,
         split_cap_scaled_jacobian_bins,
+        split_cap_scaled_jacobian_worst_corner_bins,
         edge_split_cap_candidate_count,
         edge_split_cap_pass_count,
         max_edge_split_cap_scaled_jacobian,
         edge_split_cap_scaled_jacobian_bins,
+        edge_split_cap_scaled_jacobian_worst_corner_bins,
         three_edge_split_cap_candidate_count,
         three_edge_split_cap_pass_count,
         max_three_edge_split_cap_scaled_jacobian,
         three_edge_split_cap_scaled_jacobian_bins,
+        three_edge_split_cap_scaled_jacobian_worst_corner_bins,
         rejected_by_reason,
     }
 }
@@ -2019,7 +2065,7 @@ fn diagnostic_split_cap_min_scaled_jacobian(
     cap_node_id: u32,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<f64> {
+) -> Option<(f64, &'static str)> {
     let diagnostic_options = ConstrainedCavityRefillOptions {
         min_scaled_jacobian: 0.0,
         ..options
@@ -2036,11 +2082,24 @@ fn diagnostic_split_cap_min_scaled_jacobian(
             )
             .map(|tets| {
                 tets.iter()
-                    .map(|tet| tet.exact_scaled_jacobian)
-                    .fold(f64::INFINITY, f64::min)
+                    .map(|tet| {
+                        let points = tet.node_ids.map(|node_id| {
+                            if node_id == split_node.node_id {
+                                split_node.coordinates_m
+                            } else {
+                                boundary_nodes[&node_id]
+                            }
+                        });
+                        (
+                            tet.exact_scaled_jacobian,
+                            diagnostic_scaled_jacobian_worst_corner_label(points),
+                        )
+                    })
+                    .min_by(|left, right| left.0.total_cmp(&right.0))
+                    .unwrap_or((f64::INFINITY, "face_vertex"))
             })
         })
-        .max_by(|left, right| left.total_cmp(right))
+        .max_by(|left, right| left.0.total_cmp(&right.0))
 }
 
 #[cfg(test)]
@@ -2049,7 +2108,7 @@ fn diagnostic_edge_split_cap_min_scaled_jacobian(
     cap_node_id: u32,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<f64> {
+) -> Option<(f64, &'static str)> {
     let diagnostic_options = ConstrainedCavityRefillOptions {
         min_scaled_jacobian: 0.0,
         ..options
@@ -2067,11 +2126,24 @@ fn diagnostic_edge_split_cap_min_scaled_jacobian(
             )
             .map(|tets| {
                 tets.iter()
-                    .map(|tet| tet.exact_scaled_jacobian)
-                    .fold(f64::INFINITY, f64::min)
+                    .map(|tet| {
+                        let points = tet.node_ids.map(|node_id| {
+                            if node_id == split_node.node_id {
+                                split_node.coordinates_m
+                            } else {
+                                boundary_nodes[&node_id]
+                            }
+                        });
+                        (
+                            tet.exact_scaled_jacobian,
+                            diagnostic_scaled_jacobian_worst_corner_label(points),
+                        )
+                    })
+                    .min_by(|left, right| left.0.total_cmp(&right.0))
+                    .unwrap_or((f64::INFINITY, "face_vertex"))
             })
         })
-        .max_by(|left, right| left.total_cmp(right))
+        .max_by(|left, right| left.0.total_cmp(&right.0))
 }
 
 #[cfg(test)]
@@ -2080,7 +2152,7 @@ fn diagnostic_three_edge_split_cap_min_scaled_jacobian(
     cap_node_id: u32,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<f64> {
+) -> Option<(f64, &'static str)> {
     let diagnostic_options = ConstrainedCavityRefillOptions {
         min_scaled_jacobian: 0.0,
         ..options
@@ -2105,8 +2177,20 @@ fn diagnostic_three_edge_split_cap_min_scaled_jacobian(
     )
     .map(|tets| {
         tets.iter()
-            .map(|tet| tet.exact_scaled_jacobian)
-            .fold(f64::INFINITY, f64::min)
+            .map(|tet| {
+                let points = tet.node_ids.map(|node_id| {
+                    split_node_coordinates
+                        .get(&node_id)
+                        .copied()
+                        .unwrap_or_else(|| boundary_nodes[&node_id])
+                });
+                (
+                    tet.exact_scaled_jacobian,
+                    diagnostic_scaled_jacobian_worst_corner_label(points),
+                )
+            })
+            .min_by(|left, right| left.0.total_cmp(&right.0))
+            .unwrap_or((f64::INFINITY, "face_vertex"))
     })
 }
 
@@ -5046,15 +5130,24 @@ mod tests {
         assert_eq!(diagnostic.split_cap_pass_count, 0);
         assert!(diagnostic.max_split_cap_scaled_jacobian < 0.95);
         assert!(!diagnostic.split_cap_scaled_jacobian_bins.is_empty());
+        assert!(!diagnostic
+            .split_cap_scaled_jacobian_worst_corner_bins
+            .is_empty());
         assert!(diagnostic.edge_split_cap_candidate_count > 0);
         assert_eq!(diagnostic.edge_split_cap_pass_count, 0);
         assert!(diagnostic.max_edge_split_cap_scaled_jacobian < 0.95);
         assert!(!diagnostic.edge_split_cap_scaled_jacobian_bins.is_empty());
+        assert!(!diagnostic
+            .edge_split_cap_scaled_jacobian_worst_corner_bins
+            .is_empty());
         assert!(diagnostic.three_edge_split_cap_candidate_count > 0);
         assert_eq!(diagnostic.three_edge_split_cap_pass_count, 0);
         assert!(diagnostic.max_three_edge_split_cap_scaled_jacobian < 0.95);
         assert!(!diagnostic
             .three_edge_split_cap_scaled_jacobian_bins
+            .is_empty());
+        assert!(!diagnostic
+            .three_edge_split_cap_scaled_jacobian_worst_corner_bins
             .is_empty());
         assert!(!diagnostic.rejected_by_reason.is_empty());
     }

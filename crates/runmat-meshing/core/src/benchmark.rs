@@ -3675,16 +3675,22 @@ mod tests {
         let mut trimmed_seed_star_completion_max_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_completion_max_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_three_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_completion_three_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_completion_max_three_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_completion_three_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_completion_three_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_candidate_count = 0_usize;
         let mut trimmed_seed_star_interior_pass_count = 0_usize;
@@ -3730,16 +3736,22 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_completion_max_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_completion_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_max_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_candidates = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_passes = 0_usize;
         let mut trimmed_seed_star_shell_trim_completion_max_three_edge_split_cap_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_completion_three_edge_split_cap_worst_corner_bins =
+            BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_completion_rejected_by_reason =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_interior_candidate_count = 0_usize;
@@ -4163,6 +4175,13 @@ mod tests {
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
+                                                for (bin, count) in diagnostic
+                                                    .split_cap_scaled_jacobian_worst_corner_bins
+                                                {
+                                                    *trimmed_seed_star_shell_trim_completion_split_cap_worst_corner_bins
+                                                        .entry(bin)
+                                                        .or_default() += count;
+                                                }
                                                 trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates +=
                                                     diagnostic.edge_split_cap_candidate_count;
                                                 trimmed_seed_star_shell_trim_completion_edge_split_cap_passes +=
@@ -4174,6 +4193,13 @@ mod tests {
                                                     diagnostic.edge_split_cap_scaled_jacobian_bins
                                                 {
                                                     *trimmed_seed_star_shell_trim_completion_edge_split_cap_quality_bins
+                                                        .entry(bin)
+                                                        .or_default() += count;
+                                                }
+                                                for (bin, count) in diagnostic
+                                                    .edge_split_cap_scaled_jacobian_worst_corner_bins
+                                                {
+                                                    *trimmed_seed_star_shell_trim_completion_edge_split_cap_worst_corner_bins
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
@@ -4191,6 +4217,13 @@ mod tests {
                                                     .three_edge_split_cap_scaled_jacobian_bins
                                                 {
                                                     *trimmed_seed_star_shell_trim_completion_three_edge_split_cap_quality_bins
+                                                        .entry(bin)
+                                                        .or_default() += count;
+                                                }
+                                                for (bin, count) in diagnostic
+                                                    .three_edge_split_cap_scaled_jacobian_worst_corner_bins
+                                                {
+                                                    *trimmed_seed_star_shell_trim_completion_three_edge_split_cap_worst_corner_bins
                                                         .entry(bin)
                                                         .or_default() += count;
                                                 }
@@ -4401,6 +4434,13 @@ mod tests {
                                             .entry(bin)
                                             .or_default() += count;
                                     }
+                                    for (bin, count) in
+                                        diagnostic.split_cap_scaled_jacobian_worst_corner_bins
+                                    {
+                                        *trimmed_seed_star_completion_split_cap_worst_corner_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
                                     trimmed_seed_star_completion_edge_split_cap_candidates +=
                                         diagnostic.edge_split_cap_candidate_count;
                                     trimmed_seed_star_completion_edge_split_cap_passes +=
@@ -4412,6 +4452,13 @@ mod tests {
                                         diagnostic.edge_split_cap_scaled_jacobian_bins
                                     {
                                         *trimmed_seed_star_completion_edge_split_cap_quality_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
+                                    for (bin, count) in
+                                        diagnostic.edge_split_cap_scaled_jacobian_worst_corner_bins
+                                    {
+                                        *trimmed_seed_star_completion_edge_split_cap_worst_corner_bins
                                             .entry(bin)
                                             .or_default() += count;
                                     }
@@ -4429,6 +4476,13 @@ mod tests {
                                         diagnostic.three_edge_split_cap_scaled_jacobian_bins
                                     {
                                         *trimmed_seed_star_completion_three_edge_split_cap_quality_bins
+                                            .entry(bin)
+                                            .or_default() += count;
+                                    }
+                                    for (bin, count) in diagnostic
+                                        .three_edge_split_cap_scaled_jacobian_worst_corner_bins
+                                    {
+                                        *trimmed_seed_star_completion_three_edge_split_cap_worst_corner_bins
                                             .entry(bin)
                                             .or_default() += count;
                                     }
@@ -4583,7 +4637,7 @@ mod tests {
             trimmed_seed_star_refill_rejected_by_reason
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_completion_reason,
             trimmed_seed_star_completion_missing_faces,
             trimmed_seed_star_completion_cap_candidates,
@@ -4598,14 +4652,17 @@ mod tests {
             trimmed_seed_star_completion_split_cap_passes,
             trimmed_seed_star_completion_max_split_cap_quality,
             trimmed_seed_star_completion_split_cap_quality_bins,
+            trimmed_seed_star_completion_split_cap_worst_corner_bins,
             trimmed_seed_star_completion_edge_split_cap_candidates,
             trimmed_seed_star_completion_edge_split_cap_passes,
             trimmed_seed_star_completion_max_edge_split_cap_quality,
             trimmed_seed_star_completion_edge_split_cap_quality_bins,
+            trimmed_seed_star_completion_edge_split_cap_worst_corner_bins,
             trimmed_seed_star_completion_three_edge_split_cap_candidates,
             trimmed_seed_star_completion_three_edge_split_cap_passes,
             trimmed_seed_star_completion_max_three_edge_split_cap_quality,
             trimmed_seed_star_completion_three_edge_split_cap_quality_bins,
+            trimmed_seed_star_completion_three_edge_split_cap_worst_corner_bins,
             trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
@@ -4641,7 +4698,7 @@ mod tests {
             trimmed_seed_star_shell_trim_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_completion reason={:?} missing_faces={:?} cap_candidates={:?} outside_candidates={:?} duplicate_candidates={:?} max_rejected_quality={:.6} rejected_quality_bins={:?} max_cap_height_ratio={:.6} cap_height_ratio_bins={:?} worst_corner_bins={:?} split_cap_candidates={} split_cap_passes={} max_split_cap_quality={:.6} split_cap_quality_bins={:?} split_cap_worst_corner_bins={:?} edge_split_cap_candidates={} edge_split_cap_passes={} max_edge_split_cap_quality={:.6} edge_split_cap_quality_bins={:?} edge_split_cap_worst_corner_bins={:?} three_edge_split_cap_candidates={} three_edge_split_cap_passes={} max_three_edge_split_cap_quality={:.6} three_edge_split_cap_quality_bins={:?} three_edge_split_cap_worst_corner_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_shell_trim_completion_reason,
             trimmed_seed_star_shell_trim_completion_missing_faces,
             trimmed_seed_star_shell_trim_completion_cap_candidates,
@@ -4656,14 +4713,17 @@ mod tests {
             trimmed_seed_star_shell_trim_completion_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_split_cap_quality_bins,
+            trimmed_seed_star_shell_trim_completion_split_cap_worst_corner_bins,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_candidates,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_edge_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_edge_split_cap_quality_bins,
+            trimmed_seed_star_shell_trim_completion_edge_split_cap_worst_corner_bins,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_candidates,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_passes,
             trimmed_seed_star_shell_trim_completion_max_three_edge_split_cap_quality,
             trimmed_seed_star_shell_trim_completion_three_edge_split_cap_quality_bins,
+            trimmed_seed_star_shell_trim_completion_three_edge_split_cap_worst_corner_bins,
             trimmed_seed_star_shell_trim_completion_rejected_by_reason,
         );
         eprintln!(
