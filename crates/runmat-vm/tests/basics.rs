@@ -776,6 +776,32 @@ fn fft_output_supports_complex_range_assignment_with_end_div() {
 }
 
 #[test]
+fn fftshift_accepts_abs_of_fft2_complex_output() {
+    let input = r#"
+        A = [1 2; 3 4];
+        M = abs(fft2(A));
+        C = fftshift(M);
+        out = [numel(M), size(M, 1), size(M, 2), numel(C), size(C, 1), size(C, 2)];
+    "#;
+    let vars = execute_source(input);
+    let m = match &vars[1] {
+        Value::Tensor(tensor) => tensor,
+        other => panic!("abs(fft2(A)) should produce a real tensor, got {other:?}"),
+    };
+    assert_eq!(m.shape, vec![2, 2]);
+    assert_eq!(m.data, vec![10.0, 4.0, 2.0, 0.0]);
+
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected shape summary tensor");
+    assert_eq!(out.data, vec![4.0, 2.0, 2.0, 4.0, 2.0, 2.0]);
+}
+
+#[test]
 fn fft2_output_supports_complex_multidim_end_ranges() {
     let input = r#"
         A = [1 2; 3 4];
