@@ -639,6 +639,7 @@ pub(super) fn import_variable_type_label(kind: &ImportVariableType) -> String {
         ImportVariableType::Numeric(NumericDType::F32) => "single",
         ImportVariableType::Numeric(NumericDType::U8) => "uint8",
         ImportVariableType::Numeric(NumericDType::U16) => "uint16",
+        ImportVariableType::Numeric(NumericDType::U32) => "uint32",
         ImportVariableType::Logical => "logical",
         ImportVariableType::Text(TextImportType::String) => "string",
         ImportVariableType::Text(TextImportType::Char) => "char",
@@ -1002,14 +1003,15 @@ impl ImportVariableType {
             "single" => Ok(Self::Numeric(NumericDType::F32)),
             "uint8" => Ok(Self::Numeric(NumericDType::U8)),
             "uint16" => Ok(Self::Numeric(NumericDType::U16)),
+            "uint32" => Ok(Self::Numeric(NumericDType::U32)),
             "logical" | "bool" | "boolean" => Ok(Self::Logical),
             "string" => Ok(Self::Text(TextImportType::String)),
             "char" => Ok(Self::Text(TextImportType::Char)),
             "cellstr" => Ok(Self::CellStr),
             "categorical" => Ok(Self::Categorical),
-            "int8" | "int16" | "int32" | "int64" | "uint32" | "uint64" => {
+            "int8" | "int16" | "int32" | "int64" | "uint64" => {
                 Err(invalid_argument(format!(
-                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, and uint16 numeric arrays",
+                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, uint16, and uint32 numeric arrays",
                     raw.trim()
                 )))
             }
@@ -2120,6 +2122,13 @@ pub(super) fn cast_import_numeric(value: f64, dtype: NumericDType) -> f64 {
         NumericDType::U16 => {
             if value.is_finite() {
                 value.round().clamp(0.0, u16::MAX as f64)
+            } else {
+                0.0
+            }
+        }
+        NumericDType::U32 => {
+            if value.is_finite() {
+                value.round().clamp(0.0, u32::MAX as f64)
             } else {
                 0.0
             }

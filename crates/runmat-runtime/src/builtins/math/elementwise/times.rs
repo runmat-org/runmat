@@ -751,7 +751,7 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
             }
             tensor.dtype = NumericDType::F32;
         }
-        NumericDType::U8 | NumericDType::U16 => {
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
             tensor.dtype = NumericDType::F64;
         }
     }

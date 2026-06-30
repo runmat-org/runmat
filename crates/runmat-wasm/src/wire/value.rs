@@ -100,6 +100,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                     NumericDType::F32 => "single",
                     NumericDType::U8 => "uint8",
                     NumericDType::U16 => "uint16",
+                    NumericDType::U32 => "uint32",
                 },
                 "preview": preview,
                 "length": t.data.len(),

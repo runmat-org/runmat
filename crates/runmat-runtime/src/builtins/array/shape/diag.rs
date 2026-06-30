@@ -1088,6 +1088,11 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
             .iter()
             .map(|value| tensor::clamp_u16(*value))
             .collect(),
+        NumericDType::U32 => tensor
+            .data
+            .iter()
+            .map(|value| tensor::clamp_u32(*value))
+            .collect(),
     };
 
     Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)

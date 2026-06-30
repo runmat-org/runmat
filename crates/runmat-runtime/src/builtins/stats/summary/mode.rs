@@ -589,6 +589,7 @@ enum OutputClass {
     Single,
     UInt8,
     UInt16,
+    UInt32,
     Logical,
     Int(IntKind),
 }
@@ -613,6 +614,7 @@ impl OutputClass {
                 NumericDType::F32 => OutputClass::Single,
                 NumericDType::U8 => OutputClass::UInt8,
                 NumericDType::U16 => OutputClass::UInt16,
+                NumericDType::U32 => OutputClass::UInt32,
             },
             Value::LogicalArray(_) | Value::Bool(_) => OutputClass::Logical,
             Value::Int(value) => OutputClass::Int(IntKind::from_int_value(value)),
@@ -688,6 +690,20 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
                 Ok(Value::Tensor(tensor))
             }
         }
+        OutputClass::UInt32 => {
+            if contains_nan {
+                return Ok(tensor::tensor_into_value(tensor));
+            }
+            for value in &mut tensor.data {
+                *value = value.round().clamp(0.0, u32::MAX as f64);
+            }
+            tensor.dtype = NumericDType::U32;
+            if tensor.data.len() == 1 {
+                Ok(Value::Int(IntValue::U32(tensor.data[0] as u32)))
+            } else {
+                Ok(Value::Tensor(tensor))
+            }
+        }
         OutputClass::Logical => {
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
@@ -747,6 +763,16 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
                 *value = value.round().clamp(0.0, u16::MAX as f64);
             }
             tensor.dtype = NumericDType::U16;
+            Ok(Value::Tensor(tensor))
+        }
+        OutputClass::UInt32 => {
+            if contains_nan {
+                return Ok(Value::Tensor(tensor));
+            }
+            for value in &mut tensor.data {
+                *value = value.round().clamp(0.0, u32::MAX as f64);
+            }
+            tensor.dtype = NumericDType::U32;
             Ok(Value::Tensor(tensor))
         }
         OutputClass::Logical => {

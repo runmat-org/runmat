@@ -210,6 +210,7 @@ pub enum NumericDType {
     F32,
     U8,
     U16,
+    U32,
 }
 
 impl NumericDType {
@@ -219,6 +220,7 @@ impl NumericDType {
             NumericDType::F32 => "single",
             NumericDType::U8 => "uint8",
             NumericDType::U16 => "uint16",
+            NumericDType::U32 => "uint32",
         }
     }
 
@@ -228,6 +230,7 @@ impl NumericDType {
             NumericDType::F32 => 4,
             NumericDType::U8 => 1,
             NumericDType::U16 => 2,
+            NumericDType::U32 => 4,
         }
     }
 }

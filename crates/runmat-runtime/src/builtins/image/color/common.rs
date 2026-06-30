@@ -55,6 +55,10 @@ pub(crate) fn image_value_from_tensor(tensor: Tensor) -> Value {
             NumericDType::U16 => {
                 Value::Int(IntValue::U16(clamp_round(tensor.data[0], 65535.0) as u16))
             }
+            NumericDType::U32 => Value::Int(IntValue::U32(clamp_round(
+                tensor.data[0],
+                u32::MAX as f64,
+            ) as u32)),
             NumericDType::F32 | NumericDType::F64 => Value::Num(tensor.data[0]),
         }
     } else {
@@ -132,6 +136,7 @@ pub(crate) fn dtype_max(dtype: NumericDType) -> f64 {
     match dtype {
         NumericDType::U8 => 255.0,
         NumericDType::U16 => 65535.0,
+        NumericDType::U32 => u32::MAX as f64,
         NumericDType::F32 | NumericDType::F64 => 1.0,
     }
 }
@@ -140,6 +145,7 @@ pub(crate) fn unit_value(value: f64, dtype: NumericDType) -> f64 {
     match dtype {
         NumericDType::U8 => value / 255.0,
         NumericDType::U16 => value / 65535.0,
+        NumericDType::U32 => value / (u32::MAX as f64),
         NumericDType::F32 | NumericDType::F64 => value,
     }
 }
@@ -148,6 +154,7 @@ pub(crate) fn unit_to_dtype(value: f64, dtype: NumericDType) -> f64 {
     match dtype {
         NumericDType::U8 => clamp_round(value * 255.0, 255.0),
         NumericDType::U16 => clamp_round(value * 65535.0, 65535.0),
+        NumericDType::U32 => clamp_round(value * (u32::MAX as f64), u32::MAX as f64),
         NumericDType::F32 => (value as f32) as f64,
         NumericDType::F64 => value,
     }
@@ -172,7 +179,9 @@ pub(crate) fn clamp_round(value: f64, max: f64) -> f64 {
 pub(crate) fn image_output_dtype(input: NumericDType) -> NumericDType {
     match input {
         NumericDType::F32 => NumericDType::F32,
-        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 => NumericDType::F64,
+        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+            NumericDType::F64
+        }
     }
 }
 

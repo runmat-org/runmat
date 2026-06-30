@@ -130,7 +130,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Image class scaling runs on the host today so uint8/uint16 image semantics are preserved.",
+        "Image class scaling runs on the host today so uint8/uint16/uint32 image semantics are preserved.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::im2double")]
@@ -173,6 +173,7 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         }
         Value::Int(IntValue::U8(v)) => Ok(Value::Num(v as f64 / 255.0)),
         Value::Int(IntValue::U16(v)) => Ok(Value::Num(v as f64 / 65535.0)),
+        Value::Int(IntValue::U32(v)) => Ok(Value::Num(v as f64 / u32::MAX as f64)),
         Value::Int(v) => Ok(Value::Num(v.to_f64())),
         Value::Num(v) => Ok(Value::Num(v)),
         Value::Bool(v) => Ok(Value::Num(if v { 1.0 } else { 0.0 })),
@@ -185,7 +186,10 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 
 fn im2double_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let scale = common::dtype_max(tensor.dtype);
-    let data = if matches!(tensor.dtype, NumericDType::U8 | NumericDType::U16) {
+    let data = if matches!(
+        tensor.dtype,
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32
+    ) {
         tensor.data.iter().map(|&value| value / scale).collect()
     } else {
         tensor.data
@@ -219,6 +223,25 @@ mod tests {
     #[test]
     fn scales_uint16_scalar() {
         assert_eq!(call(Value::Int(IntValue::U16(65535))), Value::Num(1.0));
+    }
+
+    #[test]
+    fn scales_uint32_scalar_and_tensor() {
+        assert_eq!(call(Value::Int(IntValue::U32(u32::MAX))), Value::Num(1.0));
+
+        let input = Tensor::new_with_dtype(
+            vec![0.0, 2147483648.0, u32::MAX as f64],
+            vec![1, 3],
+            NumericDType::U32,
+        )
+        .unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.data[0], 0.0);
+        assert!((out.data[1] - 2147483648.0 / u32::MAX as f64).abs() < 1e-12);
+        assert_eq!(out.data[2], 1.0);
     }
 
     #[test]

@@ -927,6 +927,7 @@ fn tensor_dtype_mat_class(dtype: NumericDType) -> MatClass {
         NumericDType::F32 => MatClass::Single,
         NumericDType::U8 => MatClass::UInt8,
         NumericDType::U16 => MatClass::UInt16,
+        NumericDType::U32 => MatClass::UInt32,
     }
 }
 
