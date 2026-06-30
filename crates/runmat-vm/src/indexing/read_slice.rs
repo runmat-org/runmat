@@ -1,7 +1,8 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, SparseTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
+use std::collections::HashMap;
 
 fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     crate::interpreter::errors::mex(
@@ -167,6 +168,293 @@ pub fn read_tensor_slice_from_plan(
             Tensor::new(out_data, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
         Ok(Value::Tensor(out_tensor))
     }
+}
+
+fn sparse_output_shape(plan: &IndexPlan) -> Result<(usize, usize), RuntimeError> {
+    match plan.output_shape.as_slice() {
+        [rows, cols] => Ok((*rows, *cols)),
+        [len] => Ok((*len, 1)),
+        _ => Err(crate::interpreter::errors::mex(
+            "UnsupportedSparseIndexRank",
+            "Sparse indexing currently supports two-dimensional outputs",
+        )),
+    }
+}
+
+fn sparse_scalar_value(value: f64) -> Result<Value, RuntimeError> {
+    if value == 0.0 {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
+    }
+    let sparse =
+        SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value]).map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
+    sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+    })
+}
+
+fn linear_sparse_slice(
+    sparse: &SparseTensor,
+    selector: &SliceSelector,
+) -> Result<Value, RuntimeError> {
+    let total = checked_sparse_numel(sparse)?;
+    let base_is_row_vector = sparse.rows == 1 && sparse.cols > 1;
+    if matches!(selector, SliceSelector::Colon) {
+        let mut row_indices = Vec::with_capacity(sparse.values.len());
+        let mut values = Vec::with_capacity(sparse.values.len());
+        for col in 0..sparse.cols {
+            for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+                row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
+                values.push(sparse.values[entry]);
+            }
+        }
+        let sparse = SparseTensor::new(total, 1, vec![0, values.len()], row_indices, values)
+            .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(sparse));
+    }
+    let (indices, output_shape) = match selector {
+        SliceSelector::Colon => unreachable!("colon sparse linear slices return early"),
+        SliceSelector::Scalar(index) => (vec![*index], vec![1, 1]),
+        SliceSelector::Indices(indices) => {
+            let shape = if indices.is_empty() {
+                vec![0, 1]
+            } else if indices.len() == 1 {
+                vec![1, 1]
+            } else if base_is_row_vector {
+                vec![1, indices.len()]
+            } else {
+                vec![indices.len(), 1]
+            };
+            (indices.clone(), shape)
+        }
+        SliceSelector::LinearIndices {
+            values,
+            output_shape,
+        } => (values.clone(), output_shape.clone()),
+    };
+    if indices.iter().any(|&index| index == 0 || index > total) {
+        return Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Index out of bounds",
+        ));
+    }
+    if indices.len() == 1 {
+        let lin = indices[0] - 1;
+        let row = lin % sparse.rows;
+        let col = lin / sparse.rows;
+        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+    }
+    let (out_rows, out_cols) = match output_shape.as_slice() {
+        [rows, cols] => (*rows, *cols),
+        [len] => (*len, 1),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "UnsupportedSparseIndexRank",
+                "Sparse indexing currently supports two-dimensional outputs",
+            ))
+        }
+    };
+    if indices.is_empty() {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let mut col_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); out_cols];
+    for (out_pos, &index) in indices.iter().enumerate() {
+        let base_lin = index - 1;
+        let base_row = base_lin % sparse.rows;
+        let base_col = base_lin / sparse.rows;
+        if let Some(value) = sparse.get(base_row, base_col) {
+            if value != 0.0 {
+                let out_row = out_pos % out_rows;
+                let out_col = out_pos / out_rows;
+                col_entries[out_col].push((out_row, value));
+            }
+        }
+    }
+    sparse_from_column_entries(out_rows, out_cols, col_entries)
+}
+
+fn selector_indices(selector: &SliceSelector, dim_len: usize) -> Vec<usize> {
+    match selector {
+        SliceSelector::Colon => (1..=dim_len).collect(),
+        SliceSelector::Scalar(index) => vec![*index],
+        SliceSelector::Indices(indices)
+        | SliceSelector::LinearIndices {
+            values: indices, ..
+        } => indices.clone(),
+    }
+}
+
+fn sparse_from_column_entries(
+    rows: usize,
+    cols: usize,
+    mut col_entries: Vec<Vec<(usize, f64)>>,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for entries in col_entries.iter_mut().take(cols) {
+        entries.sort_by_key(|(row, _)| *row);
+        for &(row, value) in entries.iter() {
+            if value != 0.0 {
+                row_indices.push(row);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn matrix_sparse_slice(
+    sparse: &SparseTensor,
+    selectors: &[SliceSelector],
+) -> Result<Value, RuntimeError> {
+    let row_selector = selectors.first().unwrap_or(&SliceSelector::Colon);
+    let col_selector = selectors.get(1).unwrap_or(&SliceSelector::Colon);
+    let all_rows = matches!(row_selector, SliceSelector::Colon);
+    let rows = if all_rows {
+        Vec::new()
+    } else {
+        selector_indices(row_selector, sparse.rows)
+    };
+    let cols = selector_indices(col_selector, sparse.cols);
+    if (!all_rows && rows.iter().any(|&row| row == 0 || row > sparse.rows))
+        || cols.iter().any(|&col| col == 0 || col > sparse.cols)
+    {
+        return Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Index out of bounds",
+        ));
+    }
+    let out_rows = if all_rows { sparse.rows } else { rows.len() };
+    let out_cols = cols.len();
+    if out_rows == 0 || out_cols == 0 {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let mut row_positions: HashMap<usize, Vec<usize>> = HashMap::new();
+    if !all_rows {
+        for (out_row, &row) in rows.iter().enumerate() {
+            row_positions.entry(row - 1).or_default().push(out_row);
+        }
+    }
+    let mut col_entries = vec![Vec::new(); out_cols];
+    for (out_col, &col) in cols.iter().enumerate() {
+        let base_col = col - 1;
+        for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
+            let base_row = sparse.row_indices[entry];
+            let value = sparse.values[entry];
+            if all_rows {
+                col_entries[out_col].push((base_row, value));
+            } else if let Some(output_rows) = row_positions.get(&base_row) {
+                for &out_row in output_rows {
+                    col_entries[out_col].push((out_row, value));
+                }
+            }
+        }
+    }
+    if out_rows == 1 && out_cols == 1 {
+        let value = col_entries
+            .first()
+            .and_then(|entries| entries.first())
+            .map(|(_, value)| *value)
+            .unwrap_or(0.0);
+        return sparse_scalar_value(value);
+    }
+    sparse_from_column_entries(out_rows, out_cols, col_entries)
+}
+
+pub async fn read_sparse_slice(
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    let selectors =
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, &sparse.shape()).await?;
+    match dims {
+        1 => linear_sparse_slice(
+            sparse,
+            selectors
+                .first()
+                .unwrap_or(&SliceSelector::Indices(Vec::new())),
+        ),
+        2 => matrix_sparse_slice(sparse, &selectors),
+        _ => {
+            let plan = build_index_plan(&selectors, dims, &sparse.shape())?;
+            read_sparse_slice_from_plan(sparse, &plan)
+        }
+    }
+}
+
+pub fn read_sparse_slice_from_plan(
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.len() == 1 {
+        let lin = plan.indices[0] as usize;
+        if sparse.rows == 0 || lin >= sparse.rows.saturating_mul(sparse.cols) {
+            return Err(crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Index out of bounds",
+            ));
+        }
+        let row = lin % sparse.rows;
+        let col = lin / sparse.rows;
+        return sparse_scalar_value(sparse.get(row, col).unwrap_or(0.0));
+    }
+
+    let (out_rows, out_cols) = sparse_output_shape(plan)?;
+    if plan.indices.is_empty() {
+        return Ok(Value::SparseTensor(SparseTensor::zeros(out_rows, out_cols)));
+    }
+
+    let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+    })?;
+    let mut col_ptrs = Vec::with_capacity(out_cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for out_col in 0..out_cols {
+        for out_row in 0..out_rows {
+            let out_lin = out_row + out_col * out_rows;
+            let Some(&base_lin) = plan.indices.get(out_lin) else {
+                return Err(crate::interpreter::errors::mex(
+                    "ShapeMismatch",
+                    "sparse slice plan output shape does not match selected indices",
+                ));
+            };
+            let base_lin = base_lin as usize;
+            if sparse.rows == 0 || base_lin >= total {
+                return Err(crate::interpreter::errors::mex(
+                    "IndexOutOfBounds",
+                    "Index out of bounds",
+                ));
+            }
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if let Some(value) = sparse.get(base_row, base_col) {
+                if value != 0.0 {
+                    row_indices.push(out_row);
+                    values.push(value);
+                }
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+
+    let out = SparseTensor::new(out_rows, out_cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(out))
 }
 
 pub async fn read_complex_slice(

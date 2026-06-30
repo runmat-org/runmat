@@ -29,9 +29,9 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::creation::sparse::tests",
-    "integration": "builtins::array::creation::sparse::tests::sparse_gathers_gpu_input"
+    "integration": "crates/runmat-vm/tests/logic.rs::sparse_indexing_reads_stored_unstored_and_column_major_values"
   },
-  "description": "`sparse` creates a sparse double matrix. RunMat stores sparse matrices in compressed sparse column form and supports the common MATLAB construction forms: conversion from a full array, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
+  "description": "`sparse` creates a sparse double matrix. RunMat stores sparse matrices in compressed sparse column form and supports MATLAB construction forms for conversion from full arrays, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
   "behaviors": [
     "`sparse(A)` converts a full numeric or logical array to a sparse double matrix, storing only nonzero values.",
     "`sparse(m, n)` returns an `m x n` sparse double matrix with zero stored entries.",
@@ -104,6 +104,14 @@
   ],
   "links": [
     {
+      "label": "full",
+      "url": "./full"
+    },
+    {
+      "label": "issparse",
+      "url": "./issparse"
+    },
+    {
       "label": "find",
       "url": "./find"
     },
@@ -114,15 +122,23 @@
     {
       "label": "zeros",
       "url": "./zeros"
-    },
-    {
-      "label": "gpuArray",
-      "url": "./gpuarray"
     }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "S = sparse(A)\nS = sparse(m, n)\nS = sparse(i, j, v)\nS = sparse(i, j, v, m, n)\nS = sparse(i, j, v, m, n, nzmax)",
+      "output": "`S` is a sparse double matrix."
+    },
+    "points": [
+      "Sparse values are host-resident compressed sparse column matrices.",
+      "Scalar and slice indexing read sparse values without densifying sparse outputs.",
+      "Use `full(S)` when dense storage is required."
+    ]
   },
   "gpu_residency": "Sparse values are currently host-resident. Passing a GPU tensor to `sparse` triggers a gather, after which RunMat builds a compressed sparse column matrix on the host.",
   "gpu_behavior": [
