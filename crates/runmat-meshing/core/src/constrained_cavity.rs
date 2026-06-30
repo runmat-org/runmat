@@ -1710,45 +1710,47 @@ fn complete_missing_boundary_face_tets(
     let mut changed = false;
     loop {
         let boundary_delta = refill_boundary_face_delta(&refined_cavity, &refill_tets)?;
-        let Some(missing_face) = boundary_delta.missing.first().copied() else {
-            let Some(unexpected_face) = boundary_delta.unexpected.first().copied() else {
+        if boundary_delta.missing.is_empty() {
+            if boundary_delta.unexpected.is_empty() {
                 break;
-            };
-            let Some(tet) = best_boundary_face_completion_tet(
-                unexpected_face,
+            }
+            let Some((_, tet)) = best_boundary_face_completion_tet_for_faces(
+                &boundary_delta.unexpected,
                 &refined_cavity,
                 &refined_boundary_nodes,
                 &refill_tets,
                 boundary_triangles,
                 options,
-            ) else {
+            )?
+            else {
                 return Ok(Err("boundary_node_completion_no_candidate"));
             };
             refill_tets.push(tet);
             changed = true;
             continue;
-        };
-        if let Some(tet) = best_boundary_face_completion_tet(
-            missing_face,
+        }
+        if let Some((_, tet)) = best_boundary_face_completion_tet_for_faces(
+            &boundary_delta.missing,
             &refined_cavity,
             &refined_boundary_nodes,
             &refill_tets,
             boundary_triangles,
             options,
-        ) {
+        )? {
             refill_tets.push(tet);
             changed = true;
             continue;
         }
 
-        let Some((split_cavity, split_node, split_tets)) = best_boundary_face_split_completion(
-            missing_face,
-            &refined_cavity,
-            &refined_boundary_nodes,
-            boundary_triangles,
-            &refill_tets,
-            options,
-        )?
+        let Some((split_cavity, split_node, split_tets)) =
+            best_boundary_face_split_completion_for_faces(
+                &boundary_delta.missing,
+                &refined_cavity,
+                &refined_boundary_nodes,
+                boundary_triangles,
+                &refill_tets,
+                options,
+            )?
         else {
             return Ok(Err("boundary_node_completion_no_candidate"));
         };
@@ -1763,6 +1765,98 @@ fn complete_missing_boundary_face_tets(
     } else {
         Ok(Err("boundary_node_completion_no_missing_faces"))
     }
+}
+
+fn best_boundary_face_completion_tet_for_faces(
+    faces: &[[u32; 3]],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    refill_tets: &[ConstrainedCavityRefillTet],
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Option<([u32; 3], ConstrainedCavityRefillTet)>, ConstrainedCavityValidationError> {
+    let current_delta = refill_boundary_face_delta(cavity, refill_tets)?;
+    let current_delta_count = current_delta.missing.len() + current_delta.unexpected.len();
+    let mut best = None::<([u32; 3], ConstrainedCavityRefillTet, usize)>;
+    for face in faces {
+        let Some(tet) = best_boundary_face_completion_tet(
+            *face,
+            cavity,
+            boundary_nodes,
+            refill_tets,
+            boundary_triangles,
+            options,
+        ) else {
+            continue;
+        };
+        let mut candidate_tets = refill_tets.to_vec();
+        candidate_tets.push(tet.clone());
+        let candidate_delta = refill_boundary_face_delta(cavity, &candidate_tets)?;
+        let candidate_delta_count =
+            candidate_delta.missing.len() + candidate_delta.unexpected.len();
+        if candidate_delta_count >= current_delta_count {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(_, best_tet, best_delta)| {
+            candidate_delta_count < *best_delta
+                || (candidate_delta_count == *best_delta
+                    && tet.exact_scaled_jacobian > best_tet.exact_scaled_jacobian)
+        }) {
+            best = Some((*face, tet, candidate_delta_count));
+        }
+    }
+    Ok(best.map(|(face, tet, _)| (face, tet)))
+}
+
+fn best_boundary_face_split_completion_for_faces(
+    faces: &[[u32; 3]],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    refill_tets: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<
+    Option<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+    )>,
+    ConstrainedCavityValidationError,
+> {
+    let mut best = None::<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTet>,
+        f64,
+    )>;
+    for face in faces {
+        let Some((split_cavity, split_node, split_tets)) = best_boundary_face_split_completion(
+            *face,
+            cavity,
+            boundary_nodes,
+            boundary_triangles,
+            refill_tets,
+            options,
+        )?
+        else {
+            continue;
+        };
+        let min_quality = split_tets
+            .iter()
+            .map(|tet| tet.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, _, best_quality)| min_quality > *best_quality)
+        {
+            best = Some((split_cavity, split_node, split_tets, min_quality));
+        }
+    }
+    Ok(
+        best.map(|(split_cavity, split_node, split_tets, _)| {
+            (split_cavity, split_node, split_tets)
+        }),
+    )
 }
 
 fn best_boundary_face_split_completion(
@@ -3225,6 +3319,47 @@ mod tests {
         );
 
         assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn boundary_face_completion_selector_reduces_boundary_delta() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let options = refill_options();
+        let duplicate_points = [0, 1, 2, 3].map(|node_id| boundary_nodes[&node_id]);
+        let duplicate_tet =
+            raw_refill_tet_with_rejection_reason([0, 1, 2, 3], duplicate_points, options)
+                .expect("fixture duplicate should pass quality gates");
+        let blocked_face = [0, 1, 2];
+        let fillable_face = [0, 2, 4];
+
+        let (selected_face, selected_tet) = best_boundary_face_completion_tet_for_faces(
+            &[blocked_face, fillable_face],
+            &cavity,
+            &boundary_nodes,
+            &[duplicate_tet.clone()],
+            &boundary_triangles,
+            options,
+        )
+        .expect("completion search should evaluate")
+        .expect("completion search should find a delta-reducing face");
+
+        let initial_delta = refill_boundary_face_delta(&cavity, &[duplicate_tet.clone()])
+            .expect("initial delta should evaluate");
+        let next_delta =
+            refill_boundary_face_delta(&cavity, &[duplicate_tet, selected_tet.clone()])
+                .expect("next delta should evaluate");
+        assert!(
+            next_delta.missing.len() + next_delta.unexpected.len()
+                < initial_delta.missing.len() + initial_delta.unexpected.len()
+        );
+        assert!(tet_faces(selected_tet.node_ids)
+            .map(sorted_face)
+            .contains(&sorted_face(selected_face)));
     }
 
     #[test]
