@@ -8270,7 +8270,10 @@ fn edge_star_simple_cycle_components(
             .or_default()
             .insert(opposite_edge[0]);
     }
-    if edge_to_tets.get(&target_opposite_edge).map_or(0, Vec::len) != 1 {
+    if !edge_to_tets
+        .get(&target_opposite_edge)
+        .is_some_and(|indices| indices.contains(&tet_index))
+    {
         return Ok(Vec::new());
     }
     remove_graph_edge(&mut graph, target_opposite_edge);
@@ -11948,6 +11951,68 @@ mod tests {
             best_componentized_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
                 .expect("componentized reconnection should evaluate")
                 .expect("simple cycle should reconnect");
+
+        assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
+        assert!(!quality_gain_only);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        let original_volume = reconnected_indices
+            .iter()
+            .map(|index| tets[*index].volume_m3)
+            .sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn componentized_edge_reconnection_repairs_cycle_with_duplicated_target_edge() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -2.0]),
+            (1, [0.0, 0.0, 2.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.5,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [
+            [0, 1, 2, 3],
+            [0, 1, 3, 4],
+            [0, 1, 4, 5],
+            [0, 1, 5, 2],
+            [0, 1, 2, 3],
+        ]
+        .into_iter()
+        .map(|node_ids| {
+            let points = node_ids.map(|node_id| node_points[&node_id]);
+            raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                .expect("fixture tet should be valid")
+        })
+        .collect::<Vec<_>>();
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        assert_eq!(edge_adjacency[&[0, 1]].len(), 5);
+        assert!(multi_tet_edge_reconnection_candidates(
+            &edge_adjacency[&[0, 1]],
+            [0, 1],
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("whole non-manifold ring should evaluate")
+        .is_none());
+
+        let (reconnected_indices, candidates, quality_gain_only) =
+            best_componentized_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
+                .expect("componentized reconnection should evaluate")
+                .expect("simple cycle with duplicated target edge should reconnect");
 
         assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
         assert!(!quality_gain_only);
