@@ -6419,6 +6419,48 @@ pub(crate) fn diagnostic_cavity_decomposition_transitions(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_missing_face_owner_closure_transitions(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<BTreeMap<&'static str, usize>, TetCandidateError> {
+    let mut transitions = BTreeMap::<&'static str, usize>::new();
+    for group in [
+        one_ring_tet_cavity(tet_index, tets, face_adjacency),
+        connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options),
+    ] {
+        if group.len() < 3 || group.len() > 24 {
+            *transitions.entry("source_group_out_of_bounds").or_default() += 1;
+            continue;
+        }
+        let missing_faces =
+            diagnostic_face_cavity_missing_faces(&group, tets, node_points, options)?;
+        if missing_faces.is_empty() {
+            *transitions.entry("no_missing_faces").or_default() += 1;
+            continue;
+        }
+        *transitions.entry("source_group").or_default() += 1;
+        for owner_group in missing_face_owner_closure_groups(&missing_faces, face_adjacency, tets) {
+            if owner_group.len() < 3 || owner_group.len() > 24 {
+                *transitions.entry("owner_group_out_of_bounds").or_default() += 1;
+                continue;
+            }
+            *transitions.entry("owner_group").or_default() += 1;
+            record_decomposition_candidate_group_transition(
+                &owner_group,
+                tets,
+                node_points,
+                options,
+                &mut transitions,
+            )?;
+        }
+    }
+    Ok(transitions)
+}
+
+#[cfg(test)]
 fn diagnostic_decomposition_size_bucket(prefix: &'static str, size: usize) -> &'static str {
     match (prefix, size) {
         ("face_closure", 0) => "face_closure_size_0",
@@ -7017,6 +7059,109 @@ fn missing_face_edge_component_count(missing_faces: &[[u32; 3]]) -> usize {
         }
     }
     component_count
+}
+
+#[cfg(test)]
+fn diagnostic_face_cavity_missing_faces(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Vec<[u32; 3]>, TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok(Vec::new());
+    };
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_nodes = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok(Vec::new());
+        }
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_nodes.extend(face.iter().copied());
+    }
+    if boundary_nodes.len() < 4 || boundary_nodes.len() > 16 {
+        return Ok(Vec::new());
+    }
+    let points = boundary_nodes
+        .iter()
+        .map(|node_id| {
+            Ok(ConnectivityPoint {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                is_super: false,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let mut candidates = Vec::<TetCandidate>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            tet_points,
+            options,
+        ) else {
+            return Ok(Vec::new());
+        };
+        candidates.push(candidate);
+    }
+    let candidate_boundary_faces = boundary_faces_from_tets(&candidates);
+    Ok(boundary_faces
+        .into_iter()
+        .filter(|face| !candidate_boundary_faces.contains(face))
+        .collect())
+}
+
+#[cfg(test)]
+fn missing_face_owner_closure_groups(
+    missing_faces: &[[u32; 3]],
+    face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
+    tets: &[TetCandidate],
+) -> Vec<Vec<usize>> {
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut seen = BTreeSet::<Vec<usize>>::new();
+    let mut push_group = |mut group: BTreeSet<usize>| {
+        for index in group.clone() {
+            for face in tet_node_faces(tets[index].node_ids).map(sorted_node_face) {
+                if let Some(neighbors) = face_adjacency.get(&face) {
+                    group.extend(neighbors.iter().copied());
+                }
+            }
+        }
+        let group = group.into_iter().collect::<Vec<_>>();
+        if seen.insert(group.clone()) {
+            groups.push(group);
+        }
+    };
+
+    let mut combined = BTreeSet::<usize>::new();
+    for face in missing_faces {
+        let Some(owners) = face_adjacency.get(face) else {
+            continue;
+        };
+        let owner_group = owners.iter().copied().collect::<BTreeSet<_>>();
+        combined.extend(owner_group.iter().copied());
+        push_group(owner_group);
+    }
+    if !combined.is_empty() {
+        push_group(combined);
+    }
+    groups
 }
 
 #[cfg(test)]
@@ -14744,6 +14889,35 @@ mod tests {
         assert!(groups.contains(&vec![0, 1, 2, 3]));
         assert!(!groups.iter().any(|group| group.contains(&4)));
         assert!(groups.iter().all(|group| (4..=5).contains(&group.len())));
+    }
+
+    #[test]
+    fn missing_face_owner_closure_groups_expand_one_face_neighbor_layer() {
+        let tets = [
+            [0, 1, 2, 3],
+            [0, 1, 2, 4],
+            [0, 1, 4, 5],
+            [0, 1, 5, 6],
+            [7, 8, 9, 10],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(tet_id, node_ids)| TetCandidate {
+            tet_id: tet_id as u32,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.1,
+        })
+        .collect::<Vec<_>>();
+        let face_adjacency = tet_face_adjacency(&tets);
+
+        let groups = missing_face_owner_closure_groups(&[[0, 1, 2]], &face_adjacency, &tets);
+
+        assert_eq!(groups, vec![vec![0, 1, 2]]);
     }
 
     #[test]

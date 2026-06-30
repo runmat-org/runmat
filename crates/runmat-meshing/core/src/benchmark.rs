@@ -2320,6 +2320,7 @@ mod tests {
             diagnostic_cavity_decomposition_transitions,
             diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
+            diagnostic_missing_face_owner_closure_transitions,
             diagnostic_node_cavity_reconnection_rejection_reason,
             diagnostic_node_cavity_reconnection_transitions,
             diagnostic_small_cavity_boundary_mismatch_shapes,
@@ -3116,9 +3117,11 @@ mod tests {
         let mut bad_node_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
         let mut bad_boundary_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
         let mut bad_cavity_decomposition_transitions = BTreeMap::<String, usize>::new();
+        let mut bad_missing_face_owner_closure_transitions = BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_transition_sample_count = 0_usize;
         let mut bad_boundary_cavity_transition_sample_count = 0_usize;
         let mut bad_cavity_decomposition_sample_count = 0_usize;
+        let mut bad_missing_face_owner_closure_sample_count = 0_usize;
         let mut bad_one_ring_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_face_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_node_cavity_size_histogram = BTreeMap::<usize, usize>::new();
@@ -3295,6 +3298,22 @@ mod tests {
                 .expect("cavity decomposition diagnostic should evaluate")
                 {
                     *bad_cavity_decomposition_transitions
+                        .entry(transition.to_string())
+                        .or_default() += count;
+                }
+            }
+            if bad_missing_face_owner_closure_sample_count < 8 {
+                bad_missing_face_owner_closure_sample_count += 1;
+                for (transition, count) in diagnostic_missing_face_owner_closure_transitions(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &face_index_adjacency,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("missing-face owner closure diagnostic should evaluate")
+                {
+                    *bad_missing_face_owner_closure_transitions
                         .entry(transition.to_string())
                         .or_default() += count;
                 }
@@ -3476,6 +3495,10 @@ mod tests {
         eprintln!(
             "annular recovery bad_cavity_decomposition_transition_sample={} transitions={:?}",
             bad_cavity_decomposition_sample_count, bad_cavity_decomposition_transitions
+        );
+        eprintln!(
+            "annular recovery bad_missing_face_owner_closure_transition_sample={} transitions={:?}",
+            bad_missing_face_owner_closure_sample_count, bad_missing_face_owner_closure_transitions
         );
         eprintln!(
             "annular recovery bad_cavity_size_histograms one_ring={:?} face_closure={:?} node_closure={:?}",
