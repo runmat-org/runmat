@@ -176,8 +176,11 @@ pub(crate) struct BoundaryPatchSteinerExactCoverDiagnostic {
 pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
     pub missing_face_count: usize,
     pub pass_face_count: usize,
+    pub failed_face_count: usize,
     pub candidate_count: usize,
     pub max_scaled_jacobian: f64,
+    pub max_failed_face_scaled_jacobian: f64,
+    pub failed_face_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -4265,8 +4268,11 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
     let mut diagnostic = MissingFaceLocalCapQualityDiagnostic {
         missing_face_count: missing_faces.len(),
         pass_face_count: 0,
+        failed_face_count: 0,
         candidate_count: 0,
         max_scaled_jacobian: 0.0,
+        max_failed_face_scaled_jacobian: 0.0,
+        failed_face_scaled_jacobian_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     if missing_faces.is_empty() {
@@ -4281,6 +4287,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
             continue;
         };
         let mut face_passed = false;
+        let mut best_failed_face_quality = 0.0_f64;
         for apex in
             local_cap_apex_candidates(face, surface_point, cavity_centroid, &boundary_node_map)
         {
@@ -4306,6 +4313,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 next_node_id = next_node_id.saturating_add(1);
             }
             diagnostic.candidate_count += 1;
+            let exact_scaled_jacobian = tet_scaled_jacobian(tet_points);
             match raw_refill_tet_with_rejection_reason(
                 [face[0], face[1], face[2], next_node_id],
                 tet_points,
@@ -4318,12 +4326,26 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                     face_passed = true;
                 }
                 Err(reason) => {
+                    if exact_scaled_jacobian.is_finite() {
+                        best_failed_face_quality =
+                            best_failed_face_quality.max(exact_scaled_jacobian);
+                    }
                     *diagnostic.rejected_by_reason.entry(reason).or_default() += 1;
                 }
             }
             next_node_id = next_node_id.saturating_add(1);
         }
         diagnostic.pass_face_count += usize::from(face_passed);
+        if !face_passed && best_failed_face_quality.is_finite() && best_failed_face_quality > 0.0 {
+            diagnostic.failed_face_count += 1;
+            diagnostic.max_failed_face_scaled_jacobian = diagnostic
+                .max_failed_face_scaled_jacobian
+                .max(best_failed_face_quality);
+            *diagnostic
+                .failed_face_scaled_jacobian_bins
+                .entry(diagnostic_scaled_jacobian_bin(best_failed_face_quality))
+                .or_default() += 1;
+        }
     }
     Ok(diagnostic)
 }
@@ -6358,8 +6380,11 @@ mod tests {
 
         assert_eq!(diagnostic.missing_face_count, 0);
         assert_eq!(diagnostic.pass_face_count, 0);
+        assert_eq!(diagnostic.failed_face_count, 0);
         assert_eq!(diagnostic.candidate_count, 0);
         assert_eq!(diagnostic.max_scaled_jacobian, 0.0);
+        assert_eq!(diagnostic.max_failed_face_scaled_jacobian, 0.0);
+        assert!(diagnostic.failed_face_scaled_jacobian_bins.is_empty());
         assert!(diagnostic.rejected_by_reason.is_empty());
     }
 
