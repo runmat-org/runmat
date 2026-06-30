@@ -3845,6 +3845,8 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors =
+            BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_candidates =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets =
@@ -4298,6 +4300,9 @@ mod tests {
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes
                                         .entry(local_cap_stitch.inserted_node_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors
+                                        .entry(local_cap_stitch.side_connector_candidate_count)
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_candidates
                                         .entry(local_cap_stitch.candidate_tet_count)
@@ -5088,9 +5093,10 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
             trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces,
             trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes,
+            trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors,
             trimmed_seed_star_shell_trim_local_cap_stitch_candidates,
             trimmed_seed_star_shell_trim_local_cap_stitch_selected_tets,
             trimmed_seed_star_shell_trim_local_cap_stitch_search_attempts,

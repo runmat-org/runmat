@@ -187,6 +187,7 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub missing_face_count: usize,
     pub capped_face_count: usize,
     pub inserted_node_count: usize,
+    pub side_connector_candidate_count: usize,
     pub candidate_tet_count: usize,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
@@ -3618,7 +3619,11 @@ pub(crate) fn diagnostic_boundary_exact_cover(
     let selected = search.search();
     diagnostic.search_attempt_count = search.attempts;
     let Some(selected) = selected else {
-        diagnostic.reason = "cover_not_found";
+        diagnostic.reason = if diagnostic.search_attempt_count > 5_000 {
+            "search_exhausted"
+        } else {
+            "cover_not_found"
+        };
         return Ok(diagnostic);
     };
     diagnostic.selected_tet_count = selected.len();
@@ -3751,7 +3756,11 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
     let selected = search.search();
     diagnostic.search_attempt_count = search.attempts;
     let Some(selected) = selected else {
-        diagnostic.reason = "cover_not_found";
+        diagnostic.reason = if diagnostic.search_attempt_count > 5_000 {
+            "search_exhausted"
+        } else {
+            "cover_not_found"
+        };
         return Ok(diagnostic);
     };
     diagnostic.max_min_scaled_jacobian = selected
@@ -4098,6 +4107,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         missing_face_count: missing_faces.len(),
         capped_face_count: 0,
         inserted_node_count: 0,
+        side_connector_candidate_count: 0,
         candidate_tet_count: 0,
         selected_tet_count: 0,
         search_attempt_count: 0,
@@ -4118,9 +4128,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         .iter()
         .map(|node_id| (*node_id, boundary_node_map[node_id]))
         .collect::<BTreeMap<_, _>>();
-    let mut candidate_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    let mut candidate_tets = boundary_refill_tets;
     let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
     let mut next_node_id = next_cavity_node_id(cavity);
+    let cap_tet_start = candidate_tets.len();
     for face in &missing_faces {
         let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
             continue;
@@ -4154,6 +4165,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         diagnostic.candidate_tet_count = candidate_tets.len();
         return Ok(diagnostic);
     }
+    let cap_tet_count = candidate_tets.len() - cap_tet_start;
 
     let connector_points = node_points
         .iter()
@@ -4187,12 +4199,25 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
             candidate_tets.push(tet);
         }
     }
+    diagnostic.side_connector_candidate_count = append_cap_side_connector_tets(
+        cap_tet_start,
+        cap_tet_count,
+        &mut candidate_tets,
+        &mut seen_tets,
+        &node_points,
+        &inserted_nodes
+            .iter()
+            .map(|node| node.node_id)
+            .collect::<BTreeSet<_>>(),
+        &boundary_triangles,
+        options,
+    );
     diagnostic.candidate_tet_count = candidate_tets.len();
     if candidate_tets.is_empty() {
         diagnostic.reason = "no_candidate_tets";
         return Ok(diagnostic);
     }
-    if candidate_tets.len() > 1_024 {
+    if candidate_tets.len() > 4_096 {
         diagnostic.reason = "over_candidate_limit";
         return Ok(diagnostic);
     }
@@ -4408,6 +4433,62 @@ fn best_local_cap_for_face(
                 .total_cmp(&right.1.exact_scaled_jacobian)
                 .then_with(|| right.1.aspect_ratio.total_cmp(&left.1.aspect_ratio))
         })
+}
+
+#[cfg(test)]
+fn append_cap_side_connector_tets(
+    cap_tet_start: usize,
+    cap_tet_count: usize,
+    candidate_tets: &mut Vec<ConstrainedCavityRefillTet>,
+    seen_tets: &mut BTreeSet<[u32; 4]>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    inserted_node_ids: &BTreeSet<u32>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> usize {
+    let cap_tets = candidate_tets
+        .iter()
+        .skip(cap_tet_start)
+        .take(cap_tet_count)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut inserted_count = 0_usize;
+    for cap_tet in cap_tets {
+        for face in tet_faces(cap_tet.node_ids) {
+            if !face
+                .iter()
+                .any(|node_id| inserted_node_ids.contains(node_id))
+            {
+                continue;
+            }
+            for node_id in node_points.keys().copied() {
+                if face.contains(&node_id) {
+                    continue;
+                }
+                let tet_node_ids = [face[0], face[1], face[2], node_id];
+                if !seen_tets.insert(sorted_tet_nodes(tet_node_ids)) {
+                    continue;
+                }
+                let tet_points = tet_node_ids.map(|id| node_points[&id]);
+                if point_in_closed_triangle_surface(
+                    tet_centroid(tet_points),
+                    boundary_triangles,
+                    MeshingTolerance::default(),
+                ) != PointInClosedSurface::Inside
+                {
+                    continue;
+                }
+                let Ok(tet) =
+                    raw_refill_tet_with_rejection_reason(tet_node_ids, tet_points, options)
+                else {
+                    continue;
+                };
+                candidate_tets.push(tet);
+                inserted_count += 1;
+            }
+        }
+    }
+    inserted_count
 }
 
 #[cfg(test)]
@@ -5771,6 +5852,7 @@ mod tests {
         assert_eq!(diagnostic.missing_face_count, 0);
         assert_eq!(diagnostic.capped_face_count, 0);
         assert_eq!(diagnostic.inserted_node_count, 0);
+        assert_eq!(diagnostic.side_connector_candidate_count, 0);
         assert_eq!(diagnostic.candidate_tet_count, 0);
         assert_eq!(diagnostic.selected_tet_count, 0);
         assert_eq!(diagnostic.search_attempt_count, 0);
