@@ -3556,6 +3556,12 @@ mod tests {
         let mut trimmed_seed_star_face_expansion_boundary_faces = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_face_expansion_rejected_by_reason =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_expansion_candidates = 0_usize;
+        let mut trimmed_seed_star_shell_expansion_valid = 0_usize;
+        let mut trimmed_seed_star_shell_expansion_refill_success = 0_usize;
+        let mut trimmed_seed_star_shell_expansion_boundary_faces = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_expansion_rejected_by_reason =
+            BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3674,7 +3680,96 @@ mod tests {
                             }
                         }
                     }
-                    for expansion_index in expansion_indices {
+                    if !expansion_indices.is_empty() {
+                        let mut shell_expanded =
+                            selected_indices.iter().copied().collect::<Vec<_>>();
+                        shell_expanded.extend(expansion_indices.iter().copied());
+                        shell_expanded.sort_unstable();
+                        shell_expanded.dedup();
+                        trimmed_seed_star_shell_expansion_candidates += 1;
+                        if let Ok(shell_cavity) = constrained_cavity_from_selected_tets(
+                            &preparation.tet_candidates.tets,
+                            &shell_expanded,
+                            vec![],
+                        ) {
+                            trimmed_seed_star_shell_expansion_valid += 1;
+                            *trimmed_seed_star_shell_expansion_boundary_faces
+                                .entry(shell_cavity.boundary_faces.len())
+                                .or_default() += 1;
+                            let shell_boundary_node_ids = diagnostic_cavity_node_ids(&shell_cavity);
+                            let shell_boundary_nodes = shell_boundary_node_ids
+                                .iter()
+                                .map(|node_id| {
+                                    Ok(ConstrainedCavityNode {
+                                        node_id: *node_id,
+                                        coordinates_m: *node_points
+                                            .get(node_id)
+                                            .ok_or_else(|| format!("missing node {node_id}"))?,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, String>>()
+                                .expect("diagnostic boundary nodes should exist");
+                            let mut shell_interior_candidates = Vec::<ConstrainedCavityNode>::new();
+                            if !shell_boundary_node_ids.contains(seed_node_id) {
+                                if let Some(current_point) = node_points.get(seed_node_id).copied()
+                                {
+                                    shell_interior_candidates.push(ConstrainedCavityNode {
+                                        node_id: *seed_node_id,
+                                        coordinates_m: current_point,
+                                    });
+                                }
+                            }
+                            if let Some(centroid) =
+                                diagnostic_boundary_centroid(&shell_boundary_nodes)
+                            {
+                                shell_interior_candidates.push(ConstrainedCavityNode {
+                                    node_id: next_diagnostic_node_id,
+                                    coordinates_m: centroid,
+                                });
+                                next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                            }
+                            shell_interior_candidates.push(ConstrainedCavityNode {
+                                node_id: next_diagnostic_node_id,
+                                coordinates_m: diagnostic_tet_centroid(
+                                    &preparation.tet_candidates.tets[anchor_tet_index],
+                                    &node_points,
+                                ),
+                            });
+                            next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                            match evaluate_constrained_cavity_refill_candidates(
+                                &shell_cavity,
+                                &shell_boundary_nodes,
+                                &shell_interior_candidates,
+                                refill_options,
+                            ) {
+                                Ok(evaluation) => {
+                                    if evaluation.refill.is_some() {
+                                        trimmed_seed_star_shell_expansion_refill_success += 1;
+                                    } else {
+                                        for (reason, count) in evaluation.rejected_by_reason {
+                                            *trimmed_seed_star_shell_expansion_rejected_by_reason
+                                                .entry(reason)
+                                                .or_default() += count;
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    *trimmed_seed_star_shell_expansion_rejected_by_reason
+                                        .entry(diagnostic_refill_error_reason(&err).to_string())
+                                        .or_default() += 1;
+                                }
+                            }
+                        } else if let Err(err) = constrained_cavity_from_selected_tets(
+                            &preparation.tet_candidates.tets,
+                            &shell_expanded,
+                            vec![],
+                        ) {
+                            *trimmed_seed_star_shell_expansion_rejected_by_reason
+                                .entry(diagnostic_cavity_extraction_reason(&err).to_string())
+                                .or_default() += 1;
+                        }
+                    }
+                    for expansion_index in expansion_indices.iter().copied() {
                         let mut expanded = selected_indices.iter().copied().collect::<Vec<_>>();
                         expanded.push(expansion_index);
                         expanded.sort_unstable();
@@ -4075,6 +4170,14 @@ mod tests {
             trimmed_seed_star_face_expansion_refill_success,
             trimmed_seed_star_face_expansion_boundary_faces,
             trimmed_seed_star_face_expansion_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_expansion candidates={} valid={} refill_success={} boundary_faces={:?} rejected_by_reason={:?}",
+            trimmed_seed_star_shell_expansion_candidates,
+            trimmed_seed_star_shell_expansion_valid,
+            trimmed_seed_star_shell_expansion_refill_success,
+            trimmed_seed_star_shell_expansion_boundary_faces,
+            trimmed_seed_star_shell_expansion_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",
