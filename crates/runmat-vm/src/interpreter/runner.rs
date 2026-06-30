@@ -13,6 +13,7 @@ use crate::runtime::workspace::{
     workspace_snapshot,
 };
 use runmat_builtins::{CellArray, Value};
+use runmat_runtime::builtins::common::validation as arg_validation;
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -297,7 +298,7 @@ fn validate_function_arguments(
             .ok_or_else(|| mex("InvalidInputSlot", "function argument slot out of bounds"))?;
 
         if let Some(size) = &validation.size {
-            let (rows, cols) = value_shape_2d(value);
+            let (rows, cols) = arg_validation::value_shape_2d(value);
             if !dim_matches(&size.rows, rows) || !dim_matches(&size.cols, cols) {
                 return Err(mex(
                     "ArgumentValidationSize",
@@ -311,7 +312,7 @@ fn validate_function_arguments(
         }
 
         if let Some(class_name) = &validation.class_name {
-            if !value_matches_class(value, class_name) {
+            if !arg_validation::value_matches_class(value, class_name) {
                 return Err(mex(
                     "ArgumentValidationClass",
                     &format!(
@@ -325,8 +326,32 @@ fn validate_function_arguments(
         }
         for validator in &validation.validators {
             match validator {
+                crate::bytecode::program::FunctionArgValidator::A(class_names) => {
+                    if !arg_validation::must_be_a(value, class_names.clone())? {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeA validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Column => {
+                    if !arg_validation::value_is_column(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeColumn validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::Finite => {
-                    if !value_is_finite(value) {
+                    if !arg_validation::value_is_finite(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -337,8 +362,48 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::Float => {
+                    if !arg_validation::value_is_float(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeFloat validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Folder => {
+                    if arg_validation::dispatch_validator("mustBeFolder", vec![value.clone()])
+                        .is_err()
+                    {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeFolder validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::File => {
+                    if arg_validation::dispatch_validator("mustBeFile", vec![value.clone()])
+                        .is_err()
+                    {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeFile validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::NumericOrLogical => {
-                    if !value_is_numeric_or_logical(value) {
+                    if !arg_validation::value_is_numeric_or_logical(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -349,8 +414,20 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::Numeric => {
+                    if !arg_validation::value_is_numeric(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNumeric validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::Text => {
-                    if !value_is_text(value) {
+                    if !arg_validation::value_is_text(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -361,8 +438,32 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::TextScalar => {
+                    if !arg_validation::value_is_text_scalar(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeTextScalar validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::NonzeroLengthText => {
+                    if !arg_validation::value_is_nonzero_length_text(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonzeroLengthText validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::Nonempty => {
-                    if value_is_empty(value) {
+                    if arg_validation::value_is_empty(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -374,7 +475,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::ScalarOrEmpty => {
-                    if !value_is_scalar_or_empty(value) {
+                    if !arg_validation::value_is_scalar_or_empty(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -386,7 +487,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Real => {
-                    if !value_is_real(value) {
+                    if !arg_validation::value_is_real(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -398,7 +499,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Integer => {
-                    if !value_is_integer(value) {
+                    if !arg_validation::value_is_integer(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -409,8 +510,20 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::Vector => {
+                    if !arg_validation::value_is_vector(value)? {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeVector validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::Positive => {
-                    if !value_is_positive(value) {
+                    if !arg_validation::value_is_positive(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -422,7 +535,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Negative => {
-                    if !value_is_negative(value) {
+                    if !arg_validation::value_is_negative(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -434,7 +547,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonnegative => {
-                    if !value_is_nonnegative(value) {
+                    if !arg_validation::value_is_nonnegative(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -445,8 +558,32 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::Nonmissing => {
+                    if !arg_validation::value_is_nonmissing(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonmissing validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::NonNan => {
+                    if !arg_validation::value_is_non_nan(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonNan validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::Nonzero => {
-                    if !value_is_nonzero(value) {
+                    if !arg_validation::value_is_nonzero(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -458,7 +595,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonpositive => {
-                    if !value_is_nonpositive(value) {
+                    if !arg_validation::value_is_nonpositive(value) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -469,8 +606,93 @@ fn validate_function_arguments(
                         ));
                     }
                 }
+                crate::bytecode::program::FunctionArgValidator::Nonsparse => {
+                    if matches!(value, Value::SparseTensor(_)) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonsparse validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Sparse => {
+                    if !matches!(value, Value::SparseTensor(_)) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeSparse validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::ValidVariableName => {
+                    if !arg_validation::isvarname_value(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeValidVariableName validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::UnderlyingType(class_names) => {
+                    if !arg_validation::value_underlying_type_matches(value, class_names.clone())? {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeUnderlyingType validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Member(literals) => {
+                    let allowed: Vec<_> = literals.iter().map(validation_literal_to_atom).collect();
+                    if !arg_validation::value_is_member_atoms(value, &allowed)? {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeMember validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::InRange(
+                    lower,
+                    upper,
+                    inclusivity,
+                ) => {
+                    if !arg_validation::value_is_in_range(
+                        value,
+                        *lower,
+                        *upper,
+                        arg_validation::RangeInclusivity {
+                            lower: inclusivity.lower,
+                            upper: inclusivity.upper,
+                        },
+                    ) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeInRange validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
                 crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(threshold) => {
-                    if !value_is_greater_than_or_equal(value, *threshold) {
+                    if !arg_validation::value_is_greater_than_or_equal(value, *threshold) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -482,7 +704,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(threshold) => {
-                    if !value_is_less_than_or_equal(value, *threshold) {
+                    if !arg_validation::value_is_less_than_or_equal(value, *threshold) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -494,7 +716,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::GreaterThan(threshold) => {
-                    if !value_is_greater_than(value, *threshold) {
+                    if !arg_validation::value_is_greater_than(value, *threshold) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -506,7 +728,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::LessThan(threshold) => {
-                    if !value_is_less_than(value, *threshold) {
+                    if !arg_validation::value_is_less_than(value, *threshold) {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -523,266 +745,26 @@ fn validate_function_arguments(
     Ok(())
 }
 
+fn validation_literal_to_atom(
+    literal: &crate::bytecode::program::FunctionArgValidationLiteral,
+) -> arg_validation::ValidationAtom {
+    match literal {
+        crate::bytecode::program::FunctionArgValidationLiteral::Number(value) => {
+            arg_validation::ValidationAtom::Number(*value)
+        }
+        crate::bytecode::program::FunctionArgValidationLiteral::Text(value) => {
+            arg_validation::ValidationAtom::Text(value.clone())
+        }
+        crate::bytecode::program::FunctionArgValidationLiteral::Bool(value) => {
+            arg_validation::ValidationAtom::Bool(*value)
+        }
+    }
+}
+
 fn dim_matches(dim: &crate::bytecode::program::FunctionArgDim, actual: usize) -> bool {
     match dim {
         crate::bytecode::program::FunctionArgDim::Any => true,
         crate::bytecode::program::FunctionArgDim::Exact(expected) => *expected == actual,
-    }
-}
-
-fn value_shape_2d(value: &Value) -> (usize, usize) {
-    match value {
-        Value::Tensor(t) => {
-            let rows = t.shape.first().copied().unwrap_or(0);
-            let cols = t.shape.get(1).copied().unwrap_or(1);
-            (rows, cols)
-        }
-        Value::ComplexTensor(t) => {
-            let rows = t.shape.first().copied().unwrap_or(0);
-            let cols = t.shape.get(1).copied().unwrap_or(1);
-            (rows, cols)
-        }
-        Value::LogicalArray(a) => {
-            let rows = a.shape.first().copied().unwrap_or(0);
-            let cols = a.shape.get(1).copied().unwrap_or(1);
-            (rows, cols)
-        }
-        Value::Cell(c) => (c.rows, c.cols),
-        Value::CharArray(c) => (c.rows, c.cols),
-        Value::StringArray(s) => {
-            let rows = s.shape.first().copied().unwrap_or(0);
-            let cols = s.shape.get(1).copied().unwrap_or(1);
-            (rows, cols)
-        }
-        _ => (1, 1),
-    }
-}
-
-fn value_matches_class(value: &Value, class_name: &str) -> bool {
-    match class_name {
-        "double" => match value {
-            Value::Num(_) => true,
-            Value::Tensor(t) => t.dtype.class_name() == "double",
-            _ => false,
-        },
-        "single" => matches!(value, Value::Tensor(t) if t.dtype.class_name() == "single"),
-        "logical" => matches!(value, Value::Bool(_) | Value::LogicalArray(_)),
-        "char" => matches!(value, Value::CharArray(_) | Value::String(_)),
-        "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
-        "cell" => matches!(value, Value::Cell(_)),
-        "struct" => matches!(value, Value::Struct(_)),
-        other => match value {
-            Value::Object(obj) => obj.class_name == other,
-            Value::HandleObject(handle) => handle.class_name == other,
-            Value::ClassRef(name) => name == other,
-            _ => false,
-        },
-    }
-}
-
-fn value_is_finite(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite(),
-        Value::Int(_) | Value::Bool(_) => true,
-        Value::Complex(re, im) => re.is_finite() && im.is_finite(),
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite()),
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| re.is_finite() && im.is_finite()),
-        Value::LogicalArray(_) | Value::CharArray(_) => true,
-        _ => false,
-    }
-}
-
-fn value_is_numeric_or_logical(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Num(_)
-            | Value::Int(_)
-            | Value::Complex(_, _)
-            | Value::Tensor(_)
-            | Value::ComplexTensor(_)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-    )
-}
-
-fn value_is_text(value: &Value) -> bool {
-    match value {
-        Value::String(_) | Value::StringArray(_) => true,
-        Value::CharArray(chars) => chars.rows == 1,
-        Value::Cell(cell) => cell.data.iter().all(|entry| match &entry {
-            Value::CharArray(chars) => chars.rows == 1,
-            Value::String(_) => true,
-            _ => false,
-        }),
-        _ => false,
-    }
-}
-
-fn value_is_empty(value: &Value) -> bool {
-    match value {
-        Value::Tensor(t) => t.shape.iter().product::<usize>() == 0,
-        Value::ComplexTensor(t) => t.shape.iter().product::<usize>() == 0,
-        Value::LogicalArray(a) => a.shape.iter().product::<usize>() == 0,
-        Value::StringArray(s) => s.shape.iter().product::<usize>() == 0,
-        Value::CharArray(c) => c.rows * c.cols == 0,
-        Value::Cell(c) => c.shape.iter().product::<usize>() == 0,
-        _ => false,
-    }
-}
-
-fn value_is_scalar_or_empty(value: &Value) -> bool {
-    let (rows, cols) = value_shape_2d(value);
-    (rows == 1 && cols == 1) || (rows == 0 || cols == 0)
-}
-
-fn value_is_real(value: &Value) -> bool {
-    match value {
-        Value::Complex(_, im) => *im == 0.0,
-        Value::ComplexTensor(t) => t.data.iter().all(|(_, im)| *im == 0.0),
-        _ => true,
-    }
-}
-
-fn value_is_integer(value: &Value) -> bool {
-    match value {
-        Value::Int(_) => true,
-        Value::Num(v) => v.is_finite() && v.fract() == 0.0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && v.fract() == 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && re.fract() == 0.0),
-        _ => false,
-    }
-}
-
-fn value_is_positive(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v > 0.0,
-        Value::Int(v) => v.to_i64() > 0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v > 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re > 0.0,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re > 0.0),
-        _ => false,
-    }
-}
-
-fn value_is_negative(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v < 0.0,
-        Value::Int(v) => v.to_i64() < 0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v < 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re < 0.0,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re < 0.0),
-        _ => false,
-    }
-}
-
-fn value_is_nonnegative(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v >= 0.0,
-        Value::Int(v) => v.to_i64() >= 0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v >= 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re >= 0.0,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re >= 0.0),
-        _ => false,
-    }
-}
-
-fn value_is_nonzero(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v != 0.0,
-        Value::Int(v) => v.to_i64() != 0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v != 0.0),
-        Value::Complex(re, im) => re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0),
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0)),
-        _ => false,
-    }
-}
-
-fn value_is_nonpositive(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v <= 0.0,
-        Value::Int(v) => v.to_i64() <= 0,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v <= 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re <= 0.0,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re <= 0.0),
-        _ => false,
-    }
-}
-
-fn value_is_greater_than_or_equal(value: &Value, threshold: f64) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v >= threshold,
-        Value::Int(v) => (v.to_i64() as f64) >= threshold,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v >= threshold),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re >= threshold,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re >= threshold),
-        _ => false,
-    }
-}
-
-fn value_is_less_than_or_equal(value: &Value, threshold: f64) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v <= threshold,
-        Value::Int(v) => (v.to_i64() as f64) <= threshold,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v <= threshold),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re <= threshold,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re <= threshold),
-        _ => false,
-    }
-}
-
-fn value_is_greater_than(value: &Value, threshold: f64) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v > threshold,
-        Value::Int(v) => (v.to_i64() as f64) > threshold,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v > threshold),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re > threshold,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re > threshold),
-        _ => false,
-    }
-}
-
-fn value_is_less_than(value: &Value, threshold: f64) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v < threshold,
-        Value::Int(v) => (v.to_i64() as f64) < threshold,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v < threshold),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re < threshold,
-        Value::ComplexTensor(t) => t
-            .data
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re < threshold),
-        _ => false,
     }
 }
 

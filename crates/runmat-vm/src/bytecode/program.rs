@@ -114,22 +114,52 @@ pub struct FunctionArgumentValidation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidator {
+    A(Vec<String>),
+    Column,
     Finite,
+    Float,
+    Folder,
+    File,
     NumericOrLogical,
+    Numeric,
     Text,
+    TextScalar,
+    NonzeroLengthText,
     Nonempty,
     ScalarOrEmpty,
     Real,
     Integer,
+    Vector,
     Positive,
     Negative,
     Nonnegative,
+    Nonmissing,
+    NonNan,
     Nonzero,
     Nonpositive,
+    Nonsparse,
+    Sparse,
+    ValidVariableName,
+    UnderlyingType(Vec<String>),
+    Member(Vec<FunctionArgValidationLiteral>),
+    InRange(f64, f64, FunctionArgRangeInclusivity),
     GreaterThanOrEqual(f64),
     LessThanOrEqual(f64),
     GreaterThan(f64),
     LessThan(f64),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct FunctionArgRangeInclusivity {
+    pub lower: bool,
+    pub upper: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgValidationLiteral {
+    Number(f64),
+    Text(String),
+    Bool(bool),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

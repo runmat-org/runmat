@@ -71,6 +71,142 @@ fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
 }
 
 #[test]
+fn arguments_block_accepts_extended_validation_family() {
+    let values = execute_source(
+        r#"
+        y = checked(3, 'alpha', 'on');
+        function out = checked(x, name, mode)
+            arguments
+                x (1,1) double {mustBeNumeric, mustBeFloat, mustBeInteger, mustBeInRange(1, 5)}
+                name {mustBeTextScalar, mustBeNonzeroLengthText, mustBeValidVariableName}
+                mode {mustBeMember('on')}
+            end
+            out = x + 4;
+        end
+        "#,
+    );
+    assert!(
+        has_num(&values, 7.0),
+        "expected checked output, got {values:?}"
+    );
+}
+
+#[test]
+fn arguments_block_extended_validator_failures_are_runtime_errors() {
+    let err = execute_source_result(
+        r#"
+        y = checked(8);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(1, 5)}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("out-of-range argument should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("mustBeInRange"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arguments_block_in_range_honors_exclusive_interval_flag() {
+    let err = execute_source_result(
+        r#"
+        y = checked(1);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(1, 5, 'exclusive')}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("exclusive lower endpoint should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("mustBeInRange"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arguments_block_in_range_accepts_explicit_argument_form() {
+    let values = execute_source(
+        r#"
+        y = checked(3);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(x, 1, 5)}
+            end
+            out = x + 4;
+        end
+        "#,
+    );
+    assert!(
+        has_num(&values, 7.0),
+        "expected checked output, got {values:?}"
+    );
+
+    let err = execute_source_result(
+        r#"
+        y = checked(1);
+        function out = checked(x)
+            arguments
+                x {mustBeInRange(x, 1, 5, 'exclusive')}
+            end
+            out = x;
+        end
+        "#,
+    )
+    .expect_err("exclusive lower endpoint should fail validation");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ArgumentValidationFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn argument_validation_helpers_are_callable_builtins() {
+    let values = execute_source(
+        r#"
+        mustBePositive(3);
+        mustBeMember('on', {'on', 'off'});
+        tf = isvarname('alpha_1');
+        args = namedargs2cell(struct('Name', 'Ada', 'Value', 7));
+        n = numel(args);
+        "#,
+    );
+    assert!(
+        values
+            .iter()
+            .any(|v| matches!(v, runmat_builtins::Value::Bool(true))),
+        "expected isvarname true value, got {values:?}"
+    );
+    assert!(
+        has_num(&values, 4.0),
+        "expected namedargs2cell numel, got {values:?}"
+    );
+}
+
+#[test]
 fn unresolved_external_function_handle_fails_without_legacy_fallback() {
     let err = execute_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
         .expect_err("unresolved external callback should fail");

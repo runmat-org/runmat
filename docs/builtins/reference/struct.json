@@ -29,7 +29,7 @@
   },
   "description": "`S = struct(...)` creates scalar structs or struct arrays by pairing field names with values. It supports MATLAB-compatible name/value, struct-copy, and cell-expansion construction forms.",
   "behaviors": [
-    "Field names must satisfy the MATLAB `isvarname` rules: they start with a letter or underscore and contain only letters, digits, or underscores.",
+    "Field names must satisfy the MATLAB `isvarname` rules: they start with a letter, contain only letters, digits, or underscores, stay within `namelengthmax`, and are not MATLAB keywords.",
     "The last occurrence of a repeated field name wins and overwrites earlier values.",
     "String scalars, character vectors, and single-element string arrays are accepted as field names.",
     "`struct()` returns a scalar struct with no fields, while `struct([])` yields a `0×0` struct array.",
@@ -66,7 +66,7 @@
   "faqs": [
     {
       "question": "Do field names have to be valid identifiers?",
-      "answer": "Yes. RunMat mirrors MATLAB and requires names to satisfy `isvarname`. Names must begin with a letter or underscore and may contain letters, digits, and underscores."
+      "answer": "Yes. RunMat mirrors MATLAB and requires names to satisfy `isvarname`. Names must begin with a letter, may contain letters, digits, and underscores, must stay within `namelengthmax`, and cannot be MATLAB keywords."
     },
     {
       "question": "How do I create a struct array?",

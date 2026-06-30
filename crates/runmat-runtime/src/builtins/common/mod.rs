@@ -23,6 +23,7 @@ pub mod residency;
 pub mod shape;
 pub mod spec;
 pub mod tensor;
+pub mod validation;
 
 #[cfg(test)]
 pub mod test_support;
