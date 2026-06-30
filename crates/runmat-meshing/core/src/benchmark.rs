@@ -15,10 +15,10 @@ use crate::{
         diagnostic_boundary_missing_face_clusters, diagnostic_boundary_node_completion,
         diagnostic_boundary_patch_steiner_exact_cover, diagnostic_boundary_steiner_exact_cover,
         diagnostic_interior_star_quality, diagnostic_missing_face_local_cap_quality,
-        diagnostic_missing_face_local_cap_stitch, evaluate_constrained_cavity_refill_candidates,
-        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
-        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
-        ConstrainedCavityValidationError,
+        diagnostic_missing_face_local_cap_stitch, diagnostic_missing_face_shared_patch_cap_stitch,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3888,6 +3888,30 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_reason =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_capped_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_patch_count =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_patch_capped_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_incomplete_patch_size =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_inserted_nodes =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_components =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_selected_tets =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_search_attempts =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_found = 0_usize;
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_reason =
+            BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_shared_patch_cap_max_min_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_missing_face_count = BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_missing_face_edge_component_count =
             BTreeMap::<usize, usize>::new();
@@ -4420,6 +4444,60 @@ mod tests {
                                     trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality =
                                         trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality
                                             .max(local_cap_stitch.max_min_scaled_jacobian);
+                                }
+                                if let Ok(shared_patch_cap) =
+                                    diagnostic_missing_face_shared_patch_cap_stitch(
+                                        &shell_trim_cavity,
+                                        &shell_trim_boundary_nodes,
+                                        refill_options,
+                                    )
+                                {
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_capped_faces
+                                        .entry(shared_patch_cap.capped_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_patch_count
+                                        .entry(shared_patch_cap.patch_count)
+                                        .or_default() += 1;
+                                    for (capped_faces, count) in
+                                        shared_patch_cap.patch_capped_face_count_histogram
+                                    {
+                                        *trimmed_seed_star_shell_trim_shared_patch_cap_patch_capped_faces
+                                            .entry(capped_faces)
+                                            .or_default() += count;
+                                    }
+                                    for (size, count) in
+                                        shared_patch_cap.incomplete_patch_size_histogram
+                                    {
+                                        *trimmed_seed_star_shell_trim_shared_patch_cap_incomplete_patch_size
+                                            .entry(size)
+                                            .or_default() += count;
+                                    }
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_inserted_nodes
+                                        .entry(shared_patch_cap.inserted_node_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_candidates
+                                        .entry(shared_patch_cap.candidate_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_faces
+                                        .entry(shared_patch_cap.open_interior_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_components
+                                        .entry(shared_patch_cap.open_interior_component_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_selected_tets
+                                        .entry(shared_patch_cap.selected_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_search_attempts
+                                        .entry(shared_patch_cap.search_attempt_count)
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_shared_patch_cap_found +=
+                                        usize::from(shared_patch_cap.found_cover);
+                                    *trimmed_seed_star_shell_trim_shared_patch_cap_reason
+                                        .entry(shared_patch_cap.reason.to_string())
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_shared_patch_cap_max_min_quality =
+                                        trimmed_seed_star_shell_trim_shared_patch_cap_max_min_quality
+                                            .max(shared_patch_cap.max_min_scaled_jacobian);
                                 }
                                 if let Ok(clusters) = diagnostic_boundary_missing_face_clusters(
                                     &shell_trim_cavity,
@@ -5218,6 +5296,22 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_stitch_found,
             trimmed_seed_star_shell_trim_local_cap_stitch_max_min_quality,
             trimmed_seed_star_shell_trim_local_cap_stitch_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_shared_patch_cap_stitch capped_faces={:?} patches={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} candidates={:?} open_interior_faces={:?} open_interior_components={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            trimmed_seed_star_shell_trim_shared_patch_cap_capped_faces,
+            trimmed_seed_star_shell_trim_shared_patch_cap_patch_count,
+            trimmed_seed_star_shell_trim_shared_patch_cap_patch_capped_faces,
+            trimmed_seed_star_shell_trim_shared_patch_cap_incomplete_patch_size,
+            trimmed_seed_star_shell_trim_shared_patch_cap_inserted_nodes,
+            trimmed_seed_star_shell_trim_shared_patch_cap_candidates,
+            trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_faces,
+            trimmed_seed_star_shell_trim_shared_patch_cap_open_interior_components,
+            trimmed_seed_star_shell_trim_shared_patch_cap_selected_tets,
+            trimmed_seed_star_shell_trim_shared_patch_cap_search_attempts,
+            trimmed_seed_star_shell_trim_shared_patch_cap_found,
+            trimmed_seed_star_shell_trim_shared_patch_cap_max_min_quality,
+            trimmed_seed_star_shell_trim_shared_patch_cap_reason,
         );
         eprintln!(
             "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?} common_nodes={:?} common_node_sources={:?}",
