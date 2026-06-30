@@ -190,6 +190,10 @@ pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub missing_face_count: usize,
+    pub patch_count: usize,
+    pub patch_size_histogram: BTreeMap<usize, usize>,
+    pub patch_capped_face_count_histogram: BTreeMap<usize, usize>,
+    pub incomplete_patch_size_histogram: BTreeMap<usize, usize>,
     pub capped_face_count: usize,
     pub inserted_node_count: usize,
     pub side_connector_candidate_count: usize,
@@ -4406,8 +4410,18 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     }
     let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tets)
         .map_err(ConstrainedCavityRefillError::Validation)?;
+    let missing_face_patches = missing_face_components(&missing_faces, MissingFaceLink::Node);
     let mut diagnostic = MissingFaceLocalCapStitchDiagnostic {
         missing_face_count: missing_faces.len(),
+        patch_count: missing_face_patches.len(),
+        patch_size_histogram: component_size_histogram(
+            missing_face_patches
+                .iter()
+                .map(Vec::len)
+                .collect::<Vec<_>>(),
+        ),
+        patch_capped_face_count_histogram: BTreeMap::new(),
+        incomplete_patch_size_histogram: BTreeMap::new(),
         capped_face_count: 0,
         inserted_node_count: 0,
         side_connector_candidate_count: 0,
@@ -4442,7 +4456,8 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
     let mut next_node_id = next_cavity_node_id(cavity);
     let cap_tet_start = candidate_tets.len();
-    for face in &missing_faces {
+    let mut capped_missing_face_indices = BTreeSet::<usize>::new();
+    for (face_index, face) in missing_faces.iter().enumerate() {
         let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
             continue;
         };
@@ -4467,7 +4482,24 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         });
         candidate_tets.push(cap_tet);
         diagnostic.capped_face_count += 1;
+        capped_missing_face_indices.insert(face_index);
         next_node_id = next_node_id.saturating_add(1);
+    }
+    for patch in &missing_face_patches {
+        let capped_count = patch
+            .iter()
+            .filter(|face_index| capped_missing_face_indices.contains(face_index))
+            .count();
+        *diagnostic
+            .patch_capped_face_count_histogram
+            .entry(capped_count)
+            .or_default() += 1;
+        if capped_count < patch.len() {
+            *diagnostic
+                .incomplete_patch_size_histogram
+                .entry(patch.len())
+                .or_default() += 1;
+        }
     }
     diagnostic.inserted_node_count = inserted_nodes.len();
     if diagnostic.capped_face_count < diagnostic.missing_face_count {
@@ -6544,6 +6576,10 @@ mod tests {
         assert_eq!(diagnostic.search_attempt_count, 0);
         assert!(!diagnostic.found_cover);
         assert_eq!(diagnostic.reason, "no_missing_faces");
+        assert_eq!(diagnostic.patch_count, 0);
+        assert!(diagnostic.patch_size_histogram.is_empty());
+        assert!(diagnostic.patch_capped_face_count_histogram.is_empty());
+        assert!(diagnostic.incomplete_patch_size_histogram.is_empty());
     }
 
     #[test]

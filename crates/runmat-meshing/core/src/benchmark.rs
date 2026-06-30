@@ -3852,6 +3852,14 @@ mod tests {
             BTreeMap::<&'static str, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_patch_count =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_patch_size =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_patch_capped_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_incomplete_patch_size =
+            BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors =
@@ -4342,6 +4350,28 @@ mod tests {
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces
                                         .entry(local_cap_stitch.capped_face_count)
                                         .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_patch_count
+                                        .entry(local_cap_stitch.patch_count)
+                                        .or_default() += 1;
+                                    for (size, count) in local_cap_stitch.patch_size_histogram {
+                                        *trimmed_seed_star_shell_trim_local_cap_stitch_patch_size
+                                            .entry(size)
+                                            .or_default() += count;
+                                    }
+                                    for (capped_faces, count) in
+                                        local_cap_stitch.patch_capped_face_count_histogram
+                                    {
+                                        *trimmed_seed_star_shell_trim_local_cap_stitch_patch_capped_faces
+                                            .entry(capped_faces)
+                                            .or_default() += count;
+                                    }
+                                    for (size, count) in
+                                        local_cap_stitch.incomplete_patch_size_histogram
+                                    {
+                                        *trimmed_seed_star_shell_trim_local_cap_stitch_incomplete_patch_size
+                                            .entry(size)
+                                            .or_default() += count;
+                                    }
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes
                                         .entry(local_cap_stitch.inserted_node_count)
                                         .or_default() += 1;
@@ -5167,8 +5197,12 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} cap_side_faces={:?} zero_mate_cap_side_faces={:?} min_cap_side_face_mates={:?} max_cap_side_face_mates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} patches={:?} patch_sizes={:?} patch_capped_faces={:?} incomplete_patch_sizes={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} cap_side_faces={:?} zero_mate_cap_side_faces={:?} min_cap_side_face_mates={:?} max_cap_side_face_mates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
             trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces,
+            trimmed_seed_star_shell_trim_local_cap_stitch_patch_count,
+            trimmed_seed_star_shell_trim_local_cap_stitch_patch_size,
+            trimmed_seed_star_shell_trim_local_cap_stitch_patch_capped_faces,
+            trimmed_seed_star_shell_trim_local_cap_stitch_incomplete_patch_size,
             trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes,
             trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors,
             trimmed_seed_star_shell_trim_local_cap_stitch_candidates,
