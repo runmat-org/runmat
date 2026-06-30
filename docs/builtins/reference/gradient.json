@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Scalar-spacing gradients call the provider's `gradient_dim` hook and can stay GPU-resident. Coordinate-vector spacing falls back to the host in this implementation."
+    "notes": "Scalar-spacing gradients call the provider's `gradient_dim` hook and can stay GPU-resident. Coordinate-vector spacing falls back to the host."
   },
   "fusion": {
     "elementwise": false,
@@ -34,11 +34,13 @@
   "behaviors": [
     "`gradient(F)` chooses the first non-singleton dimension for vectors and returns the column-direction derivative for matrices.",
     "`[FX, FY] = gradient(F)` on a matrix returns `FX` for dimension 2 (across columns) and `FY` for dimension 1 (down rows), matching MATLAB.",
-    "`gradient(F, h)` applies the same scalar spacing to every returned dimension.",
-    "`gradient(F, hx, hy, ...)` accepts one scalar spacing per output dimension. In v1, each spacing must be scalar.",
-    "Interior points use central differences `(f(i+1) - f(i-1)) / (2*h)`, while the first and last points use one-sided differences.",
+    "`gradient(F, h)` applies the same scalar spacing to every returned dimension. For vector inputs, `h` may be a coordinate vector with one point per element.",
+    "`gradient(F, hx, hy, ...)` accepts one scalar or coordinate-vector spacing per output dimension, ordered as MATLAB returns outputs (`x`/columns first for matrices, then `y`/rows).",
+    "Coordinate-vector spacings must be finite, match the corresponding dimension length, and avoid zero finite-difference denominators.",
+    "With scalar spacing, interior points use central differences `(f(i+1) - f(i-1)) / (2*h)`, while the first and last points use one-sided differences.",
+    "With coordinate-vector spacing, denominators come from the supplied coordinates: boundary points use adjacent coordinate differences and interior points use `x(i+1) - x(i-1)`.",
     "Real, logical, and scalar numeric inputs promote through the standard tensor conversion path. Complex host inputs are supported by differentiating the real and imaginary parts independently.",
-    "When a GPU tensor is passed and the active provider implements `gradient_dim`, scalar-spacing gradients stay resident on the device. Real and complex-interleaved GPU tensors are supported; coordinate-vector spacing currently gathers to the host."
+    "When a GPU tensor is passed and the active provider implements `gradient_dim`, scalar-spacing gradients stay resident on the device. Real and complex-interleaved GPU tensors are supported; coordinate-vector spacing gathers to the host."
   ],
   "examples": [
     {
@@ -57,6 +59,11 @@
       "output": "out = single([1.5 2.0 2.5])"
     },
     {
+      "description": "Using nonuniform coordinate spacing",
+      "input": "x = [0 1 3];\nv = [1 4 9];\ng = gradient(v, x)",
+      "output": "g = [3.0000 2.6667 2.5000]"
+    },
+    {
       "description": "Feeding `gradient` into a vector-field plot",
       "input": "[X, Y] = meshgrid(linspace(-2, 2, 25), linspace(-2, 2, 25));\nZ = X .* exp(-X.^2 - Y.^2);\n[DX, DY] = gradient(Z, X(1,2)-X(1,1), Y(2,1)-Y(1,1));\nquiver(X, Y, DX, DY)"
     }
@@ -72,7 +79,7 @@
     },
     {
       "question": "Can I pass coordinate vectors for spacing?",
-      "answer": "Not in this version. `gradient(F, X)` and vector-valued `hx`, `hy`, ... are reserved for a follow-up implementation."
+      "answer": "Yes. Vector inputs support `gradient(F, X)`, and arrays support per-dimension scalar or coordinate-vector spacings such as `[FX, FY] = gradient(F, x, y)`. Coordinate vectors must match the corresponding dimension length."
     },
     {
       "question": "Does `gradient` support GPU arrays?",
@@ -113,6 +120,6 @@
   "gpu_behavior": [
     "The WGPU backend implements `gradient_dim` for real and complex-interleaved tensors, so scalar-spacing gradients execute on the device and return GPU tensors for both single-output and multi-output calls.",
     "The simple in-process provider also exposes real and complex `gradient_dim`, allowing provider-level parity tests without requiring a physical GPU.",
-    "Coordinate-vector spacing is intentionally out of scope for this version and falls back to host evaluation."
+    "Coordinate-vector spacing falls back to host evaluation because provider hooks accept scalar spacing only."
   ]
 }

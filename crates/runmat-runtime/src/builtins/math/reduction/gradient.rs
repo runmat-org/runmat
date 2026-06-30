@@ -1,4 +1,4 @@
-//! MATLAB-compatible `gradient` builtin with scalar-spacing GPU residency.
+//! MATLAB-compatible `gradient` builtin with scalar and coordinate-vector spacing support.
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
@@ -61,7 +61,7 @@ const GRADIENT_INPUTS_F_H: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
         default: Some("1"),
-        description: "Scalar spacing shared across all output dimensions.",
+        description: "Scalar spacing shared across all output dimensions, or a coordinate vector for vector inputs.",
     },
 ];
 
@@ -78,7 +78,8 @@ const GRADIENT_INPUTS_F_HS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Per-dimension scalar spacings (one per requested gradient component).",
+        description:
+            "Per-dimension scalar or coordinate-vector spacings (one per gradient dimension).",
     },
 ];
 
@@ -169,6 +170,25 @@ fn gradient_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INTERNAL, detail)
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum GradientSpacing {
+    Scalar(f64),
+    Coordinates(Vec<f64>),
+}
+
+impl GradientSpacing {
+    fn is_scalar(&self) -> bool {
+        matches!(self, Self::Scalar(_))
+    }
+
+    fn scalar(&self) -> Option<f64> {
+        match self {
+            Self::Scalar(spacing) => Some(*spacing),
+            Self::Coordinates(_) => None,
+        }
+    }
+}
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::gradient")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gradient",
@@ -183,7 +203,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers may keep scalar-spacing gradients on device via `gradient_dim`; coordinate-vector spacing falls back to the host in this implementation.",
+        "Providers may keep scalar-spacing gradients on device via `gradient_dim`; coordinate-vector spacing falls back to the host.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::gradient")]
@@ -221,7 +241,9 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         )));
     }
 
-    let spacings = parse_spacings(&rest, available_outputs.len()).await?;
+    let dim_lengths =
+        gradient_dim_lengths(value_shape(&value), value_len(&value), &available_outputs);
+    let spacings = parse_spacings(&rest, &available_outputs, &dim_lengths).await?;
     let outputs =
         evaluate_gradient_outputs(value, &available_outputs[..requested_outputs], &spacings)
             .await?;
@@ -239,7 +261,7 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 async fn evaluate_gradient_outputs(
     value: Value,
     requested_dims: &[usize],
-    all_spacings: &[f64],
+    all_spacings: &[GradientSpacing],
 ) -> BuiltinResult<Vec<Value>> {
     if let Value::GpuTensor(handle) = value {
         return gradient_gpu_outputs(handle, requested_dims, all_spacings).await;
@@ -251,18 +273,16 @@ async fn evaluate_gradient_outputs(
 fn evaluate_host_gradient_outputs(
     value: Value,
     requested_dims: &[usize],
-    all_spacings: &[f64],
+    all_spacings: &[GradientSpacing],
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Tensor(tensor) => {
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-                outputs.push(tensor::tensor_into_value(gradient_real_tensor_host(
-                    tensor.clone(),
-                    dim,
-                    spacing,
-                )?));
+                outputs.push(tensor::tensor_into_value(
+                    gradient_real_tensor_host_with_spacing(tensor.clone(), dim, spacing)?,
+                ));
             }
             Ok(outputs)
         }
@@ -271,11 +291,9 @@ fn evaluate_host_gradient_outputs(
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-                outputs.push(tensor::tensor_into_value(gradient_real_tensor_host(
-                    tensor.clone(),
-                    dim,
-                    spacing,
-                )?));
+                outputs.push(tensor::tensor_into_value(
+                    gradient_real_tensor_host_with_spacing(tensor.clone(), dim, spacing)?,
+                ));
             }
             Ok(outputs)
         }
@@ -285,11 +303,9 @@ fn evaluate_host_gradient_outputs(
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-                outputs.push(tensor::tensor_into_value(gradient_real_tensor_host(
-                    tensor.clone(),
-                    dim,
-                    spacing,
-                )?));
+                outputs.push(tensor::tensor_into_value(
+                    gradient_real_tensor_host_with_spacing(tensor.clone(), dim, spacing)?,
+                ));
             }
             Ok(outputs)
         }
@@ -303,11 +319,9 @@ fn evaluate_host_gradient_outputs(
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-                outputs.push(complex_tensor_into_value(gradient_complex_tensor_host(
-                    tensor.clone(),
-                    dim,
-                    spacing,
-                )?));
+                outputs.push(complex_tensor_into_value(
+                    gradient_complex_tensor_host_with_spacing(tensor.clone(), dim, spacing)?,
+                ));
             }
             Ok(outputs)
         }
@@ -315,11 +329,9 @@ fn evaluate_host_gradient_outputs(
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
-                outputs.push(complex_tensor_into_value(gradient_complex_tensor_host(
-                    tensor.clone(),
-                    dim,
-                    spacing,
-                )?));
+                outputs.push(complex_tensor_into_value(
+                    gradient_complex_tensor_host_with_spacing(tensor.clone(), dim, spacing)?,
+                ));
             }
             Ok(outputs)
         }
@@ -333,10 +345,15 @@ fn evaluate_host_gradient_outputs(
 async fn gradient_gpu_outputs(
     handle: GpuTensorHandle,
     requested_dims: &[usize],
-    all_spacings: &[f64],
+    all_spacings: &[GradientSpacing],
 ) -> BuiltinResult<Vec<Value>> {
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
+
+    if all_spacings.iter().any(|spacing| !spacing.is_scalar()) {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+        return evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings);
+    }
 
     if let Some(provider) =
         runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
@@ -345,6 +362,9 @@ async fn gradient_gpu_outputs(
         let mut outputs = Vec::with_capacity(requested_dims.len());
         for &dim in requested_dims {
             let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
+            let spacing = spacing
+                .scalar()
+                .expect("gpu gradient path requires scalar spacings");
             match provider.gradient_dim(&handle, dim.saturating_sub(1), spacing) {
                 Ok(device_result) => {
                     if complex_storage
@@ -370,57 +390,79 @@ async fn gradient_gpu_outputs(
     evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings)
 }
 
-fn spacing_for_dim(dim: usize, available_dims: &[usize], spacings: &[f64]) -> f64 {
-    if spacings.len() == 1 {
-        return spacings[0];
-    }
-
+fn spacing_for_dim<'a>(
+    dim: usize,
+    available_dims: &[usize],
+    spacings: &'a [GradientSpacing],
+) -> &'a GradientSpacing {
     let index = available_dims
         .iter()
         .position(|candidate| *candidate == dim)
         .expect("spacing lookup requires matching dimension");
-    spacings[index]
+    &spacings[index]
 }
 
-async fn parse_spacings(args: &[Value], available_dims: usize) -> BuiltinResult<Vec<f64>> {
+async fn parse_spacings(
+    args: &[Value],
+    available_dims: &[usize],
+    dim_lengths: &[usize],
+) -> BuiltinResult<Vec<GradientSpacing>> {
     match args.len() {
-        0 => Ok(vec![1.0; available_dims]),
+        0 => Ok(vec![GradientSpacing::Scalar(1.0); available_dims.len()]),
         1 => {
-            let spacing = parse_scalar_spacing(&args[0]).await?;
-            Ok(vec![spacing; available_dims])
+            let spacing = parse_spacing_argument(&args[0], dim_lengths[0]).await?;
+            if spacing.is_scalar() {
+                Ok(vec![spacing; available_dims.len()])
+            } else if available_dims.len() == 1 {
+                Ok(vec![spacing])
+            } else {
+                Err(gradient_invalid_argument(
+                    "gradient: coordinate-vector spacing for arrays requires one spacing argument per gradient dimension",
+                ))
+            }
         }
-        count if count == available_dims => {
+        count if count == available_dims.len() => {
             let mut spacings = Vec::with_capacity(args.len());
-            for value in args {
-                spacings.push(parse_scalar_spacing(value).await?);
+            for (value, &dim_len) in args.iter().zip(dim_lengths.iter()) {
+                spacings.push(parse_spacing_argument(value, dim_len).await?);
             }
             Ok(spacings)
         }
         _ => Err(gradient_invalid_argument(format!(
-            "gradient: expected 0, 1, or {available_dims} scalar spacing arguments"
+            "gradient: expected 0, 1, or {} scalar/coordinate-vector spacing arguments",
+            available_dims.len()
         ))),
     }
 }
 
-async fn parse_scalar_spacing(value: &Value) -> BuiltinResult<f64> {
-    match value {
-        Value::Tensor(tensor) if tensor.data.is_empty() => {
-            return Err(gradient_invalid_argument(
-                "gradient: empty spacing arguments are not supported",
-            ))
-        }
-        _ => {}
+async fn parse_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<GradientSpacing> {
+    if let Value::GpuTensor(_) = value {
+        let gathered = gpu_helpers::gather_value_async(value).await?;
+        return parse_host_spacing_argument(&gathered, dim_len);
+    }
+    parse_host_spacing_argument(value, dim_len)
+}
+
+fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<GradientSpacing> {
+    let tensor =
+        tensor::value_into_tensor_for(NAME, value.clone()).map_err(gradient_invalid_argument)?;
+    if tensor.data.is_empty() {
+        return Err(gradient_invalid_argument(
+            "gradient: empty spacing arguments are not supported",
+        ));
     }
 
-    let Some(spacing) = tensor::scalar_f64_from_value_async(value)
-        .await
-        .map_err(gradient_invalid_argument)?
-    else {
-        return Err(gradient_invalid_argument(
-            "gradient: only scalar spacings are supported in this implementation",
-        ));
-    };
+    if tensor.data.len() == 1 {
+        let spacing = tensor.data[0];
+        validate_scalar_spacing(spacing)?;
+        return Ok(GradientSpacing::Scalar(spacing));
+    }
 
+    validate_coordinate_spacing(&tensor.data, dim_len)?;
+    Ok(GradientSpacing::Coordinates(tensor.data))
+}
+
+fn validate_scalar_spacing(spacing: f64) -> BuiltinResult<()> {
     if !spacing.is_finite() {
         return Err(gradient_invalid_argument(
             "gradient: spacing must be finite",
@@ -431,7 +473,49 @@ async fn parse_scalar_spacing(value: &Value) -> BuiltinResult<f64> {
             "gradient: spacing must be nonzero",
         ));
     }
-    Ok(spacing)
+    Ok(())
+}
+
+fn validate_coordinate_spacing(coords: &[f64], dim_len: usize) -> BuiltinResult<()> {
+    if coords.len() != dim_len {
+        return Err(gradient_invalid_argument(format!(
+            "gradient: coordinate-vector spacing length {} does not match dimension length {dim_len}",
+            coords.len()
+        )));
+    }
+
+    if coords.iter().any(|coord| !coord.is_finite()) {
+        return Err(gradient_invalid_argument(
+            "gradient: coordinate-vector spacing must be finite",
+        ));
+    }
+
+    if coords.len() <= 1 {
+        return Ok(());
+    }
+
+    if coords[1] == coords[0] {
+        return Err(gradient_invalid_argument(
+            "gradient: coordinate-vector spacing points must be distinct",
+        ));
+    }
+
+    for k in 1..coords.len() {
+        if coords[k] == coords[k - 1] {
+            return Err(gradient_invalid_argument(
+                "gradient: coordinate-vector spacing points must be distinct",
+            ));
+        }
+    }
+
+    for k in 1..coords.len() - 1 {
+        if coords[k + 1] == coords[k - 1] {
+            return Err(gradient_invalid_argument(
+                "gradient: coordinate-vector spacing cannot produce zero finite-difference denominator",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn value_shape(value: &Value) -> &[usize] {
@@ -508,10 +592,35 @@ fn gradient_output_dims(shape: &[usize], len: usize) -> Vec<usize> {
     }
 }
 
+fn gradient_dim_lengths(shape: &[usize], len: usize, dims: &[usize]) -> Vec<usize> {
+    let mut ext_shape = matlab_gradient_shape(shape, len);
+    if ext_shape.is_empty() {
+        ext_shape = if len == 0 { vec![0, 0] } else { vec![1, 1] };
+    }
+
+    let max_dim = dims.iter().copied().max().unwrap_or(1);
+    while ext_shape.len() < max_dim {
+        ext_shape.push(1);
+    }
+
+    dims.iter()
+        .map(|dim| ext_shape[dim.saturating_sub(1)])
+        .collect()
+}
+
 pub fn gradient_real_tensor_host(
     tensor: Tensor,
     dim: usize,
     spacing: f64,
+) -> BuiltinResult<Tensor> {
+    let spacing = GradientSpacing::Scalar(spacing);
+    gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
+}
+
+fn gradient_real_tensor_host_with_spacing(
+    tensor: Tensor,
+    dim: usize,
+    spacing: &GradientSpacing,
 ) -> BuiltinResult<Tensor> {
     let Tensor {
         data, shape, dtype, ..
@@ -562,11 +671,14 @@ pub fn gradient_real_tensor_host(
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
                     out[idx] = if k == 0 {
-                        (data[idx + stride_before] - data[idx]) / spacing
+                        (data[idx + stride_before] - data[idx])
+                            / spacing_denominator(spacing, k, len_dim)
                     } else if k + 1 == len_dim {
-                        (data[idx] - data[idx - stride_before]) / spacing
+                        (data[idx] - data[idx - stride_before])
+                            / spacing_denominator(spacing, k, len_dim)
                     } else {
-                        (data[idx + stride_before] - data[idx - stride_before]) / (2.0 * spacing)
+                        (data[idx + stride_before] - data[idx - stride_before])
+                            / spacing_denominator(spacing, k, len_dim)
                     };
                 }
             }
@@ -581,6 +693,15 @@ pub fn gradient_complex_tensor_host(
     tensor: ComplexTensor,
     dim: usize,
     spacing: f64,
+) -> BuiltinResult<ComplexTensor> {
+    let spacing = GradientSpacing::Scalar(spacing);
+    gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
+}
+
+fn gradient_complex_tensor_host_with_spacing(
+    tensor: ComplexTensor,
+    dim: usize,
+    spacing: &GradientSpacing,
 ) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor { data, shape, .. } = tensor;
     let dim_index = dim.saturating_sub(1);
@@ -629,17 +750,17 @@ pub fn gradient_complex_tensor_host(
                     out[idx] = if k == 0 {
                         scale_complex(
                             sub_complex(data[idx + stride_before], data[idx]),
-                            1.0 / spacing,
+                            1.0 / spacing_denominator(spacing, k, len_dim),
                         )
                     } else if k + 1 == len_dim {
                         scale_complex(
                             sub_complex(data[idx], data[idx - stride_before]),
-                            1.0 / spacing,
+                            1.0 / spacing_denominator(spacing, k, len_dim),
                         )
                     } else {
                         scale_complex(
                             sub_complex(data[idx + stride_before], data[idx - stride_before]),
-                            0.5 / spacing,
+                            1.0 / spacing_denominator(spacing, k, len_dim),
                         )
                     };
                 }
@@ -648,6 +769,27 @@ pub fn gradient_complex_tensor_host(
     }
 
     ComplexTensor::new(out, shape).map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+}
+
+fn spacing_denominator(spacing: &GradientSpacing, k: usize, len_dim: usize) -> f64 {
+    match spacing {
+        GradientSpacing::Scalar(spacing) => {
+            if k == 0 || k + 1 == len_dim {
+                *spacing
+            } else {
+                2.0 * spacing
+            }
+        }
+        GradientSpacing::Coordinates(coords) => {
+            if k == 0 {
+                coords[1] - coords[0]
+            } else if k + 1 == len_dim {
+                coords[len_dim - 1] - coords[len_dim - 2]
+            } else {
+                coords[k + 1] - coords[k - 1]
+            }
+        }
+    }
 }
 
 fn sub_complex(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
@@ -671,7 +813,6 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{NumericDType, Tensor};
 
@@ -784,13 +925,89 @@ mod tests {
     }
 
     #[test]
-    fn gradient_rejects_coordinate_vector_spacing_in_v1() {
+    fn gradient_coordinate_vector_spacing_for_row_vector() {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
-        let spacing = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![3.0, 8.0 / 3.0, 2.5]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_mixed_scalar_and_coordinate_vector_spacing_for_matrix() {
+        let tensor = Tensor::new(vec![0.0, 20.0, 1.0, 21.0, 9.0, 29.0], vec![2, 3]).unwrap();
+        let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = gradient_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(x), Value::Num(2.0)],
+        )
+        .expect("gradient");
+        match result {
+            Value::OutputList(outputs) => {
+                let fx = test_support::gather(outputs[0].clone()).expect("fx");
+                let fy = test_support::gather(outputs[1].clone()).expect("fy");
+                assert_eq!(fx.shape, vec![2, 3]);
+                assert_eq!(fx.data, vec![1.0, 1.0, 3.0, 3.0, 4.0, 4.0]);
+                assert_eq!(fy.shape, vec![2, 3]);
+                assert_eq!(fy.data, vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0]);
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_complex_coordinate_vector_spacing() {
+        let tensor =
+            ComplexTensor::new(vec![(1.0, 1.0), (4.0, 3.0), (9.0, 7.0)], vec![1, 3]).unwrap();
+        let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+        let result = gradient_builtin(Value::ComplexTensor(tensor), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![(3.0, 2.0), (8.0 / 3.0, 2.0), (2.5, 2.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_rejects_coordinate_vector_length_mismatch() {
+        let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let spacing = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
         let err =
             gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)]).unwrap_err();
         assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
-        assert!(err.message().contains("scalar"));
+        assert!(err.message().contains("length"));
+    }
+
+    #[test]
+    fn gradient_allows_nonmonotonic_coordinate_vector_spacing() {
+        let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let spacing = Tensor::new(vec![0.0, 1.0, 0.5], vec![1, 3]).unwrap();
+        let result = gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)])
+            .expect("gradient");
+        match result {
+            Value::Tensor(out) => assert_eq!(out.data, vec![3.0, 16.0, -10.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_rejects_zero_coordinate_denominator() {
+        let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let spacing = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
+        let err =
+            gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)]).unwrap_err();
+        assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("denominator"));
     }
 
     #[test]
@@ -877,6 +1094,28 @@ mod tests {
             }
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gradient_gpu_coordinate_vector_spacing_falls_back_to_host() {
+        test_support::with_test_provider(|provider| {
+            let host = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+            let view = HostTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
+            let result = gradient_builtin(Value::GpuTensor(handle), vec![Value::Tensor(spacing)])
+                .expect("gradient");
+            match result {
+                Value::Tensor(out) => {
+                    assert_eq!(out.shape, vec![1, 3]);
+                    assert_eq!(out.data, vec![3.0, 8.0 / 3.0, 2.5]);
+                }
+                other => panic!("expected host tensor fallback, got {other:?}"),
+            }
+        });
     }
 
     #[test]

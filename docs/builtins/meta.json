@@ -28091,7 +28091,7 @@
               "ty": "Any",
               "arity": "Optional",
               "default": "1",
-              "description": "Scalar spacing shared across all output dimensions."
+              "description": "Scalar spacing shared across all output dimensions, or a coordinate vector for vector inputs."
             }
           ],
           "outputs": [
@@ -28140,7 +28140,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Per-dimension scalar spacings (one per requested gradient component)."
+              "description": "Per-dimension scalar or coordinate-vector spacings (one per gradient dimension)."
             }
           ],
           "outputs": [
