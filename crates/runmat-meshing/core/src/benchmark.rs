@@ -3107,6 +3107,9 @@ mod tests {
         let mut bad_interior_seed_ids = BTreeSet::<u32>::new();
         let mut bad_edge_star_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_edge_reconnection_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut bad_edge_star_path_component_size_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_edge_star_target_path_component_size_histogram =
+            BTreeMap::<usize, usize>::new();
         let mut bad_node_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_boundary_cavity_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_reconnection_transitions = BTreeMap::<String, usize>::new();
@@ -3186,6 +3189,23 @@ mod tests {
                         *bad_edge_star_rejected_by_reason
                             .entry(reason.to_string())
                             .or_default() += 1;
+                        let (path_sizes, target_path_sizes) =
+                            diagnostic_edge_star_path_component_sizes(
+                                adjacent,
+                                edge,
+                                tet_index,
+                                &preparation.tet_candidates.tets,
+                            );
+                        for size in path_sizes {
+                            *bad_edge_star_path_component_size_histogram
+                                .entry(size)
+                                .or_default() += 1;
+                        }
+                        for size in target_path_sizes {
+                            *bad_edge_star_target_path_component_size_histogram
+                                .entry(size)
+                                .or_default() += 1;
+                        }
                         let reconnect_reason = diagnostic_edge_reconnection_rejection_reason(
                             tet_index,
                             edge,
@@ -3407,6 +3427,11 @@ mod tests {
         eprintln!(
             "annular recovery bad_edge_star_rejected_by_reason={:?}",
             bad_edge_star_rejected_by_reason
+        );
+        eprintln!(
+            "annular recovery bad_edge_star_path_component_sizes all={:?} target={:?}",
+            bad_edge_star_path_component_size_histogram,
+            bad_edge_star_target_path_component_size_histogram
         );
         eprintln!(
             "annular recovery bad_edge_reconnection_rejected_by_reason={:?}",
@@ -4085,6 +4110,103 @@ mod tests {
         }
     }
 
+    fn diagnostic_edge_star_path_component_sizes(
+        adjacent: &[usize],
+        edge: [u32; 2],
+        tet_index: usize,
+        tets: &[crate::tet_candidate::TetCandidate],
+    ) -> (Vec<usize>, Vec<usize>) {
+        let mut edge_to_tets = BTreeMap::<[u32; 2], Vec<usize>>::new();
+        let mut graph = BTreeMap::<u32, BTreeSet<u32>>::new();
+        for index in adjacent {
+            let Some(tet) = tets.get(*index) else {
+                return (Vec::new(), Vec::new());
+            };
+            if !tet.node_ids.contains(&edge[0]) || !tet.node_ids.contains(&edge[1]) {
+                return (Vec::new(), Vec::new());
+            }
+            let opposite = tet
+                .node_ids
+                .into_iter()
+                .filter(|node_id| !edge.contains(node_id))
+                .collect::<Vec<_>>();
+            if opposite.len() != 2 {
+                return (Vec::new(), Vec::new());
+            }
+            let ring_edge = diagnostic_sorted_edge([opposite[0], opposite[1]]);
+            edge_to_tets.entry(ring_edge).or_default().push(*index);
+            graph.entry(ring_edge[0]).or_default().insert(ring_edge[1]);
+            graph.entry(ring_edge[1]).or_default().insert(ring_edge[0]);
+        }
+        if edge_to_tets.values().any(|owners| owners.len() != 1) {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut path_sizes = Vec::<usize>::new();
+        let mut target_path_sizes = Vec::<usize>::new();
+        let mut visited_nodes = BTreeSet::<u32>::new();
+        for start in graph.keys().copied().collect::<Vec<_>>() {
+            if !visited_nodes.insert(start) {
+                continue;
+            }
+            let mut pending = vec![start];
+            let mut component_nodes = BTreeSet::<u32>::new();
+            while let Some(node) = pending.pop() {
+                component_nodes.insert(node);
+                if let Some(neighbors) = graph.get(&node) {
+                    for neighbor in neighbors {
+                        if visited_nodes.insert(*neighbor) {
+                            pending.push(*neighbor);
+                        }
+                    }
+                }
+            }
+            let degree_counts = component_nodes
+                .iter()
+                .map(|node| {
+                    graph
+                        .get(node)
+                        .map(|neighbors| {
+                            neighbors
+                                .iter()
+                                .filter(|neighbor| component_nodes.contains(neighbor))
+                                .count()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>();
+            if degree_counts.iter().any(|degree| *degree > 2) {
+                continue;
+            }
+            let endpoint_count = degree_counts.iter().filter(|degree| **degree == 1).count();
+            if endpoint_count != 2 {
+                continue;
+            }
+            let component_edges = edge_to_tets
+                .iter()
+                .filter(|(ring_edge, _)| {
+                    component_nodes.contains(&ring_edge[0])
+                        && component_nodes.contains(&ring_edge[1])
+                })
+                .collect::<Vec<_>>();
+            if component_edges.is_empty() {
+                continue;
+            }
+            let component_tets = component_edges
+                .iter()
+                .flat_map(|(_, owners)| owners.iter().copied())
+                .collect::<BTreeSet<_>>();
+            let size = component_tets.len();
+            path_sizes.push(size);
+            if component_tets.contains(&tet_index) {
+                target_path_sizes.push(size);
+            }
+        }
+        path_sizes.sort_unstable();
+        target_path_sizes.sort_unstable();
+        (path_sizes, target_path_sizes)
+    }
+
     fn diagnostic_order_ring_cycle(
         ring_nodes: &BTreeSet<u32>,
         ring_edges: &BTreeSet<[u32; 2]>,
@@ -4145,6 +4267,23 @@ mod tests {
         assert_eq!(
             diagnostic_edge_star_rejection_reason(&[0, 1, 2], [0, 1], &dangling_tets),
             "non_manifold_ring_nodes_dangling"
+        );
+        assert_eq!(
+            diagnostic_edge_star_path_component_sizes(&[0, 1, 2], [0, 1], 0, &dangling_tets),
+            (vec![1, 1, 1], vec![1])
+        );
+        assert_eq!(
+            diagnostic_edge_star_path_component_sizes(&[0, 1, 2, 3, 4], [0, 1], 0, &branch_tets),
+            (Vec::new(), Vec::new())
+        );
+        assert_eq!(
+            diagnostic_edge_star_path_component_sizes(
+                &[0, 1, 2, 3],
+                [0, 1],
+                0,
+                &duplicate_edge_tets
+            ),
+            (Vec::new(), Vec::new())
         );
     }
 
