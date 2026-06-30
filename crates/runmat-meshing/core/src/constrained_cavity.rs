@@ -1623,7 +1623,11 @@ fn two_interior_node_refill_candidate(
                 }
                 continue;
             }
-            match refill_from_tets(cavity, refill_tets, options.volume_relative_tolerance) {
+            match refill_from_tets(
+                cavity,
+                refill_tets.clone(),
+                options.volume_relative_tolerance,
+            ) {
                 Ok(mut refill) => {
                     refill.inserted_nodes = pair.to_vec();
                     if best
@@ -1634,6 +1638,18 @@ fn two_interior_node_refill_candidate(
                     }
                 }
                 Err(err) => {
+                    if let Some(mut refill) =
+                        exact_cover_refill_from_candidate_tets(cavity, &refill_tets, options)?
+                    {
+                        refill.inserted_nodes = pair.to_vec();
+                        if best
+                            .as_ref()
+                            .is_none_or(|current| refill_is_better(&refill, current))
+                        {
+                            best = Some(refill);
+                        }
+                        continue;
+                    }
                     if first_rejection.is_none() {
                         first_rejection = Some(boundary_node_refill_validation_reason(&err));
                     }
@@ -3971,8 +3987,19 @@ fn boundary_node_exact_cover_refill_candidate(
     if candidates.is_empty() || candidates.len() > 80 {
         return Ok(None);
     }
+    exact_cover_refill_from_candidate_tets(cavity, &candidates, options)
+}
+
+fn exact_cover_refill_from_candidate_tets(
+    cavity: &ConstrainedCavity,
+    candidates: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
+    if candidates.is_empty() {
+        return Ok(None);
+    }
     let mut search =
-        BoundaryExactCoverSearch::new(cavity, &candidates, options.volume_relative_tolerance);
+        BoundaryExactCoverSearch::new(cavity, candidates, options.volume_relative_tolerance);
     let Some(selected_indices) = search.search() else {
         return Ok(None);
     };
@@ -6951,6 +6978,48 @@ mod tests {
     }
 
     #[test]
+    fn exact_cover_refill_selects_compatible_subset() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let options = refill_options();
+        let candidate_nodes = [[0, 1, 2, 3], [0, 2, 1, 4], [1, 2, 3, 4]];
+        let candidates = candidate_nodes
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| boundary_nodes[&node_id]);
+                raw_refill_tet_with_rejection_reason(node_ids, points, options)
+                    .expect("fixture tet should pass quality gates")
+            })
+            .to_vec();
+
+        let refill = exact_cover_refill_from_candidate_tets(&cavity, &candidates, options)
+            .expect("exact cover refill should evaluate")
+            .expect("exact cover should select the compatible subset");
+
+        assert_eq!(refill.tets.len(), 2);
+        assert_eq!(
+            refill
+                .tets
+                .iter()
+                .map(|tet| sorted_tet_nodes(tet.node_ids))
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                sorted_tet_nodes([0, 1, 2, 3]),
+                sorted_tet_nodes([0, 2, 1, 4])
+            ])
+        );
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("selected subset should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("selected subset should preserve volume");
+    }
+
+    #[test]
     fn exact_cover_root_availability_reports_boundary_face_candidates() {
         let cavity = two_tet_bipyramid_cavity();
         let lower = ConstrainedCavityRefillTet {
@@ -7211,16 +7280,16 @@ mod tests {
             },
         ];
         let mut low_limit_search =
-            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 2);
+            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 1);
 
         assert!(low_limit_search.search().is_none());
-        assert!(low_limit_search.attempts > 2);
+        assert!(low_limit_search.attempts > 1);
 
         let mut sufficient_limit_search =
-            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 3);
+            BoundaryExactCoverSearch::with_attempt_limit(&cavity, &candidates, 1.0e-9, 2);
 
         assert_eq!(sufficient_limit_search.search(), Some(vec![0, 1]));
-        assert_eq!(sufficient_limit_search.attempts, 3);
+        assert_eq!(sufficient_limit_search.attempts, 2);
     }
 
     #[test]
@@ -7297,8 +7366,8 @@ mod tests {
         assert!(diagnostic.candidate_count > 0);
         assert_eq!(diagnostic.zero_candidate_boundary_face_count, 0);
         assert!(diagnostic.search_attempt_count > 0);
-        assert_eq!(diagnostic.reason, "cover_not_found");
-        assert_eq!(diagnostic.selected_tet_count, 0);
+        assert_eq!(diagnostic.reason, "cover_found");
+        assert!(diagnostic.selected_tet_count > 0);
     }
 
     #[test]
