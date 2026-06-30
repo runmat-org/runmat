@@ -3065,6 +3065,12 @@ mod tests {
             .iter()
             .map(|node| (node.node_id, node.coordinates_m))
             .collect::<BTreeMap<_, _>>();
+        let node_sources = preparation
+            .tet_candidates
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.source))
+            .collect::<BTreeMap<_, _>>();
         let mut node_adjacency = BTreeMap::<u32, usize>::new();
         let mut node_index_adjacency = BTreeMap::<u32, Vec<usize>>::new();
         let mut edge_adjacency = BTreeMap::<[u32; 2], usize>::new();
@@ -3094,6 +3100,8 @@ mod tests {
         }
         let mut bad_interior_star_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_edge_star_histogram = BTreeMap::<usize, usize>::new();
+        let mut bad_node_source_histogram = BTreeMap::<&'static str, usize>::new();
+        let mut bad_node_source_star_histogram = BTreeMap::<(&'static str, usize), usize>::new();
         let mut bad_interior_seed_ids = BTreeSet::<u32>::new();
         let mut bad_edge_star_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut bad_edge_reconnection_rejected_by_reason = BTreeMap::<String, usize>::new();
@@ -3137,6 +3145,17 @@ mod tests {
                     tet.exact_scaled_jacobian < case.options.validation.quality.min_scaled_jacobian
                 })
         {
+            for node_id in tet.node_ids {
+                if let Some(source) = node_sources.get(&node_id).copied() {
+                    let source_label = diagnostic_node_source_label(source);
+                    *bad_node_source_histogram.entry(source_label).or_default() += 1;
+                    if let Some(star_size) = node_adjacency.get(&node_id).copied() {
+                        *bad_node_source_star_histogram
+                            .entry((source_label, star_size))
+                            .or_default() += 1;
+                    }
+                }
+            }
             for node_id in tet
                 .node_ids
                 .into_iter()
@@ -3340,6 +3359,10 @@ mod tests {
         eprintln!(
             "annular recovery bad_interior_star_histogram={:?} bad_edge_star_histogram={:?}",
             bad_interior_star_histogram, bad_edge_star_histogram
+        );
+        eprintln!(
+            "annular recovery bad_node_source_histogram={:?} bad_node_source_star_histogram={:?}",
+            bad_node_source_histogram, bad_node_source_star_histogram
         );
         eprintln!(
             "annular recovery bad_edge_star_rejected_by_reason={:?}",
@@ -3800,6 +3823,14 @@ mod tests {
             diagnostic_sorted_edge([node_ids[1], node_ids[3]]),
             diagnostic_sorted_edge([node_ids[2], node_ids[3]]),
         ]
+    }
+
+    fn diagnostic_node_source_label(source: TetCandidateNodeSource) -> &'static str {
+        match source {
+            TetCandidateNodeSource::Surface => "surface",
+            TetCandidateNodeSource::BoundaryRecovery => "boundary_recovery",
+            TetCandidateNodeSource::InteriorSeed => "interior_seed",
+        }
     }
 
     fn diagnostic_sorted_edge(mut edge: [u32; 2]) -> [u32; 2] {
