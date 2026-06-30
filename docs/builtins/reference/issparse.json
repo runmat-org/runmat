@@ -1,0 +1,98 @@
+{
+  "title": "issparse",
+  "category": "logical/tests",
+  "keywords": [
+    "issparse",
+    "sparse",
+    "matrix",
+    "type predicate",
+    "MATLAB issparse"
+  ],
+  "summary": "Test whether a value is stored as a sparse matrix.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`issparse` is a metadata predicate. RunMat sparse matrices are host-resident, so dense `gpuArray` handles return false without gathering."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "`issparse` returns a scalar logical metadata result and terminates numeric fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::issparse::tests"
+  },
+  "description": "`tf = issparse(A)` returns true when `A` is a RunMat sparse matrix and false for dense arrays, scalars, containers, objects, strings, and gpuArray handles.",
+  "behaviors": [
+    "`issparse(sparse(...))` returns `true`.",
+    "Empty sparse matrices such as `sparse(m,n)` return `true`.",
+    "Dense numeric tensors, scalar numbers, logical values, strings, character arrays, cells, structs, objects, and function handles return `false`.",
+    "Dense `gpuArray` handles return `false`; RunMat does not currently expose native sparse GPU storage.",
+    "The result is always a logical scalar."
+  ],
+  "examples": [
+    {
+      "description": "Sparse matrix predicate",
+      "input": "S = sparse([1 3], [1 2], [4 -1], 3, 2);\ntf = issparse(S)",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Dense arrays are not sparse",
+      "input": "A = [0 4; 0 0];\ntf = issparse(A)",
+      "output": "tf =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `issparse` inspect the number of zeros?",
+      "answer": "No. It reports the storage representation. A dense matrix full of zeros returns false, while an empty sparse matrix returns true."
+    },
+    {
+      "question": "Are gpuArray values sparse?",
+      "answer": "No. RunMat's current gpuArray representation is dense, so `issparse(gpuArray(A))` returns false."
+    },
+    {
+      "question": "Does `issparse` return an array for array inputs?",
+      "answer": "No. Like MATLAB, it returns one logical scalar describing the input value."
+    }
+  ],
+  "links": [
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "isnumeric",
+      "url": "./isnumeric"
+    },
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "isgpuarray",
+      "url": "./isgpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/issparse.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/issparse.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "tf = issparse(A)",
+      "output": "`tf` is a logical scalar."
+    },
+    "points": [
+      "`A` may be any runtime value.",
+      "`tf` is true only for sparse matrix storage."
+    ]
+  },
+  "gpu_residency": "`issparse` does not gather dense GPU tensors; it returns false for gpuArray handles because RunMat sparse matrices are host-resident."
+}

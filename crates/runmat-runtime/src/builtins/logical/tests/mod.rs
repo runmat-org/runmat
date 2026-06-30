@@ -7,3 +7,4 @@ pub mod islogical;
 pub mod isnan;
 pub mod isnumeric;
 pub mod isreal;
+pub mod issparse;

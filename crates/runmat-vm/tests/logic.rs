@@ -32,3 +32,14 @@ fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
     .unwrap();
     assert!(logical_truth(&vars[2]));
 }
+
+#[test]
+fn issparse_reports_sparse_storage_through_vm_dispatch() {
+    let vars = execute_source(
+        "s = sparse([1 2], [1 2], [10 20], 2, 2); a = issparse(s); b = issparse([10 0; 0 20]); c = issparse(42);",
+    )
+    .unwrap();
+    assert!(logical_truth(&vars[1]));
+    assert!(!logical_truth(&vars[2]));
+    assert!(!logical_truth(&vars[3]));
+}
