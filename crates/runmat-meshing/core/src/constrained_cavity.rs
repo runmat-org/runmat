@@ -154,6 +154,16 @@ pub(crate) struct BoundarySteinerExactCoverDiagnostic {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
+    pub missing_face_count: usize,
+    pub edge_component_count: usize,
+    pub edge_component_size_histogram: BTreeMap<usize, usize>,
+    pub node_component_count: usize,
+    pub node_component_size_histogram: BTreeMap<usize, usize>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InteriorStarQualityDiagnostic {
     pub candidate_count: usize,
     pub pass_count: usize,
@@ -3709,6 +3719,112 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
     Ok(diagnostic)
 }
 
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_missing_face_clusters(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<BoundaryMissingFaceClusterDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let points = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id,
+            coordinates_m: boundary_node_map[&node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tet) = raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            refill_tets.push(tet);
+        }
+    }
+    let missing_faces = missing_refill_boundary_faces(cavity, &refill_tets)
+        .map_err(ConstrainedCavityRefillError::Validation)?;
+    let edge_component_sizes = missing_face_component_sizes(&missing_faces, MissingFaceLink::Edge);
+    let node_component_sizes = missing_face_component_sizes(&missing_faces, MissingFaceLink::Node);
+    Ok(BoundaryMissingFaceClusterDiagnostic {
+        missing_face_count: missing_faces.len(),
+        edge_component_count: edge_component_sizes.len(),
+        edge_component_size_histogram: component_size_histogram(edge_component_sizes),
+        node_component_count: node_component_sizes.len(),
+        node_component_size_histogram: component_size_histogram(node_component_sizes),
+    })
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MissingFaceLink {
+    Edge,
+    Node,
+}
+
+#[cfg(test)]
+fn missing_face_component_sizes(faces: &[[u32; 3]], link: MissingFaceLink) -> Vec<usize> {
+    let mut visited = BTreeSet::<usize>::new();
+    let mut sizes = Vec::<usize>::new();
+    for start in 0..faces.len() {
+        if !visited.insert(start) {
+            continue;
+        }
+        let mut size = 0_usize;
+        let mut pending = vec![start];
+        while let Some(index) = pending.pop() {
+            size += 1;
+            for neighbor in 0..faces.len() {
+                if visited.contains(&neighbor)
+                    || !missing_faces_connected(faces[index], faces[neighbor], link)
+                {
+                    continue;
+                }
+                visited.insert(neighbor);
+                pending.push(neighbor);
+            }
+        }
+        sizes.push(size);
+    }
+    sizes.sort_unstable();
+    sizes
+}
+
+#[cfg(test)]
+fn missing_faces_connected(left: [u32; 3], right: [u32; 3], link: MissingFaceLink) -> bool {
+    if left == right {
+        return true;
+    }
+    let shared_count = left
+        .into_iter()
+        .filter(|node_id| right.contains(node_id))
+        .count();
+    match link {
+        MissingFaceLink::Edge => shared_count >= 2,
+        MissingFaceLink::Node => shared_count >= 1,
+    }
+}
+
+#[cfg(test)]
+fn component_size_histogram(sizes: Vec<usize>) -> BTreeMap<usize, usize> {
+    let mut histogram = BTreeMap::<usize, usize>::new();
+    for size in sizes {
+        *histogram.entry(size).or_default() += 1;
+    }
+    histogram
+}
+
 fn refill_boundary_face_delta(
     cavity: &ConstrainedCavity,
     refill_tets: &[ConstrainedCavityRefillTet],
@@ -4850,6 +4966,19 @@ mod tests {
         assert!(diagnostic.search_attempt_count > 0);
         assert_eq!(diagnostic.reason, "cover_not_found");
         assert_eq!(diagnostic.selected_tet_count, 0);
+    }
+
+    #[test]
+    fn missing_face_components_separate_edge_and_node_connected_patches() {
+        let faces = [[0, 1, 2], [2, 1, 3], [3, 4, 5], [3, 6, 7]];
+
+        let edge_histogram =
+            component_size_histogram(missing_face_component_sizes(&faces, MissingFaceLink::Edge));
+        let node_histogram =
+            component_size_histogram(missing_face_component_sizes(&faces, MissingFaceLink::Node));
+
+        assert_eq!(edge_histogram, BTreeMap::from([(1, 2), (2, 1)]));
+        assert_eq!(node_histogram, BTreeMap::from([(4, 1)]));
     }
 
     #[test]

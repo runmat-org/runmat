@@ -12,11 +12,11 @@ use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets,
         constrained_cavity_from_selected_tets_with_anchor_trim, diagnostic_boundary_exact_cover,
-        diagnostic_boundary_node_completion, diagnostic_boundary_steiner_exact_cover,
-        diagnostic_interior_star_quality, evaluate_constrained_cavity_refill_candidates,
-        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
-        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
-        ConstrainedCavityValidationError,
+        diagnostic_boundary_missing_face_clusters, diagnostic_boundary_node_completion,
+        diagnostic_boundary_steiner_exact_cover, diagnostic_interior_star_quality,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3810,6 +3810,15 @@ mod tests {
         let mut trimmed_seed_star_shell_trim_steiner_exact_cover_reason =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_shell_trim_missing_face_count = BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_edge_component_count =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_edge_component_size =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_node_component_count =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_missing_face_node_component_size =
+            BTreeMap::<usize, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -4161,6 +4170,31 @@ mod tests {
                                     trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality =
                                         trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality
                                             .max(steiner_cover.max_min_scaled_jacobian);
+                                }
+                                if let Ok(clusters) = diagnostic_boundary_missing_face_clusters(
+                                    &shell_trim_cavity,
+                                    &shell_trim_boundary_nodes,
+                                    refill_options,
+                                ) {
+                                    *trimmed_seed_star_shell_trim_missing_face_count
+                                        .entry(clusters.missing_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_missing_face_edge_component_count
+                                        .entry(clusters.edge_component_count)
+                                        .or_default() += 1;
+                                    for (size, count) in clusters.edge_component_size_histogram {
+                                        *trimmed_seed_star_shell_trim_missing_face_edge_component_size
+                                            .entry(size)
+                                            .or_default() += count;
+                                    }
+                                    *trimmed_seed_star_shell_trim_missing_face_node_component_count
+                                        .entry(clusters.node_component_count)
+                                        .or_default() += 1;
+                                    for (size, count) in clusters.node_component_size_histogram {
+                                        *trimmed_seed_star_shell_trim_missing_face_node_component_size
+                                            .entry(size)
+                                            .or_default() += count;
+                                    }
                                 }
                                 match evaluate_constrained_cavity_refill_candidates(
                                     &shell_trim_cavity,
@@ -4871,6 +4905,14 @@ mod tests {
             trimmed_seed_star_shell_trim_steiner_exact_cover_found,
             trimmed_seed_star_shell_trim_steiner_exact_cover_max_min_quality,
             trimmed_seed_star_shell_trim_steiner_exact_cover_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_missing_face_clusters missing={:?} edge_components={:?} edge_sizes={:?} node_components={:?} node_sizes={:?}",
+            trimmed_seed_star_shell_trim_missing_face_count,
+            trimmed_seed_star_shell_trim_missing_face_edge_component_count,
+            trimmed_seed_star_shell_trim_missing_face_edge_component_size,
+            trimmed_seed_star_shell_trim_missing_face_node_component_count,
+            trimmed_seed_star_shell_trim_missing_face_node_component_size,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",
