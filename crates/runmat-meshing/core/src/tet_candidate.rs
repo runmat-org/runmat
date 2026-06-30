@@ -4283,6 +4283,7 @@ enum InteriorSeedCollapseScope {
 const MAX_INTERIOR_SEED_COLLAPSE_STAR_SIZE: usize = 24;
 const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
 pub(crate) const MAX_EDGE_STAR_RECONNECTION_SIZE: usize = 18;
+const MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE: usize = 7;
 const MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES: usize = 8;
 
 fn interior_seed_collapse_scope_matches(
@@ -9397,55 +9398,50 @@ fn multi_tet_edge_reconnection_candidates(
         return Ok(None);
     }
 
+    let best_fan = best_edge_ring_reconnection_from_triangulations(
+        edge_ring_fan_triangulations(&ring),
+        reference,
+        edge,
+        node_points,
+        original_volume,
+        options,
+    )?;
+    if best_fan.is_some() || ring.len() > MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE {
+        return Ok(best_fan);
+    }
+
+    let best_exhaustive = best_edge_ring_reconnection_from_triangulations(
+        edge_ring_triangulations(&ring),
+        reference,
+        edge,
+        node_points,
+        original_volume,
+        options,
+    )?;
+    Ok(best_exhaustive)
+}
+
+fn best_edge_ring_reconnection_from_triangulations(
+    triangulations: Vec<Vec<[u32; 3]>>,
+    reference: &TetCandidate,
+    edge: [u32; 2],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    original_volume: f64,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
     let mut best = None::<(Vec<TetCandidate>, usize, f64)>;
-    for root_index in 0..ring.len() {
-        let mut candidates = Vec::<TetCandidate>::with_capacity((ring.len() - 2) * 2);
-        for offset in 1..(ring.len() - 1) {
-            let tri = [
-                ring[root_index],
-                ring[(root_index + offset) % ring.len()],
-                ring[(root_index + offset + 1) % ring.len()],
-            ];
-            for node_ids in [
-                [edge[0], tri[0], tri[1], tri[2]],
-                [edge[1], tri[0], tri[2], tri[1]],
-            ] {
-                let points = [
-                    *node_points.get(&node_ids[0]).ok_or(
-                        TetCandidateError::MissingSurfaceNode {
-                            node_id: node_ids[0],
-                        },
-                    )?,
-                    *node_points.get(&node_ids[1]).ok_or(
-                        TetCandidateError::MissingSurfaceNode {
-                            node_id: node_ids[1],
-                        },
-                    )?,
-                    *node_points.get(&node_ids[2]).ok_or(
-                        TetCandidateError::MissingSurfaceNode {
-                            node_id: node_ids[2],
-                        },
-                    )?,
-                    *node_points.get(&node_ids[3]).ok_or(
-                        TetCandidateError::MissingSurfaceNode {
-                            node_id: node_ids[3],
-                        },
-                    )?,
-                ];
-                let Some(candidate) = raw_candidate_tet(
-                    reference.component_id,
-                    reference.source_surface_element_id,
-                    &reference.region_ids,
-                    node_ids,
-                    points,
-                    options,
-                ) else {
-                    candidates.clear();
-                    break;
-                };
-                candidates.push(candidate);
-            }
-            if candidates.is_empty() {
+    for triangulation in triangulations {
+        let mut candidates = Vec::<TetCandidate>::with_capacity(triangulation.len() * 2);
+        for tri in triangulation {
+            if !push_edge_reconnection_triangle_tets(
+                &mut candidates,
+                reference,
+                edge,
+                tri,
+                node_points,
+                options,
+            )? {
+                candidates.clear();
                 break;
             }
         }
@@ -9474,6 +9470,111 @@ fn multi_tet_edge_reconnection_candidates(
         }
     }
     Ok(best.map(|(candidates, _, _)| candidates))
+}
+
+fn edge_ring_triangulations(ring: &[u32]) -> Vec<Vec<[u32; 3]>> {
+    if ring.len() < 3 {
+        return Vec::new();
+    }
+    if ring.len() > MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE {
+        return edge_ring_fan_triangulations(ring);
+    }
+    let mut triangulations = edge_ring_triangulations_between(ring, 0, ring.len() - 1);
+    triangulations.sort();
+    triangulations.dedup();
+    triangulations
+}
+
+fn edge_ring_fan_triangulations(ring: &[u32]) -> Vec<Vec<[u32; 3]>> {
+    let mut triangulations = Vec::<Vec<[u32; 3]>>::with_capacity(ring.len());
+    for root_index in 0..ring.len() {
+        let mut fan = Vec::<[u32; 3]>::with_capacity(ring.len().saturating_sub(2));
+        for offset in 1..(ring.len() - 1) {
+            fan.push([
+                ring[root_index],
+                ring[(root_index + offset) % ring.len()],
+                ring[(root_index + offset + 1) % ring.len()],
+            ]);
+        }
+        triangulations.push(fan);
+    }
+    triangulations
+}
+
+fn edge_ring_triangulations_between(ring: &[u32], start: usize, end: usize) -> Vec<Vec<[u32; 3]>> {
+    let span = end - start + 1;
+    if span < 3 {
+        return vec![Vec::new()];
+    }
+    if span == 3 {
+        return vec![vec![[ring[start], ring[start + 1], ring[end]]]];
+    }
+
+    let mut triangulations = Vec::<Vec<[u32; 3]>>::new();
+    for split in (start + 1)..end {
+        let left_sets = edge_ring_triangulations_between(ring, start, split);
+        let right_sets = edge_ring_triangulations_between(ring, split, end);
+        for left in &left_sets {
+            for right in &right_sets {
+                let mut triangulation = Vec::<[u32; 3]>::with_capacity(span - 2);
+                triangulation.push([ring[start], ring[split], ring[end]]);
+                triangulation.extend(left.iter().copied());
+                triangulation.extend(right.iter().copied());
+                triangulation.sort();
+                triangulations.push(triangulation);
+            }
+        }
+    }
+    triangulations
+}
+
+fn push_edge_reconnection_triangle_tets(
+    candidates: &mut Vec<TetCandidate>,
+    reference: &TetCandidate,
+    edge: [u32; 2],
+    tri: [u32; 3],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<bool, TetCandidateError> {
+    for node_ids in [
+        [edge[0], tri[0], tri[1], tri[2]],
+        [edge[1], tri[0], tri[2], tri[1]],
+    ] {
+        let points = [
+            *node_points
+                .get(&node_ids[0])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[0],
+                })?,
+            *node_points
+                .get(&node_ids[1])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[1],
+                })?,
+            *node_points
+                .get(&node_ids[2])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[2],
+                })?,
+            *node_points
+                .get(&node_ids[3])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[3],
+                })?,
+        ];
+        let Some(candidate) = raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            points,
+            options,
+        ) else {
+            return Ok(false);
+        };
+        candidates.push(candidate);
+    }
+    Ok(true)
 }
 
 fn order_ring_cycle(
@@ -12831,6 +12932,46 @@ mod tests {
                 [9.0, 0.0, 0.0]
             ]
         );
+    }
+
+    #[test]
+    fn edge_ring_triangulations_cover_bounded_non_fan_patterns() {
+        let ring = [10, 11, 12, 13, 14, 15];
+
+        let triangulations = edge_ring_triangulations(&ring);
+
+        assert_eq!(triangulations.len(), 14);
+        assert!(triangulations.iter().all(|triangulation| {
+            triangulation.len() == ring.len() - 2
+                && triangulation
+                    .iter()
+                    .all(|triangle| triangle.iter().all(|node_id| ring.contains(node_id)))
+        }));
+        assert!(triangulations
+            .iter()
+            .any(|triangulation| !triangulation_has_common_root(triangulation)));
+    }
+
+    #[test]
+    fn edge_ring_triangulations_fall_back_to_fans_for_large_rings() {
+        let ring = (0..9).collect::<Vec<_>>();
+
+        let triangulations = edge_ring_triangulations(&ring);
+
+        assert_eq!(triangulations.len(), ring.len());
+        assert!(triangulations
+            .iter()
+            .all(|triangulation| triangulation_has_common_root(triangulation)));
+    }
+
+    fn triangulation_has_common_root(triangulation: &[[u32; 3]]) -> bool {
+        triangulation.first().is_some_and(|first| {
+            first.iter().any(|node_id| {
+                triangulation
+                    .iter()
+                    .all(|triangle| triangle.contains(node_id))
+            })
+        })
     }
 
     #[test]
