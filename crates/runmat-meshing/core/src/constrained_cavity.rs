@@ -1157,19 +1157,13 @@ pub(crate) fn diagnostic_boundary_node_completion(
             missing_face,
             cavity,
             &boundary_node_map,
+            &refill_tets,
             &boundary_triangles,
             options,
         ) else {
             aggregate.reason = "boundary_node_completion_no_candidate";
             return Ok(aggregate);
         };
-        if refill_tets
-            .iter()
-            .any(|existing| sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids))
-        {
-            aggregate.reason = "boundary_node_completion_duplicate_tet";
-            return Ok(aggregate);
-        }
         refill_tets.push(tet);
     }
     if aggregate.missing_face_count == 0 {
@@ -1357,22 +1351,33 @@ fn complete_missing_boundary_face_tets(
     let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
     let mut changed = false;
     loop {
-        let missing_faces = missing_refill_boundary_faces(&refined_cavity, &refill_tets)?;
-        let Some(missing_face) = missing_faces.into_iter().next() else {
-            break;
+        let boundary_delta = refill_boundary_face_delta(&refined_cavity, &refill_tets)?;
+        let Some(missing_face) = boundary_delta.missing.first().copied() else {
+            let Some(unexpected_face) = boundary_delta.unexpected.first().copied() else {
+                break;
+            };
+            let Some(tet) = best_boundary_face_completion_tet(
+                unexpected_face,
+                &refined_cavity,
+                &refined_boundary_nodes,
+                &refill_tets,
+                boundary_triangles,
+                options,
+            ) else {
+                return Ok(Err("boundary_node_completion_no_candidate"));
+            };
+            refill_tets.push(tet);
+            changed = true;
+            continue;
         };
         if let Some(tet) = best_boundary_face_completion_tet(
             missing_face,
             &refined_cavity,
             &refined_boundary_nodes,
+            &refill_tets,
             boundary_triangles,
             options,
         ) {
-            if refill_tets.iter().any(|existing| {
-                sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
-            }) {
-                return Ok(Err("boundary_node_completion_duplicate_tet"));
-            }
             refill_tets.push(tet);
             changed = true;
             continue;
@@ -1580,6 +1585,18 @@ fn missing_refill_boundary_faces(
     cavity: &ConstrainedCavity,
     refill_tets: &[ConstrainedCavityRefillTet],
 ) -> Result<Vec<[u32; 3]>, ConstrainedCavityValidationError> {
+    Ok(refill_boundary_face_delta(cavity, refill_tets)?.missing)
+}
+
+struct RefillBoundaryFaceDelta {
+    missing: Vec<[u32; 3]>,
+    unexpected: Vec<[u32; 3]>,
+}
+
+fn refill_boundary_face_delta(
+    cavity: &ConstrainedCavity,
+    refill_tets: &[ConstrainedCavityRefillTet],
+) -> Result<RefillBoundaryFaceDelta, ConstrainedCavityValidationError> {
     let expected = cavity
         .boundary_faces
         .iter()
@@ -1589,13 +1606,17 @@ fn missing_refill_boundary_faces(
         .into_iter()
         .map(|face| sorted_face(face.node_ids))
         .collect::<BTreeSet<_>>();
-    Ok(expected.difference(&actual).copied().collect())
+    Ok(RefillBoundaryFaceDelta {
+        missing: expected.difference(&actual).copied().collect(),
+        unexpected: actual.difference(&expected).copied().collect(),
+    })
 }
 
 fn best_boundary_face_completion_tet(
     face: [u32; 3],
     cavity: &ConstrainedCavity,
     boundary_nodes: &BTreeMap<u32, Point3>,
+    refill_tets: &[ConstrainedCavityRefillTet],
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
 ) -> Option<ConstrainedCavityRefillTet> {
@@ -1613,7 +1634,13 @@ fn best_boundary_face_completion_tet(
             {
                 return None;
             }
-            raw_refill_tet_with_rejection_reason(node_ids, points, options).ok()
+            let tet = raw_refill_tet_with_rejection_reason(node_ids, points, options).ok()?;
+            if refill_tets.iter().any(|existing| {
+                sorted_tet_nodes(existing.node_ids) == sorted_tet_nodes(tet.node_ids)
+            }) {
+                return None;
+            }
+            Some(tet)
         })
         .max_by(|left, right| {
             left.exact_scaled_jacobian
@@ -2507,6 +2534,48 @@ mod tests {
         .expect_err("strict quality should reject every cap tet");
 
         assert_eq!(rejected, "boundary_node_completion_no_candidate");
+    }
+
+    #[test]
+    fn boundary_face_completion_skips_duplicate_cap_tets() {
+        let cavity = unit_tet_cavity();
+        let nodes = unit_tet_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let options = refill_options();
+        let points = [0, 1, 2, 3].map(|node_id| boundary_nodes[&node_id]);
+        let duplicate_cap = raw_refill_tet_with_rejection_reason([0, 1, 2, 3], points, options)
+            .expect("fixture cap should pass quality gates");
+
+        let candidate = best_boundary_face_completion_tet(
+            [0, 1, 2],
+            &cavity,
+            &boundary_nodes,
+            &[duplicate_cap],
+            &boundary_triangles,
+            options,
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn refill_boundary_delta_reports_unexpected_faces() {
+        let cavity = unit_tet_cavity();
+        let refill_tets = vec![ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 4],
+            volume_m3: 1.0 / 6.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 1.0,
+        }];
+
+        let delta = refill_boundary_face_delta(&cavity, &refill_tets)
+            .expect("boundary delta should evaluate");
+
+        assert!(delta.missing.contains(&[0, 1, 3]));
+        assert!(delta.unexpected.contains(&[0, 1, 4]));
     }
 
     #[test]
