@@ -11,7 +11,7 @@ use crate::{
     artifact::AnalysisMeshArtifact,
     constrained_cavity::{
         constrained_cavity_from_selected_tets,
-        constrained_cavity_from_selected_tets_with_anchor_trim,
+        constrained_cavity_from_selected_tets_with_anchor_trim, diagnostic_boundary_exact_cover,
         diagnostic_boundary_node_completion, diagnostic_interior_star_quality,
         evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
         ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
@@ -3608,6 +3608,16 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_interior_rejected_by_reason =
             BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_boundary_nodes =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_candidates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_selected_tets =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_search_attempts =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_exact_cover_found = 0_usize;
+        let mut trimmed_seed_star_shell_trim_exact_cover_reason = BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3895,6 +3905,29 @@ mod tests {
                                             .entry(reason.to_string())
                                             .or_default() += count;
                                     }
+                                }
+                                if let Ok(exact_cover) = diagnostic_boundary_exact_cover(
+                                    &shell_trim_cavity,
+                                    &shell_trim_boundary_nodes,
+                                    refill_options,
+                                ) {
+                                    *trimmed_seed_star_shell_trim_exact_cover_boundary_nodes
+                                        .entry(exact_cover.boundary_node_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_candidates
+                                        .entry(exact_cover.candidate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_selected_tets
+                                        .entry(exact_cover.selected_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_exact_cover_search_attempts
+                                        .entry(exact_cover.search_attempt_count)
+                                        .or_default() += 1;
+                                    trimmed_seed_star_shell_trim_exact_cover_found +=
+                                        usize::from(exact_cover.found_cover);
+                                    *trimmed_seed_star_shell_trim_exact_cover_reason
+                                        .entry(exact_cover.reason.to_string())
+                                        .or_default() += 1;
                                 }
                                 match evaluate_constrained_cavity_refill_candidates(
                                     &shell_trim_cavity,
@@ -4484,6 +4517,15 @@ mod tests {
             trimmed_seed_star_shell_trim_interior_max_min_quality,
             trimmed_seed_star_shell_trim_interior_quality_bins,
             trimmed_seed_star_shell_trim_interior_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_shell_trim_exact_cover boundary_nodes={:?} candidates={:?} selected_tets={:?} search_attempts={:?} found={} reason={:?}",
+            trimmed_seed_star_shell_trim_exact_cover_boundary_nodes,
+            trimmed_seed_star_shell_trim_exact_cover_candidates,
+            trimmed_seed_star_shell_trim_exact_cover_selected_tets,
+            trimmed_seed_star_shell_trim_exact_cover_search_attempts,
+            trimmed_seed_star_shell_trim_exact_cover_found,
+            trimmed_seed_star_shell_trim_exact_cover_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",

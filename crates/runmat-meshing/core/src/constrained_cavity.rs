@@ -116,6 +116,18 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BoundaryExactCoverDiagnostic {
+    pub boundary_node_count: usize,
+    pub boundary_face_count: usize,
+    pub candidate_count: usize,
+    pub selected_tet_count: usize,
+    pub search_attempt_count: usize,
+    pub found_cover: bool,
+    pub reason: &'static str,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InteriorStarQualityDiagnostic {
     pub candidate_count: usize,
     pub pass_count: usize,
@@ -3152,6 +3164,100 @@ fn boundary_node_exact_cover_refill_candidate(
     refill_from_tets(cavity, selected_tets, options.volume_relative_tolerance).map(Some)
 }
 
+#[cfg(test)]
+pub(crate) fn diagnostic_boundary_exact_cover(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<BoundaryExactCoverDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let node_ids = cavity_boundary_node_ids(cavity)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut diagnostic = BoundaryExactCoverDiagnostic {
+        boundary_node_count: node_ids.len(),
+        boundary_face_count: cavity.boundary_faces.len(),
+        candidate_count: 0,
+        selected_tet_count: 0,
+        search_attempt_count: 0,
+        found_cover: false,
+        reason: "not_evaluated",
+    };
+    if node_ids.len() < 4 {
+        diagnostic.reason = "too_few_boundary_nodes";
+        return Ok(diagnostic);
+    }
+    let relaxed_options = ConstrainedCavityRefillOptions {
+        min_scaled_jacobian: 0.0,
+        ..options
+    };
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut candidates = Vec::<ConstrainedCavityRefillTet>::new();
+    for first in 0..node_ids.len() {
+        for second in (first + 1)..node_ids.len() {
+            for third in (second + 1)..node_ids.len() {
+                for fourth in (third + 1)..node_ids.len() {
+                    let tet_node_ids = [
+                        node_ids[first],
+                        node_ids[second],
+                        node_ids[third],
+                        node_ids[fourth],
+                    ];
+                    if !tet_faces(tet_node_ids)
+                        .map(sorted_face)
+                        .iter()
+                        .any(|face| boundary_faces.contains(face))
+                    {
+                        continue;
+                    }
+                    let points = tet_node_ids.map(|node_id| boundary_node_map[&node_id]);
+                    if point_in_closed_triangle_surface(
+                        tet_centroid(points),
+                        &boundary_triangles,
+                        MeshingTolerance::default(),
+                    ) != PointInClosedSurface::Inside
+                    {
+                        continue;
+                    }
+                    if let Ok(tet) =
+                        raw_refill_tet_with_rejection_reason(tet_node_ids, points, relaxed_options)
+                    {
+                        candidates.push(tet);
+                    }
+                }
+            }
+        }
+    }
+    diagnostic.candidate_count = candidates.len();
+    if candidates.is_empty() {
+        diagnostic.reason = "no_candidate_tets";
+        return Ok(diagnostic);
+    }
+    if candidates.len() > 512 {
+        diagnostic.reason = "over_candidate_limit";
+        return Ok(diagnostic);
+    }
+    let mut search =
+        BoundaryExactCoverSearch::new(cavity, &candidates, options.volume_relative_tolerance);
+    let selected = search.search();
+    diagnostic.search_attempt_count = search.attempts;
+    let Some(selected) = selected else {
+        diagnostic.reason = "cover_not_found";
+        return Ok(diagnostic);
+    };
+    diagnostic.selected_tet_count = selected.len();
+    diagnostic.found_cover = true;
+    diagnostic.reason = "cover_found";
+    Ok(diagnostic)
+}
+
 fn refill_boundary_face_delta(
     cavity: &ConstrainedCavity,
     refill_tets: &[ConstrainedCavityRefillTet],
@@ -4224,6 +4330,22 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("exact cover should preserve volume");
+    }
+
+    #[test]
+    fn boundary_exact_cover_diagnostic_reports_relaxed_cover_feasibility() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let diagnostic = diagnostic_boundary_exact_cover(&cavity, &nodes, refill_options())
+            .expect("diagnostic should evaluate");
+
+        assert_eq!(diagnostic.boundary_node_count, 5);
+        assert_eq!(diagnostic.boundary_face_count, 6);
+        assert!(diagnostic.candidate_count > 0);
+        assert!(diagnostic.search_attempt_count > 0);
+        assert!(diagnostic.found_cover);
+        assert_eq!(diagnostic.reason, "cover_found");
+        assert_eq!(diagnostic.selected_tet_count, 2);
     }
 
     #[test]
