@@ -106,6 +106,16 @@ pub(crate) struct BoundaryNodeCompletionDiagnostic {
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InteriorStarQualityDiagnostic {
+    pub candidate_count: usize,
+    pub pass_count: usize,
+    pub max_min_scaled_jacobian: f64,
+    pub min_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub rejected_by_reason: BTreeMap<&'static str, usize>,
+}
+
 const MAX_ANCHOR_TRIM_STATES: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1216,6 +1226,111 @@ pub(crate) fn diagnostic_boundary_node_completion(
     }
     aggregate.reason = "boundary_node_completion_completed";
     Ok(aggregate)
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_interior_star_quality(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    interior_candidates: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<InteriorStarQualityDiagnostic, ConstrainedCavityRefillError> {
+    validate_refill_options(options)?;
+    validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
+    let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
+    let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
+    let diagnostic_options = ConstrainedCavityRefillOptions {
+        min_scaled_jacobian: 0.0,
+        ..options
+    };
+    let mut diagnostic = InteriorStarQualityDiagnostic {
+        candidate_count: 0,
+        pass_count: 0,
+        max_min_scaled_jacobian: 0.0,
+        min_scaled_jacobian_bins: BTreeMap::new(),
+        rejected_by_reason: BTreeMap::new(),
+    };
+    let mut seen_interior_nodes = BTreeSet::<u32>::new();
+    let boundary_node_ids = cavity_boundary_node_ids(cavity);
+    for node in interior_candidates {
+        if !seen_interior_nodes.insert(node.node_id) {
+            *diagnostic
+                .rejected_by_reason
+                .entry("duplicate_interior_node")
+                .or_default() += 1;
+            continue;
+        }
+        if boundary_node_ids.contains(&node.node_id) {
+            *diagnostic
+                .rejected_by_reason
+                .entry("interior_node_reuses_boundary_node")
+                .or_default() += 1;
+            continue;
+        }
+        if !candidate_respects_protected_boundary_distance(
+            cavity,
+            &boundary_node_map,
+            node.coordinates_m,
+            options,
+        ) {
+            *diagnostic
+                .rejected_by_reason
+                .entry("protected_boundary_distance")
+                .or_default() += 1;
+            continue;
+        }
+        if point_in_closed_triangle_surface(
+            node.coordinates_m,
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            *diagnostic
+                .rejected_by_reason
+                .entry("interior_point_outside_cavity")
+                .or_default() += 1;
+            continue;
+        }
+        diagnostic.candidate_count += 1;
+        match star_refill_candidate_with_rejection_reason(
+            cavity,
+            &boundary_node_map,
+            node.clone(),
+            diagnostic_options,
+        ) {
+            Ok(Ok(refill)) => {
+                let min_quality = refill
+                    .tets
+                    .iter()
+                    .map(|tet| tet.exact_scaled_jacobian)
+                    .fold(f64::INFINITY, f64::min);
+                if min_quality.is_finite() {
+                    diagnostic.max_min_scaled_jacobian =
+                        diagnostic.max_min_scaled_jacobian.max(min_quality);
+                    *diagnostic
+                        .min_scaled_jacobian_bins
+                        .entry(diagnostic_scaled_jacobian_bin(min_quality))
+                        .or_default() += 1;
+                    if min_quality >= options.min_scaled_jacobian {
+                        diagnostic.pass_count += 1;
+                    }
+                }
+            }
+            Ok(Err(reason)) => {
+                *diagnostic
+                    .rejected_by_reason
+                    .entry(boundary_node_refill_rejection_reason(reason))
+                    .or_default() += 1;
+            }
+            Err(err) => {
+                *diagnostic
+                    .rejected_by_reason
+                    .entry(boundary_node_refill_validation_reason(&err))
+                    .or_default() += 1;
+            }
+        }
+    }
+    Ok(diagnostic)
 }
 
 #[cfg(test)]
@@ -2887,6 +3002,43 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("exact cover should preserve volume");
+    }
+
+    #[test]
+    fn interior_star_quality_diagnostic_bins_candidate_quality() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let candidates = vec![
+            ConstrainedCavityNode {
+                node_id: 10,
+                coordinates_m: [0.25, 0.25, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 11,
+                coordinates_m: [3.0, 3.0, 3.0],
+            },
+        ];
+
+        let diagnostic = diagnostic_interior_star_quality(
+            &cavity,
+            &nodes,
+            &candidates,
+            ConstrainedCavityRefillOptions {
+                min_scaled_jacobian: 0.01,
+                volume_relative_tolerance: 1.0e-12,
+                ..ConstrainedCavityRefillOptions::default()
+            },
+        )
+        .expect("interior star diagnostic should evaluate");
+
+        assert_eq!(diagnostic.candidate_count, 1);
+        assert_eq!(diagnostic.pass_count, 1);
+        assert!(diagnostic.max_min_scaled_jacobian >= 0.01);
+        assert!(!diagnostic.min_scaled_jacobian_bins.is_empty());
+        assert_eq!(
+            diagnostic.rejected_by_reason,
+            BTreeMap::from([("interior_point_outside_cavity", 1)])
+        );
     }
 
     #[test]

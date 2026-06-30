@@ -12,10 +12,10 @@ use crate::{
     constrained_cavity::{
         constrained_cavity_from_selected_tets,
         constrained_cavity_from_selected_tets_with_anchor_trim,
-        diagnostic_boundary_node_completion, evaluate_constrained_cavity_refill_candidates,
-        ConstrainedCavity, ConstrainedCavityExtractionError, ConstrainedCavityNode,
-        ConstrainedCavityRefillError, ConstrainedCavityRefillOptions,
-        ConstrainedCavityValidationError,
+        diagnostic_boundary_node_completion, diagnostic_interior_star_quality,
+        evaluate_constrained_cavity_refill_candidates, ConstrainedCavity,
+        ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefillError,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
@@ -3462,6 +3462,11 @@ mod tests {
         let mut trimmed_seed_star_completion_split_cap_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_interior_candidate_count = 0_usize;
+        let mut trimmed_seed_star_interior_pass_count = 0_usize;
+        let mut trimmed_seed_star_interior_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_interior_quality_bins = BTreeMap::<String, usize>::new();
+        let mut trimmed_seed_star_interior_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut next_diagnostic_node_id = preparation
             .tet_candidates
             .nodes
@@ -3553,6 +3558,29 @@ mod tests {
                         ),
                     });
                     next_diagnostic_node_id = next_diagnostic_node_id.saturating_add(1);
+                    if let Ok(star_diagnostic) = diagnostic_interior_star_quality(
+                        &trimmed_cavity,
+                        &boundary_nodes,
+                        &interior_candidates,
+                        refill_options,
+                    ) {
+                        trimmed_seed_star_interior_candidate_count +=
+                            star_diagnostic.candidate_count;
+                        trimmed_seed_star_interior_pass_count += star_diagnostic.pass_count;
+                        trimmed_seed_star_interior_max_min_quality =
+                            trimmed_seed_star_interior_max_min_quality
+                                .max(star_diagnostic.max_min_scaled_jacobian);
+                        for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
+                            *trimmed_seed_star_interior_quality_bins
+                                .entry(bin)
+                                .or_default() += count;
+                        }
+                        for (reason, count) in star_diagnostic.rejected_by_reason {
+                            *trimmed_seed_star_interior_rejected_by_reason
+                                .entry(reason.to_string())
+                                .or_default() += count;
+                        }
+                    }
                     match evaluate_constrained_cavity_refill_candidates(
                         &trimmed_cavity,
                         &boundary_nodes,
@@ -3790,6 +3818,14 @@ mod tests {
             trimmed_seed_star_completion_max_split_cap_quality,
             trimmed_seed_star_completion_split_cap_quality_bins,
             trimmed_seed_star_completion_rejected_by_reason,
+        );
+        eprintln!(
+            "annular recovery trimmed_seed_star_interior_quality candidates={} passes={} max_min_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
+            trimmed_seed_star_interior_candidate_count,
+            trimmed_seed_star_interior_pass_count,
+            trimmed_seed_star_interior_max_min_quality,
+            trimmed_seed_star_interior_quality_bins,
+            trimmed_seed_star_interior_rejected_by_reason,
         );
         eprintln!(
             "annular recovery bad_seed_surface_distance={:?}",
