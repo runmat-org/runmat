@@ -99,6 +99,20 @@ pub struct TetCandidate {
     pub exact_scaled_jacobian: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct BoundaryCavityReconnection {
+    tets: Vec<TetCandidate>,
+    inserted_nodes: Vec<TetCandidateNode>,
+}
+
+impl std::ops::Deref for BoundaryCavityReconnection {
+    type Target = [TetCandidate];
+
+    fn deref(&self) -> &Self::Target {
+        &self.tets
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetCandidateSet {
     pub nodes: Vec<TetCandidateNode>,
@@ -3826,7 +3840,13 @@ fn repair_exact_quality_tets_once(
             summary.reconnected_cavity_count += 1;
             summary.boundary_adjacent_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
@@ -3850,7 +3870,13 @@ fn repair_exact_quality_tets_once(
             summary.reconnected_cavity_count += 1;
             summary.node_adjacent_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
@@ -3873,7 +3899,13 @@ fn repair_exact_quality_tets_once(
             summary.reconnected_cavity_count += 1;
             summary.expanded_connected_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
@@ -3896,7 +3928,13 @@ fn repair_exact_quality_tets_once(
             summary.reconnected_cavity_count += 1;
             summary.connected_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
@@ -3919,7 +3957,13 @@ fn repair_exact_quality_tets_once(
             summary.reconnected_cavity_count += 1;
             summary.face_neighbor_reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         let points = candidate_tet_points(tet, &node_points)?;
@@ -3996,6 +4040,19 @@ fn replace_interior_seed_point(
         .find(|point| tolerance.point_nearly_equal(**point, old_point, 1.0))
     {
         *point = new_point;
+    }
+}
+
+fn append_boundary_recovery_nodes(
+    nodes: &mut Vec<TetCandidateNode>,
+    node_points: &mut BTreeMap<u32, [f64; 3]>,
+    next_node_id: &mut u32,
+    inserted_nodes: Vec<TetCandidateNode>,
+) {
+    for node in inserted_nodes {
+        *next_node_id = (*next_node_id).max(node.node_id.saturating_add(1));
+        node_points.insert(node.node_id, node.coordinates_m);
+        nodes.push(node);
     }
 }
 
@@ -5411,7 +5468,7 @@ fn best_boundary_adjacent_cavity_untangling(
         {
             best = Some((
                 group,
-                candidates,
+                candidates.tets,
                 candidate_near_singular_count,
                 candidate_min_exact,
             ));
@@ -5514,7 +5571,7 @@ fn best_node_adjacent_cavity_untangling(
         {
             best = Some((
                 group,
-                candidates,
+                candidates.tets,
                 candidate_near_singular_count,
                 candidate_min_exact,
             ));
@@ -8708,7 +8765,7 @@ fn best_face_neighbor_cavity_reconnection(
     face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let tet = &tets[tet_index];
     let mut neighbor_indices = BTreeSet::<usize>::from([tet_index]);
     for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
@@ -8751,7 +8808,7 @@ fn best_connected_bad_cavity_reconnection(
     face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let adjacent =
         connected_bad_tet_cavity_with_face_closure(tet_index, tets, face_adjacency, options);
     if adjacent.len() < 4 || adjacent.len() > 16 {
@@ -8792,7 +8849,7 @@ fn best_expanded_connected_bad_cavity_reconnection(
     face_adjacency: &BTreeMap<[u32; 3], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let adjacent = connected_bad_tet_cavity_with_face_closure_layers(
         tet_index,
         tets,
@@ -8840,7 +8897,7 @@ fn best_boundary_adjacent_cavity_reconnection(
     node_adjacency: &BTreeMap<u32, Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let adjacent = boundary_adjacent_bad_tet_cavity_with_node_closure(
         tet_index,
         tets,
@@ -8864,7 +8921,7 @@ fn best_boundary_adjacent_cavity_reconnection(
         candidate_groups.push(expanded);
     }
 
-    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
+    let mut best = None::<(Vec<usize>, BoundaryCavityReconnection, usize, f64, bool)>;
     for group in candidate_groups {
         if group.len() < 4 || group.len() > 24 {
             continue;
@@ -8920,7 +8977,7 @@ fn best_node_adjacent_cavity_reconnection(
     node_adjacency: &BTreeMap<u32, Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let adjacent = connected_bad_tet_cavity_with_node_closure(
         tet_index,
         tets,
@@ -8964,7 +9021,7 @@ fn best_node_adjacent_cavity_reconnection(
         }
     }
 
-    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
+    let mut best = None::<(Vec<usize>, BoundaryCavityReconnection, usize, f64, bool)>;
     for group in candidate_groups {
         if group.len() < 3 || group.len() > 24 {
             continue;
@@ -9200,7 +9257,7 @@ fn face_neighbor_cavity_reconnection_candidates(
     tets: &[TetCandidate],
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+) -> Result<Option<BoundaryCavityReconnection>, TetCandidateError> {
     let reference = &tets[adjacent[0]];
     let mut original_volume = 0.0_f64;
     let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
@@ -9278,7 +9335,10 @@ fn face_neighbor_cavity_reconnection_candidates(
     if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
         return Ok(None);
     }
-    Ok(Some(candidates))
+    Ok(Some(BoundaryCavityReconnection {
+        tets: candidates,
+        inserted_nodes: Vec::new(),
+    }))
 }
 
 fn constrained_boundary_node_cavity_reconnection_candidates(
@@ -9289,7 +9349,7 @@ fn constrained_boundary_node_cavity_reconnection_candidates(
     original_volume: f64,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+) -> Result<Option<BoundaryCavityReconnection>, TetCandidateError> {
     let cavity = ConstrainedCavity {
         removed_tet_ids: adjacent.iter().map(|index| *index as u32).collect(),
         boundary_faces: boundary_faces
@@ -9332,9 +9392,15 @@ fn constrained_boundary_node_cavity_reconnection_candidates(
     let Some(refill) = evaluation.refill else {
         return Ok(None);
     };
-    if !refill.inserted_nodes.is_empty() {
-        return Ok(None);
-    }
+    let inserted_nodes = refill
+        .inserted_nodes
+        .iter()
+        .map(|node| TetCandidateNode {
+            node_id: node.node_id,
+            coordinates_m: node.coordinates_m,
+            source: TetCandidateNodeSource::BoundaryRecovery,
+        })
+        .collect::<Vec<_>>();
     let candidates = refill
         .tets
         .into_iter()
@@ -9359,7 +9425,10 @@ fn constrained_boundary_node_cavity_reconnection_candidates(
     if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
         return Ok(None);
     }
-    Ok(Some(candidates))
+    Ok(Some(BoundaryCavityReconnection {
+        tets: candidates,
+        inserted_nodes,
+    }))
 }
 
 fn boundary_faces_from_tets(tets: &[TetCandidate]) -> BTreeSet<[u32; 3]> {
@@ -13478,6 +13547,35 @@ mod tests {
         let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((candidate_volume - original_volume).abs() <= 1.0e-12);
         assert!(candidates.iter().all(|tet| tet.region_ids == ["body"]));
+        assert!(candidates.inserted_nodes.is_empty());
+    }
+
+    #[test]
+    fn boundary_recovery_inserted_nodes_extend_repair_node_table() {
+        let mut nodes = vec![TetCandidateNode {
+            node_id: 0,
+            coordinates_m: [0.0, 0.0, 0.0],
+            source: TetCandidateNodeSource::Surface,
+        }];
+        let mut node_points = BTreeMap::from([(0, [0.0, 0.0, 0.0])]);
+        let mut next_node_id = 1;
+
+        append_boundary_recovery_nodes(
+            &mut nodes,
+            &mut node_points,
+            &mut next_node_id,
+            vec![TetCandidateNode {
+                node_id: 7,
+                coordinates_m: [0.25, 0.25, 0.0],
+                source: TetCandidateNodeSource::BoundaryRecovery,
+            }],
+        );
+
+        assert_eq!(next_node_id, 8);
+        assert_eq!(node_points[&7], [0.25, 0.25, 0.0]);
+        assert!(nodes.iter().any(|node| {
+            node.node_id == 7 && matches!(node.source, TetCandidateNodeSource::BoundaryRecovery)
+        }));
     }
 
     #[test]
