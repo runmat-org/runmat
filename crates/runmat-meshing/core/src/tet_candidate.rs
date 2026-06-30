@@ -4394,6 +4394,7 @@ pub(crate) struct ConstrainedSeedStarCandidateDiagnostic {
     pub relaxed_star_pass_count: usize,
     pub max_min_scaled_jacobian: f64,
     pub min_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub min_scaled_jacobian_worst_corner_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<String, usize>,
 }
 
@@ -4497,6 +4498,7 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
         relaxed_star_pass_count: 0,
         max_min_scaled_jacobian: 0.0,
         min_scaled_jacobian_bins: BTreeMap::new(),
+        min_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     for interior_node_id in tet
@@ -4593,6 +4595,12 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
                 .max(star_diagnostic.max_min_scaled_jacobian);
             for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
                 *diagnostic.min_scaled_jacobian_bins.entry(bin).or_default() += count;
+            }
+            for (corner, count) in star_diagnostic.min_scaled_jacobian_worst_corner_bins {
+                *diagnostic
+                    .min_scaled_jacobian_worst_corner_bins
+                    .entry(corner.to_string())
+                    .or_default() += count;
             }
             for (reason, count) in star_diagnostic.rejected_by_reason {
                 *diagnostic
@@ -13833,6 +13841,12 @@ mod tests {
         assert!(
             candidate_diagnostic.max_min_scaled_jacobian >= options.min_scaled_jacobian,
             "diagnostic should expose the relaxed candidate quality"
+        );
+        assert!(
+            !candidate_diagnostic
+                .min_scaled_jacobian_worst_corner_bins
+                .is_empty(),
+            "diagnostic should classify the limiting star-candidate corner"
         );
 
         let (indices, candidates, inserted_nodes) = best_constrained_interior_seed_star_refill(

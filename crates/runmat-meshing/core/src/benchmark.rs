@@ -3159,6 +3159,7 @@ mod tests {
         let mut bad_constrained_seed_star_relaxed_pass_count = 0_usize;
         let mut bad_constrained_seed_star_max_min_quality = 0.0_f64;
         let mut bad_constrained_seed_star_quality_bins = BTreeMap::<String, usize>::new();
+        let mut bad_constrained_seed_star_worst_corner_bins = BTreeMap::<String, usize>::new();
         let mut bad_constrained_seed_star_candidate_rejected_by_reason =
             BTreeMap::<String, usize>::new();
         let mut bad_one_ring_missing_face_class = BTreeMap::<(usize, usize, usize), usize>::new();
@@ -3489,6 +3490,13 @@ mod tests {
                     .entry(bin)
                     .or_default() += count;
             }
+            for (corner, count) in
+                constrained_seed_star_candidates.min_scaled_jacobian_worst_corner_bins
+            {
+                *bad_constrained_seed_star_worst_corner_bins
+                    .entry(corner)
+                    .or_default() += count;
+            }
             for (reason, count) in constrained_seed_star_candidates.rejected_by_reason {
                 *bad_constrained_seed_star_candidate_rejected_by_reason
                     .entry(reason)
@@ -3609,7 +3617,7 @@ mod tests {
             bad_constrained_seed_star_refill_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} worst_corner_bins={:?} rejected_by_reason={:?}",
             bad_constrained_seed_star_group_count,
             bad_constrained_seed_star_valid_cavity_count,
             bad_constrained_seed_star_interior_candidate_count,
@@ -3617,6 +3625,7 @@ mod tests {
             bad_constrained_seed_star_relaxed_pass_count,
             bad_constrained_seed_star_max_min_quality,
             bad_constrained_seed_star_quality_bins,
+            bad_constrained_seed_star_worst_corner_bins,
             bad_constrained_seed_star_candidate_rejected_by_reason,
         );
         eprintln!(

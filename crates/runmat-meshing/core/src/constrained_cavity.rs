@@ -133,6 +133,7 @@ pub(crate) struct InteriorStarQualityDiagnostic {
     pub pass_count: usize,
     pub max_min_scaled_jacobian: f64,
     pub min_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub min_scaled_jacobian_worst_corner_bins: BTreeMap<&'static str, usize>,
     pub rejected_by_reason: BTreeMap<&'static str, usize>,
 }
 
@@ -1741,6 +1742,7 @@ pub(crate) fn diagnostic_interior_star_quality(
         pass_count: 0,
         max_min_scaled_jacobian: 0.0,
         min_scaled_jacobian_bins: BTreeMap::new(),
+        min_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
     };
     let mut seen_interior_nodes = BTreeSet::<u32>::new();
@@ -1804,6 +1806,22 @@ pub(crate) fn diagnostic_interior_star_quality(
                         .min_scaled_jacobian_bins
                         .entry(diagnostic_scaled_jacobian_bin(min_quality))
                         .or_default() += 1;
+                    if let Some(worst_tet) = refill.tets.iter().min_by(|left, right| {
+                        left.exact_scaled_jacobian
+                            .total_cmp(&right.exact_scaled_jacobian)
+                    }) {
+                        let points = worst_tet.node_ids.map(|node_id| {
+                            if node_id == node.node_id {
+                                node.coordinates_m
+                            } else {
+                                boundary_node_map[&node_id]
+                            }
+                        });
+                        *diagnostic
+                            .min_scaled_jacobian_worst_corner_bins
+                            .entry(diagnostic_scaled_jacobian_worst_corner_label(points))
+                            .or_default() += 1;
+                    }
                     if min_quality >= options.min_scaled_jacobian {
                         diagnostic.pass_count += 1;
                     }
