@@ -1,4 +1,4 @@
-//! MATLAB table datatype support and tabular workflow builtins.
+//! MATLAB table, timetable, categorical, and tabular workflow builtins.
 
 use std::cell::Cell;
 use std::cmp::Ordering;
@@ -28,10 +28,37 @@ use crate::{
     OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
+mod containers;
+mod display;
+mod import;
+mod object;
+
+use containers::*;
+use display::{categorical_label_at, format_key_number};
+pub use display::{table_display_text, table_summary_text};
+use import::*;
+use object::*;
+pub use object::{
+    is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,
+    table_variable_names_from_object, table_variables, table_width,
+};
+pub(crate) use object::{
+    select_rows, selected_row_names, table_from_columns_like, value_row_count,
+};
 pub const TABLE_CLASS: &str = "table";
+pub const TIMETABLE_CLASS: &str = "timetable";
+const CATEGORICAL_CLASS: &str = "categorical";
+const DICTIONARY_CLASS: &str = "dictionary";
+const TIMERANGE_CLASS: &str = "timerange";
+const VARTYPE_CLASS: &str = "vartype";
+const ROWFILTER_CLASS: &str = "rowfilter";
+const ARRAY_DATASTORE_CLASS: &str = "arrayDatastore";
+const PARQUET_DATASTORE_CLASS: &str = "parquetDatastore";
+const UITABLE_CLASS: &str = "uitable";
 const TABLE_VARIABLES_FIELD: &str = "__table_variables";
 const TABLE_PROPERTIES_FIELD: &str = "__table_properties";
 const PROPERTIES_MEMBER: &str = "Properties";
+const ROW_TIMES: &str = "RowTimes";
 const VARIABLE_NAMES: &str = "VariableNames";
 const ROW_NAMES: &str = "RowNames";
 const DIMENSION_NAMES: &str = "DimensionNames";
@@ -226,6 +253,50 @@ const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Assigned value.",
     },
 ];
+const VALUE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value.",
+}];
+const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value options or conversion arguments.",
+    },
+];
+const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Input values and name-value options.",
+}];
+const PREDICATE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "TF",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Predicate result.",
+}];
+const WRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bytesWritten",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bytes written.",
+}];
 
 const READTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -282,6 +353,26 @@ const WIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     label: "n = width(T)",
     inputs: &TABLE_INPUT,
     outputs: &NUM_OUTPUT,
+}];
+const COMPAT_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = tabularBuiltin(A, ...)",
+    inputs: &VALUE_AND_ARGS_INPUTS,
+    outputs: &ANY_OUTPUT,
+}];
+const COMPAT_VARIADIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = tabularBuiltin(args...)",
+    inputs: &VARIADIC_INPUTS,
+    outputs: &ANY_OUTPUT,
+}];
+const PREDICATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "TF = tabularPredicate(A)",
+    inputs: &VALUE_INPUT,
+    outputs: &PREDICATE_OUTPUT,
+}];
+const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "bytesWritten = writeTabular(T, filename, ...)",
+    inputs: &VALUE_AND_ARGS_INPUTS,
+    outputs: &WRITE_OUTPUT,
 }];
 const OBJECT_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "out = table.subsref(obj, kind, payload)",
@@ -370,6 +461,30 @@ pub const HEIGHT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const WIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &WIDTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const TABLE_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COMPAT_VALUE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const TABLE_VARIADIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COMPAT_VARIADIC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const TABLE_PREDICATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PREDICATE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const TABLE_WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WRITE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
@@ -468,43 +583,123 @@ pub fn ensure_table_class_registered() {
         if registered.get() {
             return;
         }
-        let mut properties = HashMap::new();
+        register_tabular_class(TABLE_CLASS);
+        register_tabular_class(TIMETABLE_CLASS);
+        register_plain_object_class(CATEGORICAL_CLASS, &["Codes", "Categories", "Ordinal"]);
+        register_dictionary_class();
+        register_plain_object_class(TIMERANGE_CLASS, &["Start", "End", "Inclusivity"]);
+        register_plain_object_class(VARTYPE_CLASS, &["Type"]);
+        register_plain_object_class(ROWFILTER_CLASS, &["Variables", "Predicate"]);
+        register_plain_object_class(ARRAY_DATASTORE_CLASS, &["Data", "ReadSize"]);
+        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
+        register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
+        registered.set(true);
+    });
+}
+
+fn register_tabular_class(name: &str) {
+    let mut properties = HashMap::new();
+    properties.insert(
+        PROPERTIES_MEMBER.to_string(),
+        PropertyDef {
+            name: PROPERTIES_MEMBER.to_string(),
+            is_static: false,
+            is_constant: false,
+            is_dependent: false,
+            get_access: Access::Public,
+            set_access: Access::Public,
+            default_value: Some(Value::Struct(default_properties_for_class(
+                name,
+                Vec::new(),
+                None,
+            ))),
+        },
+    );
+
+    let mut methods = HashMap::new();
+    for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
+        methods.insert(
+            method_name.to_string(),
+            MethodDef {
+                name: method_name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: format!("{TABLE_CLASS}.{method_name}"),
+                implicit_class_argument: None,
+            },
+        );
+    }
+
+    runmat_builtins::register_class(ClassDef {
+        name: name.to_string(),
+        parent: None,
+        properties,
+        methods,
+    });
+}
+
+fn register_plain_object_class(name: &str, property_names: &[&str]) {
+    let mut properties = HashMap::new();
+    for property_name in property_names {
         properties.insert(
-            PROPERTIES_MEMBER.to_string(),
+            (*property_name).to_string(),
             PropertyDef {
-                name: PROPERTIES_MEMBER.to_string(),
+                name: (*property_name).to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
-                default_value: Some(Value::Struct(default_properties(Vec::new(), None))),
+                default_value: None,
             },
         );
+    }
+    runmat_builtins::register_class(ClassDef {
+        name: name.to_string(),
+        parent: None,
+        properties,
+        methods: HashMap::new(),
+    });
+}
 
-        let mut methods = HashMap::new();
-        for name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
-            methods.insert(
-                name.to_string(),
-                MethodDef {
-                    name: name.to_string(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: Access::Public,
-                    function_name: format!("{TABLE_CLASS}.{name}"),
-                    implicit_class_argument: None,
-                },
-            );
-        }
-
-        runmat_builtins::register_class(ClassDef {
-            name: TABLE_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods,
-        });
-        registered.set(true);
+fn register_dictionary_class() {
+    let mut properties = HashMap::new();
+    for property_name in ["Keys", "Values"] {
+        properties.insert(
+            property_name.to_string(),
+            PropertyDef {
+                name: property_name.to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+    }
+    let mut methods = HashMap::new();
+    for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
+        methods.insert(
+            method_name.to_string(),
+            MethodDef {
+                name: method_name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: format!("{DICTIONARY_CLASS}.{method_name}"),
+                implicit_class_argument: None,
+            },
+        );
+    }
+    runmat_builtins::register_class(ClassDef {
+        name: DICTIONARY_CLASS.to_string(),
+        parent: None,
+        properties,
+        methods,
     });
 }
 
@@ -631,6 +826,730 @@ async fn width_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
+    name = "istable",
+    category = "table",
+    summary = "Return true for table arrays.",
+    keywords = "istable,table,predicate",
+    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    Ok(Value::Bool(matches!(
+        host,
+        Value::Object(ref object) if object.is_class(TABLE_CLASS)
+    )))
+}
+
+#[runtime_builtin(
+    name = "istimetable",
+    category = "table",
+    summary = "Return true for timetable arrays.",
+    keywords = "istimetable,timetable,predicate",
+    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    Ok(Value::Bool(matches!(
+        host,
+        Value::Object(ref object) if object.is_class(TIMETABLE_CLASS)
+    )))
+}
+
+#[runtime_builtin(
+    name = "iscategorical",
+    category = "table",
+    summary = "Return true for categorical arrays.",
+    keywords = "iscategorical,categorical,predicate",
+    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    Ok(Value::Bool(matches!(
+        host,
+        Value::Object(ref object) if object.is_class(CATEGORICAL_CLASS)
+    )))
+}
+
+#[runtime_builtin(
+    name = "array2table",
+    category = "table",
+    summary = "Convert an array into a table.",
+    keywords = "array2table,table,VariableNames,RowNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let options = parse_table_options(&rest, "array2table")?;
+    let columns = split_value_columns(value)?;
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(columns.len()));
+    table_from_columns_with_properties(names, columns, options.row_names)
+}
+
+#[runtime_builtin(
+    name = "cell2table",
+    category = "table",
+    summary = "Convert a cell array into a table.",
+    keywords = "cell2table,table,cell,VariableNames,RowNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let options = parse_table_options(&rest, "cell2table")?;
+    let Value::Cell(cell) = value else {
+        return Err(invalid_argument("cell2table: expected cell array input"));
+    };
+    let mut columns = Vec::with_capacity(cell.cols);
+    for col in 0..cell.cols {
+        let mut data = Vec::with_capacity(cell.rows);
+        for row in 0..cell.rows {
+            data.push(cell.get(row, col).map_err(invalid_index)?);
+        }
+        columns
+            .push(Value::Cell(CellArray::new(data, cell.rows, 1).map_err(
+                |err| invalid_variable(format!("cell2table: {err}")),
+            )?));
+    }
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(columns.len()));
+    table_from_columns_with_properties(names, columns, options.row_names)
+}
+
+#[runtime_builtin(
+    name = "struct2table",
+    category = "table",
+    summary = "Convert a scalar struct into a table.",
+    keywords = "struct2table,table,struct,AsArray,RowNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let options = parse_struct2table_options(&rest)?;
+    match value {
+        Value::Struct(st) => {
+            let mut names = Vec::with_capacity(st.fields.len());
+            let mut columns = Vec::with_capacity(st.fields.len());
+            for (name, value) in st.fields {
+                names.push(name);
+                if options.as_array && value_row_count(&value)? != 1 {
+                    columns.push(Value::Cell(
+                        CellArray::new(vec![value], 1, 1).map_err(invalid_variable)?,
+                    ));
+                } else {
+                    columns.push(value);
+                }
+            }
+            let names = options.table.variable_names.unwrap_or(names);
+            table_from_columns_with_properties(names, columns, options.table.row_names)
+        }
+        Value::Cell(cell)
+            if cell
+                .data
+                .iter()
+                .all(|value| matches!(value, Value::Struct(_))) =>
+        {
+            let rows = cell.data.len();
+            let first = cell.data.iter().find_map(|value| match value {
+                Value::Struct(st) => Some(st),
+                _ => None,
+            });
+            let field_names = first
+                .map(|st| st.fields.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            let mut columns = Vec::with_capacity(field_names.len());
+            for name in &field_names {
+                let mut values = Vec::with_capacity(rows);
+                for value in &cell.data {
+                    let Value::Struct(st) = value else {
+                        unreachable!("checked above")
+                    };
+                    values.push(st.fields.get(name).cloned().unwrap_or(Value::Num(f64::NAN)));
+                }
+                columns.push(Value::Cell(
+                    CellArray::new(values, rows, 1).map_err(invalid_variable)?,
+                ));
+            }
+            let names = options.table.variable_names.unwrap_or(field_names);
+            table_from_columns_with_properties(names, columns, options.table.row_names)
+        }
+        other => Err(invalid_argument(format!(
+            "struct2table: expected struct or struct array, got {other:?}"
+        ))),
+    }
+}
+
+#[runtime_builtin(
+    name = "table2struct",
+    category = "table",
+    summary = "Convert a table into row structs or a scalar struct of variables.",
+    keywords = "table2struct,table,struct,ToScalar",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let to_scalar = parse_table2struct_to_scalar(&rest)?;
+    let object = into_table_object(host, "table2struct")?;
+    if to_scalar {
+        return Ok(Value::Struct(table_variables(&object)?));
+    }
+    let height = table_height(&object)?;
+    let names = table_variable_names_from_object(&object)?;
+    let variables = table_variables(&object)?;
+    let mut rows = Vec::with_capacity(height);
+    for row in 0..height {
+        let mut st = StructValue::new();
+        for name in &names {
+            let value = variables.fields.get(name).ok_or_else(|| {
+                invalid_variable(format!("table2struct: missing variable '{name}'"))
+            })?;
+            st.insert(name.clone(), row_value(value, row)?);
+        }
+        rows.push(Value::Struct(st));
+    }
+    CellArray::new(rows, height, 1)
+        .map(Value::Cell)
+        .map_err(invalid_variable)
+}
+
+#[runtime_builtin(
+    name = "table2array",
+    category = "table",
+    summary = "Convert table variables into a homogeneous array when possible.",
+    keywords = "table2array,table,array",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let object = into_table_object(host, "table2array")?;
+    table_brace_get(&object, &colon_colon_payload())
+}
+
+#[runtime_builtin(
+    name = "table2cell",
+    category = "table",
+    summary = "Convert table variables into a cell array.",
+    keywords = "table2cell,table,cell",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let object = into_table_object(host, "table2cell")?;
+    table_to_cell_array(&object)
+}
+
+#[runtime_builtin(
+    name = "head",
+    category = "table",
+    summary = "Return the first rows of a table, timetable, or array.",
+    keywords = "head,table,timetable,preview,rows",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let n = rest
+        .first()
+        .map(|value| nonnegative_usize(value, "head row count"))
+        .transpose()?
+        .unwrap_or(8);
+    let rows = value_row_count(&value)?;
+    let selected = (0..rows.min(n)).collect::<Vec<_>>();
+    if let Some(object) = table_object(&value) {
+        let names = table_variable_names_from_object(object)?;
+        let variables = table_variables(object)?;
+        let mut columns = Vec::with_capacity(names.len());
+        for name in &names {
+            columns.push(select_rows(
+                variables
+                    .fields
+                    .get(name)
+                    .ok_or_else(|| invalid_variable(format!("head: missing variable '{name}'")))?,
+                &selected,
+            )?);
+        }
+        return subset_tabular_object(object, names, columns, &selected);
+    }
+    select_rows(&value, &selected)
+}
+
+#[runtime_builtin(
+    name = "timetable",
+    category = "table",
+    summary = "Create a timetable from row times and variables.",
+    keywords = "timetable,table,RowTimes,TimeStep,VariableNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let (row_times, variables, options) = split_timetable_constructor_args(args)?;
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(variables.len()));
+    let mut value =
+        table_from_columns_with_class(TIMETABLE_CLASS, names, variables, options.row_names)?;
+    if let Value::Object(object) = &mut value {
+        set_timetable_row_times(object, row_times)?;
+    }
+    Ok(value)
+}
+
+#[runtime_builtin(
+    name = "array2timetable",
+    category = "table",
+    summary = "Convert an array into a timetable.",
+    keywords = "array2timetable,timetable,RowTimes,VariableNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn array2timetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let (row_times, options) = parse_timetable_options(&rest, "array2timetable")?;
+    let columns = split_value_columns(value)?;
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(columns.len()));
+    let mut out =
+        table_from_columns_with_class(TIMETABLE_CLASS, names, columns, options.row_names)?;
+    if let Value::Object(object) = &mut out {
+        set_timetable_row_times(object, row_times)?;
+    }
+    Ok(out)
+}
+
+#[runtime_builtin(
+    name = "table2timetable",
+    category = "table",
+    summary = "Convert a table into a timetable.",
+    keywords = "table2timetable,timetable,RowTimes",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn table2timetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let (row_times, _options) = parse_timetable_options(&rest, "table2timetable")?;
+    let object = into_table_object(host, "table2timetable")?;
+    let names = table_variable_names_from_object(&object)?;
+    let variables = table_variables(&object)?;
+    let row_names = selected_row_names(&object, &(0..table_height(&object)?).collect::<Vec<_>>())?;
+    let (times, out_names) = if let Some(row_times) = row_times {
+        (Some(row_times), names)
+    } else if let Some(first) = names.first() {
+        let first_value = variables.fields.get(first).cloned();
+        if first_value
+            .as_ref()
+            .map(is_time_like_value)
+            .unwrap_or(false)
+        {
+            (first_value, names[1..].to_vec())
+        } else {
+            (None, names)
+        }
+    } else {
+        (None, names)
+    };
+    let mut out_columns = Vec::with_capacity(out_names.len());
+    for name in &out_names {
+        out_columns.push(variables.fields.get(name).cloned().ok_or_else(|| {
+            invalid_variable(format!("table2timetable: missing variable '{name}'"))
+        })?);
+    }
+    let mut out =
+        table_from_columns_with_class(TIMETABLE_CLASS, out_names, out_columns, row_names)?;
+    if let Value::Object(object) = &mut out {
+        set_timetable_row_times(object, times)?;
+    }
+    Ok(out)
+}
+
+#[runtime_builtin(
+    name = "timetable2table",
+    category = "table",
+    summary = "Convert a timetable into a table.",
+    keywords = "timetable2table,timetable,table,ConvertRowTimes",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn timetable2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let convert_row_times = parse_bool_option(&rest, "ConvertRowTimes", false, "timetable2table")?;
+    let object = into_timetable_object(host, "timetable2table")?;
+    let mut names = table_variable_names_from_object(&object)?;
+    let variables = table_variables(&object)?;
+    let mut columns = Vec::with_capacity(names.len() + usize::from(convert_row_times));
+    if convert_row_times {
+        if let Some(row_times) = timetable_row_times(&object)? {
+            columns.push(row_times);
+            names.insert(0, "Time".to_string());
+        }
+    }
+    for name in table_variable_names_from_object(&object)? {
+        columns.push(variables.fields.get(&name).cloned().ok_or_else(|| {
+            invalid_variable(format!("timetable2table: missing variable '{name}'"))
+        })?);
+    }
+    let row_names = selected_row_names(&object, &(0..table_height(&object)?).collect::<Vec<_>>())?;
+    table_from_columns_with_properties(names, columns, row_names)
+}
+
+#[runtime_builtin(
+    name = "readtimetable",
+    category = "io/tabular",
+    summary = "Read tabular data into a timetable.",
+    keywords = "readtimetable,timetable,readtable,RowTimes",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn readtimetable_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let (readtable_args, timetable_args) = split_readtimetable_options(&rest)?;
+    let table = readtable_builtin(path, readtable_args).await?;
+    table2timetable_builtin(table, timetable_args).await
+}
+
+#[runtime_builtin(
+    name = "writetable",
+    category = "io/tabular",
+    summary = "Write a table to a delimited text file.",
+    keywords = "writetable,table,csv,delimited text,VariableNames",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_WRITE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn writetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    write_tabular_file(value, rest, false).await
+}
+
+#[runtime_builtin(
+    name = "writetimetable",
+    category = "io/tabular",
+    summary = "Write a timetable to a delimited text file.",
+    keywords = "writetimetable,timetable,csv,delimited text,RowTimes",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_WRITE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn writetimetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    write_tabular_file(value, rest, true).await
+}
+
+#[runtime_builtin(
+    name = "readcell",
+    category = "io/tabular",
+    summary = "Read text or spreadsheet data into a cell array.",
+    keywords = "readcell,cell,readtable,csv,spreadsheet",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn readcell_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let path = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let path = resolve_path(&path)?;
+    let options = ReadTableOptions::parse(&rest)?;
+    read_cell_from_file(&path, &options).await
+}
+
+#[runtime_builtin(
+    name = "categorical",
+    category = "table",
+    summary = "Create a categorical array.",
+    keywords = "categorical,categories,ordinal,table",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn categorical_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    categorical_from_args(args)
+}
+
+#[runtime_builtin(
+    name = "dictionary",
+    category = "table",
+    summary = "Create a key-value dictionary object.",
+    keywords = "dictionary,containers.Map,key,value,map",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn dictionary_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    dictionary_from_args(args)
+}
+
+#[runtime_builtin(
+    name = "timerange",
+    category = "table",
+    summary = "Create a timetable row-time range selector.",
+    keywords = "timerange,timetable,row times",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    if args.len() > 3 {
+        return Err(invalid_argument(
+            "timerange: expected start, end, and optional inclusivity",
+        ));
+    }
+    let gathered = gather_values(&args).await?;
+    let mut object = ObjectInstance::new(TIMERANGE_CLASS.to_string());
+    object.properties.insert(
+        "Start".to_string(),
+        gathered
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new())),
+    );
+    object.properties.insert(
+        "End".to_string(),
+        gathered
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new())),
+    );
+    object.properties.insert(
+        "Inclusivity".to_string(),
+        gathered
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| Value::from("closed")),
+    );
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
+    name = "vartype",
+    category = "table",
+    summary = "Create a table variable type selector.",
+    keywords = "vartype,table,selector,variable type",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let mut object = ObjectInstance::new(VARTYPE_CLASS.to_string());
+    object.properties.insert("Type".to_string(), value);
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
+    name = "rowfilter",
+    category = "table",
+    summary = "Create a table row filter descriptor.",
+    keywords = "rowfilter,table,rows,filter",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let mut object = ObjectInstance::new(ROWFILTER_CLASS.to_string());
+    object.properties.insert(
+        "Variables".to_string(),
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap())),
+    );
+    object.properties.insert(
+        "Predicate".to_string(),
+        args.get(1)
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new())),
+    );
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
+    name = "pivot",
+    category = "table",
+    summary = "Pivot or summarize table data by grouping variables.",
+    keywords = "pivot,table,reshape,groupsummary",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn pivot_builtin(
+    table: Value,
+    rowvars: Value,
+    colvars: Value,
+    datavar: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let table = gather_if_needed_async(&table)
+        .await
+        .map_err(map_control_flow)?;
+    let rowvars = gather_if_needed_async(&rowvars)
+        .await
+        .map_err(map_control_flow)?;
+    let colvars = gather_if_needed_async(&colvars)
+        .await
+        .map_err(map_control_flow)?;
+    let datavar = gather_if_needed_async(&datavar)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    let method = parse_named_text_option(&rest, "Method", "sum", "pivot")?;
+    pivot_impl(table, rowvars, colvars, datavar, &method)
+}
+
+#[runtime_builtin(
+    name = "arrayDatastore",
+    category = "io/tabular",
+    summary = "Create an array datastore descriptor.",
+    keywords = "arrayDatastore,datastore,array,data",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn array_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let mut object = ObjectInstance::new(ARRAY_DATASTORE_CLASS.to_string());
+    object.properties.insert(
+        "Data".to_string(),
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap())),
+    );
+    object
+        .properties
+        .insert("ReadSize".to_string(), Value::Num(1.0));
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
+    name = "parquetDatastore",
+    category = "io/tabular",
+    summary = "Create a parquet datastore descriptor.",
+    keywords = "parquetDatastore,datastore,parquet,table",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let mut object = ObjectInstance::new(PARQUET_DATASTORE_CLASS.to_string());
+    object.properties.insert(
+        "Files".to_string(),
+        args.first().cloned().unwrap_or_else(|| {
+            Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap())
+        }),
+    );
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
+    name = "uitable",
+    category = "table",
+    summary = "Create a table UI component descriptor.",
+    keywords = "uitable,ui,table,Data",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn uitable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    let mut object = ObjectInstance::new(UITABLE_CLASS.to_string());
+    let data = parse_named_option(&args, "Data")
+        .cloned()
+        .or_else(|| args.first().cloned())
+        .unwrap_or_else(|| Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()));
+    object.properties.insert("Data".to_string(), data);
+    object.properties.insert(
+        "ColumnName".to_string(),
+        Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()),
+    );
+    object.properties.insert(
+        "RowName".to_string(),
+        Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()),
+    );
+    Ok(Value::Object(object))
+}
+
+#[runtime_builtin(
     name = "groupsummary",
     category = "table",
     summary = "Group table rows and compute summary statistics for data variables.",
@@ -701,3530 +1620,57 @@ async fn table_subsasgn(
     }
 }
 
-async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(out)
-}
-
-#[derive(Default)]
-struct TableConstructorOptions {
-    variable_names: Option<Vec<String>>,
-    row_names: Option<Vec<String>>,
-}
-
-fn split_table_constructor_args(
-    args: Vec<Value>,
-) -> BuiltinResult<(Vec<Value>, TableConstructorOptions)> {
-    let mut variables = Vec::new();
-    let mut options = TableConstructorOptions::default();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        if let Ok(name) = scalar_text(&args[idx], "table option") {
-            if idx + 1 < args.len() && is_table_constructor_option(&name) {
-                let value = &args[idx + 1];
-                if name.eq_ignore_ascii_case("VariableNames") {
-                    options.variable_names = Some(variable_name_list(value)?);
-                } else if name.eq_ignore_ascii_case("RowNames") {
-                    options.row_names = Some(string_list(value)?);
-                }
-                idx += 2;
-                continue;
-            }
-        }
-        variables.push(args[idx].clone());
-        idx += 1;
-    }
-    Ok((variables, options))
-}
-
-fn is_table_constructor_option(name: &str) -> bool {
-    name.eq_ignore_ascii_case("VariableNames") || name.eq_ignore_ascii_case("RowNames")
-}
-
-#[derive(Clone)]
-struct ReadTableOptions {
-    file_type: ImportFileType,
-    delimiter: Option<Delimiter>,
-    read_variable_names: Option<bool>,
-    read_row_names: bool,
-    num_variables: Option<usize>,
-    variable_names: Option<Vec<String>>,
-    variable_types: Option<Vec<ImportVariableType>>,
-    row_names: Option<Vec<String>>,
-    num_header_lines: usize,
-    range: Option<RangeSpec>,
-    sheet: Option<SheetSelector>,
-    preserve_variable_names: bool,
-    treat_as_missing: HashSet<String>,
-    empty_line_rule: EmptyLineRule,
-    text_type: TextImportType,
-    encoding: String,
-    datetime_type: DatetimeImportType,
-}
-
-impl Default for ReadTableOptions {
-    fn default() -> Self {
-        Self {
-            file_type: ImportFileType::Auto,
-            delimiter: None,
-            read_variable_names: None,
-            read_row_names: false,
-            num_variables: None,
-            variable_names: None,
-            variable_types: None,
-            row_names: None,
-            num_header_lines: 0,
-            range: None,
-            sheet: None,
-            preserve_variable_names: false,
-            treat_as_missing: HashSet::new(),
-            empty_line_rule: EmptyLineRule::Skip,
-            text_type: TextImportType::String,
-            encoding: "utf-8".to_string(),
-            datetime_type: DatetimeImportType::Datetime,
-        }
-    }
-}
-
-impl ReadTableOptions {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
-        let mut options = Self::default();
-        let mut idx = 0usize;
-        if let Some(Value::Struct(st)) = args.first() {
-            for (name, value) in &st.fields {
-                options.apply(name, value)?;
-            }
-            idx = 1;
-        }
-        while idx < args.len() {
-            if idx + 1 >= args.len() {
-                return Err(invalid_argument(
-                    "readtable: name-value options must be provided in pairs",
-                ));
-            }
-            let name = scalar_text(&args[idx], "readtable option")?;
-            options.apply(&name, &args[idx + 1])?;
-            idx += 2;
-        }
-        Ok(options)
-    }
-
-    fn apply(&mut self, name: &str, value: &Value) -> BuiltinResult<()> {
-        if name.eq_ignore_ascii_case("FileType") {
-            self.file_type = ImportFileType::parse(value)?;
-        } else if name.eq_ignore_ascii_case("Delimiter") {
-            self.delimiter = Some(Delimiter::parse(value)?);
-        } else if name.eq_ignore_ascii_case("ReadVariableNames") {
-            self.read_variable_names = Some(bool_scalar(value, "ReadVariableNames")?);
-        } else if name.eq_ignore_ascii_case("ReadRowNames") {
-            self.read_row_names = bool_scalar(value, "ReadRowNames")?;
-        } else if name.eq_ignore_ascii_case("NumVariables") {
-            let count = nonnegative_usize(value, "NumVariables")?;
-            self.num_variables = (count > 0).then_some(count);
-        } else if name.eq_ignore_ascii_case("VariableNames") {
-            self.variable_names = optional_raw_variable_name_list(value)?;
-        } else if name.eq_ignore_ascii_case("VariableTypes") {
-            self.variable_types = optional_variable_type_list(value)?;
-        } else if name.eq_ignore_ascii_case("RowNames") {
-            self.row_names = Some(string_list(value)?);
-        } else if name.eq_ignore_ascii_case("NumHeaderLines") {
-            self.num_header_lines = nonnegative_usize(value, "NumHeaderLines")?;
-        } else if name.eq_ignore_ascii_case("Range") {
-            self.range = Some(RangeSpec::parse(value)?);
-        } else if name.eq_ignore_ascii_case("DataRange") {
-            self.range = optional_range_spec(value)?;
-        } else if name.eq_ignore_ascii_case("Sheet") {
-            self.sheet = optional_sheet_selector(value)?;
-        } else if name.eq_ignore_ascii_case("TreatAsMissing") {
-            for token in string_list(value)? {
-                self.treat_as_missing
-                    .insert(token.trim().to_ascii_lowercase());
-            }
-        } else if name.eq_ignore_ascii_case("PreserveVariableNames") {
-            self.preserve_variable_names = bool_scalar(value, "PreserveVariableNames")?;
-        } else if name.eq_ignore_ascii_case("VariableNamingRule") {
-            let rule = scalar_text(value, "VariableNamingRule")?;
-            if rule.eq_ignore_ascii_case("preserve") {
-                self.preserve_variable_names = true;
-            } else if rule.eq_ignore_ascii_case("modify") {
-                self.preserve_variable_names = false;
-            } else {
-                return Err(invalid_argument(format!(
-                    "readtable: unsupported VariableNamingRule '{rule}'"
-                )));
-            }
-        } else if name.eq_ignore_ascii_case("EmptyLineRule") {
-            let rule = scalar_text(value, "EmptyLineRule")?;
-            self.empty_line_rule = if rule.eq_ignore_ascii_case("read") {
-                EmptyLineRule::Read
-            } else if rule.eq_ignore_ascii_case("skip") {
-                EmptyLineRule::Skip
-            } else {
-                return Err(invalid_argument(format!(
-                    "readtable: unsupported EmptyLineRule '{rule}'"
-                )));
-            };
-        } else if name.eq_ignore_ascii_case("Encoding") {
-            let encoding = scalar_text(value, "Encoding")?;
-            validate_encoding_label(&encoding)?;
-            self.encoding = encoding;
-        } else if name.eq_ignore_ascii_case("TextType") {
-            self.text_type = TextImportType::parse(value, "readtable")?;
-        } else if name.eq_ignore_ascii_case("DatetimeType") {
-            self.datetime_type = DatetimeImportType::parse(value)?;
-        } else {
-            return Err(invalid_argument(format!(
-                "readtable: unsupported option '{name}'"
-            )));
-        }
-        Ok(())
-    }
-
-    fn is_missing(&self, token: &str) -> bool {
-        let trimmed = token.trim();
-        trimmed.is_empty()
-            || self
-                .treat_as_missing
-                .contains(&trimmed.to_ascii_lowercase())
-    }
-}
-
-fn spreadsheet_import_options(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !args.len().is_multiple_of(2) {
-        return Err(invalid_argument(
-            "spreadsheetImportOptions: name-value options must be provided in pairs",
-        ));
-    }
-    let mut options = SpreadsheetImportOptions::default();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let name = scalar_text(&args[idx], "spreadsheetImportOptions option")?;
-        options.apply(&name, &args[idx + 1])?;
-        idx += 2;
-    }
-    Ok(Value::Struct(options.into_struct()?))
-}
-
-async fn detect_import_options_from_file(
-    path: &Path,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    match options.file_type {
-        ImportFileType::Spreadsheet => detect_spreadsheet_import_options(path, options).await,
-        ImportFileType::Text => detect_text_import_options(path, options).await,
-        ImportFileType::Auto if is_spreadsheet_path(path) => {
-            detect_spreadsheet_import_options(path, options).await
-        }
-        ImportFileType::Auto => detect_text_import_options(path, options).await,
-    }
-}
-
-async fn detect_text_import_options(
-    path: &Path,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    if options.sheet.is_some() {
-        return Err(invalid_argument(
-            "detectImportOptions: Sheet is only valid for spreadsheet files",
-        ));
-    }
-    let bytes = read_file_bytes(path).await?;
-    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
-    let mut raw_lines = text.lines().map(ToString::to_string).collect::<Vec<_>>();
-    if let Some(first) = raw_lines.first_mut() {
-        if first.starts_with('\u{FEFF}') {
-            *first = first.trim_start_matches('\u{FEFF}').to_string();
-        }
-    }
-    let delimiter = options
-        .delimiter
-        .clone()
-        .or_else(|| detect_delimiter(&raw_lines))
-        .unwrap_or(Delimiter::Whitespace);
-    let mut rows = parse_text_records(&text, &delimiter, options.empty_line_rule);
-    if options.num_header_lines > 0 {
-        rows = rows.into_iter().skip(options.num_header_lines).collect();
-    }
-    if let Some(range) = options.range {
-        rows = apply_import_range(rows, range);
-    }
-    detected_options_from_rows(
-        ImportFileType::Text,
-        rows,
-        options,
-        Some(delimiter),
-        options.sheet.as_ref(),
-    )
-}
-
-async fn detect_spreadsheet_import_options(
-    path: &Path,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    if options.delimiter.is_some() {
-        return Err(invalid_argument(
-            "detectImportOptions: Delimiter is only valid for text files",
-        ));
-    }
-    let bytes = read_file_bytes(path).await?;
-    let cursor = Cursor::new(bytes);
-    let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
-        table_error(
-            &TABLE_ERROR_UNSUPPORTED_FILE,
-            format!(
-                "detectImportOptions: unable to open spreadsheet '{}': {err}",
-                path.display()
-            ),
-        )
-    })?;
-    let range = match &options.sheet {
-        Some(SheetSelector::Name(name)) => workbook.worksheet_range(name).map_err(|err| {
-            invalid_argument(format!(
-                "detectImportOptions: unable to read sheet '{name}': {err:?}"
-            ))
-        })?,
-        Some(SheetSelector::Index(index)) => workbook
-            .worksheet_range_at(*index)
-            .ok_or_else(|| {
-                invalid_argument(format!(
-                    "detectImportOptions: sheet index {} exceeds bounds",
-                    index + 1
-                ))
-            })?
-            .map_err(|err| {
-                invalid_argument(format!(
-                    "detectImportOptions: unable to read sheet {}: {err:?}",
-                    index + 1
-                ))
-            })?,
-        None => workbook
-            .worksheet_range_at(0)
-            .ok_or_else(|| {
-                invalid_argument("detectImportOptions: spreadsheet contains no worksheets")
-            })?
-            .map_err(|err| {
-                invalid_argument(format!(
-                    "detectImportOptions: unable to read first sheet: {err:?}"
-                ))
-            })?,
-    };
-    let rows = spreadsheet_range_to_rows(&range, options)?;
-    detected_options_from_rows(
-        ImportFileType::Spreadsheet,
-        rows,
-        options,
-        None,
-        options.sheet.as_ref(),
-    )
-}
-
-fn detected_options_from_rows(
-    file_type: ImportFileType,
-    mut rows: Vec<Vec<ImportCell>>,
-    options: &ReadTableOptions,
-    delimiter: Option<Delimiter>,
-    sheet: Option<&SheetSelector>,
-) -> BuiltinResult<Value> {
-    let mut variable_names = options.variable_names.clone();
-    let read_variable_names = options
-        .read_variable_names
-        .unwrap_or_else(|| variable_names.is_none() && should_read_variable_names(&rows, options));
-    let header_rows_consumed = usize::from(read_variable_names && variable_names.is_none());
-    if header_rows_consumed > 0 && !rows.is_empty() {
-        variable_names = Some(
-            rows.remove(0)
-                .into_iter()
-                .map(|cell| cell.display_text())
-                .collect(),
-        );
-    }
-
-    let mut data_rows = rows;
-    let mut data_variable_names = variable_names.clone();
-    let row_name_header = if options.read_row_names {
-        for row in &mut data_rows {
-            if !row.is_empty() {
-                row.remove(0);
-            }
-        }
-        let mut header = None;
-        if let Some(names) = data_variable_names.as_mut() {
-            if !names.is_empty() {
-                header = Some(names.remove(0));
-            }
-        }
-        Some(
-            header
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| "Row".to_string()),
-        )
-    } else {
-        None
-    };
-
-    let column_count = import_column_count(&data_rows, &data_variable_names, options)?;
-    let data_names = import_variable_names(data_variable_names, column_count, options);
-    let names = if let Some(row_name_header) = row_name_header {
-        let mut names = Vec::with_capacity(data_names.len() + 1);
-        names.push(row_name_header);
-        names.extend(data_names);
-        names
-    } else {
-        data_names
-    };
-    let types = detected_variable_type_labels(&data_rows, options, column_count)?;
-    let output_num_header_lines = detected_output_header_lines(options, header_rows_consumed);
-    let output_range = detected_output_range(options.range, header_rows_consumed);
-
-    let mut out = StructValue::new();
-    out.insert("FileType", Value::String(import_file_type_label(file_type)));
-    if let Some(delimiter) = delimiter {
-        out.insert("Delimiter", Value::String(delimiter_label(&delimiter)));
-    }
-    out.insert("NumHeaderLines", Value::Num(output_num_header_lines as f64));
-    out.insert("ReadVariableNames", Value::Bool(false));
-    out.insert("ReadRowNames", Value::Bool(options.read_row_names));
-    out.insert("NumVariables", Value::Num(column_count as f64));
-    out.insert(
-        "VariableNames",
-        string_array_value(names, "detectImportOptions")?,
-    );
-    out.insert(
-        "VariableTypes",
-        string_array_value(types, "detectImportOptions")?,
-    );
-    if let Some(range) = output_range {
-        out.insert("Range", range_spec_value(range)?);
-        out.insert("DataRange", range_spec_value(range)?);
-    }
-    if let Some(sheet) = sheet {
-        out.insert("Sheet", sheet_value(sheet));
-    }
-    let mut treat_as_missing = options.treat_as_missing.iter().cloned().collect::<Vec<_>>();
-    treat_as_missing.sort();
-    out.insert(
-        "TreatAsMissing",
-        string_array_value(treat_as_missing, "detectImportOptions")?,
-    );
-    out.insert(
-        "PreserveVariableNames",
-        Value::Bool(options.preserve_variable_names),
-    );
-    out.insert(
-        "VariableNamingRule",
-        Value::String(if options.preserve_variable_names {
-            "preserve".to_string()
-        } else {
-            "modify".to_string()
-        }),
-    );
-    out.insert(
-        "EmptyLineRule",
-        Value::String(
-            match options.empty_line_rule {
-                EmptyLineRule::Skip => "skip",
-                EmptyLineRule::Read => "read",
-            }
-            .to_string(),
-        ),
-    );
-    out.insert(
-        "TextType",
-        Value::String(
-            match options.text_type {
-                TextImportType::String => "string",
-                TextImportType::Char => "char",
-            }
-            .to_string(),
-        ),
-    );
-    out.insert(
-        "DatetimeType",
-        Value::String(
-            match options.datetime_type {
-                DatetimeImportType::Datetime => "datetime",
-                DatetimeImportType::Text => "text",
-                DatetimeImportType::ExcelDatenum => "exceldatenum",
-            }
-            .to_string(),
-        ),
-    );
-    out.insert("Encoding", Value::String(options.encoding.clone()));
-    Ok(Value::Struct(out))
-}
-
-fn detected_variable_type_labels(
-    rows: &[Vec<ImportCell>],
-    options: &ReadTableOptions,
-    column_count: usize,
-) -> BuiltinResult<Vec<String>> {
-    if let Some(requested) = &options.variable_types {
-        let mut labels = requested
-            .iter()
-            .map(import_variable_type_label)
-            .collect::<Vec<_>>();
-        while labels.len() < column_count {
-            labels.push("auto".to_string());
-        }
-        labels.truncate(column_count);
-        return Ok(labels);
-    }
-    Ok((0..column_count)
-        .map(|col| {
-            let values = rows
-                .iter()
-                .map(|row| row.get(col).cloned().unwrap_or(ImportCell::Empty))
-                .collect::<Vec<_>>();
-            infer_import_type_label(&values, options)
-        })
-        .collect())
-}
-
-fn infer_import_type_label(values: &[ImportCell], options: &ReadTableOptions) -> String {
-    if values
-        .iter()
-        .all(|value| is_detected_numeric(value, options))
-    {
-        return "double".to_string();
-    }
-    if values
-        .iter()
-        .all(|value| is_detected_logical(value, options))
-    {
-        return "logical".to_string();
-    }
-    if !matches!(options.datetime_type, DatetimeImportType::Text)
-        && values
-            .iter()
-            .all(|value| is_detected_datetime(value, options))
-    {
-        return "datetime".to_string();
-    }
-    match options.text_type {
-        TextImportType::String => "string".to_string(),
-        TextImportType::Char => "char".to_string(),
-    }
-}
-
-fn is_detected_numeric(value: &ImportCell, options: &ReadTableOptions) -> bool {
-    match value {
-        ImportCell::Empty | ImportCell::Number(_) => true,
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            options.is_missing(token) || parse_numeric(token).is_some()
-        }
-        _ => false,
-    }
-}
-
-fn is_detected_logical(value: &ImportCell, options: &ReadTableOptions) -> bool {
-    match value {
-        ImportCell::Empty | ImportCell::Logical(_) => true,
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            options.is_missing(token) || parse_logical(token).is_some()
-        }
-        _ => false,
-    }
-}
-
-fn is_detected_datetime(value: &ImportCell, options: &ReadTableOptions) -> bool {
-    match value {
-        ImportCell::Empty | ImportCell::DateTime(_) => true,
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            options.is_missing(token) || parse_iso_datetime_to_datenum(token).is_some()
-        }
-        _ => false,
-    }
-}
-
-fn import_variable_type_label(kind: &ImportVariableType) -> String {
-    match kind {
-        ImportVariableType::Auto => "auto",
-        ImportVariableType::Numeric(NumericDType::F64) => "double",
-        ImportVariableType::Numeric(NumericDType::F32) => "single",
-        ImportVariableType::Numeric(NumericDType::U8) => "uint8",
-        ImportVariableType::Numeric(NumericDType::U16) => "uint16",
-        ImportVariableType::Logical => "logical",
-        ImportVariableType::Text(TextImportType::String) => "string",
-        ImportVariableType::Text(TextImportType::Char) => "char",
-        ImportVariableType::CellStr => "cellstr",
-        ImportVariableType::Datetime => "datetime",
-        ImportVariableType::Duration => "duration",
-    }
-    .to_string()
-}
-
-fn detected_output_header_lines(options: &ReadTableOptions, header_rows_consumed: usize) -> usize {
-    if options.range.is_some() {
-        options.num_header_lines
-    } else {
-        options.num_header_lines + header_rows_consumed
-    }
-}
-
-fn detected_output_range(
-    range: Option<RangeSpec>,
-    header_rows_consumed: usize,
-) -> Option<RangeSpec> {
-    range.map(|mut range| {
-        range.start_row = range.start_row.saturating_add(header_rows_consumed);
-        range
-    })
-}
-
-fn import_file_type_label(file_type: ImportFileType) -> String {
-    match file_type {
-        ImportFileType::Text | ImportFileType::Auto => "text",
-        ImportFileType::Spreadsheet => "spreadsheet",
-    }
-    .to_string()
-}
-
-fn delimiter_label(delimiter: &Delimiter) -> String {
-    match delimiter {
-        Delimiter::Char('\t') => "\t".to_string(),
-        Delimiter::Char(ch) => ch.to_string(),
-        Delimiter::String(text) => text.clone(),
-        Delimiter::Whitespace => "whitespace".to_string(),
-    }
-}
-
-fn sheet_value(sheet: &SheetSelector) -> Value {
-    match sheet {
-        SheetSelector::Name(name) => Value::String(name.clone()),
-        SheetSelector::Index(index) => Value::Num((*index + 1) as f64),
-    }
-}
-
-fn range_spec_value(range: RangeSpec) -> BuiltinResult<Value> {
-    Ok(Value::String(range_spec_text(range)))
-}
-
-fn range_spec_text(range: RangeSpec) -> String {
-    let has_end = range.end_row.is_some() || range.end_col.is_some();
-    let include_start_col = range.start_col > 0 || range.end_col.is_some() || !has_end;
-    let include_start_row = range.start_row > 0 || range.end_row.is_some() || !has_end;
-    let start = range_ref_text(
-        range.start_row,
-        range.start_col,
-        include_start_row,
-        include_start_col,
-    );
-    if !has_end {
-        return start;
-    }
-
-    let end = range_ref_text(
-        range.end_row.unwrap_or(0),
-        range.end_col.unwrap_or(0),
-        range.end_row.is_some(),
-        range.end_col.is_some(),
-    );
-    format!("{start}:{end}")
-}
-
-fn range_ref_text(row: usize, col: usize, include_row: bool, include_col: bool) -> String {
-    let mut out = String::new();
-    if include_col {
-        out.push_str(&spreadsheet_column_label(col));
-    }
-    if include_row {
-        out.push_str(&(row + 1).to_string());
-    }
-    out
-}
-
-fn spreadsheet_column_label(mut col: usize) -> String {
-    let mut chars = Vec::new();
-    loop {
-        let rem = col % 26;
-        chars.push((b'A' + rem as u8) as char);
-        if col < 26 {
-            break;
-        }
-        col = col / 26 - 1;
-    }
-    chars.iter().rev().collect()
-}
-
-fn string_array_value(values: Vec<String>, context: &str) -> BuiltinResult<Value> {
-    let len = values.len();
-    StringArray::new(values, vec![1, len])
-        .map(Value::StringArray)
-        .map_err(|err| invalid_variable(format!("{context}: {err}")))
-}
-
-#[derive(Clone)]
-struct SpreadsheetImportOptions {
-    num_variables: usize,
-    read_variable_names: Option<bool>,
-    read_row_names: bool,
-    variable_names: Vec<String>,
-    variable_types: Vec<String>,
-    data_range: Option<Value>,
-    sheet: Option<Value>,
-    treat_as_missing: Vec<String>,
-    preserve_variable_names: bool,
-    empty_line_rule: String,
-    text_type: String,
-    datetime_type: String,
-}
-
-impl Default for SpreadsheetImportOptions {
-    fn default() -> Self {
-        let num_variables = 0;
-        Self {
-            num_variables,
-            read_variable_names: None,
-            read_row_names: false,
-            variable_names: Vec::new(),
-            variable_types: Vec::new(),
-            data_range: None,
-            sheet: None,
-            treat_as_missing: Vec::new(),
-            preserve_variable_names: false,
-            empty_line_rule: "skip".to_string(),
-            text_type: "string".to_string(),
-            datetime_type: "datetime".to_string(),
-        }
-    }
-}
-
-impl SpreadsheetImportOptions {
-    fn apply(&mut self, name: &str, value: &Value) -> BuiltinResult<()> {
-        if name.eq_ignore_ascii_case("NumVariables") {
-            self.resize_variables(positive_usize(value, "NumVariables")?);
-        } else if name.eq_ignore_ascii_case("VariableNames") {
-            self.variable_names = raw_variable_name_list(value)?;
-            self.align_variable_metadata_count(self.variable_names.len(), "VariableNames")?;
-            self.ensure_variable_metadata_len();
-        } else if name.eq_ignore_ascii_case("VariableTypes") {
-            let types = variable_type_names(value)?;
-            self.variable_types = types;
-            self.align_variable_metadata_count(self.variable_types.len(), "VariableTypes")?;
-            self.ensure_variable_metadata_len();
-        } else if name.eq_ignore_ascii_case("DataRange") || name.eq_ignore_ascii_case("Range") {
-            self.data_range = if option_value_is_empty(value) {
-                None
-            } else {
-                RangeSpec::parse(value)?;
-                Some(value.clone())
-            };
-        } else if name.eq_ignore_ascii_case("Sheet") {
-            self.sheet = if option_value_is_empty(value) {
-                None
-            } else {
-                SheetSelector::parse(value)?;
-                Some(value.clone())
-            };
-        } else if name.eq_ignore_ascii_case("ReadVariableNames") {
-            self.read_variable_names = Some(bool_scalar(value, "ReadVariableNames")?);
-        } else if name.eq_ignore_ascii_case("ReadRowNames") {
-            self.read_row_names = bool_scalar(value, "ReadRowNames")?;
-        } else if name.eq_ignore_ascii_case("TreatAsMissing") {
-            self.treat_as_missing = string_list(value)?;
-        } else if name.eq_ignore_ascii_case("PreserveVariableNames") {
-            self.preserve_variable_names = bool_scalar(value, "PreserveVariableNames")?;
-        } else if name.eq_ignore_ascii_case("VariableNamingRule") {
-            let rule = scalar_text(value, "VariableNamingRule")?;
-            if rule.eq_ignore_ascii_case("preserve") {
-                self.preserve_variable_names = true;
-            } else if rule.eq_ignore_ascii_case("modify") {
-                self.preserve_variable_names = false;
-            } else {
-                return Err(invalid_argument(format!(
-                    "spreadsheetImportOptions: unsupported VariableNamingRule '{rule}'"
-                )));
-            }
-        } else if name.eq_ignore_ascii_case("EmptyLineRule") {
-            let rule = scalar_text(value, "EmptyLineRule")?;
-            if !(rule.eq_ignore_ascii_case("read") || rule.eq_ignore_ascii_case("skip")) {
-                return Err(invalid_argument(format!(
-                    "spreadsheetImportOptions: unsupported EmptyLineRule '{rule}'"
-                )));
-            }
-            self.empty_line_rule = rule.to_ascii_lowercase();
-        } else if name.eq_ignore_ascii_case("TextType") {
-            let text_type = scalar_text(value, "TextType")?;
-            if !(text_type.eq_ignore_ascii_case("string") || text_type.eq_ignore_ascii_case("char"))
-            {
-                return Err(invalid_argument(format!(
-                    "spreadsheetImportOptions: unsupported TextType '{text_type}'"
-                )));
-            }
-            self.text_type = text_type.to_ascii_lowercase();
-        } else if name.eq_ignore_ascii_case("DatetimeType") {
-            let datetime_type = scalar_text(value, "DatetimeType")?;
-            if !(datetime_type.eq_ignore_ascii_case("datetime")
-                || datetime_type.eq_ignore_ascii_case("text")
-                || datetime_type.eq_ignore_ascii_case("exceldatenum"))
-            {
-                return Err(invalid_argument(format!(
-                    "spreadsheetImportOptions: unsupported DatetimeType '{datetime_type}'"
-                )));
-            }
-            self.datetime_type = datetime_type.to_ascii_lowercase();
-        } else {
-            return Err(invalid_argument(format!(
-                "spreadsheetImportOptions: unsupported option '{name}'"
-            )));
-        }
-        Ok(())
-    }
-
-    fn resize_variables(&mut self, num_variables: usize) {
-        self.num_variables = num_variables;
-        if self.variable_names.len() > num_variables {
-            self.variable_names.truncate(num_variables);
-        }
-        if self.variable_types.len() > num_variables {
-            self.variable_types.truncate(num_variables);
-        }
-        self.ensure_variable_metadata_len();
-    }
-
-    fn align_variable_metadata_count(&mut self, len: usize, field: &str) -> BuiltinResult<()> {
-        if self.num_variables == 0 {
-            self.num_variables = len;
-            return Ok(());
-        }
-        if len > self.num_variables {
-            return Err(invalid_argument(format!(
-                "spreadsheetImportOptions: {field} length exceeds NumVariables"
-            )));
-        }
-        Ok(())
-    }
-
-    fn ensure_variable_metadata_len(&mut self) {
-        if self.num_variables == 0 {
-            return;
-        }
-        while self.variable_names.len() < self.num_variables {
-            self.variable_names
-                .push(format!("Var{}", self.variable_names.len() + 1));
-        }
-        self.variable_names.truncate(self.num_variables);
-        while self.variable_types.len() < self.num_variables {
-            self.variable_types.push("auto".to_string());
-        }
-        self.variable_types.truncate(self.num_variables);
-    }
-
-    fn into_struct(mut self) -> BuiltinResult<StructValue> {
-        self.ensure_variable_metadata_len();
-        let mut out = StructValue::new();
-        out.insert("FileType", Value::String("spreadsheet".to_string()));
-        out.insert("NumVariables", Value::Num(self.num_variables as f64));
-        if let Some(read_variable_names) = self.read_variable_names {
-            out.insert("ReadVariableNames", Value::Bool(read_variable_names));
-        }
-        out.insert("ReadRowNames", Value::Bool(self.read_row_names));
-        out.insert(
-            "VariableNames",
-            Value::StringArray(
-                StringArray::new(
-                    self.variable_names.clone(),
-                    vec![1, self.variable_names.len()],
-                )
-                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
-            ),
-        );
-        out.insert(
-            "VariableTypes",
-            Value::StringArray(
-                StringArray::new(
-                    self.variable_types.clone(),
-                    vec![1, self.variable_types.len()],
-                )
-                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
-            ),
-        );
-        out.insert(
-            "DataRange",
-            self.data_range
-                .unwrap_or_else(|| Value::String(String::new())),
-        );
-        out.insert(
-            "Sheet",
-            self.sheet.unwrap_or_else(|| Value::String(String::new())),
-        );
-        out.insert(
-            "TreatAsMissing",
-            Value::StringArray(
-                StringArray::new(
-                    self.treat_as_missing.clone(),
-                    vec![1, self.treat_as_missing.len()],
-                )
-                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
-            ),
-        );
-        out.insert(
-            "PreserveVariableNames",
-            Value::Bool(self.preserve_variable_names),
-        );
-        out.insert(
-            "VariableNamingRule",
-            Value::String(if self.preserve_variable_names {
-                "preserve".to_string()
-            } else {
-                "modify".to_string()
-            }),
-        );
-        out.insert("EmptyLineRule", Value::String(self.empty_line_rule));
-        out.insert("TextType", Value::String(self.text_type));
-        out.insert("DatetimeType", Value::String(self.datetime_type));
-        Ok(out)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ImportVariableType {
-    Auto,
-    Numeric(NumericDType),
-    Logical,
-    Text(TextImportType),
-    CellStr,
-    Datetime,
-    Duration,
-}
-
-impl ImportVariableType {
-    fn parse(raw: &str) -> BuiltinResult<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "" | "auto" => Ok(Self::Auto),
-            "double" => Ok(Self::Numeric(NumericDType::F64)),
-            "single" => Ok(Self::Numeric(NumericDType::F32)),
-            "uint8" => Ok(Self::Numeric(NumericDType::U8)),
-            "uint16" => Ok(Self::Numeric(NumericDType::U16)),
-            "logical" | "bool" | "boolean" => Ok(Self::Logical),
-            "string" => Ok(Self::Text(TextImportType::String)),
-            "char" => Ok(Self::Text(TextImportType::Char)),
-            "cellstr" => Ok(Self::CellStr),
-            "int8" | "int16" | "int32" | "int64" | "uint32" | "uint64" => {
-                Err(invalid_argument(format!(
-                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, and uint16 numeric arrays",
-                    raw.trim()
-                )))
-            }
-            "categorical" => Err(invalid_argument(
-                "readtable: unsupported VariableTypes entry 'categorical'; categorical arrays are not implemented in RunMat yet",
-            )),
-            "datetime" => Ok(Self::Datetime),
-            "duration" => Ok(Self::Duration),
-            other => Err(invalid_argument(format!(
-                "readtable: unsupported VariableTypes entry '{other}'"
-            ))),
-        }
-    }
-
-    fn canonical_label(raw: &str) -> BuiltinResult<String> {
-        Self::parse(raw)?;
-        let label = raw.trim().to_ascii_lowercase();
-        Ok(if label.is_empty() {
-            "auto".to_string()
-        } else {
-            label
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TextImportType {
-    String,
-    Char,
-}
-
-impl TextImportType {
-    fn parse(value: &Value, context: &str) -> BuiltinResult<Self> {
-        let text_type = scalar_text(value, "TextType")?;
-        match text_type.trim().to_ascii_lowercase().as_str() {
-            "string" => Ok(Self::String),
-            "char" => Ok(Self::Char),
-            other => Err(invalid_argument(format!(
-                "{context}: unsupported TextType '{other}'"
-            ))),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum EmptyLineRule {
-    Skip,
-    Read,
-}
-
-#[derive(Clone, Copy)]
-enum DatetimeImportType {
-    Datetime,
-    Text,
-    ExcelDatenum,
-}
-
-impl DatetimeImportType {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "DatetimeType")?;
-        match text.trim().to_ascii_lowercase().as_str() {
-            "datetime" => Ok(Self::Datetime),
-            "text" => Ok(Self::Text),
-            "exceldatenum" => Ok(Self::ExcelDatenum),
-            other => Err(invalid_argument(format!(
-                "readtable: unsupported DatetimeType '{other}'"
-            ))),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ImportFileType {
-    Auto,
-    Text,
-    Spreadsheet,
-}
-
-impl ImportFileType {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "FileType")?;
-        match text.trim().to_ascii_lowercase().as_str() {
-            "auto" => Ok(Self::Auto),
-            "text" | "delimitedtext" | "delimited" => Ok(Self::Text),
-            "spreadsheet" | "excel" => Ok(Self::Spreadsheet),
-            other => Err(invalid_argument(format!(
-                "readtable: unsupported FileType '{other}'"
-            ))),
-        }
-    }
-}
-
-#[derive(Clone)]
-enum SheetSelector {
-    Name(String),
-    Index(usize),
-}
-
-impl SheetSelector {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        match value {
-            Value::Int(i) if i.to_i64() >= 1 => Ok(Self::Index(i.to_i64() as usize - 1)),
-            Value::Num(n)
-                if n.is_finite() && *n >= 1.0 && (n.round() - n).abs() <= f64::EPSILON =>
-            {
-                Ok(Self::Index(n.round() as usize - 1))
-            }
-            _ => {
-                let text = scalar_text(value, "Sheet")?;
-                if text.trim().is_empty() {
-                    return Err(invalid_argument("readtable: Sheet must not be empty"));
-                }
-                Ok(Self::Name(text))
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-enum Delimiter {
-    Char(char),
-    String(String),
-    Whitespace,
-}
-
-impl Delimiter {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "Delimiter")?;
-        if text.is_empty() {
-            return Err(invalid_argument("readtable: Delimiter must not be empty"));
-        }
-        match text.trim().to_ascii_lowercase().as_str() {
-            "tab" => Ok(Self::Char('\t')),
-            "space" | "whitespace" => Ok(Self::Whitespace),
-            "comma" => Ok(Self::Char(',')),
-            "semicolon" => Ok(Self::Char(';')),
-            "bar" | "pipe" => Ok(Self::Char('|')),
-            _ if text.chars().count() == 1 => Ok(Self::Char(text.chars().next().unwrap())),
-            _ => Ok(Self::String(text)),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct RangeSpec {
-    start_row: usize,
-    start_col: usize,
-    end_row: Option<usize>,
-    end_col: Option<usize>,
-}
-
-impl RangeSpec {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        match value {
-            Value::String(text) => Self::parse_text(text),
-            Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
-                Self::parse_text(&text)
-            }
-            Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
-            Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 4 => {
-                let mut indices = Vec::with_capacity(t.data.len());
-                for value in &t.data {
-                    indices.push(one_based_to_zero(*value, usize::MAX, "Range")?);
-                }
-                Ok(Self {
-                    start_row: indices[0],
-                    start_col: indices[1],
-                    end_row: indices.get(2).copied(),
-                    end_col: indices.get(3).copied(),
-                })
-            }
-            _ => Err(invalid_argument(
-                "readtable: Range must be a cell reference string or numeric vector",
-            )),
-        }
-    }
-
-    fn parse_text(text: &str) -> BuiltinResult<Self> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return Err(invalid_argument("readtable: Range must not be empty"));
-        }
-        let parts: Vec<&str> = trimmed.split(':').collect();
-        if parts.len() > 2 {
-            return Err(invalid_argument(format!(
-                "readtable: invalid Range specification '{trimmed}'"
-            )));
-        }
-        let start = parse_cell_ref(parts[0])?;
-        let end = if parts.len() == 2 {
-            Some(parse_cell_ref(parts[1])?)
-        } else {
-            None
-        };
-        Ok(Self {
-            start_row: start.0.unwrap_or(0),
-            start_col: start.1.unwrap_or(0),
-            end_row: end.and_then(|item| item.0),
-            end_col: end.and_then(|item| item.1),
-        })
-    }
-}
-
-fn parse_cell_ref(token: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
-    let mut letters = String::new();
-    let mut digits = String::new();
-    for ch in token.trim().chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() {
-            letters.push(ch.to_ascii_uppercase());
-        } else if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            return Err(invalid_argument(format!(
-                "readtable: invalid Range component '{token}'"
-            )));
-        }
-    }
-    let col = if letters.is_empty() {
-        None
-    } else {
-        let mut value = 0usize;
-        for ch in letters.chars() {
-            value = value
-                .checked_mul(26)
-                .and_then(|v| v.checked_add((ch as u8 - b'A' + 1) as usize))
-                .ok_or_else(|| invalid_argument("readtable: Range column overflow"))?;
-        }
-        Some(value - 1)
-    };
-    let row = if digits.is_empty() {
-        None
-    } else {
-        let parsed = digits
-            .parse::<usize>()
-            .map_err(|_| invalid_argument("readtable: invalid Range row"))?;
-        if parsed == 0 {
-            return Err(invalid_argument("readtable: Range rows are one-based"));
-        }
-        Some(parsed - 1)
-    };
-    Ok((row, col))
-}
-
-fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let text = scalar_text(value, "filename").map_err(|_| {
-        table_error(
-            &TABLE_ERROR_INVALID_ARGUMENT,
-            "readtable: filename must be a string scalar or character vector",
-        )
-    })?;
-    if text.trim().is_empty() {
-        return Err(invalid_argument("readtable: filename must not be empty"));
-    }
-    let expanded =
-        expand_user_path(&text, "readtable").map_err(|msg| invalid_argument(msg.to_string()))?;
-    Ok(Path::new(&expanded).to_path_buf())
-}
-
-async fn read_table_from_file(path: &Path, options: &ReadTableOptions) -> BuiltinResult<Value> {
-    match options.file_type {
-        ImportFileType::Spreadsheet => read_spreadsheet_table(path, options).await,
-        ImportFileType::Text => read_text_table(path, options).await,
-        ImportFileType::Auto if is_spreadsheet_path(path) => {
-            read_spreadsheet_table(path, options).await
-        }
-        ImportFileType::Auto => read_text_table(path, options).await,
-    }
-}
-
-async fn read_text_table(path: &Path, options: &ReadTableOptions) -> BuiltinResult<Value> {
-    if options.sheet.is_some() {
-        return Err(invalid_argument(
-            "readtable: Sheet is only valid for spreadsheet files",
-        ));
-    }
-    let bytes = read_file_bytes(path).await?;
-    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
-    let mut raw_lines = text.lines().map(ToString::to_string).collect::<Vec<_>>();
-    if let Some(first) = raw_lines.first_mut() {
-        if first.starts_with('\u{FEFF}') {
-            *first = first.trim_start_matches('\u{FEFF}').to_string();
-        }
-    }
-    let delimiter = options
-        .delimiter
-        .clone()
-        .or_else(|| detect_delimiter(&raw_lines))
-        .unwrap_or(Delimiter::Whitespace);
-    let mut rows = parse_text_records(&text, &delimiter, options.empty_line_rule);
-    if options.num_header_lines > 0 {
-        rows = rows.into_iter().skip(options.num_header_lines).collect();
-    }
-    if let Some(range) = options.range {
-        rows = apply_import_range(rows, range);
-    }
-    import_rows_to_table(rows, options)
-}
-
-async fn read_spreadsheet_table(path: &Path, options: &ReadTableOptions) -> BuiltinResult<Value> {
-    if options.delimiter.is_some() {
-        return Err(invalid_argument(
-            "readtable: Delimiter is only valid for text files",
-        ));
-    }
-    let bytes = read_file_bytes(path).await?;
-    let cursor = Cursor::new(bytes);
-    let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
-        table_error(
-            &TABLE_ERROR_UNSUPPORTED_FILE,
-            format!(
-                "readtable: unable to open spreadsheet '{}': {err}",
-                path.display()
-            ),
-        )
-    })?;
-    let range = match &options.sheet {
-        Some(SheetSelector::Name(name)) => workbook.worksheet_range(name).map_err(|err| {
-            invalid_argument(format!("readtable: unable to read sheet '{name}': {err:?}"))
-        })?,
-        Some(SheetSelector::Index(index)) => workbook
-            .worksheet_range_at(*index)
-            .ok_or_else(|| {
-                invalid_argument(format!(
-                    "readtable: sheet index {} exceeds bounds",
-                    index + 1
-                ))
-            })?
-            .map_err(|err| {
-                invalid_argument(format!(
-                    "readtable: unable to read sheet {}: {err:?}",
-                    index + 1
-                ))
-            })?,
-        None => workbook
-            .worksheet_range_at(0)
-            .ok_or_else(|| invalid_argument("readtable: spreadsheet contains no worksheets"))?
-            .map_err(|err| {
-                invalid_argument(format!("readtable: unable to read first sheet: {err:?}"))
-            })?,
-    };
-    let rows = spreadsheet_range_to_rows(&range, options)?;
-    import_rows_to_table(rows, options)
-}
-
-async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
-    let mut file = File::open_async(path).await.map_err(|err| {
-        table_error_with_source(
-            &TABLE_ERROR_IO,
-            format!("readtable: unable to open '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
-        table_error_with_source(
-            &TABLE_ERROR_IO,
-            format!("readtable: unable to read '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    Ok(bytes)
-}
-
-fn is_spreadsheet_path(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase())
-            .as_deref(),
-        Some("xls") | Some("xlsx") | Some("xlsm") | Some("xlsb") | Some("ods")
-    )
-}
-
-fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
-    encoding_for_label(label)
-        .map(|_| ())
-        .ok_or_else(|| invalid_argument(format!("readtable: unsupported Encoding '{label}'")))
-}
-
-fn encoding_for_label(label: &str) -> Option<&'static Encoding> {
-    let label = label.trim();
-    if label.is_empty()
-        || label.eq_ignore_ascii_case("auto")
-        || label.eq_ignore_ascii_case("default")
-        || label.eq_ignore_ascii_case("system")
-        || label.eq_ignore_ascii_case("native")
-        || label.eq_ignore_ascii_case("utf-8")
-        || label.eq_ignore_ascii_case("utf8")
-        || label.eq_ignore_ascii_case("unicode")
-    {
-        return Some(UTF_8);
-    }
-    Encoding::for_label(label.as_bytes())
-}
-
-fn decode_text_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<String> {
-    let (encoding, offset) = if encoding.trim().eq_ignore_ascii_case("auto") {
-        Encoding::for_bom(bytes).unwrap_or((UTF_8, 0))
-    } else {
-        (
-            encoding_for_label(encoding).ok_or_else(|| {
-                invalid_argument(format!("readtable: unsupported Encoding '{encoding}'"))
-            })?,
-            0,
-        )
-    };
-    let (decoded, _, had_errors) = encoding.decode(&bytes[offset..]);
-    if had_errors {
-        return Err(table_error(
-            &TABLE_ERROR_IO,
-            format!(
-                "readtable: unable to decode file contents using encoding '{}'",
-                encoding.name()
-            ),
-        ));
-    }
-    Ok(decoded.into_owned())
-}
-
-fn strip_utf8_bom(text: String) -> String {
-    text.strip_prefix('\u{FEFF}')
-        .map(ToString::to_string)
-        .unwrap_or(text)
-}
-
-#[derive(Clone, Debug)]
-enum ImportCell {
-    Empty,
-    Text(String),
-    Number(f64),
-    Logical(bool),
-    DateTime(f64),
-    Error(String),
-}
-
-impl ImportCell {
-    fn from_text(text: String) -> Self {
-        if text.trim().is_empty() {
-            Self::Empty
-        } else {
-            Self::Text(text)
-        }
-    }
-
-    fn display_text(&self) -> String {
-        match self {
-            Self::Empty => String::new(),
-            Self::Text(text) => text.clone(),
-            Self::Number(value) => format_key_number(*value),
-            Self::Logical(value) => value.to_string(),
-            Self::DateTime(serial) => format_key_number(*serial),
-            Self::Error(text) => text.clone(),
-        }
-    }
-
-    fn is_missing(&self, options: &ReadTableOptions) -> bool {
-        match self {
-            Self::Empty => true,
-            Self::Text(text) => options.is_missing(text),
-            _ => false,
-        }
-    }
-
-    fn is_likely_data_token(&self, options: &ReadTableOptions) -> bool {
-        match self {
-            Self::Number(_) | Self::Logical(_) | Self::DateTime(_) => true,
-            Self::Empty => false,
-            Self::Text(text) => {
-                let token = unquote(text.trim()).trim();
-                options.is_missing(token)
-                    || parse_numeric(token).is_some()
-                    || parse_logical(token).is_some()
-                    || parse_iso_datetime_to_datenum(token).is_some()
-            }
-            Self::Error(_) => true,
-        }
-    }
-}
-
-fn spreadsheet_cell_to_import(cell: &SpreadsheetData) -> ImportCell {
-    match cell {
-        SpreadsheetData::Empty => ImportCell::Empty,
-        SpreadsheetData::Int(value) => ImportCell::Number(*value as f64),
-        SpreadsheetData::Float(value) => ImportCell::Number(*value),
-        SpreadsheetData::String(text) => ImportCell::Text(text.clone()),
-        SpreadsheetData::Bool(value) => ImportCell::Logical(*value),
-        SpreadsheetData::DateTime(value) => value
-            .as_datetime()
-            .map(crate::builtins::datetime::datenum_from_naive)
-            .map(ImportCell::DateTime)
-            .unwrap_or_else(|| ImportCell::Number(value.as_f64())),
-        SpreadsheetData::DateTimeIso(text) => parse_iso_datetime_to_datenum(text)
-            .map(ImportCell::DateTime)
-            .unwrap_or_else(|| ImportCell::Text(text.clone())),
-        SpreadsheetData::DurationIso(text) => ImportCell::Text(text.clone()),
-        SpreadsheetData::Error(err) => ImportCell::Error(err.to_string()),
-    }
-}
-
-fn spreadsheet_range_to_rows(
-    range: &calamine::Range<SpreadsheetData>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Vec<Vec<ImportCell>>> {
-    if range.is_empty() {
-        return Ok(Vec::new());
-    }
-    let Some((range_start_row, range_start_col)) = range.start() else {
-        return Ok(Vec::new());
-    };
-    let Some((range_end_row, range_end_col)) = range.end() else {
-        return Ok(Vec::new());
-    };
-    let start_row = options
-        .range
-        .map(|spec| checked_u32(spec.start_row, "Range row"))
-        .transpose()?
-        .unwrap_or(range_start_row);
-    let start_col = options
-        .range
-        .map(|spec| checked_u32(spec.start_col, "Range column"))
-        .transpose()?
-        .unwrap_or(range_start_col);
-    let end_row = options
-        .range
-        .and_then(|spec| spec.end_row)
-        .map(|row| checked_u32(row, "Range row"))
-        .transpose()?
-        .unwrap_or(range_end_row);
-    let end_col = options
-        .range
-        .and_then(|spec| spec.end_col)
-        .map(|col| checked_u32(col, "Range column"))
-        .transpose()?
-        .unwrap_or(range_end_col);
-    if start_row > end_row || start_col > end_col {
-        return Ok(Vec::new());
-    }
-    let mut rows = Vec::new();
-    for row_idx in start_row..=end_row {
-        let mut row = Vec::new();
-        for col_idx in start_col..=end_col {
-            row.push(
-                range
-                    .get_value((row_idx, col_idx))
-                    .map(spreadsheet_cell_to_import)
-                    .unwrap_or(ImportCell::Empty),
-            );
-        }
-        if matches!(options.empty_line_rule, EmptyLineRule::Skip)
-            && row.iter().all(|cell| cell.is_missing(options))
-        {
-            continue;
-        }
-        rows.push(row);
-    }
-    if options.num_header_lines > 0 {
-        Ok(rows.into_iter().skip(options.num_header_lines).collect())
-    } else {
-        Ok(rows)
-    }
-}
-
-fn checked_u32(value: usize, context: &str) -> BuiltinResult<u32> {
-    u32::try_from(value).map_err(|_| invalid_argument(format!("readtable: {context} overflow")))
-}
-
-fn detect_delimiter(lines: &[String]) -> Option<Delimiter> {
-    let candidates = [',', '\t', ';', '|'];
-    let mut best: Option<(f64, Delimiter)> = None;
-    for candidate in candidates {
-        let counts = lines
-            .iter()
-            .take(32)
-            .filter(|line| line.contains(candidate))
-            .map(|line| split_with_char_delim(line, candidate).len())
-            .filter(|count| *count >= 2)
-            .collect::<Vec<_>>();
-        if counts.is_empty() {
-            continue;
-        }
-        let avg = counts.iter().copied().sum::<usize>() as f64 / counts.len() as f64;
-        if avg >= 2.0
-            && best
-                .as_ref()
-                .map(|(best_avg, _)| avg > *best_avg)
-                .unwrap_or(true)
-        {
-            best = Some((avg, Delimiter::Char(candidate)));
-        }
-    }
-    best.map(|(_, delimiter)| delimiter).or_else(|| {
-        lines
-            .iter()
-            .take(32)
-            .any(|line| line.split_whitespace().count() > 1)
-            .then_some(Delimiter::Whitespace)
-    })
-}
-
-fn split_with_char_delim(line: &str, delimiter: char) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            if in_quotes && chars.peek() == Some(&'"') {
-                current.push('"');
-                chars.next();
-            } else {
-                in_quotes = !in_quotes;
-            }
-            continue;
-        }
-        if ch == delimiter && !in_quotes {
-            out.push(current.clone());
-            current.clear();
-        } else {
-            current.push(ch);
-        }
-    }
-    out.push(current);
-    out
-}
-
-fn parse_text_records(
-    text: &str,
-    delimiter: &Delimiter,
-    empty_line_rule: EmptyLineRule,
-) -> Vec<Vec<ImportCell>> {
-    match delimiter {
-        Delimiter::Whitespace => parse_whitespace_records(text, empty_line_rule),
-        Delimiter::Char(ch) => parse_delimited_records(text, &ch.to_string(), empty_line_rule),
-        Delimiter::String(pattern) => parse_delimited_records(text, pattern, empty_line_rule),
-    }
-}
-
-fn parse_delimited_records(
-    text: &str,
-    delimiter: &str,
-    empty_line_rule: EmptyLineRule,
-) -> Vec<Vec<ImportCell>> {
-    let mut records = Vec::new();
-    let mut row = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut idx = 0usize;
-    while idx < text.len() {
-        let ch = text[idx..].chars().next().expect("valid char boundary");
-        if ch == '"' {
-            if in_quotes && text[idx + ch.len_utf8()..].starts_with('"') {
-                current.push('"');
-                idx += ch.len_utf8() + 1;
-                continue;
-            }
-            in_quotes = !in_quotes;
-            idx += ch.len_utf8();
-            continue;
-        }
-        if !in_quotes && !delimiter.is_empty() && text[idx..].starts_with(delimiter) {
-            row.push(ImportCell::from_text(std::mem::take(&mut current)));
-            idx += delimiter.len();
-            continue;
-        }
-        if !in_quotes && (ch == '\n' || ch == '\r') {
-            row.push(ImportCell::from_text(std::mem::take(&mut current)));
-            push_import_record(&mut records, std::mem::take(&mut row), empty_line_rule);
-            idx += ch.len_utf8();
-            if ch == '\r' && text[idx..].starts_with('\n') {
-                idx += 1;
-            }
-            continue;
-        }
-        current.push(ch);
-        idx += ch.len_utf8();
-    }
-    if !current.is_empty() || !row.is_empty() || text.ends_with(delimiter) {
-        row.push(ImportCell::from_text(current));
-        push_import_record(&mut records, row, empty_line_rule);
-    }
-    records
-}
-
-fn parse_whitespace_records(text: &str, empty_line_rule: EmptyLineRule) -> Vec<Vec<ImportCell>> {
-    let mut records = Vec::new();
-    let mut row = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut field_open = false;
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            if in_quotes && chars.peek() == Some(&'"') {
-                current.push('"');
-                chars.next();
-            } else {
-                in_quotes = !in_quotes;
-            }
-            field_open = true;
-            continue;
-        }
-        if !in_quotes && (ch == '\n' || ch == '\r') {
-            if field_open || !current.is_empty() {
-                row.push(ImportCell::from_text(std::mem::take(&mut current)));
-            }
-            field_open = false;
-            push_import_record(&mut records, std::mem::take(&mut row), empty_line_rule);
-            if ch == '\r' && chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            continue;
-        }
-        if !in_quotes && ch.is_whitespace() {
-            if field_open || !current.is_empty() {
-                row.push(ImportCell::from_text(std::mem::take(&mut current)));
-                field_open = false;
-            }
-            continue;
-        }
-        current.push(ch);
-        field_open = true;
-    }
-    if field_open || !current.is_empty() {
-        row.push(ImportCell::from_text(current));
-    }
-    if !row.is_empty() {
-        push_import_record(&mut records, row, empty_line_rule);
-    }
-    records
-}
-
-fn push_import_record(
-    records: &mut Vec<Vec<ImportCell>>,
-    row: Vec<ImportCell>,
-    empty_line_rule: EmptyLineRule,
-) {
-    if matches!(empty_line_rule, EmptyLineRule::Skip)
-        && row.iter().all(|cell| matches!(cell, ImportCell::Empty))
-    {
-        return;
-    }
-    records.push(row);
-}
-
-fn apply_import_range(rows: Vec<Vec<ImportCell>>, range: RangeSpec) -> Vec<Vec<ImportCell>> {
-    if rows.is_empty() {
-        return rows;
-    }
-    let end_row = range
-        .end_row
-        .unwrap_or_else(|| rows.len().saturating_sub(1));
-    let max_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let end_col = range.end_col.unwrap_or_else(|| max_cols.saturating_sub(1));
-    rows.into_iter()
-        .enumerate()
-        .filter_map(|(idx, row)| {
-            if idx < range.start_row || idx > end_row {
-                return None;
-            }
-            let selected = (range.start_col..=end_col)
-                .map(|col| row.get(col).cloned().unwrap_or(ImportCell::Empty))
-                .collect::<Vec<_>>();
-            Some(selected)
-        })
-        .collect()
-}
-
-fn import_rows_to_table(
-    mut rows: Vec<Vec<ImportCell>>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    let mut variable_names = options.variable_names.clone();
-    let read_variable_names = options
-        .read_variable_names
-        .unwrap_or_else(|| variable_names.is_none() && should_read_variable_names(&rows, options));
-    if variable_names.is_none() && read_variable_names && !rows.is_empty() {
-        variable_names = Some(
-            rows.remove(0)
-                .into_iter()
-                .map(|cell| cell.display_text())
-                .collect(),
-        );
-    }
-
-    let mut row_names = options.row_names.clone();
-    if options.read_row_names && !rows.is_empty() {
-        row_names = Some(
-            rows.iter_mut()
-                .map(|row| {
-                    if row.is_empty() {
-                        String::new()
-                    } else {
-                        row.remove(0).display_text()
-                    }
-                })
-                .collect(),
-        );
-        if let Some(names) = variable_names.as_mut() {
-            if !names.is_empty() {
-                names.remove(0);
-            }
-        }
-    }
-
-    let column_count = import_column_count(&rows, &variable_names, options)?;
-    let names = import_variable_names(variable_names, column_count, options);
-
-    let mut columns = Vec::with_capacity(names.len());
-    for col in 0..names.len() {
-        let values = rows
-            .iter()
-            .map(|row| row.get(col).cloned().unwrap_or(ImportCell::Empty))
-            .collect::<Vec<_>>();
-        let requested_type = options
-            .variable_types
-            .as_ref()
-            .and_then(|types| types.get(col))
-            .copied();
-        columns.push(import_column(values, options, requested_type)?);
-    }
-    table_from_columns_with_properties(names, columns, row_names)
-}
-
-fn import_column_count(
-    rows: &[Vec<ImportCell>],
-    variable_names: &Option<Vec<String>>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<usize> {
-    let data_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let name_cols = variable_names.as_ref().map(Vec::len).unwrap_or(0);
-    let type_cols = options.variable_types.as_ref().map(Vec::len).unwrap_or(0);
-    if let Some(count) = options.num_variables {
-        if name_cols > count {
-            return Err(invalid_argument(
-                "readtable: VariableNames length exceeds NumVariables",
-            ));
-        }
-        if type_cols > count {
-            return Err(invalid_argument(
-                "readtable: VariableTypes length exceeds NumVariables",
-            ));
-        }
-        return Ok(count);
-    }
-    Ok(data_cols.max(name_cols).max(type_cols))
-}
-
-fn import_variable_names(
-    variable_names: Option<Vec<String>>,
-    column_count: usize,
-    options: &ReadTableOptions,
-) -> Vec<String> {
-    match variable_names {
-        Some(mut names) => {
-            while names.len() < column_count {
-                names.push(format!("Var{}", names.len() + 1));
-            }
-            names.truncate(column_count);
-            if options.preserve_variable_names {
-                make_unique_names(names)
-            } else {
-                make_unique_variable_names(names)
-            }
-        }
-        None => generated_variable_names(column_count),
-    }
-}
-
-fn should_read_variable_names(rows: &[Vec<ImportCell>], options: &ReadTableOptions) -> bool {
-    let Some(first) = rows.first() else {
-        return false;
-    };
-    if first.is_empty() {
-        return false;
-    }
-    let names = first
-        .iter()
-        .map(ImportCell::display_text)
-        .map(|text| text.trim().to_string())
-        .collect::<Vec<_>>();
-    if names.iter().any(|name| name.is_empty()) {
-        return false;
-    }
-    if first.iter().all(|cell| cell.is_likely_data_token(options)) {
-        return false;
-    }
-    true
-}
-
-fn import_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-    requested_type: Option<ImportVariableType>,
-) -> BuiltinResult<Value> {
-    match requested_type.unwrap_or(ImportVariableType::Auto) {
-        ImportVariableType::Auto => infer_import_column(values, options),
-        ImportVariableType::Numeric(dtype) => import_numeric_column(values, options, dtype),
-        ImportVariableType::Logical => import_logical_column(values, options),
-        ImportVariableType::Text(kind) => import_text_column(values, options, kind),
-        ImportVariableType::CellStr => import_cellstr_column(values, options),
-        ImportVariableType::Datetime => import_datetime_column(values, options),
-        ImportVariableType::Duration => import_duration_column(values, options),
-    }
-}
-
-fn import_numeric_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-    dtype: NumericDType,
-) -> BuiltinResult<Value> {
-    let mut numeric = Vec::with_capacity(values.len());
-    for value in &values {
-        let parsed = numeric_from_import_cell(value, options, dtype.class_name())?;
-        numeric.push(cast_import_numeric(parsed, dtype));
-    }
-    Tensor::new_with_dtype(numeric, vec![values.len(), 1], dtype)
-        .map(Value::Tensor)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
-}
-
-fn numeric_from_import_cell(
-    value: &ImportCell,
-    options: &ReadTableOptions,
-    context: &str,
-) -> BuiltinResult<f64> {
-    match value {
-        ImportCell::Empty => Ok(f64::NAN),
-        ImportCell::Number(value) => Ok(*value),
-        ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        ImportCell::DateTime(serial) => Ok(*serial),
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            if options.is_missing(token) {
-                Ok(f64::NAN)
-            } else {
-                parse_numeric(token).ok_or_else(|| {
-                    invalid_variable(format!("readtable: cannot import '{token}' as {context}"))
-                })
-            }
-        }
-        ImportCell::Error(text) => Err(invalid_variable(format!(
-            "readtable: cannot import spreadsheet error '{text}' as {context}"
-        ))),
-    }
-}
-
-fn cast_import_numeric(value: f64, dtype: NumericDType) -> f64 {
-    match dtype {
-        NumericDType::F64 => value,
-        NumericDType::F32 => (value as f32) as f64,
-        NumericDType::U8 => {
-            if value.is_finite() {
-                value.round().clamp(0.0, u8::MAX as f64)
-            } else {
-                0.0
-            }
-        }
-        NumericDType::U16 => {
-            if value.is_finite() {
-                value.round().clamp(0.0, u16::MAX as f64)
-            } else {
-                0.0
-            }
-        }
-    }
-}
-
-fn import_logical_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    let mut logical = Vec::with_capacity(values.len());
-    for value in &values {
-        logical.push(logical_from_import_cell(value, options)?);
-    }
-    LogicalArray::new(logical, vec![values.len(), 1])
-        .map(Value::LogicalArray)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
-}
-
-fn logical_from_import_cell(value: &ImportCell, options: &ReadTableOptions) -> BuiltinResult<u8> {
-    let flag = match value {
-        ImportCell::Empty => false,
-        ImportCell::Logical(value) => *value,
-        ImportCell::Number(value) => *value != 0.0,
-        ImportCell::DateTime(serial) => *serial != 0.0,
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            if options.is_missing(token) {
-                false
-            } else if let Some(value) = parse_logical(token) {
-                value
-            } else if let Some(value) = parse_numeric(token) {
-                value != 0.0
-            } else {
-                return Err(invalid_variable(format!(
-                    "readtable: cannot import '{token}' as logical"
-                )));
-            }
-        }
-        ImportCell::Error(text) => {
-            return Err(invalid_variable(format!(
-                "readtable: cannot import spreadsheet error '{text}' as logical"
-            )));
-        }
-    };
-    Ok(u8::from(flag))
-}
-
-fn import_text_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-    kind: TextImportType,
-) -> BuiltinResult<Value> {
-    let strings = import_text_values(values, options);
-    match kind {
-        TextImportType::String => StringArray::new(strings.clone(), vec![strings.len(), 1])
-            .map(Value::StringArray)
-            .map_err(|err| invalid_variable(format!("readtable: {err}"))),
-        TextImportType::Char => import_char_column(strings),
-    }
-}
-
-fn import_text_values(values: Vec<ImportCell>, options: &ReadTableOptions) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|value| {
-            if value.is_missing(options) {
-                String::new()
-            } else {
-                unquote(value.display_text().trim()).to_string()
-            }
-        })
-        .collect()
-}
-
-fn import_char_column(strings: Vec<String>) -> BuiltinResult<Value> {
-    let rows = strings.len();
-    let cols = strings
-        .iter()
-        .map(|text| text.chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut data = vec![' '; rows * cols];
-    for (row, text) in strings.iter().enumerate() {
-        for (col, ch) in text.chars().enumerate() {
-            data[row * cols + col] = ch;
-        }
-    }
-    CharArray::new(data, rows, cols)
-        .map(Value::CharArray)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
-}
-
-fn import_cellstr_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    let strings = import_text_values(values, options);
-    let rows = strings.len();
-    let cells = strings
-        .into_iter()
-        .map(|text| Value::CharArray(CharArray::new_row(&text)))
-        .collect::<Vec<_>>();
-    CellArray::new(cells, rows, 1)
-        .map(Value::Cell)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
-}
-
-fn import_datetime_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    if matches!(options.datetime_type, DatetimeImportType::Text) {
-        return import_text_column(values, options, options.text_type);
-    }
-
-    let mut serials = Vec::with_capacity(values.len());
-    for value in &values {
-        serials.push(datetime_serial_from_import_cell(value, options)?);
-    }
-    let tensor = Tensor::new(serials, vec![values.len(), 1])
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
-    if matches!(options.datetime_type, DatetimeImportType::ExcelDatenum) {
-        Ok(Value::Tensor(tensor))
-    } else {
-        crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "yyyy-MM-dd HH:mm:ss")
-    }
-}
-
-fn datetime_serial_from_import_cell(
-    value: &ImportCell,
-    options: &ReadTableOptions,
-) -> BuiltinResult<f64> {
-    match value {
-        ImportCell::Empty => Ok(f64::NAN),
-        ImportCell::DateTime(serial) => Ok(*serial),
-        ImportCell::Number(value) => Ok(*value),
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            if options.is_missing(token) {
-                Ok(f64::NAN)
-            } else if let Some(serial) = parse_iso_datetime_to_datenum(token) {
-                Ok(serial)
-            } else if let Some(serial) = parse_numeric(token) {
-                Ok(serial)
-            } else {
-                Err(invalid_variable(format!(
-                    "readtable: cannot import '{token}' as datetime"
-                )))
-            }
-        }
-        ImportCell::Logical(_) => Err(invalid_variable(
-            "readtable: cannot import logical value as datetime",
-        )),
-        ImportCell::Error(text) => Err(invalid_variable(format!(
-            "readtable: cannot import spreadsheet error '{text}' as datetime"
-        ))),
-    }
-}
-
-fn import_duration_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    let mut days = Vec::with_capacity(values.len());
-    for value in &values {
-        days.push(duration_days_from_import_cell(value, options)?);
-    }
-    let tensor = Tensor::new(days, vec![values.len(), 1])
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
-    crate::builtins::duration::duration_object_from_days_tensor(
-        tensor,
-        crate::builtins::duration::DEFAULT_DURATION_FORMAT,
-    )
-}
-
-fn duration_days_from_import_cell(
-    value: &ImportCell,
-    options: &ReadTableOptions,
-) -> BuiltinResult<f64> {
-    match value {
-        ImportCell::Empty => Ok(f64::NAN),
-        ImportCell::Number(value) => Ok(*value),
-        ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        ImportCell::Text(text) => {
-            let token = unquote(text.trim()).trim();
-            if options.is_missing(token) {
-                Ok(f64::NAN)
-            } else {
-                parse_duration_to_days(token).ok_or_else(|| {
-                    invalid_variable(format!("readtable: cannot import '{token}' as duration"))
-                })
-            }
-        }
-        ImportCell::DateTime(_) => Err(invalid_variable(
-            "readtable: cannot import datetime value as duration",
-        )),
-        ImportCell::Error(text) => Err(invalid_variable(format!(
-            "readtable: cannot import spreadsheet error '{text}' as duration"
-        ))),
-    }
-}
-
-fn infer_import_column(
-    values: Vec<ImportCell>,
-    options: &ReadTableOptions,
-) -> BuiltinResult<Value> {
-    let mut numeric = Vec::with_capacity(values.len());
-    let mut all_numeric = true;
-    for value in &values {
-        match value {
-            ImportCell::Empty => numeric.push(f64::NAN),
-            ImportCell::Number(value) => numeric.push(*value),
-            ImportCell::Text(text) => {
-                let token = unquote(text.trim()).trim();
-                if options.is_missing(token) {
-                    numeric.push(f64::NAN);
-                } else if let Some(value) = parse_numeric(token) {
-                    numeric.push(value);
-                } else {
-                    all_numeric = false;
-                    break;
-                }
-            }
-            _ => {
-                all_numeric = false;
-                break;
-            }
-        }
-    }
-    if all_numeric {
-        return Tensor::new(numeric, vec![values.len(), 1])
-            .map(Value::Tensor)
-            .map_err(|err| invalid_variable(format!("readtable: {err}")));
-    }
-
-    let mut logical = Vec::with_capacity(values.len());
-    let mut all_logical = true;
-    for value in &values {
-        match value {
-            ImportCell::Empty => logical.push(0),
-            ImportCell::Logical(value) => logical.push(i32::from(*value) as u8),
-            ImportCell::Text(text) => {
-                let token = unquote(text.trim()).trim();
-                if options.is_missing(token) {
-                    logical.push(0);
-                } else if let Some(value) = parse_logical(token) {
-                    logical.push(i32::from(value) as u8);
-                } else {
-                    all_logical = false;
-                    break;
-                }
-            }
-            _ => {
-                all_logical = false;
-                break;
-            }
-        }
-    }
-    if all_logical {
-        return LogicalArray::new(logical, vec![values.len(), 1])
-            .map(Value::LogicalArray)
-            .map_err(|err| invalid_variable(format!("readtable: {err}")));
-    }
-
-    if !matches!(options.datetime_type, DatetimeImportType::Text) {
-        let mut serials = Vec::with_capacity(values.len());
-        let mut all_datetime = true;
-        for value in &values {
-            match value {
-                ImportCell::Empty => serials.push(f64::NAN),
-                ImportCell::DateTime(serial) => serials.push(*serial),
-                ImportCell::Text(text) => {
-                    let token = unquote(text.trim()).trim();
-                    if options.is_missing(token) {
-                        serials.push(f64::NAN);
-                    } else if let Some(serial) = parse_iso_datetime_to_datenum(token) {
-                        serials.push(serial);
-                    } else {
-                        all_datetime = false;
-                        break;
-                    }
-                }
-                _ => {
-                    all_datetime = false;
-                    break;
-                }
-            }
-        }
-        if all_datetime {
-            let tensor = Tensor::new(serials, vec![values.len(), 1])
-                .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
-            if matches!(options.datetime_type, DatetimeImportType::ExcelDatenum) {
-                return Ok(Value::Tensor(tensor));
-            }
-            return crate::builtins::datetime::datetime_object_from_serial_tensor(
-                tensor,
-                "yyyy-MM-dd HH:mm:ss",
-            );
-        }
-    }
-
-    import_text_column(values, options, options.text_type)
-}
-
-fn parse_numeric(token: &str) -> Option<f64> {
-    match token.to_ascii_lowercase().as_str() {
-        "nan" => Some(f64::NAN),
-        "inf" | "+inf" | "infinity" | "+infinity" => Some(f64::INFINITY),
-        "-inf" | "-infinity" => Some(f64::NEG_INFINITY),
-        _ => token.parse::<f64>().ok(),
-    }
-}
-
-fn parse_logical(token: &str) -> Option<bool> {
-    match token.to_ascii_lowercase().as_str() {
-        "true" | "t" | "yes" | "on" => Some(true),
-        "false" | "f" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-fn parse_duration_to_days(token: &str) -> Option<f64> {
-    parse_numeric(token).or_else(|| parse_clock_duration_to_days(token))
-}
-
-fn parse_clock_duration_to_days(token: &str) -> Option<f64> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (sign, body) = if let Some(rest) = trimmed.strip_prefix('-') {
-        (-1.0, rest)
-    } else if let Some(rest) = trimmed.strip_prefix('+') {
-        (1.0, rest)
-    } else {
-        (1.0, trimmed)
-    };
-    let parts = body.split(':').collect::<Vec<_>>();
-    let (hours, minutes, seconds) = match parts.as_slice() {
-        [hours, minutes] => (
-            hours.parse::<f64>().ok()?,
-            minutes.parse::<f64>().ok()?,
-            0.0,
-        ),
-        [hours, minutes, seconds] => (
-            hours.parse::<f64>().ok()?,
-            minutes.parse::<f64>().ok()?,
-            seconds.parse::<f64>().ok()?,
-        ),
-        _ => return None,
-    };
-    if !hours.is_finite()
-        || !minutes.is_finite()
-        || !seconds.is_finite()
-        || !(0.0..60.0).contains(&minutes)
-        || !(0.0..60.0).contains(&seconds)
-    {
-        return None;
-    }
-    Some(sign * (hours * 3600.0 + minutes * 60.0 + seconds) / 86_400.0)
-}
-
-fn parse_iso_datetime_to_datenum(token: &str) -> Option<f64> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    for format in [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y/%m/%d %H:%M:%S%.f",
-        "%m/%d/%Y %H:%M:%S%.f",
-    ] {
-        if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, format) {
-            return Some(crate::builtins::datetime::datenum_from_naive(value));
-        }
-    }
-    for format in ["%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"] {
-        if let Ok(date) = NaiveDate::parse_from_str(trimmed, format) {
-            return Some(crate::builtins::datetime::datenum_from_naive(
-                date.and_time(NaiveTime::MIN),
-            ));
-        }
-    }
-    None
-}
-
-fn unquote(token: &str) -> &str {
-    if token.len() >= 2 {
-        let bytes = token.as_bytes();
-        if (bytes[0] == b'"' && bytes[token.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[token.len() - 1] == b'\'')
-        {
-            return &token[1..token.len() - 1];
-        }
-    }
-    token
-}
-
-fn default_properties(variable_names: Vec<String>, row_names: Option<Vec<String>>) -> StructValue {
-    let mut props = StructValue::new();
-    props.insert(
-        VARIABLE_NAMES,
-        Value::StringArray(
-            StringArray::new(variable_names.clone(), vec![1, variable_names.len()])
-                .expect("VariableNames shape is valid"),
-        ),
-    );
-    props.insert(
-        ROW_NAMES,
-        row_names
-            .map(|names| {
-                Value::StringArray(
-                    StringArray::new(names.clone(), vec![names.len(), 1])
-                        .expect("RowNames shape is valid"),
-                )
-            })
-            .unwrap_or_else(|| {
-                Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap())
-            }),
-    );
-    props.insert(
-        DIMENSION_NAMES,
-        Value::StringArray(
-            StringArray::new(
-                vec![
-                    DEFAULT_ROW_DIM_NAME.to_string(),
-                    DEFAULT_VARIABLE_DIM_NAME.to_string(),
-                ],
-                vec![1, 2],
-            )
-            .expect("DimensionNames shape is valid"),
-        ),
-    );
-    props.insert(
-        VARIABLE_UNITS,
-        Value::StringArray(
-            StringArray::new(
-                vec![String::new(); variable_names.len()],
-                vec![1, variable_names.len()],
-            )
-            .expect("VariableUnits shape is valid"),
-        ),
-    );
-    props.insert(
-        VARIABLE_DESCRIPTIONS,
-        Value::StringArray(
-            StringArray::new(
-                vec![String::new(); variable_names.len()],
-                vec![1, variable_names.len()],
-            )
-            .expect("VariableDescriptions shape is valid"),
-        ),
-    );
-    props.insert(DESCRIPTION, Value::String(String::new()));
-    props.insert(USER_DATA, Value::Tensor(Tensor::zeros(vec![0, 0])));
-    props
-}
-
-pub fn table_from_columns(names: Vec<String>, columns: Vec<Value>) -> BuiltinResult<Value> {
-    table_from_columns_with_properties(names, columns, None)
-}
-
-pub(crate) fn table_from_columns_with_properties(
-    names: Vec<String>,
-    columns: Vec<Value>,
-    row_names: Option<Vec<String>>,
-) -> BuiltinResult<Value> {
-    ensure_table_class_registered();
-    if names.len() != columns.len() {
-        return Err(invalid_variable(
-            "table: number of variable names must match number of variables",
-        ));
-    }
-    let names = make_unique_names(names);
-    let height = validate_column_heights(&names, &columns)?;
-    if let Some(row_names) = &row_names {
-        if row_names.len() != height {
-            return Err(invalid_variable(
-                "table: number of row names must match table height",
-            ));
-        }
-    }
-    let mut variables = StructValue::new();
-    for (name, value) in names.iter().cloned().zip(columns) {
-        variables.insert(name, value);
-    }
-    let props = default_properties(names, row_names);
-    let mut object = ObjectInstance::new(TABLE_CLASS.to_string());
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
-    object.properties.insert(
-        TABLE_PROPERTIES_FIELD.to_string(),
-        Value::Struct(props.clone()),
-    );
-    object
-        .properties
-        .insert(PROPERTIES_MEMBER.to_string(), Value::Struct(props));
-    Ok(Value::Object(object))
-}
-
-fn validate_column_heights(names: &[String], columns: &[Value]) -> BuiltinResult<usize> {
-    if columns.is_empty() {
-        return Ok(0);
-    }
-    let height = value_row_count(&columns[0])?;
-    for (name, value) in names.iter().zip(columns) {
-        let rows = value_row_count(value)?;
-        if rows != height {
-            return Err(invalid_variable(format!(
-                "table: variable '{name}' has {rows} rows but expected {height}"
-            )));
-        }
-    }
-    Ok(height)
-}
-
-pub fn is_table_value(value: &Value) -> bool {
-    table_object(value).is_some()
-}
-
-fn table_object(value: &Value) -> Option<&ObjectInstance> {
-    match value {
-        Value::Object(object) if object.is_class(TABLE_CLASS) => Some(object),
-        _ => None,
-    }
-}
-
-fn into_table_object(value: Value, context: &str) -> BuiltinResult<ObjectInstance> {
-    match value {
-        Value::Object(object) if object.is_class(TABLE_CLASS) => Ok(object),
-        other => Err(invalid_argument(format!(
-            "{context}: expected table, got {other:?}"
-        ))),
-    }
-}
-
-pub fn table_variables(object: &ObjectInstance) -> BuiltinResult<StructValue> {
-    match object.properties.get(TABLE_VARIABLES_FIELD) {
-        Some(Value::Struct(st)) => Ok(st.clone()),
-        Some(other) => Err(invalid_variable(format!(
-            "table: invalid internal variable storage {other:?}"
-        ))),
-        None => Ok(StructValue::new()),
-    }
-}
-
-pub fn table_variable_names_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
-    let variables = table_variables(object)?;
-    Ok(variables.fields.keys().cloned().collect())
-}
-
-pub fn table_height(object: &ObjectInstance) -> BuiltinResult<usize> {
-    let variables = table_variables(object)?;
-    match variables.fields.values().next() {
-        Some(value) => value_row_count(value),
-        None => Ok(0),
-    }
-}
-
-pub fn table_width(object: &ObjectInstance) -> BuiltinResult<usize> {
-    table_variables(object).map(|vars| vars.fields.len())
-}
-
-fn table_public_properties(object: &ObjectInstance) -> BuiltinResult<StructValue> {
-    match object
-        .properties
-        .get(TABLE_PROPERTIES_FIELD)
-        .or_else(|| object.properties.get(PROPERTIES_MEMBER))
-    {
-        Some(Value::Struct(st)) => Ok(st.clone()),
-        Some(other) => Err(invalid_variable(format!(
-            "table: invalid Properties storage {other:?}"
-        ))),
-        None => Ok(default_properties(
-            table_variable_names_from_object(object)?,
-            None,
-        )),
-    }
-}
-
-fn sync_table_properties(object: &mut ObjectInstance, props: StructValue) {
-    object.properties.insert(
-        TABLE_PROPERTIES_FIELD.to_string(),
-        Value::Struct(props.clone()),
-    );
-    object
-        .properties
-        .insert(PROPERTIES_MEMBER.to_string(), Value::Struct(props));
-}
-
-fn table_member_get(object: &ObjectInstance, payload: &Value) -> BuiltinResult<Value> {
-    let name = scalar_text(payload, "table member")?;
-    if name == PROPERTIES_MEMBER {
-        return Ok(Value::Struct(table_public_properties(object)?));
-    }
-    let variables = table_variables(object)?;
-    variables
-        .fields
-        .get(&name)
-        .cloned()
-        .ok_or_else(|| invalid_variable(format!("table: unrecognized variable '{name}'")))
-}
-
-fn table_member_set(object: &mut ObjectInstance, field: &str, rhs: Value) -> BuiltinResult<()> {
-    if field == PROPERTIES_MEMBER {
-        let Value::Struct(props) = rhs else {
-            return Err(invalid_variable(
-                "table: Properties assignment expects a scalar struct",
-            ));
-        };
-        apply_properties(object, props)?;
-        return Ok(());
-    }
-    let mut variables = table_variables(object)?;
-    let mut names = table_variable_names_from_object(object)?;
-    let height = table_height(object)?;
-    let rhs_rows = value_row_count(&rhs)?;
-    if !variables.fields.is_empty() && rhs_rows != height {
-        return Err(invalid_variable(format!(
-            "table: variable '{field}' has {rhs_rows} rows but table has {height}"
-        )));
-    }
-    if !variables.fields.contains_key(field) {
-        names.push(field.to_string());
-    }
-    variables.insert(field.to_string(), rhs);
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
-    let mut props = table_public_properties(object)?;
-    update_variable_metadata_names(&mut props, names)?;
-    sync_table_properties(object, props);
-    Ok(())
-}
-
-fn apply_properties(object: &mut ObjectInstance, mut props: StructValue) -> BuiltinResult<()> {
-    if let Some(value) = props.fields.get(VARIABLE_NAMES) {
-        let names = variable_name_list(value)?;
-        rename_table_variables(object, names.clone())?;
-        update_variable_metadata_names(&mut props, names)?;
-    }
-    sync_table_properties(object, props);
-    Ok(())
-}
-
-fn rename_table_variables(
-    object: &mut ObjectInstance,
-    new_names: Vec<String>,
-) -> BuiltinResult<()> {
-    let old_names = table_variable_names_from_object(object)?;
-    if old_names.len() != new_names.len() {
-        return Err(invalid_variable(
-            "table: VariableNames assignment must preserve variable count",
-        ));
-    }
-    let new_names = make_unique_variable_names(new_names);
-    let variables = table_variables(object)?;
-    let mut renamed = StructValue::new();
-    for (old, new) in old_names.iter().zip(new_names.iter()) {
-        let value = variables
-            .fields
-            .get(old)
-            .cloned()
-            .ok_or_else(|| invalid_variable(format!("table: missing variable '{old}'")))?;
-        renamed.insert(new.clone(), value);
-    }
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(renamed));
-    Ok(())
-}
-
-fn update_variable_metadata_names(
-    props: &mut StructValue,
-    names: Vec<String>,
-) -> BuiltinResult<()> {
-    props.insert(
-        VARIABLE_NAMES,
-        Value::StringArray(
-            StringArray::new(names.clone(), vec![1, names.len()])
-                .map_err(|err| invalid_variable(format!("table: {err}")))?,
-        ),
-    );
-    for field in [VARIABLE_UNITS, VARIABLE_DESCRIPTIONS] {
-        let existing = props.fields.get(field).cloned();
-        let values = match existing {
-            Some(Value::StringArray(mut array)) => {
-                array.data.resize(names.len(), String::new());
-                array.data.truncate(names.len());
-                array.data
-            }
-            _ => vec![String::new(); names.len()],
-        };
-        props.insert(
-            field,
-            Value::StringArray(
-                StringArray::new(values, vec![1, names.len()])
-                    .map_err(|err| invalid_variable(format!("table: {err}")))?,
-            ),
-        );
-    }
-    Ok(())
-}
-
-fn table_paren_get(object: &ObjectInstance, payload: &Value) -> BuiltinResult<Value> {
-    let selectors = selector_values(payload)?;
-    let rows = parse_row_selector(selectors.first(), table_height(object)?)?;
-    let variable_names = table_variable_names_from_object(object)?;
-    let selected_names = parse_variable_selector(selectors.get(1), &variable_names)?;
-    let variables = table_variables(object)?;
-    let mut out = Vec::with_capacity(selected_names.len());
-    for name in &selected_names {
-        let value = variables
-            .fields
-            .get(name)
-            .ok_or_else(|| invalid_variable(format!("table: missing variable '{name}'")))?;
-        out.push(select_rows(value, &rows)?);
-    }
-    let row_names = selected_row_names(object, &rows)?;
-    table_from_columns_with_properties(selected_names, out, row_names)
-}
-
-fn table_brace_get(object: &ObjectInstance, payload: &Value) -> BuiltinResult<Value> {
-    let subset = table_paren_get(object, payload)?;
-    let object = into_table_object(subset, "table brace indexing")?;
-    let variables = table_variables(&object)?;
-    if variables.fields.len() == 1 {
-        return variables
-            .fields
-            .values()
-            .next()
-            .cloned()
-            .ok_or_else(|| invalid_variable("table: missing selected variable"));
-    }
-    let values = variables.fields.values().collect::<Vec<_>>();
-    if values.iter().all(|value| matches!(value, Value::Tensor(_))) {
-        return concatenate_numeric_columns(&values);
-    }
-    CellArray::new(
-        values.into_iter().cloned().collect(),
-        1,
-        variables.fields.len(),
-    )
-    .map(Value::Cell)
-    .map_err(|err| invalid_variable(format!("table: {err}")))
-}
-
-fn table_paren_assign(
-    mut object: ObjectInstance,
-    payload: &Value,
-    rhs: Value,
-) -> BuiltinResult<Value> {
-    let rhs_table = into_table_object(rhs, "table paren assignment")?;
-    let selectors = selector_values(payload)?;
-    let rows = parse_row_selector(selectors.first(), table_height(&object)?)?;
-    let variable_names = table_variable_names_from_object(&object)?;
-    let selected_names = parse_variable_selector(selectors.get(1), &variable_names)?;
-    let rhs_names = table_variable_names_from_object(&rhs_table)?;
-    if selected_names.len() != rhs_names.len() {
-        return Err(invalid_variable(
-            "table: assignment variable count must match selected variables",
-        ));
-    }
-    let mut variables = table_variables(&object)?;
-    let rhs_variables = table_variables(&rhs_table)?;
-    for (target_name, rhs_name) in selected_names.iter().zip(rhs_names.iter()) {
-        let current =
-            variables.fields.get(target_name).cloned().ok_or_else(|| {
-                invalid_variable(format!("table: missing variable '{target_name}'"))
-            })?;
-        let rhs_col =
-            rhs_variables.fields.get(rhs_name).cloned().ok_or_else(|| {
-                invalid_variable(format!("table: missing rhs variable '{rhs_name}'"))
-            })?;
-        variables.insert(target_name.clone(), assign_rows(current, &rows, rhs_col)?);
-    }
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
-    Ok(Value::Object(object))
-}
-
-fn table_brace_assign(
-    mut object: ObjectInstance,
-    payload: &Value,
-    rhs: Value,
-) -> BuiltinResult<Value> {
-    let selectors = selector_values(payload)?;
-    let rows = parse_row_selector(selectors.first(), table_height(&object)?)?;
-    let variable_names = table_variable_names_from_object(&object)?;
-    let selected_names = parse_variable_selector(selectors.get(1), &variable_names)?;
-    if selected_names.len() != 1 {
-        return Err(invalid_variable(
-            "table: brace assignment supports one variable at a time",
-        ));
-    }
-    let mut variables = table_variables(&object)?;
-    let target = selected_names[0].clone();
-    let current = variables
-        .fields
-        .get(&target)
-        .cloned()
-        .ok_or_else(|| invalid_variable(format!("table: missing variable '{target}'")))?;
-    variables.insert(target, assign_rows(current, &rows, rhs)?);
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
-    Ok(Value::Object(object))
-}
-
-fn selector_values(payload: &Value) -> BuiltinResult<Vec<Value>> {
-    match payload {
-        Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for handle in &cell.data {
-                out.push(handle.clone());
-            }
-            Ok(out)
-        }
-        other => Ok(vec![other.clone()]),
-    }
-}
-
-fn parse_row_selector(selector: Option<&Value>, height: usize) -> BuiltinResult<Vec<usize>> {
-    let Some(selector) = selector else {
-        return Ok((0..height).collect());
-    };
-    if is_colon_selector(selector) {
-        return Ok((0..height).collect());
-    }
-    if is_end_selector(selector) {
-        return if height == 0 {
-            Err(invalid_index(
-                "table: end row index is invalid for empty table",
-            ))
-        } else {
-            Ok(vec![height - 1])
-        };
-    }
-    match selector {
-        Value::Num(n) => Ok(vec![one_based_to_zero(*n, height, "row")?]),
-        Value::Int(i) => Ok(vec![one_based_to_zero(i.to_f64(), height, "row")?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| one_based_to_zero(*value, height, "row"))
-            .collect(),
-        Value::LogicalArray(array) => {
-            if array.data.len() != height {
-                return Err(invalid_index(
-                    "table: logical row selector length must match table height",
-                ));
-            }
-            Ok(array
-                .data
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, value)| (*value != 0).then_some(idx))
-                .collect())
-        }
-        other => Err(invalid_index(format!(
-            "table: unsupported row selector {other:?}"
-        ))),
-    }
-}
-
-fn parse_variable_selector(
-    selector: Option<&Value>,
-    names: &[String],
-) -> BuiltinResult<Vec<String>> {
-    let Some(selector) = selector else {
-        return Ok(names.to_vec());
-    };
-    if is_colon_selector(selector) {
-        return Ok(names.to_vec());
-    }
-    match selector {
-        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) | Value::Cell(_) => {
-            let selected = string_list(selector)?;
-            for name in &selected {
-                if !names.contains(name) {
-                    return Err(invalid_variable(format!(
-                        "table: unrecognized variable '{name}'"
-                    )));
-                }
-            }
-            Ok(selected)
-        }
-        Value::Num(n) => Ok(vec![name_at_index(names, *n)?]),
-        Value::Int(i) => Ok(vec![name_at_index(names, i.to_f64())?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| name_at_index(names, *value))
-            .collect(),
-        Value::LogicalArray(array) => {
-            if array.data.len() != names.len() {
-                return Err(invalid_index(
-                    "table: logical variable selector length must match table width",
-                ));
-            }
-            Ok(array
-                .data
-                .iter()
-                .zip(names.iter())
-                .filter_map(|(flag, name)| (*flag != 0).then_some(name.clone()))
-                .collect())
-        }
-        other => Err(invalid_index(format!(
-            "table: unsupported variable selector {other:?}"
-        ))),
-    }
-}
-
-fn is_colon_selector(value: &Value) -> bool {
-    scalar_text(value, "selector")
-        .map(|text| text == ":")
-        .unwrap_or(false)
-}
-
-fn is_end_selector(value: &Value) -> bool {
-    scalar_text(value, "selector")
-        .map(|text| text == "end")
-        .unwrap_or(false)
-}
-
-fn name_at_index(names: &[String], value: f64) -> BuiltinResult<String> {
-    let idx = one_based_to_zero(value, names.len(), "variable")?;
-    Ok(names[idx].clone())
-}
-
-fn one_based_to_zero(value: f64, len: usize, context: &str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || (value.round() - value).abs() > f64::EPSILON {
-        return Err(invalid_index(format!(
-            "table: {context} indices must be positive finite integers"
-        )));
-    }
-    let idx = value.round() as usize - 1;
-    if idx >= len {
-        return Err(invalid_index(format!(
-            "table: {context} index exceeds bounds"
-        )));
-    }
-    Ok(idx)
-}
-
-pub(crate) fn selected_row_names(
-    object: &ObjectInstance,
-    rows: &[usize],
-) -> BuiltinResult<Option<Vec<String>>> {
-    let props = table_public_properties(object)?;
-    let Some(value) = props.fields.get(ROW_NAMES) else {
-        return Ok(None);
-    };
-    let names = string_list(value)?;
-    if names.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(
-        rows.iter()
-            .filter_map(|row| names.get(*row).cloned())
-            .collect(),
-    ))
-}
-
-pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Tensor(tensor) => Ok(tensor.rows()),
-        Value::ComplexTensor(tensor) => Ok(tensor.rows),
-        Value::StringArray(array) => Ok(array.rows()),
-        Value::LogicalArray(array) => Ok(array.shape.first().copied().unwrap_or(array.data.len())),
-        Value::Cell(cell) => Ok(cell.rows),
-        Value::CharArray(array) => Ok(array.rows),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            crate::builtins::datetime::serials_from_datetime_value(value)
-                .map(|tensor| tensor.rows())
-        }
-        Value::Object(obj) if obj.is_class("duration") => {
-            crate::builtins::duration::duration_tensor_from_duration_value(value)
-                .map(|tensor| tensor.rows())
-        }
-        Value::Object(obj) if obj.is_class(TABLE_CLASS) => table_height(obj),
-        _ => Ok(1),
-    }
-}
-
-pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
-    match value {
-        Value::Tensor(tensor) => {
-            let cols = tensor.cols();
-            let mut data = Vec::with_capacity(rows.len() * cols);
-            for col in 0..cols {
-                for &row in rows {
-                    data.push(tensor.get2(row, col).map_err(invalid_index)?);
-                }
-            }
-            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.dtype)
-                .map(Value::Tensor)
-                .map_err(invalid_variable)
-        }
-        Value::ComplexTensor(tensor) => {
-            let mut data = Vec::with_capacity(rows.len() * tensor.cols);
-            for col in 0..tensor.cols {
-                for &row in rows {
-                    let idx = row + col * tensor.rows;
-                    data.push(*tensor.data.get(idx).ok_or_else(|| {
-                        invalid_index("table: complex variable row index out of bounds")
-                    })?);
-                }
-            }
-            ComplexTensor::new(data, vec![rows.len(), tensor.cols])
-                .map(Value::ComplexTensor)
-                .map_err(invalid_variable)
-        }
-        Value::StringArray(array) => {
-            let cols = array.cols();
-            let mut data = Vec::with_capacity(rows.len() * cols);
-            for col in 0..cols {
-                for &row in rows {
-                    let idx = row + col * array.rows();
-                    data.push(array.data.get(idx).cloned().ok_or_else(|| {
-                        invalid_index("table: string variable row index out of bounds")
-                    })?);
-                }
-            }
-            StringArray::new(data, vec![rows.len(), cols])
-                .map(Value::StringArray)
-                .map_err(invalid_variable)
-        }
-        Value::CharArray(array) => {
-            let mut data = Vec::with_capacity(rows.len() * array.cols);
-            for &row in rows {
-                if row >= array.rows {
-                    return Err(invalid_index(
-                        "table: char variable row index out of bounds",
-                    ));
-                }
-                let start = row * array.cols;
-                data.extend_from_slice(&array.data[start..start + array.cols]);
-            }
-            CharArray::new(data, rows.len(), array.cols)
-                .map(Value::CharArray)
-                .map_err(invalid_variable)
-        }
-        Value::LogicalArray(array) => {
-            let source_rows = array.shape.first().copied().unwrap_or(array.data.len());
-            let cols = array.shape.get(1).copied().unwrap_or(1);
-            let mut data = Vec::with_capacity(rows.len() * cols);
-            for col in 0..cols {
-                for &row in rows {
-                    let idx = row + col * source_rows;
-                    data.push(*array.data.get(idx).ok_or_else(|| {
-                        invalid_index("table: logical variable row index out of bounds")
-                    })?);
-                }
-            }
-            LogicalArray::new(data, vec![rows.len(), cols])
-                .map(Value::LogicalArray)
-                .map_err(invalid_variable)
-        }
-        Value::Cell(cell) => {
-            let mut data = Vec::with_capacity(rows.len() * cell.cols);
-            for col in 0..cell.cols {
-                for &row in rows {
-                    data.push(cell.get(row, col).map_err(invalid_index)?);
-                }
-            }
-            CellArray::new(data, rows.len(), cell.cols)
-                .map(Value::Cell)
-                .map_err(invalid_variable)
-        }
-        Value::Object(obj) if obj.is_class("datetime") => {
-            let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            let selected = select_rows(&Value::Tensor(tensor), rows)?;
-            match selected {
-                Value::Tensor(tensor) => {
-                    crate::builtins::datetime::datetime_object_from_serial_tensor(
-                        tensor,
-                        crate::builtins::datetime::datetime_format_from_value(value),
-                    )
-                }
-                _ => unreachable!("select_rows tensor branch returns tensor"),
-            }
-        }
-        Value::Object(obj) if obj.is_class("duration") => {
-            let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
-            let selected = select_rows(&Value::Tensor(tensor), rows)?;
-            match selected {
-                Value::Tensor(tensor) => {
-                    crate::builtins::duration::duration_object_from_days_tensor(
-                        tensor,
-                        crate::builtins::duration::duration_format_from_value(value),
-                    )
-                }
-                _ => unreachable!("select_rows tensor branch returns tensor"),
-            }
-        }
-        _ if rows.len() == 1 && rows[0] == 0 => Ok(value.clone()),
-        other => Err(invalid_variable(format!(
-            "table: row selection unsupported for variable {other:?}"
-        ))),
-    }
-}
-
-fn assign_rows(mut current: Value, rows: &[usize], rhs: Value) -> BuiltinResult<Value> {
-    if value_row_count(&rhs)? != rows.len() {
-        return Err(invalid_variable(
-            "table: assignment row count must match selected row count",
-        ));
-    }
-    let replacing_all_rows = rows.len() == value_row_count(&current)?;
-    match (&mut current, rhs) {
-        (Value::Tensor(target), Value::Tensor(source)) => {
-            if target.cols() != source.cols() {
-                return Err(invalid_variable(
-                    "table: tensor assignment column count mismatch",
-                ));
-            }
-            for col in 0..target.cols() {
-                for (src_row, &dst_row) in rows.iter().enumerate() {
-                    let value = source.get2(src_row, col).map_err(invalid_index)?;
-                    target.set2(dst_row, col, value).map_err(invalid_index)?;
-                }
-            }
-            Ok(current)
-        }
-        (_, source) if replacing_all_rows => Ok(source),
-        _ => Err(invalid_variable(
-            "table: assignment for this variable type requires replacing all rows",
-        )),
-    }
-}
-
-fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Value> {
-    let rows = values
-        .first()
-        .and_then(|value| match value {
-            Value::Tensor(t) => Some(t.rows()),
-            _ => None,
-        })
-        .unwrap_or(0);
-    let cols = values
-        .iter()
-        .map(|value| match value {
-            Value::Tensor(t) => Ok(t.cols()),
-            _ => Err(invalid_variable("table: expected numeric variable")),
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    let total_cols: usize = cols.iter().sum();
-    let mut data = Vec::with_capacity(rows * total_cols);
-    for value in values {
-        let Value::Tensor(tensor) = value else {
-            return Err(invalid_variable("table: expected numeric variable"));
-        };
-        for col in 0..tensor.cols() {
-            for row in 0..rows {
-                data.push(tensor.get2(row, col).map_err(invalid_index)?);
-            }
-        }
-    }
-    Tensor::new(data, vec![rows, total_cols])
-        .map(Value::Tensor)
-        .map_err(invalid_variable)
-}
-
-pub fn sortrows_table(value: Value, rest: &[Value]) -> BuiltinResult<(Value, Tensor)> {
-    let object = into_table_object(value, "sortrows")?;
-    let names = table_variable_names_from_object(&object)?;
-    let sort_spec = SortSpec::parse(rest, &names)?;
-    let height = table_height(&object)?;
-    let variables = table_variables(&object)?;
-    let mut indices: Vec<usize> = (0..height).collect();
-    indices.sort_by(|&a, &b| {
-        for key in &sort_spec.keys {
-            let Some(value) = variables.fields.get(&key.name) else {
-                continue;
-            };
-            let ord = compare_table_cells(value, a, b).unwrap_or(Ordering::Equal);
-            let ord = if key.descending { ord.reverse() } else { ord };
-            if ord != Ordering::Equal {
-                return ord;
-            }
-        }
-        a.cmp(&b)
-    });
-    let mut sorted_columns = Vec::with_capacity(names.len());
-    for name in &names {
-        let value = variables
-            .fields
-            .get(name)
-            .ok_or_else(|| invalid_variable(format!("table: missing variable '{name}'")))?;
-        sorted_columns.push(select_rows(value, &indices)?);
-    }
-    let row_names = selected_row_names(&object, &indices)?;
-    let sorted = table_from_columns_with_properties(names, sorted_columns, row_names)?;
-    let indices_tensor = Tensor::new(
-        indices.iter().map(|idx| *idx as f64 + 1.0).collect(),
-        vec![indices.len(), 1],
-    )
-    .map_err(invalid_variable)?;
-    Ok((sorted, indices_tensor))
-}
-
-struct SortSpec {
-    keys: Vec<SortKey>,
-}
-
-struct SortKey {
-    name: String,
-    descending: bool,
-}
-
-impl SortSpec {
-    fn parse(rest: &[Value], names: &[String]) -> BuiltinResult<Self> {
-        let mut keys = if rest.is_empty() {
-            names
-                .iter()
-                .map(|name| SortKey {
-                    name: name.clone(),
-                    descending: false,
-                })
-                .collect::<Vec<_>>()
-        } else {
-            parse_variable_selector(rest.first(), names)?
-                .into_iter()
-                .map(|name| SortKey {
-                    name,
-                    descending: false,
-                })
-                .collect()
-        };
-        if let Some(direction) = rest.get(1) {
-            let directions = string_list(direction)?;
-            if directions.len() == 1 {
-                let descending = directions[0].eq_ignore_ascii_case("descend")
-                    || directions[0].eq_ignore_ascii_case("desc");
-                for key in &mut keys {
-                    key.descending = descending;
-                }
-            } else {
-                for (key, direction) in keys.iter_mut().zip(directions.iter()) {
-                    key.descending = direction.eq_ignore_ascii_case("descend")
-                        || direction.eq_ignore_ascii_case("desc");
-                }
-            }
-        }
-        Ok(Self { keys })
-    }
-}
-
-fn compare_table_cells(value: &Value, a: usize, b: usize) -> BuiltinResult<Ordering> {
-    match value {
-        Value::Tensor(tensor) => Ok(tensor
-            .get2(a, 0)
-            .map_err(invalid_index)?
-            .partial_cmp(&tensor.get2(b, 0).map_err(invalid_index)?)
-            .unwrap_or(Ordering::Greater)),
-        Value::StringArray(array) => {
-            let av = array.data.get(a).cloned().unwrap_or_default();
-            let bv = array.data.get(b).cloned().unwrap_or_default();
-            Ok(av.cmp(&bv))
-        }
-        Value::LogicalArray(array) => {
-            let av = *array.data.get(a).unwrap_or(&0);
-            let bv = *array.data.get(b).unwrap_or(&0);
-            Ok(av.cmp(&bv))
-        }
-        Value::Object(obj) if obj.is_class("datetime") => {
-            let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            Ok(tensor
-                .data
-                .get(a)
-                .copied()
-                .unwrap_or(f64::NAN)
-                .partial_cmp(&tensor.data.get(b).copied().unwrap_or(f64::NAN))
-                .unwrap_or(Ordering::Greater))
-        }
-        other => Ok(cell_key_string(other, a).cmp(&cell_key_string(other, b))),
-    }
-}
-
-#[derive(Clone, Debug)]
-enum GroupAtom {
-    Number(f64),
-    Text(String),
-    Logical(bool),
-    Missing,
-}
-
-impl GroupAtom {
-    fn rank(&self) -> u8 {
-        match self {
-            Self::Missing => 0,
-            Self::Logical(_) => 1,
-            Self::Number(_) => 2,
-            Self::Text(_) => 3,
-        }
-    }
-}
-
-impl PartialEq for GroupAtom {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for GroupAtom {}
-
-impl PartialOrd for GroupAtom {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for GroupAtom {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let rank = self.rank().cmp(&other.rank());
-        if rank != Ordering::Equal {
-            return rank;
-        }
-        match (self, other) {
-            (Self::Missing, Self::Missing) => Ordering::Equal,
-            (Self::Logical(a), Self::Logical(b)) => a.cmp(b),
-            (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
-            (Self::Text(a), Self::Text(b)) => a.cmp(b),
-            _ => Ordering::Equal,
-        }
-    }
-}
-
-fn cell_group_atom(value: &Value, row: usize) -> GroupAtom {
-    match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(GroupAtom::Number)
-            .unwrap_or(GroupAtom::Missing),
-        Value::StringArray(array) => array
-            .data
-            .get(row)
-            .cloned()
-            .map(GroupAtom::Text)
-            .unwrap_or(GroupAtom::Missing),
-        Value::LogicalArray(array) => array
-            .data
-            .get(row)
-            .map(|value| GroupAtom::Logical(*value != 0))
-            .unwrap_or(GroupAtom::Missing),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            crate::builtins::datetime::serials_from_datetime_value(value)
-                .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
-                .map(GroupAtom::Number)
-                .unwrap_or(GroupAtom::Missing)
-        }
-        other => GroupAtom::Text(cell_key_string(other, row)),
-    }
-}
-
-fn groupsummary_impl(
-    table: Value,
-    groupvars: Value,
-    method: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Value> {
-    let object = into_table_object(table, "groupsummary")?;
-    let names = table_variable_names_from_object(&object)?;
-    let group_names = parse_variable_selector(Some(&groupvars), &names)?;
-    let methods = string_list(&method)?;
-    if methods.is_empty() {
-        return Err(invalid_argument(
-            "groupsummary: method list must not be empty",
-        ));
-    }
-    let data_names = if let Some(value) = rest.first() {
-        parse_variable_selector(Some(value), &names)?
-    } else {
-        names
-            .iter()
-            .filter(|name| !group_names.contains(name))
-            .filter(|name| {
-                table_variables(&object)
-                    .ok()
-                    .and_then(|vars| vars.fields.get(*name).cloned())
-                    .map(|value| matches!(value, Value::Tensor(_)))
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect()
-    };
-    let variables = table_variables(&object)?;
-    let height = table_height(&object)?;
-    let mut groups: BTreeMap<Vec<GroupAtom>, Vec<usize>> = BTreeMap::new();
-    for row in 0..height {
-        let key = group_names
-            .iter()
-            .map(|name| {
-                variables
-                    .fields
-                    .get(name)
-                    .map(|value| cell_group_atom(value, row))
-                    .unwrap_or(GroupAtom::Missing)
-            })
-            .collect::<Vec<_>>();
-        groups.entry(key).or_default().push(row);
-    }
-    let group_rows = groups
-        .values()
-        .filter_map(|rows| rows.first().copied())
-        .collect::<Vec<_>>();
-    let mut out_names = Vec::new();
-    let mut out_columns = Vec::new();
-    for name in &group_names {
-        let value = variables.fields.get(name).ok_or_else(|| {
-            invalid_variable(format!("groupsummary: missing group variable '{name}'"))
-        })?;
-        out_names.push(name.clone());
-        out_columns.push(select_rows(value, &group_rows)?);
-    }
-    out_names.push("GroupCount".to_string());
-    out_columns.push(Value::Tensor(
-        Tensor::new(
-            groups.values().map(|rows| rows.len() as f64).collect(),
-            vec![groups.len(), 1],
-        )
-        .map_err(invalid_variable)?,
-    ));
-    for method in &methods {
-        for name in &data_names {
-            let value = variables.fields.get(name).ok_or_else(|| {
-                invalid_variable(format!("groupsummary: missing data variable '{name}'"))
-            })?;
-            let values = summarize_groups(value, groups.values(), method)?;
-            out_names.push(format!("{}_{}", method.to_ascii_lowercase(), name));
-            out_columns.push(Value::Tensor(
-                Tensor::new(values, vec![groups.len(), 1]).map_err(invalid_variable)?,
-            ));
-        }
-    }
-    table_from_columns(out_names, out_columns)
-}
-
-fn summarize_groups<'a>(
-    value: &Value,
-    groups: impl Iterator<Item = &'a Vec<usize>>,
-    method: &str,
-) -> BuiltinResult<Vec<f64>> {
-    let tensor = match value {
-        Value::Tensor(tensor) if tensor.cols() == 1 => tensor,
-        _ => {
-            return Err(invalid_variable(
-                "groupsummary: summary data variables must be numeric column vectors",
-            ))
-        }
-    };
-    groups
-        .map(|rows| {
-            let mut values = rows
-                .iter()
-                .map(|row| tensor.get2(*row, 0).map_err(invalid_index))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            values.retain(|value| !value.is_nan());
-            let result = match method.to_ascii_lowercase().as_str() {
-                "mean" => {
-                    if values.is_empty() {
-                        f64::NAN
-                    } else {
-                        values.iter().sum::<f64>() / values.len() as f64
-                    }
-                }
-                "sum" => values.iter().sum(),
-                "min" => values.into_iter().fold(f64::INFINITY, f64::min),
-                "max" => values.into_iter().fold(f64::NEG_INFINITY, f64::max),
-                "median" => {
-                    if values.is_empty() {
-                        f64::NAN
-                    } else {
-                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-                        let mid = values.len() / 2;
-                        if values.len() % 2 == 0 {
-                            (values[mid - 1] + values[mid]) / 2.0
-                        } else {
-                            values[mid]
-                        }
-                    }
-                }
-                "count" | "numel" => values.len() as f64,
-                other => {
-                    return Err(invalid_argument(format!(
-                        "groupsummary: unsupported method '{other}'"
-                    )))
-                }
-            };
-            Ok(result)
-        })
-        .collect()
-}
-
-fn cell_key_string(value: &Value, row: usize) -> String {
-    match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(format_key_number)
-            .unwrap_or_default(),
-        Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
-        Value::LogicalArray(array) => array
-            .data
-            .get(row)
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            crate::builtins::datetime::serials_from_datetime_value(value)
-                .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
-                .map(format_key_number)
-                .unwrap_or_default()
-        }
-        other => format!("{other}"),
-    }
-}
-
-pub fn table_display_text(value: &Value) -> BuiltinResult<String> {
-    let object = match value {
-        Value::Object(object) if object.is_class(TABLE_CLASS) => object,
-        _ => return Err(invalid_argument("table display expects table object")),
-    };
-    let names = table_variable_names_from_object(object)?;
-    let variables = table_variables(object)?;
-    let rows = table_height(object)?;
-    let preview = rows.min(12);
-    let mut widths = names.iter().map(|name| name.len()).collect::<Vec<_>>();
-    let rendered_cols = names
-        .iter()
-        .enumerate()
-        .map(|(col, name)| {
-            let value = variables
-                .fields
-                .get(name)
+#[runtime_builtin(
+    name = "dictionary.subsref",
+    descriptor(crate::builtins::table::TABLE_SUBSREF_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn dictionary_subsref(obj: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
+    let object = into_dictionary_object(obj, "dictionary.subsref")?;
+    match kind.as_str() {
+        OBJECT_INDEX_MEMBER => {
+            let field = scalar_text(&payload, "dictionary member")?;
+            object
+                .properties
+                .get(&field)
                 .cloned()
-                .unwrap_or_else(|| Value::String(String::new()));
-            let cells = (0..preview)
-                .map(|row| render_table_cell(&value, row))
-                .collect::<Vec<_>>();
-            for cell in &cells {
-                widths[col] = widths[col].max(cell.len());
+                .ok_or_else(|| invalid_variable(format!("dictionary: unknown property '{field}'")))
+        }
+        OBJECT_INDEX_PAREN | OBJECT_INDEX_BRACE => dictionary_lookup(&object, &payload),
+        other => Err(invalid_index(format!(
+            "dictionary.subsref: unsupported indexing kind '{other}'"
+        ))),
+    }
+}
+
+#[runtime_builtin(
+    name = "dictionary.subsasgn",
+    descriptor(crate::builtins::table::TABLE_SUBSASGN_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn dictionary_subsasgn(
+    obj: Value,
+    kind: String,
+    payload: Value,
+    rhs: Value,
+) -> BuiltinResult<Value> {
+    let mut object = into_dictionary_object(obj, "dictionary.subsasgn")?;
+    match kind.as_str() {
+        OBJECT_INDEX_MEMBER => {
+            let field = scalar_text(&payload, "dictionary member")?;
+            if field != "Keys" && field != "Values" {
+                return Err(invalid_variable(format!(
+                    "dictionary: unknown property '{field}'"
+                )));
             }
-            cells
-        })
-        .collect::<Vec<_>>();
-
-    let mut lines = Vec::new();
-    lines.push(format!("{rows}x{} table", names.len()));
-    if names.is_empty() {
-        return Ok(lines.join("\n"));
-    }
-    let header = names
-        .iter()
-        .enumerate()
-        .map(|(idx, name)| format!("{name:<width$}", width = widths[idx]))
-        .collect::<Vec<_>>()
-        .join("  ");
-    lines.push(header);
-    for row in 0..preview {
-        lines.push(
-            rendered_cols
-                .iter()
-                .enumerate()
-                .map(|(col, cells)| format!("{:<width$}", cells[row], width = widths[col]))
-                .collect::<Vec<_>>()
-                .join("  "),
-        );
-    }
-    if preview < rows {
-        lines.push(format!("... {} more rows", rows - preview));
-    }
-    Ok(lines.join("\n"))
-}
-
-pub fn table_summary_text(value: &Value) -> BuiltinResult<String> {
-    let object = match value {
-        Value::Object(object) if object.is_class(TABLE_CLASS) => object,
-        _ => return Err(invalid_argument("table display expects table object")),
-    };
-    Ok(format!(
-        "{}x{} table",
-        table_height(object)?,
-        table_width(object)?
-    ))
-}
-
-fn render_table_cell(value: &Value, row: usize) -> String {
-    match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(format_table_number)
-            .unwrap_or_default(),
-        Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
-        Value::LogicalArray(array) => array
-            .data
-            .get(row)
-            .map(|value| if *value != 0 { "true" } else { "false" }.to_string())
-            .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            crate::builtins::datetime::datetime_string_array(value)
-                .ok()
-                .flatten()
-                .and_then(|array| array.data.get(row).cloned())
-                .unwrap_or_else(|| value.to_string())
+            object.properties.insert(field, rhs);
+            Ok(Value::Object(object))
         }
-        other => other.to_string(),
+        OBJECT_INDEX_PAREN | OBJECT_INDEX_BRACE => dictionary_assign(object, &payload, rhs),
+        other => Err(invalid_index(format!(
+            "dictionary.subsasgn: unsupported indexing kind '{other}'"
+        ))),
     }
-}
-
-fn format_table_number(value: f64) -> String {
-    if value.is_nan() {
-        "NaN".to_string()
-    } else if value.fract() == 0.0 && value.abs() < 1e15 {
-        format!("{}", value as i64)
-    } else {
-        trim_float(format!("{value:.6}"))
-    }
-}
-
-fn format_key_number(value: f64) -> String {
-    if value.is_nan() {
-        "NaN".to_string()
-    } else if value.is_infinite() {
-        value.to_string()
-    } else {
-        trim_float(format!("{value:.17}"))
-    }
-}
-
-fn trim_float(mut text: String) -> String {
-    if let Some(dot) = text.find('.') {
-        let mut end = text.len();
-        while end > dot + 1 && text.as_bytes()[end - 1] == b'0' {
-            end -= 1;
-        }
-        if end == dot + 1 {
-            end -= 1;
-        }
-        text.truncate(end);
-    }
-    text
 }
 
 fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
@@ -5285,7 +2731,7 @@ mod tests {
         let path = unique_path("readtable_variable_types");
         fs::write(
             &path,
-            "Value,Flag,When,Elapsed\n1.5,true,2026-06-01,01:30:00\n2.25,false,2026-06-02,02:00:00\n",
+            "Value,Flag,When,Elapsed,Kind\n1.5,true,2026-06-01,01:30:00,A\n2.25,false,2026-06-02,02:00:00,B\n",
         )
         .expect("write sample");
         let types = StringArray::new(
@@ -5294,8 +2740,9 @@ mod tests {
                 "logical".to_string(),
                 "datetime".to_string(),
                 "duration".to_string(),
+                "categorical".to_string(),
             ],
-            vec![1, 4],
+            vec![1, 5],
         )
         .unwrap();
         let table = object(read_table(
@@ -5320,6 +2767,10 @@ mod tests {
         match table_member_get(&table, &Value::from("Elapsed")).unwrap() {
             Value::Object(object) => assert!(object.is_class("duration")),
             other => panic!("expected duration object, got {other:?}"),
+        }
+        match table_member_get(&table, &Value::from("Kind")).unwrap() {
+            Value::Object(object) => assert!(object.is_class(CATEGORICAL_CLASS)),
+            other => panic!("expected categorical object, got {other:?}"),
         }
         let _ = fs::remove_file(&path);
     }
@@ -5413,17 +2864,6 @@ mod tests {
         assert!(err
             .message()
             .contains("unsupported VariableTypes entry 'int8'"));
-        let categorical = StringArray::new(vec!["categorical".to_string()], vec![1, 1]).unwrap();
-        let err = read_table_err(
-            &path,
-            vec![
-                Value::from("VariableTypes"),
-                Value::StringArray(categorical),
-            ],
-        );
-        assert!(err
-            .message()
-            .contains("unsupported VariableTypes entry 'categorical'"));
         let _ = fs::remove_file(&path);
     }
 
@@ -5534,5 +2974,409 @@ mod tests {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 4.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn table_conversion_builtins_round_trip_arrays_cells_and_structs() {
+        let matrix = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let table = block_on(array2table_builtin(
+            matrix,
+            vec![
+                Value::from("VariableNames"),
+                Value::Cell(
+                    CellArray::new(vec![Value::from("A"), Value::from("B")], 1, 2).unwrap(),
+                ),
+            ],
+        ))
+        .unwrap();
+        assert!(matches!(
+            block_on(istable_builtin(table.clone())).unwrap(),
+            Value::Bool(true)
+        ));
+        let array = block_on(table2array_builtin(table.clone())).unwrap();
+        match array {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let cells = block_on(table2cell_builtin(table.clone())).unwrap();
+        match cells {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 2);
+                assert_eq!(cell.cols, 2);
+            }
+            other => panic!("expected cell, got {other:?}"),
+        }
+        let st = block_on(table2struct_builtin(table.clone(), Vec::new())).unwrap();
+        let round_trip = block_on(struct2table_builtin(st, Vec::new())).unwrap();
+        assert_eq!(table_width(&object(round_trip)).unwrap(), 2);
+    }
+
+    #[test]
+    fn timetable_conversion_predicates_and_head_work() {
+        let values = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
+        let times = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let timetable = block_on(timetable_builtin(vec![
+            times,
+            values,
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("X")], 1, 1).unwrap()),
+        ]))
+        .unwrap();
+        assert!(matches!(
+            block_on(istimetable_builtin(timetable.clone())).unwrap(),
+            Value::Bool(true)
+        ));
+        let first_two = block_on(head_builtin(timetable.clone(), vec![Value::Num(2.0)])).unwrap();
+        let first_two_object = object(first_two);
+        assert_eq!(first_two_object.class_name, TIMETABLE_CLASS);
+        assert_eq!(table_height(&first_two_object).unwrap(), 2);
+        match timetable_row_times(&first_two_object).unwrap().unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+            other => panic!("expected selected row times, got {other:?}"),
+        }
+        let table = block_on(timetable2table_builtin(
+            timetable,
+            vec![Value::from("ConvertRowTimes"), Value::Bool(true)],
+        ))
+        .unwrap();
+        assert_eq!(
+            table_variable_names_from_object(&object(table.clone())).unwrap(),
+            vec!["Time".to_string(), "X".to_string()]
+        );
+        let converted = block_on(table2timetable_builtin(table, Vec::new())).unwrap();
+        let converted_object = object(converted);
+        assert_eq!(converted_object.class_name, TIMETABLE_CLASS);
+        assert_eq!(
+            table_variable_names_from_object(&converted_object).unwrap(),
+            vec!["Time".to_string(), "X".to_string()]
+        );
+        match timetable_row_times(&converted_object).unwrap().unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+            other => panic!("expected timetable Time member, got {other:?}"),
+        }
+        match table_member_get(&converted_object, &Value::from("Time")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+            other => panic!("expected retained Time variable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn categorical_dictionary_and_selector_objects_materialize() {
+        let categorical = block_on(categorical_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),
+        )]))
+        .unwrap();
+        assert!(matches!(
+            block_on(iscategorical_builtin(categorical.clone())).unwrap(),
+            Value::Bool(true)
+        ));
+        let Value::Object(cat) = categorical else {
+            panic!("expected categorical object");
+        };
+        match cat.properties.get("Categories").unwrap() {
+            Value::StringArray(array) => assert_eq!(array.data, vec!["red", "blue"]),
+            other => panic!("expected categories, got {other:?}"),
+        }
+
+        let dictionary = block_on(dictionary_builtin(vec![
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        ]))
+        .unwrap();
+        assert!(matches!(dictionary, Value::Object(obj) if obj.class_name == DICTIONARY_CLASS));
+        assert!(matches!(
+            block_on(timerange_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).unwrap(),
+            Value::Object(obj) if obj.class_name == TIMERANGE_CLASS
+        ));
+        assert!(matches!(
+            block_on(vartype_builtin(Value::from("numeric"))).unwrap(),
+            Value::Object(obj) if obj.class_name == VARTYPE_CLASS
+        ));
+    }
+
+    #[test]
+    fn writetable_and_readcell_cover_delimited_interop() {
+        let path = unique_path("writetable_round_trip").with_extension("csv");
+        let table = table_from_columns(
+            vec!["A".into(), "Name".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::StringArray(
+                    StringArray::new(vec!["Ada".into(), "Grace".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let bytes = block_on(writetable_builtin(
+            table,
+            vec![Value::from(path.to_string_lossy().to_string())],
+        ))
+        .unwrap();
+        assert!(matches!(bytes, Value::Num(n) if n > 0.0));
+        let cells = block_on(readcell_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .unwrap();
+        match cells {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 3);
+                assert_eq!(cell.cols, 2);
+                assert_eq!(cell.get(0, 0).unwrap(), Value::from("A"));
+                assert_eq!(cell.get(0, 1).unwrap(), Value::from("Name"));
+                assert_eq!(cell.get(1, 0).unwrap(), Value::Num(1.0));
+                assert_eq!(cell.get(1, 1).unwrap(), Value::from("Ada"));
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_drop_data() {
+        let a = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
+        let b = Value::Tensor(Tensor::new(vec![30.0, 40.0], vec![2, 1]).unwrap());
+        let times = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let tt = block_on(timetable_builtin(vec![
+            a,
+            b,
+            Value::from("RowTimes"),
+            times,
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("A"), Value::from("B")], 1, 2).unwrap()),
+        ]))
+        .unwrap();
+        let tt_obj = object(tt);
+        assert_eq!(
+            table_variable_names_from_object(&tt_obj).unwrap(),
+            vec!["A".to_string(), "B".to_string()]
+        );
+
+        let t = table_from_columns(
+            vec!["A".into(), "B".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        let converted = block_on(table2timetable_builtin(t, Vec::new())).unwrap();
+        let converted_obj = object(converted);
+        assert_eq!(
+            table_variable_names_from_object(&converted_obj).unwrap(),
+            vec!["A".to_string(), "B".to_string()]
+        );
+        match timetable_row_times(&converted_obj).unwrap().unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+            other => panic!("expected generated row times, got {other:?}"),
+        }
+
+        let path = unique_path("readtimetable_rowtimes").with_extension("csv");
+        fs::write(&path, "A\n10\n20\n").unwrap();
+        let read = block_on(readtimetable_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![
+                Value::from("RowTimes"),
+                Value::Tensor(Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap()),
+            ],
+        ))
+        .unwrap();
+        let read_obj = object(read);
+        match timetable_row_times(&read_obj).unwrap().unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 6.0]),
+            other => panic!("expected explicit readtimetable row times, got {other:?}"),
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn table_selector_objects_filter_rows_and_variables() {
+        let t = table_from_columns(
+            vec!["A".into(), "Name".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![-1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+                Value::StringArray(
+                    StringArray::new(vec!["x".into(), "y".into(), "z".into()], vec![3, 1]).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let t_obj = object(t.clone());
+        let numeric = block_on(vartype_builtin(Value::from("numeric"))).unwrap();
+        let subset = object(
+            table_paren_get(
+                &t_obj,
+                &Value::Cell(CellArray::new(vec![Value::from(":"), numeric], 1, 2).unwrap()),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            table_variable_names_from_object(&subset).unwrap(),
+            vec!["A".to_string()]
+        );
+
+        let filter = block_on(rowfilter_builtin(vec![
+            Value::Cell(CellArray::new(vec![Value::from("A")], 1, 1).unwrap()),
+            Value::from("@gt0"),
+        ]))
+        .unwrap();
+        let filtered = object(
+            table_paren_get(
+                &t_obj,
+                &Value::Cell(CellArray::new(vec![filter, Value::from(":")], 1, 2).unwrap()),
+            )
+            .unwrap(),
+        );
+        assert_eq!(table_height(&filtered).unwrap(), 2);
+
+        let tt = block_on(timetable_builtin(vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap()),
+            Value::from("VariableNames"),
+            Value::Cell(CellArray::new(vec![Value::from("X")], 1, 1).unwrap()),
+        ]))
+        .unwrap();
+        let tt_obj = object(tt);
+        let range = block_on(timerange_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap();
+        let ranged = object(
+            table_paren_get(
+                &tt_obj,
+                &Value::Cell(CellArray::new(vec![range, Value::from(":")], 1, 2).unwrap()),
+            )
+            .unwrap(),
+        );
+        assert_eq!(ranged.class_name, TIMETABLE_CLASS);
+        assert_eq!(table_height(&ranged).unwrap(), 2);
+
+        let open_left = block_on(timerange_builtin(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::from("openleft"),
+        ]))
+        .unwrap();
+        let ranged = object(
+            table_paren_get(
+                &tt_obj,
+                &Value::Cell(CellArray::new(vec![open_left, Value::from(":")], 1, 2).unwrap()),
+            )
+            .unwrap(),
+        );
+        match table_member_get(&ranged, &Value::from("X")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![30.0]),
+            other => panic!("expected openleft range result, got {other:?}"),
+        }
+
+        let open_right = block_on(timerange_builtin(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::from("openright"),
+        ]))
+        .unwrap();
+        let ranged = object(
+            table_paren_get(
+                &tt_obj,
+                &Value::Cell(CellArray::new(vec![open_right, Value::from(":")], 1, 2).unwrap()),
+            )
+            .unwrap(),
+        );
+        match table_member_get(&ranged, &Value::from("X")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![20.0]),
+            other => panic!("expected openright range result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pivot_builds_wide_summary_table() {
+        let t = table_from_columns(
+            vec!["Group".into(), "Kind".into(), "Value".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "A".into(), "B".into()], vec![3, 1]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["x".into(), "y".into(), "x".into()], vec![3, 1]).unwrap(),
+                ),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        let out = block_on(pivot_builtin(
+            t,
+            Value::from("Group"),
+            Value::from("Kind"),
+            Value::from("Value"),
+            Vec::new(),
+        ))
+        .unwrap();
+        let out_obj = object(out);
+        let names = table_variable_names_from_object(&out_obj).unwrap();
+        assert!(names.contains(&"x_Value".to_string()));
+        assert!(names.contains(&"y_Value".to_string()));
+        assert_eq!(table_height(&out_obj).unwrap(), 2);
+    }
+
+    #[test]
+    fn table2struct_defaults_to_row_structs_and_to_scalar_preserves_columns() {
+        let t = table_from_columns(
+            vec!["A".into(), "B".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        match block_on(table2struct_builtin(t.clone(), Vec::new())).unwrap() {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 2);
+                assert!(matches!(cell.data[0], Value::Struct(_)));
+            }
+            other => panic!("expected struct array cell, got {other:?}"),
+        }
+        match block_on(table2struct_builtin(
+            t,
+            vec![Value::from("ToScalar"), Value::Bool(true)],
+        ))
+        .unwrap()
+        {
+            Value::Struct(st) => assert!(st.fields.contains_key("A")),
+            other => panic!("expected scalar struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn categorical_categories_and_dictionary_lookup_have_semantics() {
+        let categorical = block_on(categorical_builtin(vec![
+            Value::StringArray(
+                StringArray::new(vec!["b".into(), "a".into(), "c".into()], vec![3, 1]).unwrap(),
+            ),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::from("Ordinal"),
+            Value::Bool(true),
+        ]))
+        .unwrap();
+        let Value::Object(cat) = categorical else {
+            panic!("expected categorical");
+        };
+        match cat.properties.get("Codes").unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.data[0], 2.0);
+                assert_eq!(tensor.data[1], 1.0);
+                assert!(tensor.data[2].is_nan());
+            }
+            other => panic!("expected categorical codes, got {other:?}"),
+        }
+
+        let dictionary = block_on(dictionary_builtin(vec![
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        ]))
+        .unwrap();
+        let value = block_on(dictionary_subsref(
+            dictionary,
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::from("b"),
+        ))
+        .unwrap();
+        assert_eq!(value, Value::Num(20.0));
     }
 }

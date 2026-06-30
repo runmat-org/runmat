@@ -10,8 +10,8 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::reduction::{mean, median, min, std as std_reduction, sum, var};
 use crate::builtins::table::{
-    select_rows, selected_row_names, table_from_columns_with_properties, table_height,
-    table_variable_names_from_object, table_variables, table_width, TABLE_CLASS,
+    is_tabular_object, select_rows, selected_row_names, table_from_columns_like, table_height,
+    table_variable_names_from_object, table_variables, table_width,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -616,7 +616,7 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Struct(out))
         }
-        Value::Object(object) if object.is_class(TABLE_CLASS) => ismissing_table(object),
+        Value::Object(object) if is_tabular_object(object) => ismissing_table(object),
         Value::Object(object) if object.is_class("datetime") => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
             logical_from_iter(
@@ -793,7 +793,7 @@ fn remove_missing_value(
     options: RemoveOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
     match value {
-        Value::Object(object) if object.is_class(TABLE_CLASS) => {
+        Value::Object(object) if is_tabular_object(&object) => {
             remove_missing_table(object, options)
         }
         Value::Tensor(tensor) => remove_missing_tensor(tensor, options),
@@ -843,7 +843,7 @@ fn remove_missing_table(
         }
         let row_names = selected_row_names(&object, &(0..height).collect::<Vec<_>>())?;
         Ok((
-            table_from_columns_with_properties(keep_names, keep_values, row_names)?,
+            table_from_columns_like(&object, keep_names, keep_values, row_names, None)?,
             LogicalArray::new(removed, vec![1, width]).map_err(internal_error)?,
         ))
     } else {
@@ -873,7 +873,7 @@ fn remove_missing_table(
         }
         let row_names = selected_row_names(&object, &keep_rows)?;
         Ok((
-            table_from_columns_with_properties(names, values, row_names)?,
+            table_from_columns_like(&object, names, values, row_names, Some(&keep_rows))?,
             LogicalArray::new(row_has_missing, vec![height, 1]).map_err(internal_error)?,
         ))
     }
@@ -1223,9 +1223,7 @@ fn fill_missing_value(value: Value, options: &FillOptions) -> BuiltinResult<(Val
     match value {
         Value::Tensor(tensor) => fill_missing_tensor(tensor, options),
         Value::StringArray(array) => fill_missing_string_array(array, options),
-        Value::Object(object) if object.is_class(TABLE_CLASS) => {
-            fill_missing_table(object, options)
-        }
+        Value::Object(object) if is_tabular_object(&object) => fill_missing_table(object, options),
         Value::Cell(cell) => fill_missing_cell(cell, options),
         other => {
             let missing = any_missing(&other)?;
@@ -1891,7 +1889,7 @@ fn standardize_missing_value(value: Value, indicators: &IndicatorSet) -> Builtin
                 StringArray::new(data, vec![array.rows, 1]).map_err(internal_error)?,
             ))
         }
-        Value::Object(mut object) if object.is_class(TABLE_CLASS) => {
+        Value::Object(mut object) if is_tabular_object(&object) => {
             let variables = table_variables(&object)?;
             let mut out = StructValue::new();
             for (name, field) in variables.fields {

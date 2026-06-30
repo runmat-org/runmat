@@ -1,0 +1,15 @@
+{
+  "title": "iscategorical",
+  "category": "table",
+  "keywords": ["iscategorical", "categorical", "predicate"],
+  "summary": "Return true for categorical objects.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Predicate inspects host metadata."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`iscategorical(A)` returns true when `A` is a RunMat categorical object.",
+  "behaviors": ["Non-categorical values return false."],
+  "examples": [{"description": "Test categorical", "input": "tf = iscategorical(categorical({'a'}))", "output": "tf = true"}],
+  "links": [{"label": "categorical", "url": "./categorical"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

@@ -153,7 +153,7 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
-        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => match mode {
+        Value::Object(_) if crate::builtins::table::is_table_value(value) => match mode {
             RenderMode::TopLevel => crate::builtins::table::table_display_text(value)
                 .unwrap_or_else(|_| value.to_string())
                 .lines()

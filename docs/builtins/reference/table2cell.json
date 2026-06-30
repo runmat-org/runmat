@@ -1,0 +1,15 @@
+{
+  "title": "table2cell",
+  "category": "table",
+  "keywords": ["table2cell", "table", "cell"],
+  "summary": "Convert a table into a cell array.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Conversion runs on host table metadata."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`table2cell(T)` returns an `height(T)` by `width(T)` cell array of table element values.",
+  "behaviors": ["Scalar numeric, logical, string, char, cell, datetime, and duration variables are supported.", "Multi-column variables are preserved as row slices."],
+  "examples": [{"description": "Table to cells", "input": "C = table2cell(T)", "output": "C = cell array"}],
+  "links": [{"label": "cell2table", "url": "./cell2table"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

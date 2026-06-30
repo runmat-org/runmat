@@ -1,0 +1,15 @@
+{
+  "title": "readcell",
+  "category": "io/tabular",
+  "keywords": ["readcell", "cell", "readtable", "csv", "spreadsheet"],
+  "summary": "Read tabular data into a cell array.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "File import runs on the host."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests"},
+  "description": "`readcell(filename, ...)` imports text or spreadsheet data directly into a cell array without consuming detected table headers.",
+  "behaviors": ["Text and spreadsheet options accepted by `readtable` are reused where they apply.", "Rows are padded to a rectangular cell array.", "Delimited text cells are converted to numeric or logical scalars when they parse cleanly; otherwise they remain strings."],
+  "examples": [{"description": "Read cells", "input": "C = readcell('data.csv')", "output": "C = cell array"}],
+  "links": [{"label": "readtable", "url": "./readtable"}, {"label": "table2cell", "url": "./table2cell"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}

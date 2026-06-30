@@ -1,0 +1,15 @@
+{
+  "title": "vartype",
+  "category": "table",
+  "keywords": ["vartype", "table", "variable type", "selector"],
+  "summary": "Create a table variable type selector.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Selector metadata is host-only."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`vartype(type)` creates a selector with a `Type` property for table variable type selection workflows.",
+  "behaviors": ["The selector can be used as a table or timetable variable subscript.", "Supported categories include numeric, logical, string, cell, categorical, datetime, duration, and all."],
+  "examples": [{"description": "Select numeric variables", "input": "T(:, vartype('numeric'))", "output": "Table containing numeric variables"}],
+  "links": [{"label": "rowfilter", "url": "./rowfilter"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+}
