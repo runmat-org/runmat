@@ -3849,6 +3849,14 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_candidates =
             BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_cap_side_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_zero_mate_cap_side_faces =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_min_cap_side_face_mates =
+            BTreeMap::<usize, usize>::new();
+        let mut trimmed_seed_star_shell_trim_local_cap_stitch_max_cap_side_face_mates =
+            BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_faces =
             BTreeMap::<usize, usize>::new();
         let mut trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_components =
@@ -4312,6 +4320,18 @@ mod tests {
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_candidates
                                         .entry(local_cap_stitch.candidate_tet_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_cap_side_faces
+                                        .entry(local_cap_stitch.cap_side_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_zero_mate_cap_side_faces
+                                        .entry(local_cap_stitch.zero_mate_cap_side_face_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_min_cap_side_face_mates
+                                        .entry(local_cap_stitch.min_cap_side_face_mate_count)
+                                        .or_default() += 1;
+                                    *trimmed_seed_star_shell_trim_local_cap_stitch_max_cap_side_face_mates
+                                        .entry(local_cap_stitch.max_cap_side_face_mate_count)
                                         .or_default() += 1;
                                     *trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_faces
                                         .entry(local_cap_stitch.open_interior_face_count)
@@ -5112,11 +5132,15 @@ mod tests {
             trimmed_seed_star_shell_trim_local_cap_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_local_cap_stitch capped_faces={:?} inserted_nodes={:?} side_connectors={:?} candidates={:?} cap_side_faces={:?} zero_mate_cap_side_faces={:?} min_cap_side_face_mates={:?} max_cap_side_face_mates={:?} open_interior_faces={:?} open_interior_components={:?} open_interior_component_sizes={:?} selected_tets={:?} search_attempts={:?} found={} max_min_quality={:.6} reason={:?}",
             trimmed_seed_star_shell_trim_local_cap_stitch_capped_faces,
             trimmed_seed_star_shell_trim_local_cap_stitch_inserted_nodes,
             trimmed_seed_star_shell_trim_local_cap_stitch_side_connectors,
             trimmed_seed_star_shell_trim_local_cap_stitch_candidates,
+            trimmed_seed_star_shell_trim_local_cap_stitch_cap_side_faces,
+            trimmed_seed_star_shell_trim_local_cap_stitch_zero_mate_cap_side_faces,
+            trimmed_seed_star_shell_trim_local_cap_stitch_min_cap_side_face_mates,
+            trimmed_seed_star_shell_trim_local_cap_stitch_max_cap_side_face_mates,
             trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_faces,
             trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_components,
             trimmed_seed_star_shell_trim_local_cap_stitch_open_interior_component_sizes,

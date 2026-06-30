@@ -189,6 +189,10 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub inserted_node_count: usize,
     pub side_connector_candidate_count: usize,
     pub candidate_tet_count: usize,
+    pub cap_side_face_count: usize,
+    pub zero_mate_cap_side_face_count: usize,
+    pub min_cap_side_face_mate_count: usize,
+    pub max_cap_side_face_mate_count: usize,
     pub open_interior_face_count: usize,
     pub open_interior_component_count: usize,
     pub open_interior_component_size_histogram: BTreeMap<usize, usize>,
@@ -3329,6 +3333,40 @@ fn open_interior_refill_faces(
         .collect()
 }
 
+#[cfg(test)]
+fn cap_side_face_mate_counts(
+    cap_tets: &[ConstrainedCavityRefillTet],
+    candidate_tets: &[ConstrainedCavityRefillTet],
+    inserted_node_ids: &BTreeSet<u32>,
+) -> Vec<usize> {
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in candidate_tets {
+        for face in tet_faces(tet.node_ids).map(sorted_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+
+    let mut mate_counts = Vec::<usize>::new();
+    for cap_tet in cap_tets {
+        for face in tet_faces(cap_tet.node_ids).map(sorted_face) {
+            if !face
+                .iter()
+                .any(|node_id| inserted_node_ids.contains(node_id))
+            {
+                continue;
+            }
+            mate_counts.push(
+                face_counts
+                    .get(&face)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_sub(1),
+            );
+        }
+    }
+    mate_counts
+}
+
 struct RefillBoundaryFaceDelta {
     missing: Vec<[u32; 3]>,
     unexpected: Vec<[u32; 3]>,
@@ -4189,6 +4227,10 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         inserted_node_count: 0,
         side_connector_candidate_count: 0,
         candidate_tet_count: 0,
+        cap_side_face_count: 0,
+        zero_mate_cap_side_face_count: 0,
+        min_cap_side_face_mate_count: 0,
+        max_cap_side_face_mate_count: 0,
         open_interior_face_count: 0,
         open_interior_component_count: 0,
         open_interior_component_size_histogram: BTreeMap::new(),
@@ -4296,6 +4338,23 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         options,
     );
     diagnostic.candidate_tet_count = candidate_tets.len();
+    let cap_side_mate_counts = cap_side_face_mate_counts(
+        &candidate_tets[cap_tet_start..cap_tet_start + cap_tet_count],
+        &candidate_tets,
+        &inserted_nodes
+            .iter()
+            .map(|node| node.node_id)
+            .collect::<BTreeSet<_>>(),
+    );
+    diagnostic.cap_side_face_count = cap_side_mate_counts.len();
+    diagnostic.zero_mate_cap_side_face_count = cap_side_mate_counts
+        .iter()
+        .filter(|count| **count == 0)
+        .count();
+    diagnostic.min_cap_side_face_mate_count =
+        cap_side_mate_counts.iter().copied().min().unwrap_or(0);
+    diagnostic.max_cap_side_face_mate_count =
+        cap_side_mate_counts.iter().copied().max().unwrap_or(0);
     let open_interior_faces = open_interior_refill_faces(cavity, &candidate_tets);
     diagnostic.open_interior_face_count = open_interior_faces.len();
     diagnostic.open_interior_component_count =
@@ -6036,6 +6095,10 @@ mod tests {
         assert_eq!(diagnostic.inserted_node_count, 0);
         assert_eq!(diagnostic.side_connector_candidate_count, 0);
         assert_eq!(diagnostic.candidate_tet_count, 0);
+        assert_eq!(diagnostic.cap_side_face_count, 0);
+        assert_eq!(diagnostic.zero_mate_cap_side_face_count, 0);
+        assert_eq!(diagnostic.min_cap_side_face_mate_count, 0);
+        assert_eq!(diagnostic.max_cap_side_face_mate_count, 0);
         assert_eq!(diagnostic.open_interior_face_count, 0);
         assert_eq!(diagnostic.open_interior_component_count, 0);
         assert!(diagnostic.open_interior_component_size_histogram.is_empty());
@@ -6090,6 +6153,31 @@ mod tests {
             vec![[0, 1, 2]]
         );
         assert!(open_interior_refill_faces(&cavity, &[lower, upper]).is_empty());
+    }
+
+    #[test]
+    fn cap_side_face_mate_counts_report_connector_coverage() {
+        let cap_tet = ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 4],
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        };
+        let mate_tet = ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 4, 5],
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        };
+
+        assert_eq!(
+            cap_side_face_mate_counts(
+                &[cap_tet.clone()],
+                &[cap_tet, mate_tet],
+                &BTreeSet::from([4])
+            ),
+            vec![1, 0, 0]
+        );
     }
 
     #[test]
