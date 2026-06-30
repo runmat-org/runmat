@@ -1,12 +1,13 @@
 {
   "title": "close",
-  "category": "io/net",
+  "category": "general",
   "keywords": [
     "close",
     "tcpclient",
     "tcpserver",
     "socket",
-    "networking"
+    "networking",
+    "figure"
   ],
   "summary": "Close figures or networking resources in MATLAB and RunMat.",
   "gpu_support": {
@@ -24,20 +25,33 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::io::net::close::tests",
-    "integration": "builtins::io::net::close::tests::close_tcpclient_releases_handle"
+    "unit": "builtins::plotting::close::tests and builtins::io::net::close::tests",
+    "integration": "runmat-core close command rewrite and no-current-figure execution tests"
   },
-  "description": "`close` releases resources such as plotting figures and TCP clients/servers. Object and selector forms return status codes indicating whether handles were closed, following MATLAB and RunMat close semantics.",
+  "description": "`close` releases plotting figures and TCP clients/servers. Bare `close` targets the current figure and is a no-op when no figures exist, so common startup code such as `clc; clear; close` is safe. Object and selector forms return status codes indicating whether handles were closed.",
   "behaviors": [
+    "`close` with no arguments closes the current figure when one exists. If no figure exists, it returns `0` and does not create or error on a default figure.",
+    "`close('all')` closes every open figure. Networking resources use explicit selectors such as `close('clients')` and `close('servers')`.",
+    "`close(fig)` closes an explicit figure handle and raises a figure-handle diagnostic if that explicit handle does not exist.",
     "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected” diagnostics.",
     "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB’s lifecycle rules.",
-    "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server, and `close('all')` closes both clients and servers.",
+    "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server. Use those explicit networking selectors instead of `close('all')`, which is reserved for figure closure.",
     "Multiple inputs are processed from left to right. The return value is `1` when at least one handle was closed and `0` otherwise.",
     "Invalid arguments raise `RunMat:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `RunMat:close:InvalidHandle`.",
     "Networking happens on the CPU. If the arguments live on the GPU, RunMat gathers them automatically before touching the host-side registries.",
     "Arguments wrapped in cell arrays (possibly nested) or scalar string arrays are supported. `close` walks each element in-order and applies the usual rules to every value it discovers."
   ],
   "examples": [
+    {
+      "description": "Start a script safely when no figures are open",
+      "input": "clc;\nclear;\nstatus = close",
+      "output": "status = 0"
+    },
+    {
+      "description": "Close the current figure",
+      "input": "figure(7);\nstatus = close",
+      "output": "status = 7"
+    },
     {
       "description": "Close a TCP client after finishing I/O",
       "input": "client = tcpclient(\"127.0.0.1\", 50000);\nstatus = close(client)",
@@ -54,9 +68,9 @@
       "output": "status = 1"
     },
     {
-      "description": "Close all networking resources at once",
-      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nstatus = close(\"all\")",
-      "output": "status = 1"
+      "description": "Close networking resources by selector",
+      "input": "client = tcpclient(\"localhost\", 40000);\nsrv = tcpserver(\"localhost\", 0);\nclientStatus = close(\"clients\");\nserverStatus = close(\"servers\")",
+      "output": "clientStatus = 1\nserverStatus = 1"
     },
     {
       "description": "Calling close on an already-closed client",
@@ -71,8 +85,12 @@
   ],
   "faqs": [
     {
+      "question": "Is bare `close` safe when no figures are open?",
+      "answer": "Yes. RunMat treats bare `close` as a no-op when there is no current figure, returning `0` instead of creating a default figure or raising an invalid-handle error."
+    },
+    {
       "question": "What does the return value represent?",
-      "answer": "The return value is `1` when at least one client or server was closed and `0` otherwise. Use it to detect whether `close` released any networking resources."
+      "answer": "For figure targets, the return value is the closed figure handle for a single target or a count for multi-target/all closures. For networking resources, it is `1` when at least one client or server was closed and `0` otherwise."
     },
     {
       "question": "Can I pass multiple clients or servers at once?",
@@ -96,6 +114,10 @@
     }
   ],
   "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
     {
       "label": "tcpclient",
       "url": "./tcpclient"
@@ -122,8 +144,8 @@
     }
   ],
   "source": {
-    "label": "crates/runmat-runtime/src/builtins/io/net/close.rs",
-    "url": "crates/runmat-runtime/src/builtins/io/net/close.rs"
+    "label": "crates/runmat-runtime/src/builtins/close/mod.rs",
+    "url": "crates/runmat-runtime/src/builtins/close/mod.rs"
   },
   "gpu_behavior": [
     "`close` performs only CPU-side bookkeeping. When network structs or option strings reside on the GPU, RunMat gathers them to host memory before inspecting their hidden identifiers. No provider hooks participate, and GPU residency is irrelevant to the close operation."

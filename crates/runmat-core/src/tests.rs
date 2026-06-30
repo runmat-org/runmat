@@ -2096,6 +2096,23 @@ fn execute_request_supports_close_all_command_rewrite() {
 }
 
 #[test]
+fn execute_request_supports_bare_close_without_current_figure() {
+    let _guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    assert!(runmat_runtime::builtins::plotting::figure_handles().is_empty());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(&mut session, "clc; clear; close; ok = 1;")
+        .expect("bare close should be safe when no figures exist");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(runmat_runtime::builtins::plotting::figure_handles().is_empty());
+}
+
+#[test]
 fn execute_request_supports_clearvars_except_command_rewrite() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
