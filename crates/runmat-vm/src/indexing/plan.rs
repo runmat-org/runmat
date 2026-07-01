@@ -471,6 +471,7 @@ where
         && spec.shape.first().copied().unwrap_or(1) == 1
         && spec.shape.get(1).copied().unwrap_or(1) > 1;
     let linear_selector_is_colon = matches!(selectors.first(), Some(ExprSel::Colon));
+    let linear_selector_is_range = matches!(selectors.first(), Some(ExprSel::Range { .. }));
     for (d, sel) in selectors.iter().enumerate().take(spec.dims) {
         let dim_len = full_shape[d] as i64;
         let idxs: Vec<usize> = match sel {
@@ -548,7 +549,7 @@ where
                 shape
             } else if linear_selector_is_colon {
                 vec![0, 1]
-            } else if base_is_row_vector {
+            } else if linear_selector_is_range || base_is_row_vector {
                 vec![1, 0]
             } else {
                 vec![0, 1]
@@ -619,7 +620,7 @@ where
             vec![1, 1]
         } else if linear_selector_is_colon {
             vec![total_out, 1]
-        } else if base_is_row_vector {
+        } else if linear_selector_is_range || base_is_row_vector {
             vec![1, total_out]
         } else {
             vec![total_out, 1]
@@ -757,6 +758,74 @@ mod tests {
             assert_eq!(plain.properties.full_column, Some(2));
             assert_eq!(plain.properties.full_column, expr.properties.full_column);
             assert_eq!(plain.properties.full_row, expr.properties.full_row);
+        })
+    }
+
+    #[test]
+    fn expr_linear_range_on_column_vector_uses_range_shape() {
+        futures::executor::block_on(async {
+            let plan = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[0],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::Var(0)],
+                    numeric: &[],
+                    shape: &[10, 1],
+                },
+                |_dim_len, expr| {
+                    let expr = expr.clone();
+                    async move {
+                        match expr {
+                            EndExpr::Var(_) => Ok(6.0),
+                            other => panic!("unsupported expr: {other:?}"),
+                        }
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plan.indices, vec![0, 1, 2, 3, 4, 5]);
+            assert_eq!(plan.output_shape, vec![1, 6]);
+            assert_eq!(plan.selection_lengths, vec![6]);
+        })
+    }
+
+    #[test]
+    fn expr_empty_linear_range_uses_range_shape() {
+        futures::executor::block_on(async {
+            let plan = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[0],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::Var(0)],
+                    numeric: &[],
+                    shape: &[10, 1],
+                },
+                |_dim_len, expr| {
+                    let expr = expr.clone();
+                    async move {
+                        match expr {
+                            EndExpr::Var(_) => Ok(0.0),
+                            other => panic!("unsupported expr: {other:?}"),
+                        }
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert!(plan.indices.is_empty());
+            assert_eq!(plan.output_shape, vec![1, 0]);
+            assert_eq!(plan.selection_lengths, vec![0]);
         })
     }
 

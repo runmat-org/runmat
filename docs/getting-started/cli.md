@@ -50,11 +50,15 @@ REPL commands:
 | `.gc`, `.gc-info` | Show garbage collector statistics. |
 | `.gc-collect` | Force a major collection. |
 | `.reset-stats` | Reset execution statistics. |
+| `!cmd` | Run `cmd` in the platform shell and print stdout/stderr. |
+
+Shell escapes are local CLI REPL behavior. A line such as `!pwd` runs `pwd` through the host shell without submitting it to the RunMat parser. Non-zero shell exits are reported at the prompt and do not close the REPL. `.m` scripts and other hosts do not treat leading `!` as a shell escape.
 
 The REPL also accepts piped input:
 
 ```bash
 printf "1 + 1\n" | runmat repl
+printf "!pwd\n1 + 1\n" | runmat repl
 ```
 
 ## Run

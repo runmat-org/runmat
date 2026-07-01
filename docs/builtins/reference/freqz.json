@@ -43,6 +43,11 @@
       "description": "Evaluate a response in Hz",
       "input": "b = fir1(20, 0.25);\n[H, f] = freqz(b, 1, 8, 1000);\nfprintf('%.1f %.1f\\n', f(1), f(end));",
       "output": "0.0 437.5"
+    },
+    {
+      "description": "Inspect a Butterworth low-pass response",
+      "input": "[b, a] = butter(2, 0.25, 'low');\n[H, w] = freqz(b, a, 8);\nfprintf('%d %.4f %.4f\\n', length(H), abs(H(1)), w(end));",
+      "output": "8 1.0000 2.7489"
     }
   ],
   "faqs": [
@@ -56,6 +61,10 @@
     }
   ],
   "links": [
+    {
+      "label": "butter",
+      "url": "./butter"
+    },
     {
       "label": "filter",
       "url": "./filter"
