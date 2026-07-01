@@ -396,7 +396,8 @@ fn anchor_trimmed_constrained_cavity(
     let Some(selected) = anchor_connected_tet_subset(tets, &selected, anchor_tet_index) else {
         return Ok(None);
     };
-    let mut pending = vec![selected.clone()];
+    let selected_score = boundary_edge_defect_score(tets, &selected);
+    let mut pending = vec![(selected.clone(), selected_score)];
     let mut visited = BTreeSet::<BTreeSet<usize>>::from([selected]);
     let mut evaluated = 0_usize;
 
@@ -404,15 +405,10 @@ fn anchor_trimmed_constrained_cavity(
         let best_index = pending
             .iter()
             .enumerate()
-            .min_by_key(|(_, candidate)| {
-                (
-                    boundary_edge_defect_score(tets, candidate),
-                    Reverse(candidate.len()),
-                )
-            })
+            .min_by_key(|(_, (candidate, score))| (*score, Reverse(candidate.len())))
             .map(|(index, _)| index)
             .expect("pending should be non-empty");
-        let selected = pending.swap_remove(best_index);
+        let (selected, _) = pending.swap_remove(best_index);
         evaluated += 1;
         let cavity =
             build_constrained_cavity_from_index_set(tets, &selected, protected_node_ids.clone());
@@ -432,7 +428,8 @@ fn anchor_trimmed_constrained_cavity(
                             continue;
                         };
                         if visited.insert(connected.clone()) {
-                            pending.push(connected);
+                            let score = boundary_edge_defect_score(tets, &connected);
+                            pending.push((connected, score));
                         }
                     }
                 }
