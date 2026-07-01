@@ -14,6 +14,9 @@ use crate::{
     tolerance::MeshingTolerance,
 };
 
+const MAX_MULTI_INTERIOR_REFILL_NODES: usize = 6;
+const MAX_MULTI_INTERIOR_REFILL_CANDIDATES: usize = 512;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavity {
     pub removed_tet_ids: Vec<u32>,
@@ -752,6 +755,21 @@ pub fn evaluate_constrained_cavity_refill_candidates(
     }
     if best.is_none() && valid_interior_nodes.len() >= 2 {
         match two_interior_node_refill_candidate(
+            cavity,
+            &boundary_node_map,
+            &boundary_triangles,
+            &valid_interior_nodes,
+            options,
+        ) {
+            Ok(Ok(refill)) => best = Some(refill),
+            Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
+            Err(err) => {
+                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
+            }
+        }
+    }
+    if best.is_none() && valid_interior_nodes.len() >= 3 {
+        match multi_interior_node_refill_candidate(
             cavity,
             &boundary_node_map,
             &boundary_triangles,
@@ -1660,6 +1678,104 @@ fn two_interior_node_refill_candidate(
     Ok(best
         .map(Ok)
         .unwrap_or_else(|| Err(first_rejection.unwrap_or("two_interior_no_candidate"))))
+}
+
+fn multi_interior_node_refill_candidate(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    interior_candidates: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
+    let boundary_node_ids = cavity_boundary_node_ids(cavity);
+    let Some(cavity_centroid) = cavity_boundary_node_centroid(cavity, boundary_nodes) else {
+        return Ok(Err("multi_interior_empty_boundary"));
+    };
+    let selected_interior_nodes =
+        selected_multi_interior_nodes(interior_candidates, cavity_centroid);
+    if selected_interior_nodes.len() < 3 {
+        return Ok(Err("multi_interior_too_few_candidates"));
+    }
+    let mut points = boundary_node_ids
+        .iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: boundary_nodes[node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    points.extend(
+        selected_interior_nodes
+            .iter()
+            .map(|node| ConnectivityPoint {
+                node_id: node.node_id,
+                coordinates_m: node.coordinates_m,
+                is_super: false,
+            }),
+    );
+
+    let mut refill_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    let mut first_rejection = None::<&'static str>;
+    let mut seen_tets = BTreeSet::<[u32; 4]>::new();
+    for tet in tetrahedralize_points(&points) {
+        let node_ids = tet.vertices.map(|index| points[index].node_id);
+        if !seen_tets.insert(sorted_tet_nodes(node_ids)) {
+            continue;
+        }
+        let tet_points = tet.vertices.map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        match raw_refill_tet_with_rejection_reason(node_ids, tet_points, options) {
+            Ok(tet) => refill_tets.push(tet),
+            Err(reason) => {
+                if first_rejection.is_none() {
+                    first_rejection = Some(boundary_node_refill_rejection_reason(reason));
+                }
+            }
+        }
+        if refill_tets.len() > MAX_MULTI_INTERIOR_REFILL_CANDIDATES {
+            return Ok(Err("multi_interior_over_candidate_limit"));
+        }
+    }
+    if refill_tets.is_empty() {
+        return Ok(Err(
+            first_rejection.unwrap_or("multi_interior_delaunay_empty")
+        ));
+    }
+    let Some(mut refill) = exact_cover_refill_from_candidate_tets(cavity, &refill_tets, options)?
+    else {
+        return Ok(Err("multi_interior_exact_cover_not_found"));
+    };
+    let used_node_ids = refill
+        .tets
+        .iter()
+        .flat_map(|tet| tet.node_ids)
+        .collect::<BTreeSet<_>>();
+    refill.inserted_nodes = selected_interior_nodes
+        .into_iter()
+        .filter(|node| used_node_ids.contains(&node.node_id))
+        .collect();
+    Ok(Ok(refill))
+}
+
+fn selected_multi_interior_nodes(
+    interior_candidates: &[ConstrainedCavityNode],
+    cavity_centroid: Point3,
+) -> Vec<ConstrainedCavityNode> {
+    let mut nodes = interior_candidates.to_vec();
+    nodes.sort_by(|left, right| {
+        distance_squared(left.coordinates_m, cavity_centroid)
+            .total_cmp(&distance_squared(right.coordinates_m, cavity_centroid))
+            .then_with(|| left.node_id.cmp(&right.node_id))
+    });
+    nodes.truncate(MAX_MULTI_INTERIOR_REFILL_NODES);
+    nodes
 }
 
 #[cfg(test)]
@@ -8495,6 +8611,51 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("two-interior refill should preserve volume");
+    }
+
+    #[test]
+    fn multi_interior_node_refill_preserves_bipyramid_cavity() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+        let interior_candidates = [
+            ConstrainedCavityNode {
+                node_id: 10,
+                coordinates_m: [0.25, 0.25, 0.25],
+            },
+            ConstrainedCavityNode {
+                node_id: 11,
+                coordinates_m: [0.25, 0.25, -0.25],
+            },
+            ConstrainedCavityNode {
+                node_id: 12,
+                coordinates_m: [0.50, 0.25, 0.0],
+            },
+        ];
+        let options = refill_options();
+
+        let refill = multi_interior_node_refill_candidate(
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            &interior_candidates,
+            options,
+        )
+        .expect("multi-interior refill should evaluate")
+        .expect("multi-interior refill should recover the cavity");
+
+        assert!(!refill.inserted_nodes.is_empty());
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("multi-interior refill should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("multi-interior refill should preserve volume");
     }
 
     #[test]
