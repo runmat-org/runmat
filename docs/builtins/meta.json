@@ -52909,6 +52909,89 @@
       ]
     },
     {
+      "name": "nchoosek",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = nchoosek(n, k)",
+          "inputs": [
+            {
+              "name": "n_or_v",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Nonnegative integer scalar n or vector v containing choices."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of choices to select."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Binomial coefficient or matrix whose rows contain all selected combinations."
+            }
+          ]
+        },
+        {
+          "label": "C = nchoosek(v, k)",
+          "inputs": [
+            {
+              "name": "n_or_v",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Nonnegative integer scalar n or vector v containing choices."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of choices to select."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Binomial coefficient or matrix whose rows contain all selected combinations."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NCHOOSEK.INVALID_INPUT",
+          "identifier": "RunMat:nchoosek:InvalidInput",
+          "when": "Inputs are missing, malformed, unsupported, or not valid nonnegative integer choices.",
+          "message": "nchoosek: invalid input"
+        },
+        {
+          "code": "RM.NCHOOSEK.TOO_LARGE",
+          "identifier": "RunMat:nchoosek:TooLarge",
+          "when": "The combinations matrix would exceed RunMat's supported materialisation limit.",
+          "message": "nchoosek: output is too large"
+        },
+        {
+          "code": "RM.NCHOOSEK.INTERNAL",
+          "identifier": "RunMat:nchoosek:Internal",
+          "when": "Output allocation, GPU gather, or container construction failed.",
+          "message": "nchoosek: internal error"
+        }
+      ]
+    },
+    {
       "name": "ndgrid",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

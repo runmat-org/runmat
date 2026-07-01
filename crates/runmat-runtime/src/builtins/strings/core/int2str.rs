@@ -412,7 +412,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn int2str_rounds_scalar_float() {
-        let out = int2str_builtin(Value::Num(3.14159), Vec::new()).expect("int2str");
+        let out = int2str_builtin(Value::Num(3.25), Vec::new()).expect("int2str");
         assert_eq!(char_rows(out), vec!["3"]);
 
         let out = int2str_builtin(Value::Num(4.5), Vec::new()).expect("int2str");

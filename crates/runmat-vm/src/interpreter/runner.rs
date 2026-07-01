@@ -1411,10 +1411,6 @@ pub async fn interpret_function_with_counts(
 mod tests {
     use super::{
         collect_semantic_outputs, interpret_with_vars, output_value, run_interpreter_inner,
-        value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
-        value_is_less_than, value_is_less_than_or_equal, value_is_negative, value_is_nonnegative,
-        value_is_nonpositive, value_is_nonzero, value_is_numeric_or_logical, value_is_positive,
-        value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use crate::bytecode::program::{Bytecode, FunctionBytecode};
     use crate::bytecode::Instr;
@@ -1424,6 +1420,12 @@ mod tests {
         CellArray, Closure, HandleRef, ObjectInstance, StructValue, Tensor, Value,
     };
     use runmat_hir::FunctionId;
+    use runmat_runtime::builtins::common::validation::{
+        value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
+        value_is_less_than, value_is_less_than_or_equal, value_is_negative, value_is_nonnegative,
+        value_is_nonpositive, value_is_nonzero, value_is_numeric_or_logical, value_is_positive,
+        value_is_real, value_is_scalar_or_empty, value_is_text,
+    };
     use std::collections::{HashMap, HashSet};
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]

@@ -1457,7 +1457,7 @@ mod tests {
 
         let result = block_on(crate::call_feval_async_with_outputs(
             f.clone(),
-            &[payload.clone()],
+            std::slice::from_ref(&payload),
             1,
         ))
         .expect("memoized handle output");

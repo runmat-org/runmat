@@ -9,6 +9,7 @@ pub(crate) mod logspace;
 pub(crate) mod magic;
 pub mod meshgrid;
 pub(crate) mod nan;
+pub(crate) mod nchoosek;
 pub(crate) mod ndgrid;
 pub(crate) mod ones;
 pub(crate) mod peaks;

@@ -1,0 +1,84 @@
+{
+  "title": "nchoosek",
+  "category": "array/creation",
+  "keywords": [
+    "nchoosek",
+    "combinations",
+    "binomial",
+    "combinatorics",
+    "vector"
+  ],
+  "summary": "Return a binomial coefficient or all k-combinations of a vector.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered before host-side coefficient calculation or combination materialization."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::nchoosek::tests",
+    "integration": null
+  },
+  "description": "`nchoosek(n, k)` returns the binomial coefficient for selecting `k` items from scalar `n`. `nchoosek(v, k)` returns a matrix whose rows contain every `k`-element combination from vector `v` in input order.",
+  "behaviors": [
+    "Scalar coefficient mode accepts nonnegative integer numeric scalars. `n` and `k` must have the same type unless one input is double, and mixed double/nondouble inputs return the nondouble class when the result fits.",
+    "Vector mode accepts numeric, complex, logical, and character vectors, including row vectors, column vectors, and empty vectors.",
+    "For vector inputs, the output has `k` columns and one row per combination.",
+    "`k = 0` returns a 1-by-0 empty combinations matrix.",
+    "When `k` is greater than the vector length, vector mode returns a 0-by-k empty matrix.",
+    "Unsupported containers such as string arrays, cells, structs, objects, and sparse arrays raise an input error."
+  ],
+  "examples": [
+    {
+      "description": "Compute a binomial coefficient",
+      "input": "b = nchoosek(5, 2)",
+      "output": "b = 10"
+    },
+    {
+      "description": "List combinations from a numeric vector",
+      "input": "C = nchoosek([10 20 30], 2)",
+      "output": "C = [10 20; 10 30; 20 30]"
+    },
+    {
+      "description": "List character combinations",
+      "input": "C = nchoosek('abc', 2)",
+      "output": "C = ['ab'; 'ac'; 'bc']"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `nchoosek` run on the GPU?",
+      "answer": "No GPU kernel is launched. RunMat gathers gpuArray inputs and materializes the scalar or combinations matrix on the host."
+    },
+    {
+      "question": "Why can `nchoosek(v, k)` fail for large vectors?",
+      "answer": "The number of output rows grows combinatorially. RunMat rejects outputs that exceed its materialization limit rather than attempting an impractically large allocation."
+    }
+  ],
+  "links": [
+    {
+      "label": "perms",
+      "url": "./perms"
+    },
+    {
+      "label": "factorial",
+      "url": "./factorial"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/nchoosek.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/nchoosek.rs"
+  },
+  "gpu_residency": "The result is a host value.",
+  "gpu_behavior": [
+    "GPU inputs are gathered; no GPU kernels are launched."
+  ]
+}
