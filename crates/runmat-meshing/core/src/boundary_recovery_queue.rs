@@ -17,6 +17,7 @@ pub enum BoundaryRecoveryPriority {
 pub enum BoundaryRecoveryReason {
     MissingEdge,
     MissingFace,
+    OutsideTetMismatch,
     SourceEdgeMismatch,
     SourceFaceMismatch,
     RegionMismatch,
@@ -35,6 +36,8 @@ pub struct BoundaryRecoveryQueueItem {
     #[serde(default)]
     pub source_edge_id: Option<u32>,
     #[serde(default)]
+    pub outside_tet_ids: Vec<u32>,
+    #[serde(default)]
     pub region_ids: Vec<String>,
 }
 
@@ -43,6 +46,8 @@ pub struct BoundaryRecoveryQueue {
     pub items: Vec<BoundaryRecoveryQueueItem>,
     pub missing_edge_count: usize,
     pub missing_face_count: usize,
+    #[serde(default)]
+    pub interface_mismatch_count: usize,
     pub provenance_mismatch_count: usize,
 }
 
@@ -73,6 +78,7 @@ pub fn build_boundary_recovery_queue(
                         edge_node_ids: Some(edge_key),
                         source_face_id: expected_face.source_face_id,
                         source_edge_id,
+                        outside_tet_ids: sorted_u32_ids(&expected_face.outside_tet_ids),
                         region_ids: sorted_region_ids(&expected_face.region_ids),
                     });
                 }
@@ -84,6 +90,7 @@ pub fn build_boundary_recovery_queue(
                 edge_node_ids: None,
                 source_face_id: expected_face.source_face_id,
                 source_edge_id: None,
+                outside_tet_ids: sorted_u32_ids(&expected_face.outside_tet_ids),
                 region_ids: sorted_region_ids(&expected_face.region_ids),
             });
             continue;
@@ -92,6 +99,20 @@ pub fn build_boundary_recovery_queue(
         let candidate_face = candidate
             .get(face_key)
             .expect("candidate face exists after contains_key check");
+        let expected_outside_tet_ids = sorted_u32_ids(&expected_face.outside_tet_ids);
+        let candidate_outside_tet_ids = sorted_u32_ids(&candidate_face.outside_tet_ids);
+        if expected_outside_tet_ids != candidate_outside_tet_ids {
+            items.push(BoundaryRecoveryQueueItem {
+                priority: BoundaryRecoveryPriority::Face,
+                reason: BoundaryRecoveryReason::OutsideTetMismatch,
+                face_node_ids: Some(*face_key),
+                edge_node_ids: None,
+                source_face_id: expected_face.source_face_id,
+                source_edge_id: None,
+                outside_tet_ids: expected_outside_tet_ids,
+                region_ids: sorted_region_ids(&expected_face.region_ids),
+            });
+        }
         if expected_face.source_face_id != candidate_face.source_face_id {
             items.push(BoundaryRecoveryQueueItem {
                 priority: BoundaryRecoveryPriority::Provenance,
@@ -100,6 +121,7 @@ pub fn build_boundary_recovery_queue(
                 edge_node_ids: None,
                 source_face_id: expected_face.source_face_id,
                 source_edge_id: None,
+                outside_tet_ids: sorted_u32_ids(&expected_face.outside_tet_ids),
                 region_ids: sorted_region_ids(&expected_face.region_ids),
             });
         }
@@ -113,6 +135,7 @@ pub fn build_boundary_recovery_queue(
                     edge_node_ids: Some(edge_key),
                     source_face_id: expected_face.source_face_id,
                     source_edge_id,
+                    outside_tet_ids: sorted_u32_ids(&expected_face.outside_tet_ids),
                     region_ids: sorted_region_ids(&expected_face.region_ids),
                 });
             }
@@ -127,6 +150,7 @@ pub fn build_boundary_recovery_queue(
                 edge_node_ids: None,
                 source_face_id: expected_face.source_face_id,
                 source_edge_id: None,
+                outside_tet_ids: sorted_u32_ids(&expected_face.outside_tet_ids),
                 region_ids: sorted_region_ids(&expected_face.region_ids),
             });
         }
@@ -141,6 +165,10 @@ pub fn build_boundary_recovery_queue(
         .iter()
         .filter(|item| item.reason == BoundaryRecoveryReason::MissingFace)
         .count();
+    let interface_mismatch_count = items
+        .iter()
+        .filter(|item| item.reason == BoundaryRecoveryReason::OutsideTetMismatch)
+        .count();
     let provenance_mismatch_count = items
         .iter()
         .filter(|item| item.priority == BoundaryRecoveryPriority::Provenance)
@@ -149,6 +177,7 @@ pub fn build_boundary_recovery_queue(
         items,
         missing_edge_count,
         missing_face_count,
+        interface_mismatch_count,
         provenance_mismatch_count,
     })
 }
@@ -222,6 +251,13 @@ fn sorted_region_ids(region_ids: &[String]) -> Vec<String> {
     sorted
 }
 
+fn sorted_u32_ids(ids: &[u32]) -> Vec<u32> {
+    let mut sorted = ids.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    sorted
+}
+
 fn sorted_face(mut node_ids: [u32; 3]) -> [u32; 3] {
     node_ids.sort();
     node_ids
@@ -254,6 +290,7 @@ mod tests {
         assert!(queue.items.is_empty());
         assert_eq!(queue.missing_edge_count, 0);
         assert_eq!(queue.missing_face_count, 0);
+        assert_eq!(queue.interface_mismatch_count, 0);
         assert_eq!(queue.provenance_mismatch_count, 0);
     }
 
@@ -267,6 +304,7 @@ mod tests {
 
         assert_eq!(queue.missing_edge_count, 0);
         assert_eq!(queue.missing_face_count, 1);
+        assert_eq!(queue.interface_mismatch_count, 0);
         assert_eq!(queue.items[0].priority, BoundaryRecoveryPriority::Face);
         assert_eq!(queue.items[0].reason, BoundaryRecoveryReason::MissingFace);
         assert_eq!(queue.items[0].face_node_ids, Some([0, 1, 2]));
@@ -282,6 +320,7 @@ mod tests {
 
         assert_eq!(queue.missing_edge_count, 3);
         assert_eq!(queue.missing_face_count, 1);
+        assert_eq!(queue.interface_mismatch_count, 0);
         assert_eq!(
             queue
                 .items
@@ -310,6 +349,7 @@ mod tests {
 
         assert_eq!(queue.missing_edge_count, 0);
         assert_eq!(queue.missing_face_count, 0);
+        assert_eq!(queue.interface_mismatch_count, 0);
         assert_eq!(queue.provenance_mismatch_count, 3);
         assert_eq!(
             queue
@@ -323,6 +363,30 @@ mod tests {
                 BoundaryRecoveryReason::SourceEdgeMismatch,
             ]
         );
+    }
+
+    #[test]
+    fn outside_neighbor_mismatch_queues_face_recovery() {
+        let mut expected = tetrahedron_faces();
+        expected[0].outside_tet_ids = vec![42, 24, 42];
+        let mut candidate = expected.clone();
+        candidate[0].outside_tet_ids = vec![42];
+
+        let queue = build_boundary_recovery_queue(&expected, &candidate)
+            .expect("outside-neighbor mismatch should queue face recovery work");
+
+        assert_eq!(queue.missing_edge_count, 0);
+        assert_eq!(queue.missing_face_count, 0);
+        assert_eq!(queue.interface_mismatch_count, 1);
+        assert_eq!(queue.provenance_mismatch_count, 0);
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0].priority, BoundaryRecoveryPriority::Face);
+        assert_eq!(
+            queue.items[0].reason,
+            BoundaryRecoveryReason::OutsideTetMismatch
+        );
+        assert_eq!(queue.items[0].face_node_ids, Some([0, 1, 2]));
+        assert_eq!(queue.items[0].outside_tet_ids, vec![24, 42]);
     }
 
     #[test]
