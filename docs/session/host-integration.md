@@ -11,7 +11,9 @@ The session API is intentionally host-neutral. Different frontends wrap it diffe
 
 ## CLI REPL
 
-The CLI REPL creates one `RunMatSession`, keeps it alive for the process, and submits each line as `SourceInput::Text { name: "<repl>", text }`. Special dot commands such as `.stats`, `.gc`, and `.info` are handled by the CLI before code reaches the session.
+The CLI REPL creates one `RunMatSession`, keeps it alive for the process, and submits ordinary source lines as `SourceInput::Text { name: "<repl>", text }`. Special dot commands such as `.stats`, `.gc`, and `.info` are handled by the CLI before code reaches the session.
+
+Lines beginning with `!` are also CLI-only shell escapes. The native CLI runs the rest of the line in the platform shell, prints stdout and stderr, reports non-zero exits, and then returns to the REPL. This is host execution, not a `runmat-core` ABI feature: `.m` scripts, WASM, notebook hosts, and editor hosts do not receive implicit shell execution by submitting source that starts with `!`.
 
 The CLI uses in-memory line-editor history. Persistent notebook or command history is not part of `runmat-core`.
 
