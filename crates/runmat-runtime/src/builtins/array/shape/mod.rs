@@ -1,5 +1,6 @@
 //! Shape-manipulation builtins (reshape, squeeze, permute, …).
 
+pub(crate) mod blkdiag;
 pub(crate) mod cat;
 pub(crate) mod circshift;
 pub(crate) mod diag;

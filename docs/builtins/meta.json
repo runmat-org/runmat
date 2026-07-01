@@ -86747,6 +86747,74 @@
           "message": "zplane: internal operation failed"
         }
       ]
+    },
+    {
+      "name": "blkdiag",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = blkdiag()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Block diagonal matrix containing each input along the diagonal."
+            }
+          ]
+        },
+        {
+          "label": "B = blkdiag(A1, An...)",
+          "inputs": [
+            {
+              "name": "A1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First scalar, vector, matrix, sparse matrix, or gpuArray block."
+            },
+            {
+              "name": "An",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional blocks placed down and right from the previous block."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Block diagonal matrix containing each input along the diagonal."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BLKDIAG.INVALID_INPUT",
+          "identifier": "RunMat:blkdiag:InvalidInput",
+          "when": "An input class, dimensionality, or block conversion is unsupported.",
+          "message": "blkdiag: invalid input"
+        },
+        {
+          "code": "RM.BLKDIAG.SIZE_OVERFLOW",
+          "identifier": "RunMat:blkdiag:SizeOverflow",
+          "when": "The block diagonal output dimensions or allocation size exceed addressable memory.",
+          "message": "blkdiag: output size exceeds maximum supported size"
+        },
+        {
+          "code": "RM.BLKDIAG.GPU",
+          "identifier": "RunMat:blkdiag:GpuError",
+          "when": "A required gpuArray gather or upload operation fails.",
+          "message": "blkdiag: gpuArray operation failed"
+        }
+      ]
     }
   ]
 }

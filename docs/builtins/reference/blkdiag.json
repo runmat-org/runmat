@@ -1,0 +1,132 @@
+{
+  "title": "blkdiag",
+  "category": "array/shape",
+  "keywords": [
+    "blkdiag",
+    "block diagonal",
+    "matrix assembly",
+    "sparse",
+    "gpu"
+  ],
+  "summary": "Construct block diagonal matrices from scalar, vector, matrix, sparse, complex, logical, character, or gpuArray blocks.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat gathers gpuArray inputs once, assembles the block diagonal result on the host, and uploads dense numeric, logical, or complex results back to the active provider. Sparse results remain host sparse matrices because RunMat does not yet have a sparse gpuArray representation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::blkdiag::tests",
+    "integration": "builtins::array::shape::blkdiag::tests::gpu_numeric_inputs_roundtrip_to_gpu"
+  },
+  "description": "`B = blkdiag(A1, A2, ...)` places each input block down the diagonal of a new matrix. Rows and columns are accumulated from the input blocks, and all off-block entries are filled with zeros or spaces for character arrays.",
+  "behaviors": [
+    "`blkdiag()` returns the canonical empty `0 x 0` double matrix.",
+    "Numeric scalars are treated as `1 x 1` blocks, vectors and matrices keep their two-dimensional shape, and inputs with only singleton trailing dimensions are accepted.",
+    "All-logical inputs return a logical array. Mixed logical and numeric inputs return a numeric array.",
+    "If any input is sparse and no input is character, the output is sparse when complex inputs are real-valued; dense numeric, logical, and real-valued complex blocks contribute only their nonzero entries.",
+    "If any input is complex and no input is character, the output is complex and real, logical, and sparse inputs are promoted into the real part when needed.",
+    "Sparse inputs mixed with non-real complex blocks currently return a dense complex result because RunMat does not yet have a complex sparse matrix representation.",
+    "Single-precision dense blocks preserve single dtype when all dense numeric blocks share that dtype.",
+    "Character blocks are supported when every input is a character array; off-block entries are spaces.",
+    "String arrays, cell arrays, and non-matrix higher-dimensional inputs raise errors.",
+    "gpuArray inputs can be mixed with host numeric, logical, or complex blocks. Dense numeric, logical, and complex results remain gpu-resident; sparse results remain host sparse matrices."
+  ],
+  "examples": [
+    {
+      "description": "Combining dense matrix blocks",
+      "input": "A = [1 2; 3 4];\nB = [5 6];\nC = blkdiag(A, B)",
+      "output": "C =\n     1     2     0     0\n     3     4     0     0\n     0     0     5     6"
+    },
+    {
+      "description": "Using scalar and vector blocks",
+      "input": "D = blkdiag(1, [2 3 4], 5)",
+      "output": "D =\n     1     0     0     0     0\n     0     2     3     4     0\n     0     0     0     0     5"
+    },
+    {
+      "description": "Preserving sparse output",
+      "input": "S = sparse([1 2], [1 2], [10 20], 2, 2);\nT = blkdiag(S, [0; 30])",
+      "output": "T = sparse([1 2 4], [1 2 3], [10 20 30], 4, 3)"
+    },
+    {
+      "description": "Building a complex block diagonal matrix",
+      "input": "Z = blkdiag(1 + 2i, [3; 4])"
+    },
+    {
+      "description": "Keeping all-gpuArray inputs on the GPU",
+      "input": "G1 = gpuArray([1; 2]);\nG2 = gpuArray([3 4]);\nG = blkdiag(G1, G2);\nresult = gather(G)",
+      "output": "result =\n     1     0     0\n     2     0     0\n     0     3     4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What class does `blkdiag` return?",
+      "answer": "All-logical inputs return logical. Sparse inputs return sparse unless character input is present or a non-real complex block requires complex output. Complex inputs promote the output to complex when needed. Otherwise numeric dense output is returned."
+    },
+    {
+      "question": "Does `blkdiag` preserve sparse matrices?",
+      "answer": "Yes for real-valued sparse outputs. If any input is sparse and the output is not character or non-real complex, RunMat builds a sparse CSC result and keeps only nonzero entries from dense numeric, logical, and real-valued complex blocks. Non-real complex entries currently promote the result to dense complex because RunMat does not yet provide complex sparse storage."
+    },
+    {
+      "question": "Can I mix host arrays and gpuArray values?",
+      "answer": "Yes, for dense numeric, logical, and complex blocks. RunMat gathers gpuArray inputs, assembles the result, and uploads dense results back to the provider. Sparse results remain host sparse matrices."
+    },
+    {
+      "question": "Are character arrays supported?",
+      "answer": "Yes, when every input is a character array. The original character blocks are placed on the diagonal and spaces fill off-block positions."
+    },
+    {
+      "question": "Does `blkdiag` accept 3-D arrays?",
+      "answer": "Only inputs whose trailing dimensions are singleton are accepted. Non-matrix higher-dimensional inputs raise an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "cat",
+      "url": "./cat"
+    },
+    {
+      "label": "horzcat",
+      "url": "./horzcat"
+    },
+    {
+      "label": "vertcat",
+      "url": "./vertcat"
+    },
+    {
+      "label": "sparse",
+      "url": "./sparse"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs"
+  },
+  "gpu_residency": "gpuArray inputs are gathered to host for block placement, then dense numeric, logical, and complex results are uploaded back to the active provider. Sparse results remain host sparse matrices.",
+  "gpu_behavior": [
+    "`blkdiag` is GPU-aware but not fused. It materialises a fresh block diagonal array and therefore acts as a fusion sink."
+  ]
+}
