@@ -3643,10 +3643,12 @@ impl Compiler {
             }
             MirOperand::Local(local) => {
                 let slot = self.mir_local_slot(*local).ok()?;
+                let mut visited = HashSet::new();
                 match self
                     .mir_local_single_assignment_rvalue(*local)
-                    .and_then(|value| self.mir_rvalue_end_expr_internal(&value))
-                {
+                    .and_then(|value| {
+                        self.mir_rvalue_range_bound_end_expr_internal(&value, &mut visited)
+                    }) {
                     Some((expr, true)) => Some(expr),
                     Some((_, false)) | None => Some(EndExpr::Var(slot)),
                 }
@@ -3694,6 +3696,110 @@ impl Compiler {
             });
         let value = assignments.next()?.clone();
         assignments.next().is_none().then_some(value)
+    }
+
+    fn mir_operand_range_bound_end_expr_internal(
+        &self,
+        operand: &MirOperand,
+        visited: &mut HashSet<runmat_mir::MirLocalId>,
+    ) -> Option<(EndExpr, bool)> {
+        match operand {
+            MirOperand::Local(local) => {
+                if !visited.insert(*local) {
+                    return None;
+                }
+                let result = self
+                    .mir_local_single_assignment_rvalue(*local)
+                    .and_then(|value| {
+                        self.mir_rvalue_range_bound_end_expr_internal(&value, visited)
+                    });
+                visited.remove(local);
+                result
+            }
+            MirOperand::Constant(MirConstant::Number(value)) => value
+                .parse::<f64>()
+                .ok()
+                .map(|value| (EndExpr::Const(value), false)),
+            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
+        }
+    }
+
+    fn mir_rvalue_range_bound_end_expr_internal(
+        &self,
+        value: &MirRvalue,
+        visited: &mut HashSet<runmat_mir::MirLocalId>,
+    ) -> Option<(EndExpr, bool)> {
+        match value {
+            MirRvalue::End => Some((EndExpr::End, true)),
+            MirRvalue::Use(operand) => {
+                self.mir_operand_range_bound_end_expr_internal(operand, visited)
+            }
+            MirRvalue::Unary(op, operand) => {
+                let (expr, has_end) =
+                    self.mir_operand_range_bound_end_expr_internal(operand, visited)?;
+                match op {
+                    OperatorKind::UnaryPlus => Some((EndExpr::Pos(Box::new(expr)), has_end)),
+                    OperatorKind::UnaryMinus => Some((EndExpr::Neg(Box::new(expr)), has_end)),
+                    _ => None,
+                }
+            }
+            MirRvalue::Binary(left, op, right) => {
+                let (left, left_has_end) =
+                    self.mir_operand_range_bound_end_expr_internal(left, visited)?;
+                let (right, right_has_end) =
+                    self.mir_operand_range_bound_end_expr_internal(right, visited)?;
+                let has_end = left_has_end || right_has_end;
+                let expr = match op {
+                    OperatorKind::Add => EndExpr::Add(Box::new(left), Box::new(right)),
+                    OperatorKind::Subtract => EndExpr::Sub(Box::new(left), Box::new(right)),
+                    OperatorKind::MatrixMultiply | OperatorKind::ElementwiseMultiply => {
+                        EndExpr::Mul(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::Mrdivide | OperatorKind::ElementwiseDivide => {
+                        EndExpr::Div(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::Mldivide | OperatorKind::ElementwiseLeftDivide => {
+                        EndExpr::LeftDiv(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::MatrixPower | OperatorKind::ElementwisePower => {
+                        EndExpr::Pow(Box::new(left), Box::new(right))
+                    }
+                    _ => return None,
+                };
+                Some((expr, has_end))
+            }
+            MirRvalue::Call(call) => self.mir_call_range_bound_end_expr_internal(call, visited),
+            _ => None,
+        }
+    }
+
+    fn mir_call_range_bound_end_expr_internal(
+        &self,
+        call: &MirCall,
+        visited: &mut HashSet<runmat_mir::MirLocalId>,
+    ) -> Option<(EndExpr, bool)> {
+        let identity = match &call.callee {
+            MirCallee::Static(identity) => identity.clone(),
+            MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => return None,
+            MirCallee::Dynamic(_) => return None,
+        };
+        let mut args = Vec::with_capacity(call.args.len());
+        let mut has_end = false;
+        for arg in &call.args {
+            let MirCallArg::Single(operand) = arg else {
+                return None;
+            };
+            let (expr, arg_has_end) =
+                self.mir_operand_range_bound_end_expr_internal(operand, visited)?;
+            args.push(expr);
+            has_end |= arg_has_end;
+        }
+        let expr = EndExpr::ResolvedCall {
+            identity,
+            fallback_policy: call.fallback_policy,
+            args,
+        };
+        Some((expr, has_end))
     }
 
     fn mir_rvalue_end_expr_internal(&self, value: &MirRvalue) -> Option<(EndExpr, bool)> {
@@ -4169,11 +4275,41 @@ mod tests {
     }
 
     fn compiler_with_local_assignments(assignments: Vec<MirRvalue>) -> Compiler {
+        compiler_with_assignments(
+            assignments
+                .into_iter()
+                .map(|value| (MirLocalId(0), value))
+                .collect(),
+        )
+    }
+
+    fn compiler_with_assignments(assignments: Vec<(MirLocalId, MirRvalue)>) -> Compiler {
         let function = FunctionId(0);
-        let local = MirLocalId(0);
-        let slot = VmSlotId(7);
+        let target_local = MirLocalId(0);
         let mut mir_local_slots = HashMap::new();
-        mir_local_slots.insert(local, slot);
+        let mut locals = Vec::new();
+        for local in assignments
+            .iter()
+            .map(|(local, _)| *local)
+            .chain(std::iter::once(target_local))
+        {
+            if mir_local_slots.contains_key(&local) {
+                continue;
+            }
+            let slot = VmSlotId(7 + local.0);
+            mir_local_slots.insert(local, slot);
+            locals.push(MirLocal {
+                id: local,
+                binding: None,
+                kind: MirLocalKind::Temporary,
+                span: runmat_hir::Span::default(),
+            });
+        }
+        let local_count = mir_local_slots
+            .values()
+            .map(|slot| slot.0 + 1)
+            .max()
+            .unwrap_or(0);
         let mut functions = HashMap::new();
         functions.insert(
             function,
@@ -4192,13 +4328,13 @@ mod tests {
                 binding_slots: HashMap::new(),
                 mir_local_slots,
                 captures: Vec::new(),
-                local_count: slot.0 + 1,
+                local_count,
             },
         );
         let span = runmat_hir::Span::default();
         let statements = assignments
             .into_iter()
-            .map(|value| MirStmt {
+            .map(|(local, value)| MirStmt {
                 kind: MirStmtKind::Assign {
                     place: MirPlace::Local(local),
                     value,
@@ -4210,9 +4346,9 @@ mod tests {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
-            var_count: slot.0 + 1,
+            var_count: local_count,
             imports: Vec::new(),
-            var_types: vec![Type::Unknown; slot.0 + 1],
+            var_types: vec![Type::Unknown; local_count],
             layout: Some(VmAssemblyLayout {
                 functions,
                 entrypoints: HashMap::new(),
@@ -4222,12 +4358,7 @@ mod tests {
             body: Some(MirBody {
                 function,
                 abi: empty_function_abi(),
-                locals: vec![MirLocal {
-                    id: local,
-                    binding: None,
-                    kind: MirLocalKind::Temporary,
-                    span,
-                }],
+                locals,
                 blocks: vec![BasicBlock {
                     id: BasicBlockId(0),
                     statements,
@@ -4255,6 +4386,23 @@ mod tests {
         let compiler = compiler_with_local_assignments(vec![
             MirRvalue::End,
             MirRvalue::Use(MirOperand::Constant(MirConstant::Number("3".to_string()))),
+        ]);
+        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
+        assert!(matches!(expr, Some(EndExpr::Var(7))));
+    }
+
+    #[test]
+    fn range_bound_uses_live_var_for_nested_reassigned_local() {
+        let compiler = compiler_with_assignments(vec![
+            (
+                MirLocalId(0),
+                MirRvalue::Use(MirOperand::Local(MirLocalId(1))),
+            ),
+            (MirLocalId(1), MirRvalue::End),
+            (
+                MirLocalId(1),
+                MirRvalue::Use(MirOperand::Constant(MirConstant::Number("3".to_string()))),
+            ),
         ]);
         let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
         assert!(matches!(expr, Some(EndExpr::Var(7))));
