@@ -29,6 +29,7 @@ pub mod new_handle_object;
 pub mod new_object;
 pub mod notify;
 pub mod object_indexing;
+pub mod on_cleanup;
 pub mod runtime_compat;
 pub mod test_classes;
 pub mod test_methods;

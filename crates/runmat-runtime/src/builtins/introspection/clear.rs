@@ -74,6 +74,7 @@ pub const CLEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
+        cleanup_workspace_values(workspace::snapshot()).await?;
         workspace::clear().map_err(clear_error)?;
         return Ok(empty_return_value());
     }
@@ -84,14 +85,31 @@ async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     if names.is_empty() || names.iter().any(|name| name.eq_ignore_ascii_case("all")) {
+        cleanup_workspace_values(workspace::snapshot()).await?;
         workspace::clear().map_err(clear_error)?;
     } else {
         for name in names {
+            if let Some(value) = workspace::lookup(&name) {
+                crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
+                    .await?;
+            }
             workspace::remove(&name).map_err(clear_error)?;
         }
     }
 
     Ok(empty_return_value())
+}
+
+async fn cleanup_workspace_values(snapshot: Option<Vec<(String, Value)>>) -> BuiltinResult<()> {
+    if let Some(entries) = snapshot {
+        let values = entries
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>();
+        crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_values(&values)
+            .await?;
+    }
+    Ok(())
 }
 
 fn clear_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -138,7 +156,7 @@ mod tests {
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     static CLEAR_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -202,6 +220,21 @@ mod tests {
         });
     }
 
+    fn cleanup_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
+        Arc::new(move |_function, args, requested_outputs| {
+            assert!(
+                args.is_empty(),
+                "onCleanup callback should receive no inputs"
+            );
+            assert_eq!(requested_outputs, 0);
+            let counter = Arc::clone(&counter);
+            Box::pin(async move {
+                *counter.lock().unwrap() += 1;
+                Ok(Value::Tensor(runmat_builtins::Tensor::zeros(vec![0, 0])))
+            })
+        })
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn clear_without_args_clears_workspace() {
@@ -246,5 +279,36 @@ mod tests {
         assert!(err
             .to_string()
             .contains("expected variable names as character vectors or string scalars"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn clear_named_oncleanup_runs_callback_before_removal() {
+        let (_workspace_guard, _clear_guard) = test_guard();
+        let _cleanup_guard = crate::builtins::introspection::on_cleanup::ON_CLEANUP_TEST_LOCK
+            .lock()
+            .unwrap();
+        ensure_test_resolver();
+        let counter = Arc::new(Mutex::new(0usize));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            cleanup_invoker(Arc::clone(&counter)),
+        ));
+        let cleanup = block_on(
+            crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
+                Value::BoundFunctionHandle {
+                    name: "cleanup".to_string(),
+                    function: 11,
+                },
+            ),
+        )
+        .expect("create cleanup");
+        set_workspace(&[("cleanup", cleanup), ("x", Value::Num(1.0))]);
+
+        clear_builtin(vec![Value::from("cleanup")]).expect("clear cleanup");
+
+        assert_eq!(*counter.lock().unwrap(), 1);
+        let snapshot = crate::workspace::snapshot().unwrap_or_default();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].0, "x");
     }
 }
