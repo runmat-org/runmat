@@ -14,3 +14,4 @@ pub mod string_empty;
 pub mod strings;
 pub mod strlength;
 pub mod strncmp;
+pub mod unicode2native;

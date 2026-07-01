@@ -74355,6 +74355,88 @@
       ]
     },
     {
+      "name": "unicode2native",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bytes = unicode2native(unicodestr)",
+          "inputs": [
+            {
+              "name": "unicodestr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Unicode text, provided as a string scalar or character vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytes",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "uint8 row vector containing encoded bytes."
+            }
+          ]
+        },
+        {
+          "label": "bytes = unicode2native(unicodestr, encoding)",
+          "inputs": [
+            {
+              "name": "unicodestr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Unicode text, provided as a string scalar or character vector."
+            },
+            {
+              "name": "encoding",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"UTF-8\"",
+              "description": "Character encoding name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytes",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "uint8 row vector containing encoded bytes."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_INPUT",
+          "identifier": "RunMat:unicode2native:InvalidInput",
+          "when": "Input text is not a string scalar or character vector.",
+          "message": "unicode2native: input must be a string scalar or character vector"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_ENCODING",
+          "identifier": "RunMat:unicode2native:InvalidEncoding",
+          "when": "Encoding name is unsupported or malformed.",
+          "message": "unicode2native: unsupported character encoding"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_ARGUMENT",
+          "identifier": "RunMat:unicode2native:InvalidArgument",
+          "when": "Too many arguments were supplied.",
+          "message": "unicode2native: invalid argument"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INTERNAL",
+          "identifier": "RunMat:unicode2native:InternalError",
+          "when": "Internal byte-vector tensor construction failed.",
+          "message": "unicode2native: internal error"
+        }
+      ]
+    },
+    {
       "name": "strrep",
       "output_mode": "Fixed",
       "completion_policy": "Public",
