@@ -3828,7 +3828,13 @@ fn repair_exact_quality_tets_once(
             summary.changed = true;
             summary.reconnected_cavity_count += 1;
             summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
-            repaired.extend(candidates);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
@@ -6293,9 +6299,9 @@ fn best_componentized_edge_reconnection(
     edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
-) -> Result<Option<(Vec<usize>, Vec<TetCandidate>, bool)>, TetCandidateError> {
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
     let tet = &tets[tet_index];
-    let mut best = None::<(Vec<usize>, Vec<TetCandidate>, usize, f64, bool)>;
+    let mut best = None::<(Vec<usize>, BoundaryCavityReconnection, usize, f64, bool)>;
     for edge in tet_node_edges(tet.node_ids) {
         let Some(adjacent) = edge_adjacency.get(&edge) else {
             continue;
@@ -6331,7 +6337,7 @@ fn best_componentized_edge_reconnection(
             let original_min_exact =
                 min_exact_scaled_jacobian(component.iter().map(|index| &tets[*index]));
             let candidates = if closed_edge_star_cavity(&component, edge, tets)?.is_some() {
-                if component.len() == 3 {
+                let edge_candidates = if component.len() == 3 {
                     three_tet_edge_reconnection_candidates(
                         &component,
                         edge,
@@ -6347,6 +6353,19 @@ fn best_componentized_edge_reconnection(
                         node_points,
                         options,
                     )?
+                };
+                if let Some(tets) = edge_candidates {
+                    Some(BoundaryCavityReconnection {
+                        tets,
+                        inserted_nodes: Vec::new(),
+                    })
+                } else {
+                    face_neighbor_cavity_reconnection_candidates(
+                        &component,
+                        tets,
+                        node_points,
+                        options,
+                    )?
                 }
             } else {
                 face_neighbor_cavity_reconnection_candidates(
@@ -6355,12 +6374,6 @@ fn best_componentized_edge_reconnection(
                     node_points,
                     options,
                 )?
-                .and_then(|candidate| {
-                    candidate
-                        .inserted_nodes
-                        .is_empty()
-                        .then_some(candidate.tets)
-                })
             };
             let Some(candidates) = candidates else {
                 continue;
@@ -14086,6 +14099,77 @@ mod tests {
 
         assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
         assert!(!quality_gain_only);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        let original_volume = reconnected_indices
+            .iter()
+            .map(|index| tets[*index].volume_m3)
+            .sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn componentized_edge_reconnection_uses_boundary_refill_when_ring_reconnect_collapses() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [0.0, 0.0, 0.2]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+            (6, [3.0, 0.0, 0.0]),
+            (7, [3.0, 1.0, 0.0]),
+            (8, [2.2, 0.5, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let mut tets = [
+            [0, 1, 2, 3],
+            [0, 1, 3, 4],
+            [0, 1, 4, 5],
+            [0, 1, 5, 2],
+            [0, 1, 6, 7],
+            [0, 1, 7, 8],
+            [0, 1, 8, 6],
+        ]
+        .into_iter()
+        .map(|node_ids| {
+            let points = node_ids.map(|node_id| node_points[&node_id]);
+            raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                .expect("fixture tet should be valid")
+        })
+        .collect::<Vec<_>>();
+        for tet in &mut tets[0..4] {
+            tet.exact_scaled_jacobian = 0.01;
+        }
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        assert!(multi_tet_edge_reconnection_candidates(
+            &[0, 1, 2, 3],
+            [0, 1],
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("closed edge-star reconnection should evaluate")
+        .is_none());
+
+        let (reconnected_indices, candidates, quality_gain_only) =
+            best_componentized_edge_reconnection(0, &tets, &edge_adjacency, &node_points, options)
+                .expect("componentized reconnection should evaluate")
+                .expect("constrained refill fallback should reconnect");
+
+        assert_eq!(reconnected_indices, vec![0, 1, 2, 3]);
+        assert!(!quality_gain_only);
+        assert!(candidates.inserted_nodes.is_empty());
         assert_eq!(
             candidates
                 .iter()
