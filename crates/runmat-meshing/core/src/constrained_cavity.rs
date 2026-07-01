@@ -6,6 +6,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    local_tet_flip::{
+        evaluate_local_tet_flip_quality, two_to_three_face_flip_candidate, LocalTet,
+        LocalTetFlipQualityThresholds,
+    },
     predicate::{
         distance_squared, point_in_closed_triangle_surface, tet_centroid, tet_edge_aspect_ratio,
         tet_scaled_jacobian, tet_signed_volume, Point3, PointInClosedSurface, Triangle3,
@@ -1489,6 +1493,20 @@ fn boundary_node_refill_candidate(
         }
     }
     if refill_tets.is_empty() {
+        if let Some(refill) = boundary_node_exact_cover_refill_candidate(
+            cavity,
+            boundary_nodes,
+            &boundary_triangles,
+            options,
+        )? {
+            return Ok(Ok(improve_refill_with_local_flips(
+                cavity,
+                &boundary_nodes,
+                &refill,
+                options,
+            )
+            .unwrap_or(refill)));
+        }
         return Ok(Err(
             first_rejection.unwrap_or("boundary_node_delaunay_empty")
         ));
@@ -1498,7 +1516,13 @@ fn boundary_node_refill_candidate(
         refill_tets.clone(),
         options.volume_relative_tolerance,
     ) {
-        Ok(refill) => Ok(Ok(refill)),
+        Ok(refill) => Ok(Ok(improve_refill_with_local_flips(
+            cavity,
+            &boundary_nodes,
+            &refill,
+            options,
+        )
+        .unwrap_or(refill))),
         Err(_) => {
             if let Some(refill) = boundary_node_exact_cover_refill_candidate(
                 cavity,
@@ -1506,7 +1530,13 @@ fn boundary_node_refill_candidate(
                 &boundary_triangles,
                 options,
             )? {
-                return Ok(Ok(refill));
+                return Ok(Ok(improve_refill_with_local_flips(
+                    cavity,
+                    &boundary_nodes,
+                    &refill,
+                    options,
+                )
+                .unwrap_or(refill)));
             }
             let (completed_cavity, completed_tets, inserted_nodes) =
                 match complete_missing_boundary_face_tets(
@@ -1528,6 +1558,13 @@ fn boundary_node_refill_candidate(
                 Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
             };
             refill.inserted_nodes = inserted_nodes;
+            refill = improve_refill_with_local_flips(
+                &completed_cavity,
+                &boundary_nodes,
+                &refill,
+                options,
+            )
+            .unwrap_or(refill);
             Ok(Ok(refill))
         }
     }
@@ -6862,6 +6899,109 @@ fn boundary_faces_from_refill_tets(
     Ok(boundary_faces)
 }
 
+fn improve_refill_with_local_flips(
+    cavity: &ConstrainedCavity,
+    node_coordinates: &BTreeMap<u32, Point3>,
+    refill: &ConstrainedCavityRefill,
+    options: ConstrainedCavityRefillOptions,
+) -> Option<ConstrainedCavityRefill> {
+    if refill.tets.len() < 2 {
+        return None;
+    }
+    let mut coordinates = node_coordinates.clone();
+    for node in &refill.inserted_nodes {
+        coordinates.insert(node.node_id, node.coordinates_m);
+    }
+    let thresholds = LocalTetFlipQualityThresholds {
+        min_volume_m3: options.min_volume_m3,
+        min_scaled_jacobian: options.min_scaled_jacobian,
+    };
+    let mut best = None::<ConstrainedCavityRefill>;
+
+    for left_index in 0..refill.tets.len() {
+        for right_index in (left_index + 1)..refill.tets.len() {
+            let left = LocalTet {
+                tet_id: left_index as u32,
+                node_ids: refill.tets[left_index].node_ids,
+            };
+            let right = LocalTet {
+                tet_id: right_index as u32,
+                node_ids: refill.tets[right_index].node_ids,
+            };
+            let Ok(flip) = two_to_three_face_flip_candidate(left, right) else {
+                continue;
+            };
+            if evaluate_local_tet_flip_quality(&flip, &coordinates, thresholds).is_err() {
+                continue;
+            }
+
+            let mut candidate_tets = refill
+                .tets
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tet)| {
+                    (index != left_index && index != right_index).then_some(tet.clone())
+                })
+                .collect::<Vec<_>>();
+            let mut created_tets = Vec::<ConstrainedCavityRefillTet>::new();
+            let mut created_keys = BTreeSet::<[u32; 4]>::new();
+            let mut duplicate_tet = false;
+            for node_ids in &flip.created_tets {
+                let key = sorted_tet_nodes(*node_ids);
+                if !created_keys.insert(key)
+                    || candidate_tets
+                        .iter()
+                        .any(|tet| sorted_tet_nodes(tet.node_ids) == key)
+                {
+                    duplicate_tet = true;
+                    break;
+                }
+                let mut points = [[0.0; 3]; 4];
+                let mut missing_node = false;
+                for (point, node_id) in points.iter_mut().zip(node_ids) {
+                    let Some(coordinates_m) = coordinates.get(node_id) else {
+                        missing_node = true;
+                        break;
+                    };
+                    *point = *coordinates_m;
+                }
+                if missing_node {
+                    duplicate_tet = true;
+                    break;
+                }
+                let Ok(tet) = raw_refill_tet_with_rejection_reason(*node_ids, points, options)
+                else {
+                    duplicate_tet = true;
+                    break;
+                };
+                created_tets.push(tet);
+            }
+            if duplicate_tet {
+                continue;
+            }
+            candidate_tets.extend(created_tets);
+
+            let Ok(mut candidate) =
+                refill_from_tets(cavity, candidate_tets, options.volume_relative_tolerance)
+            else {
+                continue;
+            };
+            candidate.inserted_nodes = refill.inserted_nodes.clone();
+            if !refill_is_better(&candidate, refill) {
+                continue;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|current| refill_is_better(&candidate, current))
+            {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    best
+}
+
 fn refill_is_better(
     candidate: &ConstrainedCavityRefill,
     current: &ConstrainedCavityRefill,
@@ -7800,6 +7940,100 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("exact cover should preserve volume");
+    }
+
+    #[test]
+    fn boundary_node_refill_applies_quality_gated_two_to_three_flip() {
+        let nodes = vec![
+            ConstrainedCavityNode {
+                node_id: 0,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 1,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 2,
+                coordinates_m: [0.0, 1.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 3,
+                coordinates_m: [0.05, 0.55, 0.3],
+            },
+            ConstrainedCavityNode {
+                node_id: 4,
+                coordinates_m: [0.55, 0.05, -0.3],
+            },
+        ];
+        let boundary_nodes = nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let options = refill_options();
+        let baseline_tets = [[0, 1, 2, 3], [0, 2, 1, 4]]
+            .into_iter()
+            .map(|node_ids| {
+                raw_refill_tet_with_rejection_reason(
+                    node_ids,
+                    node_ids.map(|node_id| boundary_nodes[&node_id]),
+                    options,
+                )
+                .expect("baseline tet should pass fixture quality gates")
+            })
+            .collect::<Vec<_>>();
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![1, 2],
+            boundary_faces: [
+                [0, 1, 3],
+                [1, 2, 3],
+                [0, 2, 3],
+                [0, 2, 4],
+                [1, 2, 4],
+                [0, 1, 4],
+            ]
+            .into_iter()
+            .map(|node_ids| ConstrainedCavityBoundaryFace {
+                node_ids,
+                outside_tet_ids: Vec::new(),
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: vec!["body".to_string()],
+            })
+            .collect(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: baseline_tets.iter().map(|tet| tet.volume_m3).sum(),
+        };
+        let baseline = refill_from_tets(&cavity, baseline_tets, options.volume_relative_tolerance)
+            .expect("baseline should preserve the cavity boundary");
+
+        let evaluation =
+            evaluate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], options)
+                .expect("refill evaluation should complete");
+
+        let refill = evaluation.refill.expect("boundary-node refill should pass");
+        assert_eq!(refill.tets.len(), 3);
+        assert!(refill_is_better(&refill, &baseline));
+        assert_eq!(
+            refill
+                .tets
+                .iter()
+                .map(|tet| sorted_tet_nodes(tet.node_ids))
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                sorted_tet_nodes([0, 1, 3, 4]),
+                sorted_tet_nodes([1, 2, 3, 4]),
+                sorted_tet_nodes([0, 2, 3, 4])
+            ])
+        );
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("flipped refill should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("flipped refill should preserve volume");
     }
 
     #[test]
