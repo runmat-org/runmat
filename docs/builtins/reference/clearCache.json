@@ -1,0 +1,71 @@
+{
+  "title": "clearCache",
+  "category": "introspection",
+  "keywords": [
+    "clearCache",
+    "memoize",
+    "MemoizedFunction",
+    "cache"
+  ],
+  "summary": "Clear the cache and counters for one MemoizedFunction object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side cache bookkeeping only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::memoize",
+    "integration": "clearCache resets shared MemoizedFunction cache counters"
+  },
+  "description": "`clearCache(memoizedFcn)` removes all cached entries for a `MemoizedFunction` object and resets `TotalHits` and `TotalMisses` to zero.",
+  "behaviors": [
+    "The input must be a `MemoizedFunction` object returned by `memoize`.",
+    "Cache state is shared per wrapped function, so clearing one object also clears other memoized handles for the same function.",
+    "The operation returns zero internally and suppresses automatic output in statement form.",
+    "Object properties such as `Function`, `Enabled`, and `CacheSize` are preserved."
+  ],
+  "examples": [
+    {
+      "description": "Clear one memoized cache",
+      "input": "f = memoize(@sqrt);\nf(4);\nf(4);\nclearCache(f);\nS = stats(f)",
+      "output": "% S.Cache.TotalHits and TotalMisses are zero."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `clearCache` delete the MemoizedFunction object?",
+      "answer": "No. It only clears cache entries and counters."
+    },
+    {
+      "question": "Does it affect other functions?",
+      "answer": "No. Use `clearAllMemoizedCaches` to clear every memoized-function cache."
+    }
+  ],
+  "links": [
+    {
+      "label": "memoize",
+      "url": "./memoize"
+    },
+    {
+      "label": "clearAllMemoizedCaches",
+      "url": "./clearAllMemoizedCaches"
+    },
+    {
+      "label": "stats",
+      "url": "./stats"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/memoize.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/memoize.rs"
+  }
+}

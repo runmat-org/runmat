@@ -24,6 +24,7 @@ pub(crate) mod isstring;
 pub mod isvalid;
 pub mod localfunctions;
 pub mod make_anon;
+pub mod memoize;
 pub mod mfilename;
 pub mod new_handle_object;
 pub mod new_object;

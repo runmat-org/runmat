@@ -1900,6 +1900,74 @@
       ]
     },
     {
+      "name": "MemoizedFunction.subsref",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "HiddenInternal",
+      "signatures": [
+        {
+          "label": "varargout = subsref(obj, kind, payload)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MemoizedFunction receiver."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind token."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Result of function invocation or property access."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MEMOIZE.INVALID_OBJECT",
+          "identifier": "RunMat:memoize:InvalidObject",
+          "when": "A memoized-function method receives a non-MemoizedFunction object.",
+          "message": "memoize: expected MemoizedFunction object"
+        },
+        {
+          "code": "RM.MEMOIZE.INVALID_CACHE_SIZE",
+          "identifier": "RunMat:memoize:InvalidCacheSize",
+          "when": "CacheSize is not a positive finite integer scalar.",
+          "message": "memoize: CacheSize must be a positive integer scalar"
+        },
+        {
+          "code": "RM.MEMOIZE.INVALID_INDEX",
+          "identifier": "RunMat:memoize:InvalidIndex",
+          "when": "The MemoizedFunction object is indexed with an unsupported indexing form.",
+          "message": "memoize: unsupported MemoizedFunction indexing"
+        },
+        {
+          "code": "RM.MEMOIZE.GC",
+          "identifier": "RunMat:memoize:GcFailure",
+          "when": "The memoized object target cannot be allocated or accessed.",
+          "message": "memoize: internal object storage failed"
+        }
+      ]
+    },
+    {
       "name": "abs",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -8186,6 +8254,69 @@
           "identifier": null,
           "when": "A target argument is not a string scalar/array or row character vector.",
           "message": "clear: expected variable names as character vectors or string scalars"
+        }
+      ]
+    },
+    {
+      "name": "clearAllMemoizedCaches",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "clearAllMemoizedCaches",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Zero when the operation completes."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "clearCache",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "clearCache(memoizedFcn)",
+          "inputs": [
+            {
+              "name": "memoizedFcn",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MemoizedFunction object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Zero when the operation completes."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MEMOIZE.INVALID_OBJECT",
+          "identifier": "RunMat:memoize:InvalidObject",
+          "when": "A memoized-function method receives a non-MemoizedFunction object.",
+          "message": "memoize: expected MemoizedFunction object"
+        },
+        {
+          "code": "RM.MEMOIZE.GC",
+          "identifier": "RunMat:memoize:GcFailure",
+          "when": "The memoized object target cannot be allocated or accessed.",
+          "message": "memoize: internal object storage failed"
         }
       ]
     },
@@ -46373,6 +46504,48 @@
       ]
     },
     {
+      "name": "memoize",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "memoizedFcn = memoize(fh)",
+          "inputs": [
+            {
+              "name": "fh",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle to memoize."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "memoizedFcn",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MemoizedFunction handle object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MEMOIZE.INVALID_FUNCTION",
+          "identifier": "RunMat:memoize:InvalidFunction",
+          "when": "The input is not a function handle or closure.",
+          "message": "memoize: input must be a function handle"
+        },
+        {
+          "code": "RM.MEMOIZE.GC",
+          "identifier": "RunMat:memoize:GcFailure",
+          "when": "The memoized object target cannot be allocated or accessed.",
+          "message": "memoize: internal object storage failed"
+        }
+      ]
+    },
+    {
       "name": "mfilename",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -71455,6 +71628,54 @@
           "identifier": "RunMat:startsWith:InternalError",
           "when": "Internal logical result assembly failed.",
           "message": "startsWith: internal error"
+        }
+      ]
+    },
+    {
+      "name": "stats",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "S = stats(memoizedFcn)",
+          "inputs": [
+            {
+              "name": "memoizedFcn",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MemoizedFunction object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "stats",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Structure with cache entries and hit/miss counters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MEMOIZE.INVALID_OBJECT",
+          "identifier": "RunMat:memoize:InvalidObject",
+          "when": "A memoized-function method receives a non-MemoizedFunction object.",
+          "message": "memoize: expected MemoizedFunction object"
+        },
+        {
+          "code": "RM.MEMOIZE.INVALID_CACHE_SIZE",
+          "identifier": "RunMat:memoize:InvalidCacheSize",
+          "when": "CacheSize is not a positive finite integer scalar.",
+          "message": "memoize: CacheSize must be a positive integer scalar"
+        },
+        {
+          "code": "RM.MEMOIZE.GC",
+          "identifier": "RunMat:memoize:GcFailure",
+          "when": "The memoized object target cannot be allocated or accessed.",
+          "message": "memoize: internal object storage failed"
         }
       ]
     },

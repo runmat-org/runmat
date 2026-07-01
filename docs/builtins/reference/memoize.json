@@ -1,0 +1,115 @@
+{
+  "title": "memoize",
+  "category": "introspection",
+  "keywords": [
+    "memoize",
+    "MemoizedFunction",
+    "function handle",
+    "cache",
+    "performance"
+  ],
+  "summary": "Create a MemoizedFunction handle object that caches function-handle results by input values and requested output count.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side function-dispatch helper. GPU behavior belongs to the wrapped function body."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::memoize",
+    "integration": "MemoizedFunction subsref dispatch through feval"
+  },
+  "description": "`memoizedFcn = memoize(fh)` returns a `MemoizedFunction` handle object for function handle `fh`. Calling the object reuses cached outputs when the input values and requested output count match a previous call. Repeated `memoize` calls for the same function handle share the same object state within the current runtime thread.",
+  "behaviors": [
+    "`fh` must be a function handle or anonymous-function closure.",
+    "The returned object is callable like the original function through normal function-call syntax or `feval`.",
+    "Cache entries are keyed by the input values and the number of requested outputs.",
+    "Numeric `NaN` values compare equal for cache lookup.",
+    "`Function` stores the wrapped function handle and is read-only.",
+    "`Enabled` defaults to true. When false, calls dispatch to the wrapped function without reading, writing, or updating cache statistics.",
+    "`CacheSize` defaults to 10 and must be a positive integer scalar. The oldest entries are evicted when the cache exceeds this size.",
+    "`clearCache(memoizedFcn)` clears one shared cache and resets its counters.",
+    "`clearAllMemoizedCaches` clears every memoized-function cache in the current runtime thread.",
+    "`stats(memoizedFcn)` returns a structure with `Cache.Inputs`, `Cache.Nargout`, `Cache.Outputs`, `Cache.HitCount`, `Cache.TotalHits`, and `Cache.TotalMisses`."
+  ],
+  "examples": [
+    {
+      "description": "Memoize an expensive function handle",
+      "input": "f = memoize(@(x) sum(sin(x)));\ny1 = f(1:1000);\ny2 = f(1:1000);",
+      "output": "% The second call reuses the cached result."
+    },
+    {
+      "description": "Inspect cache statistics",
+      "input": "f = memoize(@sqrt);\nf(4);\nf(4);\nS = stats(f)",
+      "output": "% S.Cache.TotalHits is 1 and TotalMisses is 1."
+    },
+    {
+      "description": "Limit cache capacity",
+      "input": "f = memoize(@cos);\nf.CacheSize = 2;\nf(1); f(2); f(3);",
+      "output": "% The oldest cached entry is evicted."
+    },
+    {
+      "description": "Disable cache lookup temporarily",
+      "input": "f = memoize(@rand);\nf.Enabled = false;\na = f(1);\nb = f(1);",
+      "output": "% The two calls dispatch normally and do not update cache statistics."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `memoize(@f)` return a function handle?",
+      "answer": "No. It returns a `MemoizedFunction` handle object that can be invoked like the original function."
+    },
+    {
+      "question": "Do separate `memoize(@f)` calls share cache data?",
+      "answer": "Yes, within the current runtime thread. The cache is associated with the wrapped function identity, so repeated memoization of the same function shares cache entries and properties."
+    },
+    {
+      "question": "Are multiple-output calls cached separately?",
+      "answer": "Yes. The requested output count is part of the cache key."
+    },
+    {
+      "question": "Does this launch GPU kernels?",
+      "answer": "No. `memoize` itself is host-side dispatch and bookkeeping. The wrapped function may still call GPU-aware operations."
+    }
+  ],
+  "links": [
+    {
+      "label": "clearCache",
+      "url": "./clearCache"
+    },
+    {
+      "label": "clearAllMemoizedCaches",
+      "url": "./clearAllMemoizedCaches"
+    },
+    {
+      "label": "stats",
+      "url": "./stats"
+    },
+    {
+      "label": "feval",
+      "url": "./feval"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/memoize.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/memoize.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "memoizedFcn = memoize(fh)\ny = memoizedFcn(x)\n[y1, y2] = memoizedFcn(x)"
+    },
+    "points": [
+      "`fh` is a function handle or anonymous function.",
+      "`memoizedFcn.Function`, `memoizedFcn.Enabled`, and `memoizedFcn.CacheSize` expose the memoized-function state."
+    ]
+  }
+}
