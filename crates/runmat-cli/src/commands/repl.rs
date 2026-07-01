@@ -8,7 +8,7 @@ use runmat_core::{
 };
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::process::Command;
 use supports_color::Stream;
 
@@ -468,6 +468,7 @@ fn run_shell_escape(command: &str) {
     match shell.output() {
         Ok(output) => {
             print!("{}", String::from_utf8_lossy(&output.stdout));
+            let _ = io::stdout().flush();
             eprint!("{}", String::from_utf8_lossy(&output.stderr));
             if !output.status.success() {
                 if let Some(code) = output.status.code() {

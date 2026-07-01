@@ -46,11 +46,12 @@ fn run_repl_with_piped_input(
     }
 
     let mut child = command.spawn()?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(input.as_bytes())?;
-    }
-    drop(child.stdin.take());
-    Ok(child.wait_with_output()?)
+    let mut stdin = child.stdin.take().expect("stdin should be piped");
+    let input = input.to_owned();
+    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+    let output = child.wait_with_output()?;
+    writer.join().expect("stdin writer thread panicked")?;
+    Ok(output)
 }
 
 fn write_test_config(dir: &Path) -> PathBuf {
