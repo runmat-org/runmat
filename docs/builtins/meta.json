@@ -39428,6 +39428,193 @@
       ]
     },
     {
+      "name": "ismembertol",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "LIA = ismembertol(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Query values or rows."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reference values or rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "LIA",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask over A."
+            }
+          ]
+        },
+        {
+          "label": "LIA = ismembertol(A, B, tol, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Query values or rows."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reference values or rows."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1e-12 for double, 1e-6 for single",
+              "description": "Relative tolerance."
+            },
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: ByRows, DataScale, OutputAllIndices."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "LIA",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask over A."
+            }
+          ]
+        },
+        {
+          "label": "[LIA, LocB] = ismembertol(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Query values or rows."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reference values or rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "LIA",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask over A."
+            },
+            {
+              "name": "LocB",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First or all matching indices into B."
+            }
+          ]
+        },
+        {
+          "label": "[LIA, LocB] = ismembertol(A, B, tol, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Query values or rows."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reference values or rows."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1e-12 for double, 1e-6 for single",
+              "description": "Relative tolerance."
+            },
+            {
+              "name": "Name,Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options: ByRows, DataScale, OutputAllIndices."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "LIA",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask over A."
+            },
+            {
+              "name": "LocB",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First or all matching indices into B."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISMEMBERTOL.INVALID_INPUT",
+          "identifier": "RunMat:ismembertol:InvalidInput",
+          "when": "A or B is not a supported real full numeric input.",
+          "message": "ismembertol: inputs must be real full numeric arrays"
+        },
+        {
+          "code": "RM.ISMEMBERTOL.INVALID_ARGUMENT",
+          "identifier": "RunMat:ismembertol:InvalidArgument",
+          "when": "Tolerance or name-value arguments are malformed.",
+          "message": "ismembertol: invalid argument"
+        },
+        {
+          "code": "RM.ISMEMBERTOL.ROWS_COLUMN_MISMATCH",
+          "identifier": "RunMat:ismembertol:RowsColumnMismatch",
+          "when": "ByRows is true and A/B column counts differ.",
+          "message": "ismembertol: inputs must have the same number of columns when ByRows is true"
+        },
+        {
+          "code": "RM.ISMEMBERTOL.INTERNAL",
+          "identifier": "RunMat:ismembertol:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "ismembertol: internal error"
+        }
+      ]
+    },
+    {
       "name": "ismissing",
       "output_mode": "Fixed",
       "completion_policy": "Public",
