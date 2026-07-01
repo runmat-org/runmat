@@ -1801,6 +1801,24 @@ fn multi_interior_exact_cover_failure_reason(
         Some("interior_incomplete") => "multi_interior_exact_cover_interior_incomplete",
         Some("volume_mismatch") => "multi_interior_exact_cover_volume_mismatch",
         Some("candidates_exhausted") => "multi_interior_exact_cover_candidates_exhausted",
+        Some("boundary_face_candidates_exhausted") => {
+            "multi_interior_exact_cover_boundary_face_candidates_exhausted"
+        }
+        Some("boundary_face_no_raw_candidate") => {
+            "multi_interior_exact_cover_boundary_face_no_raw_candidate"
+        }
+        Some("boundary_face_no_addable_candidate") => {
+            "multi_interior_exact_cover_boundary_face_no_addable_candidate"
+        }
+        Some("interior_face_candidates_exhausted") => {
+            "multi_interior_exact_cover_interior_face_candidates_exhausted"
+        }
+        Some("interior_face_no_raw_candidate") => {
+            "multi_interior_exact_cover_interior_face_no_raw_candidate"
+        }
+        Some("interior_face_no_addable_candidate") => {
+            "multi_interior_exact_cover_interior_face_no_addable_candidate"
+        }
         Some("forced_interior_mate_no_candidate_contains_face") => {
             "multi_interior_exact_cover_forced_mate_missing_candidate"
         }
@@ -3872,7 +3890,11 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             selected.pop();
             self.remove_candidate_faces(candidate_index, face_counts);
         }
-        self.record_dead_end(trace, selected, "candidates_exhausted");
+        self.record_dead_end(
+            trace,
+            selected,
+            self.candidates_exhausted_reason(face_counts, selected),
+        );
         self.rollback_selected_candidates(&forced_indices, face_counts, selected);
         None
     }
@@ -4266,6 +4288,75 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             }
         }
         best
+    }
+
+    #[cfg(test)]
+    fn candidates_exhausted_reason(
+        &self,
+        face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
+    ) -> &'static str {
+        for face in self
+            .boundary_faces
+            .iter()
+            .filter(|face| face_counts.get(*face).copied().unwrap_or(0) == 0)
+        {
+            let raw_count = self.raw_candidate_count_for_face(*face, selected);
+            if raw_count == 0 {
+                return "boundary_face_no_raw_candidate";
+            }
+            let addable_count = self.addable_candidate_count_for_face(*face, face_counts, selected);
+            if addable_count == 0 {
+                return "boundary_face_no_addable_candidate";
+            }
+            return "boundary_face_candidates_exhausted";
+        }
+
+        for face in face_counts.iter().filter_map(|(face, count)| {
+            (!self.boundary_faces.contains(face) && *count == 1).then_some(*face)
+        }) {
+            let raw_count = self.raw_candidate_count_for_face(face, selected);
+            if raw_count == 0 {
+                return "interior_face_no_raw_candidate";
+            }
+            let addable_count = self.addable_candidate_count_for_face(face, face_counts, selected);
+            if addable_count == 0 {
+                return "interior_face_no_addable_candidate";
+            }
+            return "interior_face_candidates_exhausted";
+        }
+
+        "candidates_exhausted"
+    }
+
+    #[cfg(test)]
+    fn raw_candidate_count_for_face(&self, face: [u32; 3], selected: &[usize]) -> usize {
+        (0..self.candidates.len())
+            .filter(|candidate_index| {
+                !selected.contains(candidate_index)
+                    && self.candidate_faces[*candidate_index].contains(&face)
+            })
+            .count()
+    }
+
+    #[cfg(test)]
+    fn addable_candidate_count_for_face(
+        &self,
+        face: [u32; 3],
+        face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
+    ) -> usize {
+        (0..self.candidates.len())
+            .filter(|candidate_index| {
+                !selected.contains(candidate_index)
+                    && self.candidate_can_be_added_for_face(
+                        *candidate_index,
+                        face,
+                        face_counts,
+                        selected,
+                    )
+            })
+            .count()
     }
 
     fn candidate_can_be_added_for_face(
@@ -8707,7 +8798,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_interior_exact_cover_failure_reports_candidates_exhausted() {
+    fn multi_interior_exact_cover_failure_reports_boundary_face_without_addable_candidate() {
         let cavity = two_tet_bipyramid_cavity();
         let nodes = two_tet_bipyramid_nodes();
         let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
@@ -8719,7 +8810,56 @@ mod tests {
 
         assert_eq!(
             multi_interior_exact_cover_failure_reason(&cavity, &[lower_tet], options),
-            "multi_interior_exact_cover_candidates_exhausted"
+            "multi_interior_exact_cover_boundary_face_no_addable_candidate"
+        );
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_boundary_face_without_addable_candidate() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: vec![
+                ConstrainedCavityBoundaryFace {
+                    node_ids: [0, 1, 2],
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: Vec::new(),
+                },
+                ConstrainedCavityBoundaryFace {
+                    node_ids: [0, 1, 3],
+                    source_face_id: None,
+                    source_edge_ids: [None, None, None],
+                    region_ids: Vec::new(),
+                },
+            ],
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let candidates = vec![
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 2, 4],
+                volume_m3: 0.1,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.5,
+            },
+            ConstrainedCavityRefillTet {
+                node_ids: [0, 1, 3, 4],
+                volume_m3: 0.1,
+                aspect_ratio: 1.0,
+                exact_scaled_jacobian: 0.5,
+            },
+        ];
+        let mut search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+
+        let (selected, trace) = search.search_with_trace();
+
+        assert!(selected.is_none());
+        assert_eq!(
+            trace.dead_end,
+            Some(BoundaryExactCoverDeadEnd {
+                reason: "boundary_face_no_addable_candidate",
+                depth: 0,
+            })
         );
     }
 
