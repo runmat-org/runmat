@@ -56577,6 +56577,54 @@
       ]
     },
     {
+      "name": "perms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "P = perms(v)",
+          "inputs": [
+            {
+              "name": "v",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input vector to permute."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "P",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose rows contain every permutation of the input vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PERMS.INVALID_INPUT",
+          "identifier": "RunMat:perms:InvalidInput",
+          "when": "The input is missing, not a vector, or has an unsupported type.",
+          "message": "perms: input must be a vector"
+        },
+        {
+          "code": "RM.PERMS.TOO_LARGE",
+          "identifier": "RunMat:perms:TooLarge",
+          "when": "The factorial-size output would exceed RunMat's supported materialisation limit.",
+          "message": "perms: output is too large"
+        },
+        {
+          "code": "RM.PERMS.INTERNAL",
+          "identifier": "RunMat:perms:Internal",
+          "when": "Output allocation, GPU gather, or container construction failed.",
+          "message": "perms: internal error"
+        }
+      ]
+    },
+    {
       "name": "periodogram",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

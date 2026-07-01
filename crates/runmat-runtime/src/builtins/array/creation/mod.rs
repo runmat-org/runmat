@@ -12,6 +12,7 @@ pub(crate) mod nan;
 pub(crate) mod ndgrid;
 pub(crate) mod ones;
 pub(crate) mod peaks;
+pub(crate) mod perms;
 pub(crate) mod rand;
 pub(crate) mod randi;
 pub(crate) mod randn;
