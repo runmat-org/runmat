@@ -1,6 +1,7 @@
 pub(crate) mod digits;
 pub(crate) mod int;
 pub(crate) mod limit;
+pub(crate) mod piecewise;
 pub(crate) mod sym;
 pub(crate) mod syms;
 pub(crate) mod vpa;
@@ -19,12 +20,16 @@ pub(crate) enum SymbolicBinaryOp {
     Pow,
 }
 
+pub(crate) fn symbolic_named_binary(lhs: &Value, rhs: &Value, name: &str) -> Option<Value> {
+    let (lhs, rhs) = symbolic_binary_operands(lhs, rhs)?;
+    Some(symbolic_expr_to_value(SymbolicExpr::function_call(
+        name,
+        vec![lhs, rhs],
+    )))
+}
+
 pub(crate) fn symbolic_binary(lhs: &Value, rhs: &Value, op: SymbolicBinaryOp) -> Option<Value> {
-    if !matches!(lhs, Value::Symbolic(_)) && !matches!(rhs, Value::Symbolic(_)) {
-        return None;
-    }
-    let lhs = value_to_symbolic_scalar(lhs)?;
-    let rhs = value_to_symbolic_scalar(rhs)?;
+    let (lhs, rhs) = symbolic_binary_operands(lhs, rhs)?;
     let expr = match op {
         SymbolicBinaryOp::Add => SymbolicExpr::add_expr(lhs, rhs),
         SymbolicBinaryOp::Sub => SymbolicExpr::sub_expr(lhs, rhs),
@@ -33,6 +38,15 @@ pub(crate) fn symbolic_binary(lhs: &Value, rhs: &Value, op: SymbolicBinaryOp) ->
         SymbolicBinaryOp::Pow => SymbolicExpr::pow_expr(lhs, rhs),
     };
     Some(symbolic_expr_to_value(expr))
+}
+
+fn symbolic_binary_operands(lhs: &Value, rhs: &Value) -> Option<(SymbolicExpr, SymbolicExpr)> {
+    if !matches!(lhs, Value::Symbolic(_)) && !matches!(rhs, Value::Symbolic(_)) {
+        return None;
+    }
+    let lhs = value_to_symbolic_scalar(lhs)?;
+    let rhs = value_to_symbolic_scalar(rhs)?;
+    Some((lhs, rhs))
 }
 
 pub(crate) fn symbolic_function(value: &Value, function: SymbolicFunction) -> Option<Value> {

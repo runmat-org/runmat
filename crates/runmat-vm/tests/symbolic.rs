@@ -41,3 +41,35 @@ fn symbolic_int_source_workflow() {
         .iter()
         .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "exp(x)")));
 }
+
+#[test]
+fn symbolic_syms_piecewise_repro_binds_workspace_variables() {
+    let vars =
+        execute_source("clear; clc; close all; syms t w; f = piecewise(abs(t)<2, 1, abs(t)>2, 0);")
+            .unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "t")));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "w")));
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Symbolic(expr) if {
+            let text = expr.to_string();
+            text.contains("piecewise")
+                && text.contains("lt(abs(t), 2)")
+                && text.contains("gt(abs(t), 2)")
+        })
+    }));
+}
+
+#[test]
+fn symbolic_syms_invalid_declaration_reports_syms_diagnostic() {
+    let err = execute_source("syms 1; x = 2;").expect_err("invalid syms declaration should fail");
+
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:syms:InvalidName"));
+    assert_eq!(err.context.builtin.as_deref(), Some("syms"));
+    assert!(err.message().contains("invalid symbolic variable name"));
+    assert!(err.span.is_some(), "expected syms call span on diagnostic");
+}

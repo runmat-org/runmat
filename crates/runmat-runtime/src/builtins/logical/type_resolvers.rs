@@ -1,4 +1,4 @@
-use runmat_builtins::shape_rules::broadcast_shapes;
+use runmat_builtins::shape_rules::{broadcast_shapes, element_count_if_known};
 use runmat_builtins::{ResolveContext, Type};
 
 pub fn logical_like(input: &Type) -> Type {
@@ -58,6 +58,25 @@ pub fn logical_binary_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn symbolic_logical_binary_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() >= 2
+        && args.iter().take(2).any(|arg| matches!(arg, Type::Symbolic))
+        && args.iter().take(2).all(is_symbolic_scalar_compatible)
+    {
+        Type::Symbolic
+    } else {
+        logical_binary_type(args, context)
+    }
+}
+
+fn is_symbolic_scalar_compatible(ty: &Type) -> bool {
+    match ty {
+        Type::Symbolic | Type::Num | Type::Int | Type::Bool => true,
+        Type::Tensor { shape: Some(shape) } => element_count_if_known(shape) == Some(1),
+        _ => false,
+    }
+}
+
 pub fn logical_unary_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first().map(logical_like).unwrap_or(Type::logical())
 }
@@ -100,6 +119,34 @@ mod tests {
     fn logical_binary_scalar_defaults_bool() {
         let out = logical_binary_type(&[Type::Num, Type::Bool], &ResolveContext::new(Vec::new()));
         assert_eq!(out, Type::Bool);
+    }
+
+    #[test]
+    fn symbolic_logical_binary_returns_symbolic() {
+        let out = symbolic_logical_binary_type(
+            &[Type::Symbolic, Type::Num],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Symbolic);
+    }
+
+    #[test]
+    fn symbolic_logical_binary_delegates_for_nonscalar_inputs() {
+        let out = symbolic_logical_binary_type(
+            &[
+                Type::Symbolic,
+                Type::Tensor {
+                    shape: Some(vec![Some(2), Some(2)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
     }
 
     #[test]
