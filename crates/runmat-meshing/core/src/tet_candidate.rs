@@ -23,6 +23,7 @@ use crate::{
 #[cfg(test)]
 use crate::constrained_cavity::{
     diagnostic_boundary_node_completion, diagnostic_interior_star_quality,
+    BoundaryNodeCompletionDiagnostic,
 };
 #[cfg(test)]
 use crate::predicate::{point_in_closed_triangle_surface, PointInClosedSurface};
@@ -6725,8 +6726,11 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("closed_edge_star_boundary_refill_completion_near_quality") => {
             "component_edge_star_closed_cavity_boundary_refill_completion_near_quality"
         }
-        Some("closed_edge_star_boundary_refill_completion_low_quality") => {
-            "component_edge_star_closed_cavity_boundary_refill_completion_low_quality"
+        Some("closed_edge_star_boundary_refill_completion_apex_limited") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_apex_limited"
+        }
+        Some("closed_edge_star_boundary_refill_completion_face_limited") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_face_limited"
         }
         Some("closed_edge_star_boundary_refill_completion_no_cap_candidate") => {
             "component_edge_star_closed_cavity_boundary_refill_completion_no_cap_candidate"
@@ -6982,28 +6986,53 @@ fn diagnostic_closed_edge_star_boundary_refill_completion_bucket(
         },
     )
     .map_err(|_| TetCandidateError::InvalidOptions)?;
+    Ok(classify_boundary_refill_completion_diagnostic(
+        &diagnostic,
+        options.min_scaled_jacobian,
+    ))
+}
+
+#[cfg(test)]
+fn classify_boundary_refill_completion_diagnostic(
+    diagnostic: &BoundaryNodeCompletionDiagnostic,
+    min_scaled_jacobian: f64,
+) -> &'static str {
     let best_completion_quality = diagnostic
         .max_rejected_scaled_jacobian
         .max(diagnostic.max_split_cap_scaled_jacobian)
         .max(diagnostic.max_edge_split_cap_scaled_jacobian)
         .max(diagnostic.max_three_edge_split_cap_scaled_jacobian);
-    if best_completion_quality >= options.min_scaled_jacobian * 0.99 {
-        return Ok("closed_edge_star_boundary_refill_completion_near_quality");
+    if best_completion_quality >= min_scaled_jacobian * 0.99 {
+        return "closed_edge_star_boundary_refill_completion_near_quality";
     }
     if diagnostic.cap_candidate_count == 0
         && diagnostic.split_cap_candidate_count == 0
         && diagnostic.edge_split_cap_candidate_count == 0
         && diagnostic.three_edge_split_cap_candidate_count == 0
     {
-        return Ok("closed_edge_star_boundary_refill_completion_no_cap_candidate");
+        return "closed_edge_star_boundary_refill_completion_no_cap_candidate";
     }
     if diagnostic
         .rejected_by_reason
         .contains_key("boundary_node_tet_scaled_jacobian")
     {
-        return Ok("closed_edge_star_boundary_refill_completion_low_quality");
+        if !diagnostic.split_cap_apex_limited_node_ids.is_empty()
+            || !diagnostic.edge_split_cap_apex_limited_node_ids.is_empty()
+            || !diagnostic
+                .three_edge_split_cap_apex_limited_node_ids
+                .is_empty()
+            || diagnostic
+                .rejected_scaled_jacobian_worst_corner_bins
+                .get("apex")
+                .copied()
+                .unwrap_or_default()
+                > 0
+        {
+            return "closed_edge_star_boundary_refill_completion_apex_limited";
+        }
+        return "closed_edge_star_boundary_refill_completion_face_limited";
     }
-    Ok("closed_edge_star_boundary_refill_completion_other")
+    "closed_edge_star_boundary_refill_completion_other"
 }
 
 #[cfg(test)]
@@ -12574,6 +12603,41 @@ mod tests {
         UnitSystem,
     };
 
+    fn boundary_refill_completion_diagnostic() -> BoundaryNodeCompletionDiagnostic {
+        BoundaryNodeCompletionDiagnostic {
+            reason: "boundary_node_completion_no_candidate",
+            missing_face_count: 1,
+            cap_candidate_count: 1,
+            outside_candidate_count: 0,
+            duplicate_candidate_count: 0,
+            max_rejected_scaled_jacobian: 0.1,
+            rejected_scaled_jacobian_bins: BTreeMap::new(),
+            max_rejected_cap_height_ratio: 1.0,
+            rejected_cap_height_ratio_bins: BTreeMap::new(),
+            rejected_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
+            rejected_cap_node_ids: BTreeMap::new(),
+            split_cap_candidate_count: 1,
+            split_cap_pass_count: 0,
+            max_split_cap_scaled_jacobian: 0.1,
+            split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
+            split_cap_apex_limited_node_ids: BTreeMap::new(),
+            edge_split_cap_candidate_count: 1,
+            edge_split_cap_pass_count: 0,
+            max_edge_split_cap_scaled_jacobian: 0.1,
+            edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
+            edge_split_cap_apex_limited_node_ids: BTreeMap::new(),
+            three_edge_split_cap_candidate_count: 1,
+            three_edge_split_cap_pass_count: 0,
+            max_three_edge_split_cap_scaled_jacobian: 0.1,
+            three_edge_split_cap_scaled_jacobian_bins: BTreeMap::new(),
+            three_edge_split_cap_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
+            three_edge_split_cap_apex_limited_node_ids: BTreeMap::new(),
+            rejected_by_reason: BTreeMap::from([("boundary_node_tet_scaled_jacobian", 1)]),
+        }
+    }
+
     #[test]
     fn forms_positive_tet_candidates_from_closed_cube_surface() {
         let (surface, volume_candidates) = cube_surface_and_volume_candidates();
@@ -13567,9 +13631,15 @@ mod tests {
         );
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some(
-                "closed_edge_star_boundary_refill_completion_low_quality"
+                "closed_edge_star_boundary_refill_completion_apex_limited"
             )),
-            "component_edge_star_closed_cavity_boundary_refill_completion_low_quality"
+            "component_edge_star_closed_cavity_boundary_refill_completion_apex_limited"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_boundary_refill_completion_face_limited"
+            )),
+            "component_edge_star_closed_cavity_boundary_refill_completion_face_limited"
         );
         assert_eq!(
             diagnostic_closed_edge_star_boundary_refill_rejection_bucket(
@@ -13602,6 +13672,27 @@ mod tests {
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some("unknown")),
             "component_edge_star_candidate_invalid"
+        );
+    }
+
+    #[test]
+    fn boundary_refill_completion_diagnostic_splits_low_quality_limiters() {
+        let mut diagnostic = boundary_refill_completion_diagnostic();
+        assert_eq!(
+            classify_boundary_refill_completion_diagnostic(&diagnostic, 0.3),
+            "closed_edge_star_boundary_refill_completion_face_limited"
+        );
+
+        diagnostic.split_cap_apex_limited_node_ids.insert(10, 1);
+        assert_eq!(
+            classify_boundary_refill_completion_diagnostic(&diagnostic, 0.3),
+            "closed_edge_star_boundary_refill_completion_apex_limited"
+        );
+
+        diagnostic.max_three_edge_split_cap_scaled_jacobian = 0.298;
+        assert_eq!(
+            classify_boundary_refill_completion_diagnostic(&diagnostic, 0.3),
+            "closed_edge_star_boundary_refill_completion_near_quality"
         );
     }
 
