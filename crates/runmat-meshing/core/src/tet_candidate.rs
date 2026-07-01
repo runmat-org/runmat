@@ -6711,8 +6711,32 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("closed_edge_star_boundary_refill_reconnectable") => {
             "component_edge_star_closed_cavity_boundary_refill_reconnectable"
         }
-        Some("closed_edge_star_boundary_refill_rejected") => {
-            "component_edge_star_closed_cavity_boundary_refill_rejected"
+        Some("closed_edge_star_boundary_refill_boundary_node_scaled_jacobian") => {
+            "component_edge_star_closed_cavity_boundary_refill_boundary_node_scaled_jacobian"
+        }
+        Some("closed_edge_star_boundary_refill_boundary_node_volume_mismatch") => {
+            "component_edge_star_closed_cavity_boundary_refill_boundary_node_volume_mismatch"
+        }
+        Some("closed_edge_star_boundary_refill_completion_no_candidate") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_no_candidate"
+        }
+        Some("closed_edge_star_boundary_refill_star_scaled_jacobian") => {
+            "component_edge_star_closed_cavity_boundary_refill_star_scaled_jacobian"
+        }
+        Some("closed_edge_star_boundary_refill_boundary_face_count_mismatch") => {
+            "component_edge_star_closed_cavity_boundary_refill_boundary_face_count_mismatch"
+        }
+        Some("closed_edge_star_boundary_refill_unexpected_boundary_face") => {
+            "component_edge_star_closed_cavity_boundary_refill_unexpected_boundary_face"
+        }
+        Some("closed_edge_star_boundary_refill_missing_boundary_face") => {
+            "component_edge_star_closed_cavity_boundary_refill_missing_boundary_face"
+        }
+        Some("closed_edge_star_boundary_refill_single_tet_rejected") => {
+            "component_edge_star_closed_cavity_boundary_refill_single_tet_rejected"
+        }
+        Some("closed_edge_star_boundary_refill_other_rejected") => {
+            "component_edge_star_closed_cavity_boundary_refill_other_rejected"
         }
         Some("closed_edge_star_raw_aspect_ratio_edge0") => {
             "component_edge_star_closed_cavity_raw_aspect_ratio_edge0"
@@ -6832,10 +6856,10 @@ fn diagnostic_closed_edge_star_raw_rejection_bucket(
     else {
         return Ok(raw_reason);
     };
-    if rejection.is_some() {
+    if let Some(rejection) = rejection {
         return Ok(match raw_reason {
             "closed_edge_star_raw_min_volume_edge0" | "closed_edge_star_raw_min_volume_edge1" => {
-                "closed_edge_star_boundary_refill_rejected"
+                diagnostic_closed_edge_star_boundary_refill_rejection_bucket(rejection)
             }
             _ => raw_reason,
         });
@@ -6865,6 +6889,39 @@ fn diagnostic_closed_edge_star_raw_rejection_bucket(
         }
         _ => raw_reason,
     })
+}
+
+#[cfg(test)]
+fn diagnostic_closed_edge_star_boundary_refill_rejection_bucket(
+    rejection: &'static str,
+) -> &'static str {
+    match rejection {
+        "boundary_face_mismatch_constrained_refill_boundary_node_scaled_jacobian" => {
+            "closed_edge_star_boundary_refill_boundary_node_scaled_jacobian"
+        }
+        "boundary_face_mismatch_constrained_refill_boundary_node_volume_mismatch" => {
+            "closed_edge_star_boundary_refill_boundary_node_volume_mismatch"
+        }
+        "boundary_face_mismatch_constrained_refill_completion_no_candidate" => {
+            "closed_edge_star_boundary_refill_completion_no_candidate"
+        }
+        "boundary_face_mismatch_constrained_refill_star_scaled_jacobian" => {
+            "closed_edge_star_boundary_refill_star_scaled_jacobian"
+        }
+        "boundary_face_mismatch_constrained_refill_boundary_face_count_mismatch" => {
+            "closed_edge_star_boundary_refill_boundary_face_count_mismatch"
+        }
+        "boundary_face_mismatch_constrained_refill_unexpected_boundary_face" => {
+            "closed_edge_star_boundary_refill_unexpected_boundary_face"
+        }
+        "boundary_face_mismatch_constrained_refill_missing_boundary_face" => {
+            "closed_edge_star_boundary_refill_missing_boundary_face"
+        }
+        "boundary_face_mismatch_constrained_refill_single_tet_rejected" => {
+            "closed_edge_star_boundary_refill_single_tet_rejected"
+        }
+        _ => "closed_edge_star_boundary_refill_other_rejected",
+    }
 }
 
 #[cfg(test)]
@@ -13383,9 +13440,19 @@ mod tests {
         );
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some(
-                "closed_edge_star_boundary_refill_rejected"
+                "closed_edge_star_boundary_refill_boundary_node_scaled_jacobian"
             )),
-            "component_edge_star_closed_cavity_boundary_refill_rejected"
+            "component_edge_star_closed_cavity_boundary_refill_boundary_node_scaled_jacobian"
+        );
+        assert_eq!(
+            diagnostic_closed_edge_star_boundary_refill_rejection_bucket(
+                "boundary_face_mismatch_constrained_refill_boundary_node_scaled_jacobian"
+            ),
+            "closed_edge_star_boundary_refill_boundary_node_scaled_jacobian"
+        );
+        assert_eq!(
+            diagnostic_closed_edge_star_boundary_refill_rejection_bucket("unclassified"),
+            "closed_edge_star_boundary_refill_other_rejected"
         );
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some(
