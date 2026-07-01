@@ -38,6 +38,11 @@ pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
 }
 
+pub fn open_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Unknown
+}
+
 pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::tensor()

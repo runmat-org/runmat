@@ -6461,6 +6461,54 @@
       ]
     },
     {
+      "name": "cancel",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = cancel(cleanupObj)",
+          "inputs": [
+            {
+              "name": "cleanupObj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "onCleanup object to deactivate without running its callback."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Zero after the cleanup callback has been deactivated."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ONCLEANUP.INVALID_CALLBACK",
+          "identifier": "RunMat:onCleanup:InvalidCallback",
+          "when": "The cleanup function is not a function handle or closure.",
+          "message": "onCleanup: cleanupFun must be a function handle"
+        },
+        {
+          "code": "RM.ONCLEANUP.INVALID_OBJECT",
+          "identifier": "RunMat:onCleanup:InvalidObject",
+          "when": "A cleanup operation targets a value that is not an onCleanup object.",
+          "message": "onCleanup: invalid cleanup object"
+        },
+        {
+          "code": "RM.ONCLEANUP.GC",
+          "identifier": "RunMat:onCleanup:GcFailure",
+          "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
+          "message": "onCleanup: internal object storage failed"
+        }
+      ]
+    },
+    {
       "name": "cat",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -6594,54 +6642,6 @@
           "identifier": "RunMat:cat:InvalidLikePrototype",
           "when": "The 'like' name-value form is malformed or uses an unsupported prototype.",
           "message": "cat: invalid 'like' prototype"
-        }
-      ]
-    },
-    {
-      "name": "cancel",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "status = cancel(cleanupObj)",
-          "inputs": [
-            {
-              "name": "cleanupObj",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "onCleanup object to deactivate without running its callback."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "status",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero after the cleanup callback has been deactivated."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.ONCLEANUP.INVALID_CALLBACK",
-          "identifier": "RunMat:onCleanup:InvalidCallback",
-          "when": "The cleanup function is not a function handle or closure.",
-          "message": "onCleanup: cleanupFun must be a function handle"
-        },
-        {
-          "code": "RM.ONCLEANUP.INVALID_OBJECT",
-          "identifier": "RunMat:onCleanup:InvalidObject",
-          "when": "A cleanup operation targets a value that is not an onCleanup object.",
-          "message": "onCleanup: invalid cleanup object"
-        },
-        {
-          "code": "RM.ONCLEANUP.GC",
-          "identifier": "RunMat:onCleanup:GcFailure",
-          "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
-          "message": "onCleanup: internal object storage failed"
         }
       ]
     },
@@ -54150,6 +54150,93 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "ones: multiple 'like' specifications are not supported"
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "open name",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File or variable name to open."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MAT-file contents, extension-handler output, figure handle, or empty array."
+            }
+          ]
+        },
+        {
+          "label": "A = open(name)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File or variable name to open."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MAT-file contents, extension-handler output, figure handle, or empty array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OPEN.ARG_COUNT",
+          "identifier": "RunMat:open:ArgumentCount",
+          "when": "The call does not provide exactly one input argument.",
+          "message": "open: expected exactly one input argument"
+        },
+        {
+          "code": "RM.OPEN.NAME",
+          "identifier": "RunMat:open:InvalidName",
+          "when": "The name is not a string scalar or row character vector.",
+          "message": "open: name must be a character vector or string scalar"
+        },
+        {
+          "code": "RM.OPEN.NOT_FOUND",
+          "identifier": "RunMat:open:NotFound",
+          "when": "No matching variable or file can be resolved.",
+          "message": "open: file or variable was not found"
+        },
+        {
+          "code": "RM.OPEN.UNSUPPORTED",
+          "identifier": "RunMat:open:UnsupportedFileType",
+          "when": "The resolved file type cannot be opened by RunMat and no extension handler exists.",
+          "message": "open: unsupported file type"
+        },
+        {
+          "code": "RM.OPEN.HANDLER",
+          "identifier": "RunMat:open:HandlerFailed",
+          "when": "A custom open<extension> handler fails.",
+          "message": "open: extension handler failed"
+        },
+        {
+          "code": "RM.OPEN.OUTPUT_COUNT",
+          "identifier": "RunMat:open:TooManyOutputs",
+          "when": "The call requests more than one output.",
+          "message": "open: expected at most one output"
         }
       ]
     },
