@@ -223,6 +223,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
         Value::String(s) => Ok(vec![s.chars().collect()]),
         Value::Symbolic(expr) => Ok(vec![expr.to_string().chars().collect()]),
+        Value::SymbolicArray(array) => Ok(vec![array.to_string().chars().collect()]),
         Value::StringArray(sa) => string_array_rows(sa),
         Value::Num(n) => Ok(vec![vec![number_to_char(*n)?]]),
         Value::Int(i) => {

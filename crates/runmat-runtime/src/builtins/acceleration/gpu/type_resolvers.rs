@@ -63,9 +63,12 @@ fn arrayfun_output_type(returns: &Type) -> Type {
     match returns {
         Type::Bool | Type::Logical { .. } => Type::logical(),
         Type::Num | Type::Int | Type::Tensor { .. } => Type::tensor(),
-        Type::Unknown | Type::Cell { .. } | Type::String | Type::Struct { .. } | Type::Symbolic => {
-            Type::Unknown
-        }
+        Type::Unknown
+        | Type::Cell { .. }
+        | Type::String
+        | Type::Struct { .. }
+        | Type::Symbolic
+        | Type::SymbolicArray { .. } => Type::Unknown,
         Type::Function { .. } | Type::Void | Type::Union(_) | Type::OutputList(_) => Type::Unknown,
     }
 }

@@ -255,6 +255,49 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::SymbolicArray(array) => {
+            if indices.is_empty() {
+                return Err(indexing_error("At least one index is required"));
+            }
+
+            if indices.len() == 1 {
+                let idx = indices[0] as usize;
+                if idx < 1 || idx > array.data.len() {
+                    return Err(indexing_error_with_identifier(
+                        format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                Ok(Value::Symbolic(array.data[idx - 1].clone()))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize;
+                let col = indices[1] as usize;
+                let shape = normalize_scalar_shape(&array.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+
+                if row < 1 || row > rows {
+                    return Err(indexing_error_with_identifier(
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                if col < 1 || col > cols {
+                    return Err(indexing_error_with_identifier(
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+
+                let linear_idx = (row - 1) + (col - 1) * rows;
+                Ok(Value::Symbolic(array.data[linear_idx].clone()))
+            } else {
+                Err(indexing_error(format!(
+                    "Symbolic arrays support 1 or 2 indices, got {}",
+                    indices.len()
+                )))
+            }
+        }
         Value::StringArray(sa) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));

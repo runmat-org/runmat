@@ -468,6 +468,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::StringArray(_) => "StringArray",
         Value::CharArray(_) => "CharArray",
         Value::Symbolic(_) => "Symbolic",
+        Value::SymbolicArray(_) => "SymbolicArray",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
         Value::Object(_) => "Object",

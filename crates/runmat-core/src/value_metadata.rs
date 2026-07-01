@@ -10,7 +10,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
         Value::CharArray(_) => "char".to_string(),
-        Value::Symbolic(_) => "sym".to_string(),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
@@ -44,6 +44,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         | Value::Bool(_)
         | Value::Complex(_, _)
         | Value::Symbolic(_) => Some(vec![1, 1]),
+        Value::SymbolicArray(arr) => Some(arr.shape.clone()),
         Value::LogicalArray(arr) => Some(arr.shape.clone()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
@@ -85,6 +86,12 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
         Value::CharArray(ca) => (ca.rows * ca.cols) as u64,
+        Value::Symbolic(expr) => expr.to_string().len() as u64,
+        Value::SymbolicArray(arr) => arr
+            .data
+            .iter()
+            .map(|expr| expr.to_string().len() as u64)
+            .sum(),
         _ => return None,
     })
 }
@@ -124,6 +131,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,
         Value::Cell(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

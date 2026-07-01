@@ -254,7 +254,9 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
             Err(ifftshift_error(&IFFTSHIFT_ERROR_INVALID_INPUT))
         }
-        Value::Symbolic(_) => Err(ifftshift_error(&IFFTSHIFT_ERROR_INVALID_INPUT)),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => {
+            Err(ifftshift_error(&IFFTSHIFT_ERROR_INVALID_INPUT))
+        }
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

@@ -1073,6 +1073,11 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Symbolic(_) => {
             output.push(value);
         }
+        Value::SymbolicArray(array) => {
+            for expr in array.data {
+                output.push(Value::Symbolic(expr));
+            }
+        }
         Value::Tensor(tensor) => {
             for &elem in &tensor.data {
                 output.push(Value::Num(elem));

@@ -92,7 +92,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
         Value::CharArray(_) => "char".to_string(),
-        Value::Symbolic(_) => "sym".to_string(),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),

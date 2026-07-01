@@ -959,6 +959,7 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::CharArray(_)
         | Value::SparseTensor(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::Cell(_) => Err(max_invalid_input(format!(
             "{name}: expected numeric or logical input, received non-numeric value"
         ))),

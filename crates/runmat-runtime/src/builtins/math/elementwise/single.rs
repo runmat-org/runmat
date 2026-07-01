@@ -215,6 +215,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             .numeric_constant_value()
             .map(|value| Value::Num(cast_f64_to_single(value)))
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(_) => Err(conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),

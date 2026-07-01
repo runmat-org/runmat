@@ -134,6 +134,10 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::StringArray(sa) => cellstr_from_string_array(sa),
         Value::String(text) => cellstr_from_string(text),
         Value::Symbolic(expr) => cellstr_from_string(expr.to_string()),
+        Value::SymbolicArray(_) => Err(cellstr_error_with_message(
+            CELLSTR_INPUT_NOT_TEXT_TEXT,
+            &CELLSTR_ERROR_INVALID_INPUT,
+        )),
         Value::Cell(cell) => cellstr_from_cell(cell).await,
         Value::LogicalArray(_)
         | Value::Bool(_)
