@@ -6776,6 +6776,7 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
     let mut saw_too_small_group = false;
     let mut saw_too_large_group = false;
     let mut saw_whole_star_group = false;
+    let mut whole_star_group_reason = None::<&'static str>;
     let mut saw_invalid_candidate = false;
     let mut invalid_candidate_reason = None::<&'static str>;
     let mut saw_non_improving_candidate = false;
@@ -6794,6 +6795,14 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
         }
         if component.len() == adjacent.len() {
             saw_whole_star_group = true;
+            whole_star_group_reason.get_or_insert(
+                diagnostic_whole_edge_star_cavity_reconnection_reason(
+                    &component,
+                    tets,
+                    node_points,
+                    options,
+                )?,
+            );
             continue;
         }
         let original_below_count = count_exact_quality_violations(
@@ -6876,11 +6885,112 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
     } else if saw_too_small_group {
         Ok("component_edge_star_too_small")
     } else if saw_whole_star_group {
-        Ok("component_edge_star_whole_star_only")
+        Ok(diagnostic_component_edge_star_whole_star_bucket(
+            whole_star_group_reason,
+        ))
     } else if saw_target_group {
         Ok("component_edge_star_no_candidate")
     } else {
         Ok("no_component_edge_star_for_target")
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_whole_edge_star_cavity_reconnection_reason(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let Some((candidates, rejection)) = diagnostic_face_neighbor_cavity_reconnection_candidates(
+        adjacent,
+        tets,
+        node_points,
+        options,
+    )?
+    else {
+        return Ok("empty_candidate");
+    };
+    if let Some(rejection) = rejection {
+        return Ok(rejection);
+    }
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+    if cavity_reconnection_improves_quality(
+        candidate_below_count,
+        candidate_min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        Ok("reconnectable")
+    } else {
+        Ok("no_improvement")
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_component_edge_star_whole_star_bucket(reason: Option<&'static str>) -> &'static str {
+    match reason {
+        Some("boundary_face_mismatch_constrained_refill_completion_no_candidate") => {
+            "component_edge_star_whole_star_refill_completion_no_candidate"
+        }
+        Some("boundary_face_mismatch_constrained_refill_boundary_node_scaled_jacobian") => {
+            "component_edge_star_whole_star_refill_boundary_node_scaled_jacobian"
+        }
+        Some("boundary_face_mismatch_constrained_refill_boundary_node_volume_mismatch") => {
+            "component_edge_star_whole_star_refill_boundary_node_volume_mismatch"
+        }
+        Some("boundary_face_mismatch_constrained_refill_star_scaled_jacobian") => {
+            "component_edge_star_whole_star_refill_star_scaled_jacobian"
+        }
+        Some("boundary_face_mismatch_constrained_refill_boundary_face_count_mismatch") => {
+            "component_edge_star_whole_star_refill_boundary_face_count_mismatch"
+        }
+        Some("boundary_face_mismatch_constrained_refill_unexpected_boundary_face") => {
+            "component_edge_star_whole_star_refill_unexpected_boundary_face"
+        }
+        Some("boundary_face_mismatch_constrained_refill_missing_boundary_face") => {
+            "component_edge_star_whole_star_refill_missing_boundary_face"
+        }
+        Some("boundary_face_mismatch_constrained_refill_single_tet_rejected") => {
+            "component_edge_star_whole_star_refill_single_tet_rejected"
+        }
+        Some("boundary_face_mismatch_constrained_trim_no_candidate") => {
+            "component_edge_star_whole_star_trim_no_candidate"
+        }
+        Some("boundary_face_mismatch_constrained_trim_no_improvement") => {
+            "component_edge_star_whole_star_trim_no_improvement"
+        }
+        Some("boundary_face_mismatch_constrained_trim_volume_mismatch") => {
+            "component_edge_star_whole_star_trim_volume_mismatch"
+        }
+        Some("boundary_face_mismatch_constrained_non_manifold_trim_available") => {
+            "component_edge_star_whole_star_non_manifold_trim_available"
+        }
+        Some("boundary_face_mismatch_constrained_non_manifold_trim_not_found") => {
+            "component_edge_star_whole_star_non_manifold_trim_not_found"
+        }
+        Some("boundary_face_mismatch_constrained_duplicate_boundary_face") => {
+            "component_edge_star_whole_star_duplicate_boundary_face"
+        }
+        Some("boundary_face_mismatch_constrained_degenerate_boundary_face") => {
+            "component_edge_star_whole_star_degenerate_boundary_face"
+        }
+        Some("boundary_face_mismatch_constrained_too_few_boundary_faces") => {
+            "component_edge_star_whole_star_too_few_boundary_faces"
+        }
+        Some("boundary_face_mismatch") => "component_edge_star_whole_star_boundary_face_mismatch",
+        Some("volume_mismatch") => "component_edge_star_whole_star_volume_mismatch",
+        Some("empty_candidate") => "component_edge_star_whole_star_empty_candidate",
+        Some("no_improvement") => "component_edge_star_whole_star_no_improvement",
+        Some("reconnectable") => "component_edge_star_whole_star_reconnectable",
+        _ => "component_edge_star_whole_star_only",
     }
 }
 
@@ -14940,6 +15050,53 @@ mod tests {
             .sum::<f64>();
         let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn whole_edge_star_diagnostic_reports_refill_completion_blocker() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -1.0]),
+            (1, [0.0, 0.0, 1.0]),
+            (2, [1.0, -1.0, 0.0]),
+            (3, [1.0, 0.0, 0.0]),
+            (4, [0.15, 0.12, 0.02]),
+            (5, [-1.0, 0.0, 0.0]),
+            (6, [-1.0, 1.0, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 6]]
+            .into_iter()
+            .map(|node_ids| {
+                raw_candidate_tet(
+                    0,
+                    0,
+                    &[],
+                    node_ids,
+                    node_ids.map(|node_id| node_points[&node_id]),
+                    options,
+                )
+                .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        let reason = diagnostic_edge_reconnection_rejection_reason(
+            1,
+            [0, 1],
+            &edge_adjacency[&[0, 1]],
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(
+            reason,
+            "component_edge_star_whole_star_refill_completion_no_candidate"
+        );
     }
 
     #[test]
