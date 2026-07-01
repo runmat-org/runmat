@@ -1,0 +1,111 @@
+{
+  "title": "pagemtimes",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "pagemtimes",
+    "page-wise matrix multiplication",
+    "batched matrix multiply",
+    "linear algebra",
+    "gpuArray"
+  ],
+  "summary": "Multiply corresponding matrix pages in dense arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "RunMat gathers GPU operands for host-complete scalar and transpose semantics, then uploads real and complex numeric results back to the active provider."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::pagemtimes::tests",
+    "integration": "builtins::math::linalg::ops::pagemtimes::tests::gpu_input_roundtrips_to_gpu_result"
+  },
+  "description": "`pagemtimes(X,Y)` multiplies each corresponding two-dimensional matrix page of `X` and `Y`. Dimensions three and higher are page dimensions and use MATLAB-compatible singleton expansion.",
+  "behaviors": [
+    "Supports `Z = pagemtimes(X,Y)` and `Z = pagemtimes(X,transpX,Y,transpY)`.",
+    "`transpX` and `transpY` must both be present in the four-argument form and each must be `none`, `transpose`, or `ctranspose`.",
+    "The first two dimensions of each input form the matrix multiplied on each page. Page dimensions are dimensions three and higher and are expanded by position when one side has extent `1` or omits the trailing dimension.",
+    "If either operand is scalar, the result uses the first two dimensions of the nonscalar operand and performs page-wise scalar multiplication.",
+    "Dense `double`, `single`, and complex double arrays are supported. Integer, logical, sparse, cell, struct, object, and text inputs are rejected.",
+    "Complex `ctranspose` conjugates each page before multiplication; `transpose` only swaps the first two dimensions."
+  ],
+  "examples": [
+    {
+      "description": "Multiply matching pages",
+      "input": "X = reshape(1:8, [2 2 2]);\nY = reshape(10:17, [2 2 2]);\nZ = pagemtimes(X,Y)"
+    },
+    {
+      "description": "Broadcast a matrix across all pages",
+      "input": "X = eye(2);\nY = reshape(1:8, [2 2 2]);\nZ = pagemtimes(X,Y)"
+    },
+    {
+      "description": "Use transpose options",
+      "input": "X = rand(2,3,5);\nY = rand(2,4,5);\nZ = pagemtimes(X,'transpose',Y,'none');\nsize(Z)",
+      "output": "ans =\n     3     4     5"
+    },
+    {
+      "description": "Implicit expansion of page dimensions",
+      "input": "X = rand(10,8,1,3);\nY = rand(8,10,4,1);\nZ = pagemtimes(X,Y);\nsize(Z)",
+      "output": "ans =\n    10    10     4     3"
+    },
+    {
+      "description": "GPU inputs remain device-resident",
+      "input": "G = gpuArray(rand(3,3,8));\nH = pagemtimes(G,2);\nfirstPage = gather(H(:,:,1));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How does `pagemtimes` differ from `mtimes`?",
+      "answer": "`mtimes` multiplies two matrices. `pagemtimes` treats every slice in dimensions three and higher as an independent matrix and multiplies corresponding pages with singleton expansion across page dimensions."
+    },
+    {
+      "question": "Can I specify only one transpose option?",
+      "answer": "No. MATLAB's four-argument form requires both `transpX` and `transpY`; use `none` for the operand that should not be transposed."
+    },
+    {
+      "question": "What happens when page dimensions do not match?",
+      "answer": "RunMat raises `RunMat:pagemtimes:PageDimensionMismatch` unless the differing page extent is `1` or omitted on one side."
+    }
+  ],
+  "links": [
+    {
+      "label": "mtimes",
+      "url": "./mtimes"
+    },
+    {
+      "label": "transpose",
+      "url": "./transpose"
+    },
+    {
+      "label": "ctranspose",
+      "url": "./ctranspose"
+    },
+    {
+      "label": "pagefun",
+      "url": "./pagefun"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/pagemtimes.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/pagemtimes.rs"
+  },
+  "gpu_residency": "Yes for explicit `gpuArray` inputs. RunMat gathers when needed for host-complete semantics, then re-uploads real and complex numeric results to the active acceleration provider.",
+  "gpu_behavior": [
+    "`pagemtimes` exposes a custom GPU spec and keeps outputs resident when any input is a `gpuArray` and an acceleration provider is available.",
+    "Plain page-wise products may be accelerated by provider `pagefun` hooks in future backends; transpose and scalar forms currently use the host-complete fallback path."
+  ]
+}

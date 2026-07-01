@@ -55029,6 +55029,121 @@
       ]
     },
     {
+      "name": "pagemtimes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Z = pagemtimes(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left dense single, double, or complex array."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right dense single, double, or complex array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Page-wise matrix product."
+            }
+          ]
+        },
+        {
+          "label": "Z = pagemtimes(X, transpX, Y, transpY)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left dense single, double, or complex array."
+            },
+            {
+              "name": "transpX",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`none`, `transpose`, or `ctranspose` for X."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right dense single, double, or complex array."
+            },
+            {
+              "name": "transpY",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`none`, `transpose`, or `ctranspose` for Y."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Page-wise matrix product."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PAGEMTIMES.INVALID_ARITY",
+          "identifier": "RunMat:pagemtimes:InvalidArity",
+          "when": "The call does not use the two-argument or four-argument form.",
+          "message": "pagemtimes: expected X,Y or X,transpX,Y,transpY"
+        },
+        {
+          "code": "RM.PAGEMTIMES.INVALID_INPUT",
+          "identifier": "RunMat:pagemtimes:InvalidInput",
+          "when": "Inputs are not dense single, double, or complex arrays.",
+          "message": "pagemtimes: inputs must be dense single, double, or complex arrays"
+        },
+        {
+          "code": "RM.PAGEMTIMES.INVALID_TRANSPOSE",
+          "identifier": "RunMat:pagemtimes:InvalidTranspose",
+          "when": "Transpose flags are not one of none, transpose, or ctranspose.",
+          "message": "pagemtimes: transpose options must be 'none', 'transpose', or 'ctranspose'"
+        },
+        {
+          "code": "RM.PAGEMTIMES.PAGE_DIM_MISMATCH",
+          "identifier": "RunMat:pagemtimes:PageDimensionMismatch",
+          "when": "Trailing page dimensions cannot be implicitly expanded.",
+          "message": "pagemtimes: page dimensions are not compatible"
+        },
+        {
+          "code": "RM.PAGEMTIMES.MATRIX_DIM_MISMATCH",
+          "identifier": "RunMat:pagemtimes:MatrixDimensionMismatch",
+          "when": "Matrix dimensions are not valid for page-wise multiplication.",
+          "message": "pagemtimes: inner matrix dimensions must agree"
+        },
+        {
+          "code": "RM.PAGEMTIMES.INTERNAL",
+          "identifier": "RunMat:pagemtimes:InternalError",
+          "when": "Runtime cannot materialize the page-wise result.",
+          "message": "pagemtimes: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "parquetDatastore",
       "output_mode": "Fixed",
       "completion_policy": "Public",
