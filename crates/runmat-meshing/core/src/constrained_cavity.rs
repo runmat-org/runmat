@@ -3448,6 +3448,12 @@ struct BoundaryExactCoverSearch<'a> {
     attempts: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct BoundaryExactCoverSolution {
+    selected_indices: Vec<usize>,
+    min_scaled_jacobian: f64,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BoundaryExactCoverRootAvailability {
@@ -3548,6 +3554,18 @@ impl<'a> BoundaryExactCoverSearch<'a> {
 
     fn search(&mut self) -> Option<Vec<usize>> {
         self.search_from(0.0, &mut BTreeMap::new(), &mut Vec::new())
+    }
+
+    fn search_best(&mut self) -> Option<Vec<usize>> {
+        let mut best = None::<BoundaryExactCoverSolution>;
+        self.search_best_from(
+            0.0,
+            f64::INFINITY,
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+            &mut best,
+        );
+        best.map(|solution| solution.selected_indices)
     }
 
     #[cfg(test)]
@@ -3750,6 +3768,85 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         }
         self.rollback_selected_candidates(&forced_indices, face_counts, selected);
         None
+    }
+
+    fn search_best_from(
+        &mut self,
+        current_volume_m3: f64,
+        current_min_scaled_jacobian: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+        best: &mut Option<BoundaryExactCoverSolution>,
+    ) {
+        self.attempts += 1;
+        if self.attempts > self.max_attempt_count
+            || current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3
+        {
+            return;
+        }
+        if best
+            .as_ref()
+            .is_some_and(|solution| current_min_scaled_jacobian <= solution.min_scaled_jacobian)
+        {
+            return;
+        }
+        let Some((forced_volume_m3, forced_indices)) =
+            self.propagate_forced_interior_mates(current_volume_m3, face_counts, selected)
+        else {
+            return;
+        };
+        let current_volume_m3 = current_volume_m3 + forced_volume_m3;
+        let current_min_scaled_jacobian = forced_indices
+            .iter()
+            .map(|index| self.candidates[*index].exact_scaled_jacobian)
+            .fold(current_min_scaled_jacobian, f64::min);
+        if best
+            .as_ref()
+            .is_some_and(|solution| current_min_scaled_jacobian <= solution.min_scaled_jacobian)
+        {
+            self.rollback_selected_candidates(&forced_indices, face_counts, selected);
+            return;
+        }
+        let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
+            let boundary_ok = self
+                .boundary_faces
+                .iter()
+                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+            let interior_ok = face_counts
+                .iter()
+                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
+            if boundary_ok
+                && interior_ok
+                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
+            {
+                *best = Some(BoundaryExactCoverSolution {
+                    selected_indices: selected.clone(),
+                    min_scaled_jacobian: current_min_scaled_jacobian,
+                });
+            }
+            self.rollback_selected_candidates(&forced_indices, face_counts, selected);
+            return;
+        };
+        for candidate_index in candidate_indices {
+            if selected.contains(&candidate_index) {
+                continue;
+            }
+            for face in self.candidate_faces[candidate_index] {
+                *face_counts.entry(face).or_default() += 1;
+            }
+            selected.push(candidate_index);
+            self.search_best_from(
+                current_volume_m3 + self.candidates[candidate_index].volume_m3,
+                current_min_scaled_jacobian
+                    .min(self.candidates[candidate_index].exact_scaled_jacobian),
+                face_counts,
+                selected,
+                best,
+            );
+            selected.pop();
+            self.remove_candidate_faces(candidate_index, face_counts);
+        }
+        self.rollback_selected_candidates(&forced_indices, face_counts, selected);
     }
 
     fn propagate_forced_interior_mates(
@@ -4141,7 +4238,7 @@ fn exact_cover_refill_from_candidate_tets(
     }
     let mut search =
         BoundaryExactCoverSearch::new(cavity, candidates, options.volume_relative_tolerance);
-    let Some(selected_indices) = search.search() else {
+    let Some(selected_indices) = search.search_best() else {
         return Ok(None);
     };
     let selected_tets = selected_indices
@@ -7292,6 +7389,89 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("selected subset should preserve volume");
+    }
+
+    #[test]
+    fn exact_cover_refill_maximizes_worst_selected_quality() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: [
+                [4, 0, 1],
+                [4, 1, 2],
+                [4, 2, 3],
+                [4, 3, 0],
+                [5, 1, 0],
+                [5, 2, 1],
+                [5, 3, 2],
+                [5, 0, 3],
+            ]
+            .into_iter()
+            .map(|node_ids| ConstrainedCavityBoundaryFace {
+                node_ids,
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: Vec::new(),
+            })
+            .collect(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let low_worst_cover = [
+            ([4, 5, 0, 1], 0.90),
+            ([4, 5, 1, 2], 0.20),
+            ([4, 5, 2, 3], 0.20),
+            ([4, 5, 3, 0], 0.20),
+        ];
+        let better_worst_cover = [
+            ([0, 2, 4, 1], 0.50),
+            ([0, 2, 4, 3], 0.50),
+            ([0, 2, 5, 1], 0.50),
+            ([0, 2, 5, 3], 0.50),
+        ];
+        let candidates = low_worst_cover
+            .into_iter()
+            .chain(better_worst_cover)
+            .map(
+                |(node_ids, exact_scaled_jacobian)| ConstrainedCavityRefillTet {
+                    node_ids,
+                    volume_m3: 0.25,
+                    aspect_ratio: 1.0,
+                    exact_scaled_jacobian,
+                },
+            )
+            .collect::<Vec<_>>();
+
+        let refill = exact_cover_refill_from_candidate_tets(
+            &cavity,
+            &candidates,
+            ConstrainedCavityRefillOptions {
+                volume_relative_tolerance: 1.0e-9,
+                ..refill_options()
+            },
+        )
+        .expect("exact cover should evaluate")
+        .expect("octahedron cavity should have a cover");
+
+        assert_eq!(refill.tets.len(), 4);
+        assert_eq!(
+            refill
+                .tets
+                .iter()
+                .map(|tet| sorted_tet_nodes(tet.node_ids))
+                .collect::<BTreeSet<_>>(),
+            better_worst_cover
+                .into_iter()
+                .map(|(node_ids, _)| sorted_tet_nodes(node_ids))
+                .collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            refill
+                .tets
+                .iter()
+                .map(|tet| tet.exact_scaled_jacobian)
+                .fold(f64::INFINITY, f64::min),
+            0.50
+        );
     }
 
     #[test]
