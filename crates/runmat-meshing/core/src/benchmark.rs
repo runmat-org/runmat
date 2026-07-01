@@ -3166,7 +3166,10 @@ mod tests {
             BTreeMap::<usize, usize>::new();
         let mut bad_constrained_seed_star_relaxed_candidate_count = 0_usize;
         let mut bad_constrained_seed_star_relaxed_pass_count = 0_usize;
+        let mut bad_constrained_seed_star_scaled_worst_face_candidate_count = 0_usize;
+        let mut bad_constrained_seed_star_scaled_worst_face_pass_count = 0_usize;
         let mut bad_constrained_seed_star_max_min_quality = 0.0_f64;
+        let mut bad_constrained_seed_star_max_scaled_worst_face_quality = 0.0_f64;
         let mut bad_constrained_seed_star_quality_bins = BTreeMap::<String, usize>::new();
         let mut bad_constrained_seed_star_worst_corner_bins = BTreeMap::<String, usize>::new();
         let mut bad_constrained_seed_star_candidate_rejected_by_reason =
@@ -3506,8 +3509,16 @@ mod tests {
                 constrained_seed_star_candidates.relaxed_star_candidate_count;
             bad_constrained_seed_star_relaxed_pass_count +=
                 constrained_seed_star_candidates.relaxed_star_pass_count;
+            bad_constrained_seed_star_scaled_worst_face_candidate_count +=
+                constrained_seed_star_candidates.scaled_worst_face_candidate_count;
+            bad_constrained_seed_star_scaled_worst_face_pass_count +=
+                constrained_seed_star_candidates.scaled_worst_face_pass_count;
             bad_constrained_seed_star_max_min_quality = bad_constrained_seed_star_max_min_quality
                 .max(constrained_seed_star_candidates.max_min_scaled_jacobian);
+            bad_constrained_seed_star_max_scaled_worst_face_quality =
+                bad_constrained_seed_star_max_scaled_worst_face_quality.max(
+                    constrained_seed_star_candidates.max_scaled_worst_face_min_scaled_jacobian,
+                );
             for (bin, count) in constrained_seed_star_candidates.min_scaled_jacobian_bins {
                 *bad_constrained_seed_star_quality_bins
                     .entry(bin)
@@ -3640,7 +3651,7 @@ mod tests {
             bad_constrained_seed_star_refill_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} visible_candidates={} min_visible_faces={} visible_face_bins={:?} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} worst_corner_bins={:?} rejected_by_reason={:?}",
+            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} visible_candidates={} min_visible_faces={} visible_face_bins={:?} relaxed_candidates={} relaxed_passes={} scaled_worst_face_candidates={} scaled_worst_face_passes={} max_min_quality={:.6} max_scaled_worst_face_quality={:.6} quality_bins={:?} worst_corner_bins={:?} rejected_by_reason={:?}",
             bad_constrained_seed_star_group_count,
             bad_constrained_seed_star_valid_cavity_count,
             bad_constrained_seed_star_interior_candidate_count,
@@ -3653,7 +3664,10 @@ mod tests {
             bad_constrained_seed_star_visible_boundary_face_bins,
             bad_constrained_seed_star_relaxed_candidate_count,
             bad_constrained_seed_star_relaxed_pass_count,
+            bad_constrained_seed_star_scaled_worst_face_candidate_count,
+            bad_constrained_seed_star_scaled_worst_face_pass_count,
             bad_constrained_seed_star_max_min_quality,
+            bad_constrained_seed_star_max_scaled_worst_face_quality,
             bad_constrained_seed_star_quality_bins,
             bad_constrained_seed_star_worst_corner_bins,
             bad_constrained_seed_star_candidate_rejected_by_reason,
@@ -3732,7 +3746,10 @@ mod tests {
         let mut trimmed_seed_star_completion_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_candidate_count = 0_usize;
         let mut trimmed_seed_star_interior_pass_count = 0_usize;
+        let mut trimmed_seed_star_interior_scaled_worst_face_candidate_count = 0_usize;
+        let mut trimmed_seed_star_interior_scaled_worst_face_pass_count = 0_usize;
         let mut trimmed_seed_star_interior_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_interior_max_scaled_worst_face_quality = 0.0_f64;
         let mut trimmed_seed_star_interior_quality_bins = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_interior_rejected_by_reason = BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_face_expansion_candidates = 0_usize;
@@ -3802,7 +3819,10 @@ mod tests {
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_interior_candidate_count = 0_usize;
         let mut trimmed_seed_star_shell_trim_interior_pass_count = 0_usize;
+        let mut trimmed_seed_star_shell_trim_interior_scaled_worst_face_candidate_count = 0_usize;
+        let mut trimmed_seed_star_shell_trim_interior_scaled_worst_face_pass_count = 0_usize;
         let mut trimmed_seed_star_shell_trim_interior_max_min_quality = 0.0_f64;
+        let mut trimmed_seed_star_shell_trim_interior_max_scaled_worst_face_quality = 0.0_f64;
         let mut trimmed_seed_star_shell_trim_interior_quality_bins =
             BTreeMap::<String, usize>::new();
         let mut trimmed_seed_star_shell_trim_interior_rejected_by_reason =
@@ -4312,9 +4332,16 @@ mod tests {
                                         star_diagnostic.candidate_count;
                                     trimmed_seed_star_shell_trim_interior_pass_count +=
                                         star_diagnostic.pass_count;
+                                    trimmed_seed_star_shell_trim_interior_scaled_worst_face_candidate_count +=
+                                        star_diagnostic.scaled_worst_face_candidate_count;
+                                    trimmed_seed_star_shell_trim_interior_scaled_worst_face_pass_count +=
+                                        star_diagnostic.scaled_worst_face_pass_count;
                                     trimmed_seed_star_shell_trim_interior_max_min_quality =
                                         trimmed_seed_star_shell_trim_interior_max_min_quality
                                             .max(star_diagnostic.max_min_scaled_jacobian);
+                                    trimmed_seed_star_shell_trim_interior_max_scaled_worst_face_quality =
+                                        trimmed_seed_star_shell_trim_interior_max_scaled_worst_face_quality
+                                            .max(star_diagnostic.max_scaled_worst_face_min_scaled_jacobian);
                                     for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
                                         *trimmed_seed_star_shell_trim_interior_quality_bins
                                             .entry(bin)
@@ -5098,9 +5125,16 @@ mod tests {
                         trimmed_seed_star_interior_candidate_count +=
                             star_diagnostic.candidate_count;
                         trimmed_seed_star_interior_pass_count += star_diagnostic.pass_count;
+                        trimmed_seed_star_interior_scaled_worst_face_candidate_count +=
+                            star_diagnostic.scaled_worst_face_candidate_count;
+                        trimmed_seed_star_interior_scaled_worst_face_pass_count +=
+                            star_diagnostic.scaled_worst_face_pass_count;
                         trimmed_seed_star_interior_max_min_quality =
                             trimmed_seed_star_interior_max_min_quality
                                 .max(star_diagnostic.max_min_scaled_jacobian);
+                        trimmed_seed_star_interior_max_scaled_worst_face_quality =
+                            trimmed_seed_star_interior_max_scaled_worst_face_quality
+                                .max(star_diagnostic.max_scaled_worst_face_min_scaled_jacobian);
                         for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
                             *trimmed_seed_star_interior_quality_bins
                                 .entry(bin)
@@ -5438,10 +5472,13 @@ mod tests {
             trimmed_seed_star_completion_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_interior_quality candidates={} passes={} max_min_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_interior_quality candidates={} passes={} scaled_worst_face_candidates={} scaled_worst_face_passes={} max_min_quality={:.6} max_scaled_worst_face_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_interior_candidate_count,
             trimmed_seed_star_interior_pass_count,
+            trimmed_seed_star_interior_scaled_worst_face_candidate_count,
+            trimmed_seed_star_interior_scaled_worst_face_pass_count,
             trimmed_seed_star_interior_max_min_quality,
+            trimmed_seed_star_interior_max_scaled_worst_face_quality,
             trimmed_seed_star_interior_quality_bins,
             trimmed_seed_star_interior_rejected_by_reason,
         );
@@ -5503,10 +5540,13 @@ mod tests {
             trimmed_seed_star_shell_trim_completion_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery trimmed_seed_star_shell_trim_interior_quality candidates={} passes={} max_min_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
+            "annular recovery trimmed_seed_star_shell_trim_interior_quality candidates={} passes={} scaled_worst_face_candidates={} scaled_worst_face_passes={} max_min_quality={:.6} max_scaled_worst_face_quality={:.6} quality_bins={:?} rejected_by_reason={:?}",
             trimmed_seed_star_shell_trim_interior_candidate_count,
             trimmed_seed_star_shell_trim_interior_pass_count,
+            trimmed_seed_star_shell_trim_interior_scaled_worst_face_candidate_count,
+            trimmed_seed_star_shell_trim_interior_scaled_worst_face_pass_count,
             trimmed_seed_star_shell_trim_interior_max_min_quality,
+            trimmed_seed_star_shell_trim_interior_max_scaled_worst_face_quality,
             trimmed_seed_star_shell_trim_interior_quality_bins,
             trimmed_seed_star_shell_trim_interior_rejected_by_reason,
         );

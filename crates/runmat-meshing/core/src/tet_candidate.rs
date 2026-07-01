@@ -4398,7 +4398,10 @@ pub(crate) struct ConstrainedSeedStarCandidateDiagnostic {
     pub visible_boundary_face_count_bins: BTreeMap<usize, usize>,
     pub relaxed_star_candidate_count: usize,
     pub relaxed_star_pass_count: usize,
+    pub scaled_worst_face_candidate_count: usize,
+    pub scaled_worst_face_pass_count: usize,
     pub max_min_scaled_jacobian: f64,
+    pub max_scaled_worst_face_min_scaled_jacobian: f64,
     pub min_scaled_jacobian_bins: BTreeMap<String, usize>,
     pub min_scaled_jacobian_worst_corner_bins: BTreeMap<String, usize>,
     pub rejected_by_reason: BTreeMap<String, usize>,
@@ -4505,7 +4508,10 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
         visible_boundary_face_count_bins: BTreeMap::new(),
         relaxed_star_candidate_count: 0,
         relaxed_star_pass_count: 0,
+        scaled_worst_face_candidate_count: 0,
+        scaled_worst_face_pass_count: 0,
         max_min_scaled_jacobian: 0.0,
+        max_scaled_worst_face_min_scaled_jacobian: 0.0,
         min_scaled_jacobian_bins: BTreeMap::new(),
         min_scaled_jacobian_worst_corner_bins: BTreeMap::new(),
         rejected_by_reason: BTreeMap::new(),
@@ -4637,9 +4643,15 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
             .map_err(|_| TetCandidateError::InvalidOptions)?;
             diagnostic.relaxed_star_candidate_count += star_diagnostic.candidate_count;
             diagnostic.relaxed_star_pass_count += star_diagnostic.pass_count;
+            diagnostic.scaled_worst_face_candidate_count +=
+                star_diagnostic.scaled_worst_face_candidate_count;
+            diagnostic.scaled_worst_face_pass_count += star_diagnostic.scaled_worst_face_pass_count;
             diagnostic.max_min_scaled_jacobian = diagnostic
                 .max_min_scaled_jacobian
                 .max(star_diagnostic.max_min_scaled_jacobian);
+            diagnostic.max_scaled_worst_face_min_scaled_jacobian = diagnostic
+                .max_scaled_worst_face_min_scaled_jacobian
+                .max(star_diagnostic.max_scaled_worst_face_min_scaled_jacobian);
             for (bin, count) in star_diagnostic.min_scaled_jacobian_bins {
                 *diagnostic.min_scaled_jacobian_bins.entry(bin).or_default() += count;
             }
