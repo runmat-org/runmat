@@ -9,9 +9,6 @@
     "complex"
   ],
   "summary": "Compute the normalized sinc function `sin(pi*x)/(pi*x)` element-wise.",
-  "references": [
-    "title: \"MATLAB sinc documentation\""
-  ],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,
@@ -20,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Providers may execute sinc on-device through unary_sinc. The runtime gathers to the host only when a provider lacks that hook or cannot service the input."
+    "notes": "Providers may execute sinc on-device through unary_sinc for real and complex-interleaved inputs. The runtime gathers to the host only when a provider lacks that hook or cannot service the input."
   },
   "fusion": {
     "elementwise": true,
@@ -89,7 +86,7 @@
     },
     {
       "question": "Will `sinc(gpuArray(...))` stay on the GPU?",
-      "answer": "Yes when the active provider implements `unary_sinc`. Providers without that hook fall back to host evaluation so zero and integer cases still use the exact MATLAB-compatible path."
+      "answer": "Yes for real and complex gpuArray inputs when the active provider implements `unary_sinc`. Providers without that hook fall back to host evaluation so zero and integer cases still use the exact MATLAB-compatible path."
     }
   ],
   "links": [
@@ -122,7 +119,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/signal/sinc.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/sinc.rs"
   },
-  "gpu_residency": "`sinc` keeps real GPU tensors resident when the active provider exposes `unary_sinc`. The runtime preserves a host fallback for providers that do not support the hook.",
+  "gpu_residency": "`sinc` keeps real and complex-interleaved GPU tensors resident when the active provider exposes `unary_sinc`. The runtime preserves a host fallback for providers that do not support the hook.",
   "gpu_behavior": [
     "Provider-backed execution uses the same normalized sinc semantics, including `sinc(0) == 1` and exact zeros for finite nonzero integer-valued real inputs.",
     "If the provider declines the operation, RunMat gathers through the active provider and evaluates with the host implementation.",

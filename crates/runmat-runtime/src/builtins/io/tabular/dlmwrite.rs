@@ -1,12 +1,5 @@
 //! MATLAB-compatible `dlmwrite` builtin for delimiter-separated exports.
 
-#[cfg(not(target_arch = "wasm32"))]
-use core::ffi::{c_char, c_int};
-#[cfg(any(
-    all(not(target_arch = "wasm32"), not(windows)),
-    all(windows, target_env = "gnu")
-))]
-use libc;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -14,8 +7,6 @@ use runmat_builtins::{
 };
 use runmat_filesystem::{self as vfs, File, OpenOptions};
 use runmat_macros::runtime_builtin;
-#[cfg(not(target_arch = "wasm32"))]
-use std::ffi::CString;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
@@ -28,6 +19,7 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmwrite";
+const MAX_NUMERIC_FORMAT_FIELD: usize = 4096;
 
 const DLMWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -995,94 +987,15 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> BuiltinResult<String
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
-    let fmt = CString::new(spec.as_bytes()).map_err(|_| {
-        dlmwrite_error_with(
-            &DLMWRITE_ERROR_FORMAT,
-            "dlmwrite: precision format must not contain embedded null bytes",
-        )
-    })?;
-    let mut size: usize = 128;
-    loop {
-        let mut buffer = vec![0u8; size];
-        let written = unsafe {
-            platform_snprintf(
-                buffer.as_mut_ptr() as *mut c_char,
-                size,
-                fmt.as_ptr(),
-                value,
-            )
-        };
-        if written < 0 {
-            return Err(dlmwrite_error_with(
-                &DLMWRITE_ERROR_FORMAT,
-                "dlmwrite: failed to apply precision format string",
-            ));
-        }
-        let written = written as usize;
-        if written >= size {
-            size = written + 1;
-            continue;
-        }
-        buffer.truncate(written);
-        return String::from_utf8(buffer).map_err(|_| {
-            dlmwrite_error_with(
-                &DLMWRITE_ERROR_FORMAT,
-                "dlmwrite: formatted output was not valid UTF-8",
-            )
-        });
-    }
+    format_float(value, spec)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
-    wasm_format_float(value, spec)
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
-unsafe fn platform_snprintf(
-    buffer: *mut c_char,
-    size: usize,
-    fmt: *const c_char,
-    value: f64,
-) -> c_int {
-    libc::snprintf(buffer, size as libc::size_t, fmt, value)
-}
-
-#[cfg(all(windows, target_env = "msvc"))]
-#[link(name = "legacy_stdio_definitions")]
-extern "C" {
-    fn _snprintf(buffer: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
-}
-
-#[cfg(all(windows, target_env = "msvc"))]
-unsafe fn platform_snprintf(
-    buffer: *mut c_char,
-    size: usize,
-    fmt: *const c_char,
-    value: f64,
-) -> c_int {
-    _snprintf(buffer, size, fmt, value)
-}
-
-#[cfg(all(windows, target_env = "gnu"))]
-unsafe fn platform_snprintf(
-    buffer: *mut c_char,
-    size: usize,
-    fmt: *const c_char,
-    value: f64,
-) -> c_int {
-    libc::snprintf(buffer, size as libc::size_t, fmt, value)
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn wasm_format_float(value: f64, spec: &str) -> BuiltinResult<String> {
+fn format_float(value: f64, spec: &str) -> BuiltinResult<String> {
     let parsed = ParsedFormat::parse(spec)?;
     Ok(parsed.render(value))
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FloatSpecifier {
     Fixed,
@@ -1090,7 +1003,6 @@ enum FloatSpecifier {
     General,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SignFlag {
     None,
@@ -1098,7 +1010,6 @@ enum SignFlag {
     Space,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Copy, Debug)]
 struct ParsedFormat {
     specifier: FloatSpecifier,
@@ -1111,7 +1022,6 @@ struct ParsedFormat {
     precision: Option<usize>,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 impl ParsedFormat {
     fn parse(input: &str) -> BuiltinResult<Self> {
         use std::iter::Peekable;
@@ -1139,6 +1049,12 @@ impl ParsedFormat {
                 } else {
                     break;
                 }
+            }
+            if saw_digit && value > MAX_NUMERIC_FORMAT_FIELD {
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_FORMAT,
+                    format!("dlmwrite: {label} exceeds maximum supported precision format size"),
+                ));
             }
             Ok(if saw_digit { Some(value) } else { None })
         }
@@ -1310,7 +1226,6 @@ impl ParsedFormat {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn format_fixed_body(value: f64, precision: usize, alternate: bool) -> String {
     let mut s = format!("{:.*}", precision, value);
     if precision == 0 && alternate && !s.contains('.') {
@@ -1319,7 +1234,6 @@ fn format_fixed_body(value: f64, precision: usize, alternate: bool) -> String {
     s
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn format_exponential_body(
     value: f64,
     precision: usize,
@@ -1337,7 +1251,6 @@ fn format_exponential_body(
     s
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase: bool) -> String {
     let effective_precision = precision.max(1);
     let abs_val = value.abs();
@@ -1352,8 +1265,7 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     }
 
     let exponent = abs_val.log10().floor() as i32;
-    let force_exponent = uppercase && alternate;
-    let use_exponent = force_exponent || exponent < -4 || exponent >= effective_precision as i32;
+    let use_exponent = exponent < -4 || exponent >= effective_precision as i32;
     let mut s = if use_exponent {
         let frac = effective_precision.saturating_sub(1);
         let mut out = format!("{:.*e}", frac, abs_val);
@@ -1386,7 +1298,6 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     s
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn insert_decimal_point(s: &mut String) {
     if s.contains('.') {
         return;
@@ -1398,7 +1309,6 @@ fn insert_decimal_point(s: &mut String) {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn trim_trailing_zeros(s: &mut String) {
     if let Some(idx) = find_exponent_index(s) {
         let exponent = s[idx..].to_string();
@@ -1413,7 +1323,6 @@ fn trim_trailing_zeros(s: &mut String) {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn trim_fraction(s: &mut String) {
     if let Some(dot_idx) = s.find('.') {
         let mut idx = s.len();
@@ -1427,12 +1336,10 @@ fn trim_fraction(s: &mut String) {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn find_exponent_index(s: &str) -> Option<usize> {
     s.find('e').or_else(|| s.find('E'))
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn normalize_exponent_notation(s: &mut String) {
     if let Some(idx) = find_exponent_index(s) {
         let marker = s.as_bytes()[idx] as char;
@@ -1523,7 +1430,7 @@ pub(crate) mod tests {
     #[test]
     fn wasm_precision_parser_handles_common_specs() {
         fn fmt(value: f64, spec: &str) -> String {
-            super::wasm_format_float(value, spec).expect("formatting failed")
+            super::format_float(value, spec).expect("formatting failed")
         }
 
         assert_eq!(fmt(12.3456, "%.2f"), "12.35");
@@ -1532,7 +1439,30 @@ pub(crate) mod tests {
         assert_eq!(fmt(12345.0, "%.3g"), "1.23e+04");
         assert_eq!(fmt(1.5, "%#.0f"), "2.");
         assert_eq!(fmt(1.5, "%#.2e"), "1.50e+00");
-        assert_eq!(fmt(1.5, "%#.2G"), "1.5E+00");
+        assert_eq!(fmt(1.5, "%#.2G"), "1.5");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn precision_parser_rejects_unsafe_native_format_shapes() {
+        for spec in [
+            "%n",
+            "%s",
+            "%*f",
+            "%.2f %.2f",
+            "%.2lf",
+            "prefix %.2f",
+            "%4097f",
+            "%.4097f",
+        ] {
+            let err = super::format_float(1.0, spec).expect_err("format should be rejected");
+            assert!(
+                err.message().contains("precision format")
+                    || err.message().contains("unsupported precision format"),
+                "unexpected error for {spec}: {}",
+                err.message()
+            );
+        }
     }
 
     fn platform_newline() -> &'static str {

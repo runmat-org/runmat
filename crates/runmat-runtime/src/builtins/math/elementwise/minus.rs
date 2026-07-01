@@ -40,7 +40,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses elem_sub for equal-shape gpuArrays and specialised scalar_sub / scalar_rsub hooks for scalar broadcast cases; unsupported shapes fall back to host execution.",
+    notes: "Uses elem_sub for equal-shape gpuArrays, including complex-interleaved handles, attempts provider-side implicit expansion with repmat, and uses scalar_sub / scalar_rsub hooks for real scalar broadcast cases; unsupported shapes fall back to host execution.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::minus")]
@@ -514,9 +514,9 @@ async fn minus_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             }
         }
     }
-    let left = gpu_helpers::gather_tensor_async(&lhs).await?;
-    let right = gpu_helpers::gather_tensor_async(&rhs).await?;
-    minus_host(Value::Tensor(left), Value::Tensor(right))
+    let left = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs)).await?;
+    let right = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs)).await?;
+    minus_host(left, right)
 }
 
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
@@ -557,8 +557,8 @@ async fn minus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor_async(&lhs).await?;
-    minus_host(Value::Tensor(host_lhs), rhs)
+    let host_lhs = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs)).await?;
+    minus_host(host_lhs, rhs)
 }
 
 async fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -569,8 +569,8 @@ async fn minus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor_async(&rhs).await?;
-    minus_host(lhs, Value::Tensor(host_rhs))
+    let host_rhs = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs)).await?;
+    minus_host(lhs, host_rhs)
 }
 
 fn scalar_real_value(value: &Value) -> Option<f64> {

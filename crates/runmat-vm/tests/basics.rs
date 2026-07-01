@@ -50,6 +50,44 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
 }
 
 #[test]
+fn nan_constant_and_constructor_coexist() {
+    let input = "\
+        a = nan;
+        b = nan(2, 3);
+        c = NaN;
+        out = [isnan(a), numel(b), all(isnan(b(:))), isnan(c)];
+    ";
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+}
+
+#[test]
+fn inf_constant_and_constructor_coexist() {
+    let input = "\
+        a = inf;
+        b = inf(2, 3);
+        c = Inf;
+        out = [isinf(a), numel(b), all(isinf(b(:))), isinf(c)];
+    ";
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+}
+
+#[test]
 fn hilbert_builtin_executes_for_fm_demod_shape() {
     let input = r#"
         t = 0:0.001:0.01;
@@ -70,6 +108,102 @@ fn hilbert_builtin_executes_for_fm_demod_shape() {
         })
         .expect("expected output tensor");
     assert_eq!(out.data, vec![11.0, 11.0, 11.0, 11.0]);
+}
+
+#[test]
+fn buttord_builtin_executes_for_butterworth_workflow() {
+    let input = r#"
+        [n, Wn] = buttord(0.2, 0.3, 1, 40);
+        [b, a] = butter(n, Wn);
+        out = [n, Wn, numel(b), numel(a)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 12.0);
+    assert!((out.data[1] - 0.2108).abs() < 5e-4);
+    assert_eq!(out.data[2], 13.0);
+    assert_eq!(out.data[3], 13.0);
+}
+
+#[test]
+fn pwelch_builtin_executes_for_psd_workflow() {
+    let input = r#"
+        fs = 32;
+        t = 0:31;
+        x = sin(2*pi*4*t/fs);
+        [pxx, f] = pwelch(x, 32, 0, 32, fs);
+        [~, idx] = max(pxx);
+        out = [numel(pxx), numel(f), idx, f(idx)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 17.0);
+    assert_eq!(out.data[1], 17.0);
+    assert_eq!(out.data[2], 5.0);
+    assert_eq!(out.data[3], 4.0);
+}
+
+#[test]
+fn periodogram_builtin_executes_for_psd_workflow() {
+    let input = r#"
+        fs = 32;
+        t = 0:31;
+        x = sin(2*pi*4*t/fs);
+        [pxx, f] = periodogram(x, [], 32, fs);
+        [~, idx] = max(pxx);
+        out = [numel(pxx), numel(f), idx, f(idx)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 17.0);
+    assert_eq!(out.data[1], 17.0);
+    assert_eq!(out.data[2], 5.0);
+    assert_eq!(out.data[3], 4.0);
+}
+
+#[test]
+fn spectrogram_builtin_executes_for_stft_workflow() {
+    let input = r#"
+        fs = 32;
+        t = 0:63;
+        x = sin(2*pi*4*t/fs);
+        [s, f, tt, ps] = spectrogram(x, 32, 16, 32, fs);
+        [~, idx] = max(ps(:,1));
+        out = [size(s,1), size(s,2), numel(f), numel(tt), idx, f(idx), tt(1)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 7] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 17.0);
+    assert_eq!(out.data[1], 3.0);
+    assert_eq!(out.data[2], 17.0);
+    assert_eq!(out.data[3], 3.0);
+    assert_eq!(out.data[4], 5.0);
+    assert_eq!(out.data[5], 4.0);
+    assert_eq!(out.data[6], 0.5);
 }
 
 #[test]

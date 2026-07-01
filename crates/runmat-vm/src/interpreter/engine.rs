@@ -44,11 +44,11 @@ pub fn prepare_workspace_guard(
     Some(guard)
 }
 
-pub fn create_gc_context(
-    stack: &Vec<Value>,
-    vars: &Vec<Value>,
+pub fn create_gc_context<'roots>(
+    stack: &'roots Vec<Value>,
+    vars: &'roots Vec<Value>,
     thread_roots: Vec<Value>,
-) -> Result<InterpretContext, String> {
+) -> Result<InterpretContext<'roots>, String> {
     let mut gc_context = InterpretContext::new(stack, vars)?;
     let _ = gc_context.register_global_values(thread_roots, "thread_globals_persistents");
     Ok(gc_context)

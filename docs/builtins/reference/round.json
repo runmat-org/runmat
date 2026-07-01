@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Round values to nearest integers, decimal places, or significant digits with MATLAB-compatible modes.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

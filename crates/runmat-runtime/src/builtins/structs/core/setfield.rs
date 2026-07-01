@@ -20,7 +20,6 @@ use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance, StructValue,
     Tensor, Value,
 };
-use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 use std::convert::TryFrom;
 
@@ -516,9 +515,9 @@ async fn assign_into_struct_array(
         .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
         .clone();
 
-    let current = unsafe { &*handle.as_raw() }.clone();
+    let current = handle.clone();
     let updated = assign_into_value(current, steps, rhs).await?;
-    cell.data[position] = allocate_cell_handle(updated)?;
+    cell.data[position] = updated;
     Ok(Value::Cell(cell))
 }
 
@@ -673,13 +672,13 @@ async fn assign_with_selector(
                 .get(position)
                 .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
                 .clone();
-            let existing = unsafe { &*handle.as_raw() }.clone();
+            let existing = handle.clone();
             let new_value = if rest.is_empty() {
                 rhs
             } else {
                 assign_into_value(existing, rest, rhs).await?
             };
-            cell.data[position] = allocate_cell_handle(new_value)?;
+            cell.data[position] = new_value;
             Ok(Value::Cell(cell))
         }
         Value::Tensor(mut tensor) => {
@@ -1039,21 +1038,44 @@ async fn assign_into_handle(
             "setfield: expected at least one field name when assigning into a handle",
         ));
     }
-    if !runmat_builtins::is_handle_valid(&handle) {
+    if !crate::is_handle_valid(&handle) {
         return Err(setfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
             handle.class_name
         )));
     }
-    let current = unsafe { &*handle.target.as_raw() }.clone();
-    let updated = assign_into_value(current, steps, rhs).await?;
-    let raw = unsafe { handle.target.as_raw_mut() };
-    if raw.is_null() {
-        return Err(setfield_flow("setfield: handle target is null"));
-    }
-    unsafe {
-        *raw = updated;
-    }
+    let current = runmat_gc::gc_clone_value(&handle.target)
+        .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
+    let updated = assign_into_value(current.clone(), steps, rhs).await?;
+    runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
+        let target_valid = match target {
+            Value::Object(obj) => !matches!(
+                obj.properties.get(crate::HANDLE_VALID_FLAG_PROPERTY),
+                Some(Value::Bool(false))
+            ),
+            _ => {
+                return Err(setfield_flow(format!(
+                    "Invalid or deleted handle object '{}'.",
+                    handle.class_name
+                )));
+            }
+        };
+        if !target_valid {
+            return Err(setfield_flow(format!(
+                "Invalid or deleted handle object '{}'.",
+                handle.class_name
+            )));
+        }
+        if *target != current {
+            return Err(setfield_flow(
+                "setfield: handle target changed during asynchronous assignment",
+            ));
+        }
+        runmat_gc::gc_record_handle_write(&handle.target, &updated);
+        *target = updated;
+        Ok(())
+    })
+    .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))??;
     Ok(Value::HandleObject(handle))
 }
 
@@ -1067,7 +1089,7 @@ fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
-        let entry = unsafe { &*handle.as_raw() };
+        let entry = handle;
         components.push(parse_index_component(entry)?);
     }
     Ok(IndexSelector { components })
@@ -1405,18 +1427,10 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     }
 }
 
-fn allocate_cell_handle(value: Value) -> BuiltinResult<GcPtr<Value>> {
-    runmat_gc::gc_allocate(value).map_err(|e| {
-        setfield_flow(format!(
-            "setfield: failed to allocate cell element in GC: {e}"
-        ))
-    })
-}
-
 fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
-        .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+        .all(|handle| matches!(handle, Value::Struct(_)))
 }
 
 #[cfg(test)]
@@ -1511,7 +1525,7 @@ pub(crate) mod tests {
         .expect("setfield");
         match updated {
             Value::Cell(cell) => {
-                let second = unsafe { &*cell.data[1].as_raw() }.clone();
+                let second = &cell.data[1].clone();
                 match second {
                     Value::Struct(st) => {
                         assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
@@ -1556,7 +1570,7 @@ pub(crate) mod tests {
                 let samples = st.fields.get("samples").expect("samples field");
                 match samples {
                     Value::Cell(cell) => {
-                        let value = unsafe { &*cell.data[1].as_raw() }.clone();
+                        let value = &cell.data[1].clone();
                         match value {
                             Value::Struct(inner) => {
                                 assert_eq!(inner.fields.get("value"), Some(&Value::Num(10.0)));
@@ -1599,7 +1613,7 @@ pub(crate) mod tests {
         .expect("setfield");
         match updated {
             Value::Cell(cell) => {
-                let second = unsafe { &*cell.data[1].as_raw() }.clone();
+                let second = &cell.data[1].clone();
                 match second {
                     Value::Struct(st) => {
                         assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(99))));
@@ -1757,10 +1771,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_handle_target() {
-        let mut inner = StructValue::new();
-        inner.fields.insert("x".to_string(), Value::Num(0.0));
-        let gc_ptr = gc_allocate(Value::Struct(inner)).expect("gc allocation");
-        let handle_ptr = gc_ptr.clone();
+        let mut inner = ObjectInstance::new("PointHandle".to_string());
+        inner.properties.insert("x".to_string(), Value::Num(0.0));
+        let gc_ptr = gc_allocate(Value::Object(inner)).expect("gc allocation");
+        let handle_ptr = gc_ptr;
         let handle = HandleRef {
             class_name: "PointHandle".to_string(),
             target: handle_ptr,
@@ -1774,16 +1788,16 @@ pub(crate) mod tests {
         .expect("setfield handle update");
 
         match updated {
-            Value::HandleObject(h) => assert!(runmat_builtins::is_handle_valid(&h)),
+            Value::HandleObject(h) => assert!(crate::is_handle_valid(&h)),
             other => panic!("expected handle, got {other:?}"),
         }
 
-        let pointee = unsafe { &*gc_ptr.as_raw() };
+        let pointee = runmat_gc::gc_clone_value(&gc_ptr).expect("valid handle target");
         match pointee {
-            Value::Struct(st) => {
-                assert_eq!(st.fields.get("x"), Some(&Value::Num(7.0)));
+            Value::Object(obj) => {
+                assert_eq!(obj.properties.get("x"), Some(&Value::Num(7.0)));
             }
-            other => panic!("expected struct pointee, got {other:?}"),
+            other => panic!("expected object pointee, got {other:?}"),
         }
     }
 

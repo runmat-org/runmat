@@ -9,7 +9,6 @@
     "match"
   ],
   "summary": "Run case-insensitive regular-expression matching with MATLAB-compatible outputs and options.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

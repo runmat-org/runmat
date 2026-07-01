@@ -586,6 +586,11 @@ pub(crate) mod tests {
                     assert!((*observed - *exp).abs() < 1e-12);
                 }
             }
+            Value::GpuTensor(handle) => {
+                let gathered =
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather randn output");
+                assert_eq!(gathered.shape, vec![2, 2]);
+            }
             other => panic!("expected tensor result, got {other:?}"),
         }
     }

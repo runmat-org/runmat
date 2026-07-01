@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod memory;
+#[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
@@ -17,6 +19,8 @@ pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,6 +38,13 @@ use data_contract::{
 
 #[async_trait(?Send)]
 pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "file handle metadata is not supported by this provider",
+        ))
+    }
+
     async fn flush_async(&mut self) -> io::Result<()> {
         self.flush()
     }
@@ -45,6 +56,26 @@ pub trait FileHandle: Read + Write + Seek + Send + Sync {
 
 #[async_trait(?Send)]
 impl FileHandle for std::fs::File {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        let meta = std::fs::File::metadata(self)?;
+        let file_type = meta.file_type();
+        Ok(FsMetadata {
+            file_type: if file_type.is_dir() {
+                FsFileType::Directory
+            } else if file_type.is_file() {
+                FsFileType::File
+            } else if file_type.is_symlink() {
+                FsFileType::Symlink
+            } else {
+                FsFileType::Other
+            },
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            readonly: meta.permissions().readonly(),
+            hash: None,
+        })
+    }
+
     async fn sync_all_async(&mut self) -> io::Result<()> {
         std::fs::File::sync_all(self)
     }
@@ -282,6 +313,19 @@ pub struct OpenFileDialogSelection {
     pub filter_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SaveFileDialogRequest {
+    pub title: Option<String>,
+    pub default_path: Option<PathBuf>,
+    pub filters: Vec<OpenFileDialogFilter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveFileDialogSelection {
+    pub path: PathBuf,
+    pub filter_index: Option<usize>,
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -392,6 +436,13 @@ pub trait FsProvider: Send + Sync + 'static {
     ) -> io::Result<Option<OpenFileDialogSelection>> {
         Ok(None)
     }
+
+    async fn select_file_save(
+        &self,
+        _request: &SaveFileDialogRequest,
+    ) -> io::Result<Option<SaveFileDialogSelection>> {
+        Ok(None)
+    }
 }
 
 pub struct File {
@@ -429,6 +480,10 @@ impl File {
 
     pub async fn flush_async(&mut self) -> io::Result<()> {
         self.inner.flush_async().await
+    }
+
+    pub async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        self.inner.metadata_async().await
     }
 
     pub async fn sync_all_async(&mut self) -> io::Result<()> {
@@ -677,9 +732,19 @@ pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     provider.read(&resolved).await
 }
 
+pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_async(path).await })
+}
+
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
     let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
+}
+
+pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_to_string_async(path).await })
 }
 
 pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
@@ -688,16 +753,32 @@ pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::
     provider.write(&resolved, data.as_ref()).await
 }
 
+pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    let data = data.as_ref().to_vec();
+    wait_for_fs(move || async move { write_async(path, data).await })
+}
+
 pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.remove_file(&resolved).await
 }
 
+pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { remove_file_async(path).await })
+}
+
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.metadata(&resolved).await
+}
+
+pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { metadata_async(path).await })
 }
 
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
@@ -710,6 +791,11 @@ pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>>
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.read_dir(&resolved).await
+}
+
+pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { read_dir_async(path).await })
 }
 
 pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -728,6 +814,11 @@ pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.create_dir_all(&resolved).await
+}
+
+pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { create_dir_all_async(path).await })
 }
 
 pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
@@ -749,6 +840,12 @@ pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::R
     provider.rename(&resolved_from, &resolved_to).await
 }
 
+pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    let from = from.as_ref().to_path_buf();
+    let to = to.as_ref().to_path_buf();
+    wait_for_fs(move || async move { rename_async(from, to).await })
+}
+
 pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
@@ -764,6 +861,17 @@ pub async fn select_file_open_async(
     }
     let provider = current_provider();
     provider.select_file_open(&resolved).await
+}
+
+pub async fn select_file_save_async(
+    request: &SaveFileDialogRequest,
+) -> io::Result<Option<SaveFileDialogSelection>> {
+    let mut resolved = request.clone();
+    if let Some(default_path) = resolved.default_path.as_mut() {
+        *default_path = resolve_path(default_path);
+    }
+    let provider = current_provider();
+    provider.select_file_save(&resolved).await
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -798,6 +906,27 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
         .truncate(true)
         .open(to.as_ref())?;
     io::copy(&mut reader, &mut writer)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = io::Result<T>> + 'static,
+{
+    std::thread::spawn(move || futures::executor::block_on(factory()))
+        .join()
+        .map_err(|_| io::Error::other("filesystem worker thread panicked"))?
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = io::Result<T>>,
+{
+    futures::executor::block_on(factory())
 }
 
 fn default_provider() -> Arc<dyn FsProvider> {
@@ -1270,6 +1399,24 @@ mod tests {
     }
 
     #[test]
+    fn sync_helpers_work_inside_async_executor() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("file.txt");
+        let parent = path.parent().unwrap().to_path_buf();
+
+        futures::executor::block_on(async {
+            create_dir_all(&parent).expect("create dir");
+            write(&path, b"hello").expect("write");
+            assert_eq!(read(&path).expect("read"), b"hello");
+            assert_eq!(read_to_string(&path).expect("read string"), "hello");
+            assert!(metadata(&path).expect("metadata").is_file());
+            assert_eq!(read_dir(&parent).expect("read dir").len(), 1);
+            remove_file(&path).expect("remove");
+        });
+    }
+
+    #[test]
     fn replace_provider_restores_previous() {
         let _guard = test_lock();
         let original = current_provider();
@@ -1458,6 +1605,26 @@ mod tests {
 
         let selection =
             futures::executor::block_on(select_file_open_async(&request)).expect("select file");
+
+        assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn select_file_save_defaults_to_cancelled_selection() {
+        let _guard = test_lock();
+        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let _provider_guard = replace_provider(provider);
+        let request = SaveFileDialogRequest {
+            title: Some("Save".to_string()),
+            default_path: Some(PathBuf::from("data.mat")),
+            filters: vec![OpenFileDialogFilter {
+                patterns: vec!["*.mat".to_string()],
+                description: Some("MAT files".to_string()),
+            }],
+        };
+
+        let selection =
+            futures::executor::block_on(select_file_save_async(&request)).expect("select file");
 
         assert_eq!(selection, None);
     }

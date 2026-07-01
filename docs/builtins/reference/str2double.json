@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Convert text representations of numbers into double-precision values with MATLAB-compatible parsing rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

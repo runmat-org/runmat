@@ -1,0 +1,87 @@
+{
+  "title": "zplane",
+  "category": "math/signal",
+  "keywords": [
+    "zplane",
+    "zero pole plot",
+    "digital filter",
+    "signal processing",
+    "roots"
+  ],
+  "summary": "Plot zeros and poles of a digital filter.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Coefficient and SOS inputs are gathered to the host before root extraction and plot rendering."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::zplane::tests"
+  },
+  "description": "`zplane` draws the unit circle, real and imaginary axes, and markers for filter zeros and poles. Row-vector inputs are interpreted as transfer-function coefficients `b` and `a`; column-vector inputs are interpreted as explicit zero and pole locations.",
+  "behaviors": [
+    "`zplane(b, a)` computes `roots(b)` and `roots(a)` and plots the resulting zeros and poles.",
+    "`zplane(z, p, k)` accepts explicit zero and pole locations; the gain is validated for compatibility and does not affect marker placement.",
+    "`zplane(sos)` accepts a second-order-section matrix with six columns `[b0 b1 b2 a0 a1 a2]` and plots all section roots.",
+    "The plot uses equal axis scaling, grid lines, the unit circle, and symmetric limits large enough to include all finite zeros and poles.",
+    "When assigned, `h = zplane(...)` returns a row vector of graphics handles for the guide lines and marker plots."
+  ],
+  "examples": [
+    {
+      "description": "Plot zeros and poles of a simple IIR filter",
+      "input": "b = 1;\na = [1 -0.8];\nzplane(b, a);\ntitle('Zero-Pole Plot');"
+    },
+    {
+      "description": "Use explicit zero and pole vectors",
+      "input": "z = [0.2; -0.2];\np = [0.8; 0.6];\nzplane(z, p, 1);"
+    },
+    {
+      "description": "Plot roots from second-order sections",
+      "input": "sos = [1 0 0 1 -0.8 0];\nzplane(sos);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How does RunMat distinguish coefficients from explicit zeros and poles?",
+      "answer": "Row-vector two-argument inputs are treated as transfer-function coefficients. Column-vector two-argument inputs are treated as explicit zero and pole locations, matching the common MATLAB zplane convention."
+    },
+    {
+      "question": "Does zplane compute the frequency response?",
+      "answer": "No. `zplane` only computes roots and renders the zero-pole diagram. Use `freqz` to compute or plot frequency response values."
+    }
+  ],
+  "links": [
+    {
+      "label": "roots",
+      "url": "./roots"
+    },
+    {
+      "label": "freqz",
+      "url": "./freqz"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/zplane.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/zplane.rs"
+  },
+  "gpu_behavior": [
+    "Host-side root extraction and plotting only.",
+    "GPU coefficient inputs are gathered before evaluation."
+  ]
+}

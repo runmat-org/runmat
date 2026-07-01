@@ -31,7 +31,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers may execute conj in-place for real tensors via unary_conj; complex tensors currently gather to the host for conjugation.",
+        "Providers may execute conj via unary_conj for real tensors and complex-interleaved GPU tensors, preserving complex GPU residency when supported.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::conj")]
@@ -218,6 +218,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     fn conj_builtin(value: Value) -> BuiltinResult<Value> {
@@ -392,11 +401,36 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn conj_complex_gpu_provider_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, -4.0)], vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.data, vec![(1.0, -2.0), (-3.0, 4.0)]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn conj_wgpu_matches_cpu_for_real() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5, 0.0], vec![4, 1]).unwrap();
         let cpu = conj_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
@@ -416,5 +450,31 @@ pub(crate) mod tests {
             }
             _ => panic!("unexpected shapes"),
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn conj_wgpu_complex_matches_cpu() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, -4.0)], vec![2, 1]).unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(conj_gpu(handle)).unwrap();
+        let Value::GpuTensor(out) = gpu else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+        let Value::ComplexTensor(ct) = gathered else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(ct.data, vec![(1.0, -2.0), (-3.0, 4.0)]);
     }
 }

@@ -11,9 +11,6 @@
     "bandstop"
   ],
   "summary": "Design windowed-sinc FIR filters.",
-  "references": [
-    "title: \"MATLAB fir1 documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

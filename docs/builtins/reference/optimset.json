@@ -7,10 +7,10 @@
     "TolX",
     "TolFun",
     "MaxIter",
-    "Display"
+    "Display",
+    "SpecifyObjectiveGradient"
   ],
   "summary": "Create or update optimization options structures with MATLAB-compatible name/value handling.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -31,7 +31,8 @@
   "description": "`optimset` builds option structs for optimization routines and supports MATLAB-compatible create-from-scratch and copy-and-override workflows with recognized option names.",
   "behaviors": [
     "Option names are case-insensitive for the builtins that consume them.",
-    "`TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are canonicalized when constructed with `optimset`.",
+    "`TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, `Algorithm`, and `SpecifyObjectiveGradient` are canonicalized when constructed with `optimset`.",
+    "`GradObj` is accepted as a MATLAB-compatible alias for `SpecifyObjectiveGradient`.",
     "Unknown option names are preserved so future solvers can read them."
   ],
   "examples": [
@@ -45,6 +46,10 @@
     {
       "label": "fminbnd",
       "url": "./fminbnd"
+    },
+    {
+      "label": "fminunc",
+      "url": "./fminunc"
     },
     {
       "label": "fzero",

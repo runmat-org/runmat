@@ -891,7 +891,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
                 assert_eq!(cell.data.len(), 1);
-                let entry = unsafe { &*cell.data[0].as_raw() };
+                let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 1]);
@@ -949,7 +949,7 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = unsafe { &*cell.data[0].as_raw() };
+                let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![1, 1]);
@@ -982,7 +982,7 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = unsafe { &*cell.data[0].as_raw() };
+                let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![0, 1]);
@@ -1018,7 +1018,7 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(2.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = unsafe { &*cell.data[0].as_raw() };
+                let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.dtype, NumericDType::U16);
@@ -1040,7 +1040,7 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(3.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = unsafe { &*cell.data[0].as_raw() };
+                let entry = &cell.data[0];
                 match entry {
                     Value::LogicalArray(array) => {
                         assert_eq!(array.shape, vec![1, 1]);

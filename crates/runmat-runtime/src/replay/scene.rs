@@ -173,6 +173,9 @@ async fn hydrate_scene_data_refs_async(payload: &mut Value) -> Result<(), Runtim
                 hydrate_plot_field_async(plot, "colorsRgba").await?;
                 hydrate_plot_field_async(plot, "pointSizes").await?;
             }
+            "mesh" => {
+                hydrate_plot_field_async(plot, "vertices").await?;
+            }
             _ => {}
         }
     }
@@ -719,6 +722,19 @@ mod tests {
     #[test]
     fn scene_payload_too_large_rejects() {
         let scene = runmat_plot::event::FigureScene::capture(&runmat_plot::plots::Figure::new());
+        let err = encode_figure_scene_payload_with_limits(
+            &scene,
+            ReplayLimits {
+                max_scene_payload_bytes: 1,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect_err("expected encode payload rejection");
+        assert_eq!(
+            err.identifier(),
+            Some(ReplayErrorKind::PayloadTooLarge.identifier())
+        );
+
         let bytes = encode_figure_scene_payload_with_limits(
             &scene,
             ReplayLimits {

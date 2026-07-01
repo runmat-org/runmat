@@ -2,11 +2,13 @@
 //!
 //! High-performance line plotting with GPU acceleration.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material,
     PipelineType, RenderData, Vertex,
 };
 use crate::gpu::line::LineGpuInputs;
+use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
 use glam::{Vec3, Vec4};
 use log::{trace, warn};
@@ -114,6 +116,51 @@ impl LinePlot {
         self.gpu_vertices.is_some()
     }
 
+    pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
+        if !self.x_data.is_empty() && self.x_data.len() == self.y_data.len() {
+            return Ok((self.x_data.clone(), self.y_data.clone()));
+        }
+        if !self.x_data.is_empty() || !self.y_data.is_empty() {
+            return Err(format!(
+                "line plot has partial CPU source data: x has {} values, y has {} values",
+                self.x_data.len(),
+                self.y_data.len()
+            ));
+        }
+
+        if let Some(inputs) = &self.gpu_line_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "line plot has GPU source data but no shared WGPU context is installed".to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            return Ok((x, y));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "line plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new()))
+    }
+
     /// Create a new line plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
@@ -122,10 +169,6 @@ impl LinePlot {
                 x_data.len(),
                 y_data.len()
             ));
-        }
-
-        if x_data.is_empty() {
-            return Err("Cannot create line plot with empty data".to_string());
         }
 
         Ok(Self {
@@ -225,16 +268,18 @@ impl LinePlot {
         }
     }
 
-    fn invalidate_gpu_data(&mut self) {
+    fn invalidate_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
-        self.bounds = None;
-        self.gpu_line_inputs = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self.gpu_topology = None;
         self.gpu_pack_viewport_px = None;
         self.gpu_pack_view_bounds = None;
+    }
+
+    fn clear_gpu_source_inputs(&mut self) {
+        self.gpu_line_inputs = None;
     }
 
     fn invalidate_marker_data(&mut self) {
@@ -251,7 +296,7 @@ impl LinePlot {
         self.line_width = line_width;
         self.line_style = line_style;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
         self
     }
 
@@ -271,13 +316,12 @@ impl LinePlot {
             ));
         }
 
-        if x_data.is_empty() {
-            return Err("Cannot update with empty data".to_string());
-        }
-
         self.x_data = x_data;
         self.y_data = y_data;
         self.dirty = true;
+        self.bounds = None;
+        self.invalidate_gpu_render_cache();
+        self.clear_gpu_source_inputs();
         self.invalidate_marker_data();
         Ok(())
     }
@@ -286,7 +330,7 @@ impl LinePlot {
     pub fn set_color(&mut self, color: Vec4) {
         self.color = color;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
         self.invalidate_marker_data();
     }
 
@@ -294,14 +338,14 @@ impl LinePlot {
     pub fn set_line_width(&mut self, width: f32) {
         self.line_width = width.max(0.1); // Minimum line width
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Set the line style
     pub fn set_line_style(&mut self, style: LineStyle) {
         self.line_style = style;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Attach marker metadata so renderers can emit hybrid line+marker plots.
@@ -314,14 +358,14 @@ impl LinePlot {
     pub fn set_line_join(&mut self, join: LineJoin) {
         self.line_join = join;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Set the line cap style for thick lines
     pub fn set_line_cap(&mut self, cap: LineCap) {
         self.line_cap = cap;
         self.dirty = true;
-        self.invalidate_gpu_data();
+        self.invalidate_gpu_render_cache();
     }
 
     /// Show or hide the plot
@@ -443,6 +487,11 @@ impl LinePlot {
     pub fn bounds(&mut self) -> BoundingBox {
         if self.bounds.is_some() && self.x_data.is_empty() && self.y_data.is_empty() {
             return self.bounds.unwrap_or_default();
+        }
+        if self.x_data.is_empty() && self.y_data.is_empty() {
+            let bounds = BoundingBox::new(Vec3::ZERO, Vec3::ZERO);
+            self.bounds = Some(bounds);
+            return bounds;
         }
         if self.dirty || self.bounds.is_none() {
             let points: Vec<Vec3> = self
@@ -1010,10 +1059,23 @@ mod tests {
         let y = vec![0.0, 1.0];
         assert!(LinePlot::new(x, y).is_err());
 
-        // Empty data should fail
+        // Empty data is a valid empty line object.
         let empty_x: Vec<f64> = vec![];
         let empty_y: Vec<f64> = vec![];
-        assert!(LinePlot::new(empty_x, empty_y).is_err());
+        let empty = LinePlot::new(empty_x, empty_y).unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_line_plot_update_data_to_empty_invalidates_render_data() {
+        let mut plot = LinePlot::new(vec![0.0, 1.0], vec![2.0, 3.0]).unwrap();
+        assert!(!plot.render_data().vertices.is_empty());
+
+        plot.update_data(Vec::new(), Vec::new()).unwrap();
+        assert!(plot.is_empty());
+        assert_eq!(plot.render_data().vertices.len(), 0);
+        assert_eq!(plot.bounds().min, Vec3::ZERO);
+        assert_eq!(plot.bounds().max, Vec3::ZERO);
     }
 
     #[test]
@@ -1059,6 +1121,20 @@ mod tests {
         assert_eq!(bounds.max.x, 2.0);
         assert_eq!(bounds.min.y, -2.0);
         assert_eq!(bounds.max.y, 3.0);
+    }
+
+    #[test]
+    fn style_invalidation_preserves_gpu_source_bounds() {
+        let expected = BoundingBox::new(Vec3::new(-2.0, -1.0, 0.0), Vec3::new(3.0, 4.0, 0.0));
+        let mut plot = LinePlot::new(Vec::new(), Vec::new()).unwrap();
+        plot.bounds = Some(expected);
+        plot.dirty = false;
+
+        plot.set_line_width(3.0);
+
+        let bounds = plot.bounds();
+        assert_eq!(bounds.min, expected.min);
+        assert_eq!(bounds.max, expected.max);
     }
 
     #[test]

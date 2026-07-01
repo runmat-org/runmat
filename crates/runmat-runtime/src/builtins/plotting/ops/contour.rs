@@ -15,7 +15,9 @@ use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::contour::{contour_bounds, contour_bounds_3d};
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
-use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
+use super::common::{
+    numeric_vector, tensor_to_surface_grid_matlab_xy, value_as_f64, SurfaceDataInput,
+};
 use super::op_common::surface_inputs::{extract_meshgrid_axes_from_xy_matrices, AxisSource};
 use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
@@ -515,8 +517,8 @@ fn from_implicit_args(
             format!("{name}: Z must be at least 2x2"),
         ));
     }
-    let x_axis = implicit_axis(rows);
-    let y_axis = implicit_axis(cols);
+    let x_axis = implicit_axis(cols);
+    let y_axis = implicit_axis(rows);
     let level_spec = match level_value {
         Some(value) => parse_level_spec(value, name)?,
         None => ContourLevelSpec::Auto,
@@ -574,13 +576,13 @@ fn from_explicit_args(
         }
         (x_axis, y_axis)
     };
-    if rows != x_axis.len() || cols != y_axis.len() {
+    if cols != x_axis.len() || rows != y_axis.len() {
         return Err(plotting_error(
             name,
             format!(
                 "{name}: Z must be {}x{} to match axis vectors",
-                x_axis.len(),
-                y_axis.len()
+                y_axis.len(),
+                x_axis.len()
             ),
         ));
     }
@@ -742,8 +744,12 @@ impl ContourCall {
             }
         }
 
-        let grid =
-            tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len(), name)?;
+        let grid = tensor_to_surface_grid_matlab_xy(
+            z_input.into_tensor(name)?,
+            y_axis.len(),
+            x_axis.len(),
+            name,
+        )?;
         if let ContourLineColor::None = line_color {
             return Ok(());
         }
@@ -2049,9 +2055,9 @@ pub(crate) mod tests {
     #[test]
     fn implicit_axes_respect_tensor_shape() {
         setup_plot_tests();
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0], 2, 3));
         let args = parse_contour_args("contour", z, Vec::new()).unwrap();
-        assert_eq!(args.x_axis, vec![1.0, 2.0]);
+        assert_eq!(args.x_axis, vec![1.0, 2.0, 3.0]);
         assert_eq!(args.y_axis, vec![1.0, 2.0]);
     }
 
@@ -2174,11 +2180,11 @@ pub(crate) mod tests {
     #[test]
     fn explicit_meshgrid_axes_parse_correctly() {
         setup_plot_tests();
-        let x = Value::Tensor(tensor_from(&[10.0, 10.0, 20.0, 20.0], 2, 2));
-        let y = Value::Tensor(tensor_from(&[1.0, 2.0, 1.0, 2.0], 2, 2));
-        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let x = Value::Tensor(tensor_from(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0], 2, 3));
+        let y = Value::Tensor(tensor_from(&[1.0, 2.0, 1.0, 2.0, 1.0, 2.0], 2, 3));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0, 2.0, 3.0], 2, 3));
         let args = parse_contour_args("contour", x, vec![y, z]).unwrap();
-        assert_eq!(args.x_axis, vec![10.0, 20.0]);
+        assert_eq!(args.x_axis, vec![10.0, 20.0, 30.0]);
         assert_eq!(args.y_axis, vec![1.0, 2.0]);
     }
 

@@ -1,9 +1,12 @@
 //! Contour plot implementation (iso-lines on a surface or base plane).
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::gpu::util::copy_readback_bytes;
+use bytemuck::cast_slice;
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone)]
@@ -20,6 +23,31 @@ pub struct ContourPlot {
 }
 
 impl ContourPlot {
+    pub async fn export_scene_vertices(&self) -> Result<Vec<Vertex>, String> {
+        if let Some(vertices) = &self.vertices {
+            return Ok(vertices.clone());
+        }
+
+        if let Some(gpu_vertices) = &self.gpu_vertices {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "contour plot has GPU vertices but no shared WGPU context is installed".to_string()
+            })?;
+            let vertex_count = self.vertex_count.min(gpu_vertices.vertex_count);
+            let byte_len = vertex_count * std::mem::size_of::<Vertex>();
+            let bytes = copy_readback_bytes(
+                &context.device,
+                &context.queue,
+                &gpu_vertices.buffer,
+                byte_len,
+            )
+            .await?;
+            let vertices: &[Vertex] = cast_slice(&bytes);
+            return Ok(vertices.to_vec());
+        }
+
+        Ok(Vec::new())
+    }
+
     /// Create a contour plot from CPU vertices.
     pub fn from_vertices(vertices: Vec<Vertex>, base_z: f32, bounds: BoundingBox) -> Self {
         Self {

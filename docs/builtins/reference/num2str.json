@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Convert numeric values to character arrays in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

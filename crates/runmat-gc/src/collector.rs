@@ -3,7 +3,9 @@
 //! Implements mark-and-sweep collection for generational garbage collection,
 //! with optimizations for RunMat's value types and usage patterns.
 
-use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
+use crate::{
+    roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
+};
 use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
@@ -36,7 +38,7 @@ impl MarkSweepCollector {
     pub fn collect_young_generation(
         &mut self,
         allocator: &mut GenerationalAllocator,
-        roots: &[GcPtr<Value>],
+        roots: &[GcHandle],
         stats: &GcStats,
     ) -> Result<usize> {
         let _ = stats; // currently unused in this path
@@ -44,23 +46,27 @@ impl MarkSweepCollector {
         let start_time = Instant::now();
 
         // Phase 1: Mark reachable objects
-        self.mark_phase(roots, 0)?; // Only mark in generation 0
+        self.mark_phase(allocator, roots, 0)?; // Only mark in generation 0
 
         // Phase 2: Sweep unmarked objects in young generation (in-place sweep)
         let mut collected = 0usize;
         let mut any_survivor = false;
         // Walk allocations recorded by the young generation and free the unmarked ones
-        let allocated_ptrs = allocator.young_take_allocations();
+        let allocated_ptrs = allocator.young_take_collection_candidates();
         let mut promoted_this_cycle = 0usize;
         for &ptr in &allocated_ptrs {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
                 // Run finalizer if registered for this object address
-                crate::gc_run_finalizer_for_addr(addr);
-                // Drop the value in place to run destructors if any
-                unsafe {
-                    std::ptr::drop_in_place(ptr as *mut Value);
+                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
+                    crate::gc_run_finalizer_for_handle(handle);
+                }
+                if allocator.note_value_dropped(ptr) {
+                    // Drop the value in place to run destructors if any
+                    unsafe {
+                        std::ptr::drop_in_place(ptr as *mut Value);
+                    }
                 }
                 // Space remains reserved; a free-list compactor can reclaim later
             } else {
@@ -97,25 +103,37 @@ impl MarkSweepCollector {
     pub fn collect_all_generations(
         &mut self,
         allocator: &mut GenerationalAllocator,
-        roots: &[GcPtr<Value>],
+        roots: &[GcHandle],
         stats: &GcStats,
     ) -> Result<usize> {
         log::debug!("Starting full heap collection");
         let start_time = Instant::now();
 
         // Phase 1: Mark reachable objects in all generations
-        self.mark_phase(roots, usize::MAX)?;
+        self.mark_phase(allocator, roots, usize::MAX)?;
 
-        // Phase 2: Sweep unmarked objects (reuse young sweep and then clear marks)
-        // Do not call collect_young_generation to avoid double incrementing stats/marks; inline minimal work
-        let collected = {
-            // Reuse the young sweep logic without updating collection counters here
-            let mut temp_collector = MarkSweepCollector::new(&self.config);
-            temp_collector.marked_objects = std::mem::take(&mut self.marked_objects);
-            let c = temp_collector.collect_young_generation(allocator, roots, stats)?;
-            self.marked_objects = temp_collector.marked_objects; // bring back mark set (already cleared inside)
-            c
-        };
+        // Phase 2: Sweep every currently live allocation. Promoted objects are
+        // logical old-generation occupants even though their slots are still in
+        // allocator blocks, so major GC must not restrict itself to young
+        // collection candidates.
+        let _ = stats;
+        let allocated_ptrs = allocator.all_live_collection_candidates();
+        let mut collected = 0usize;
+        for ptr in allocated_ptrs {
+            let addr = ptr as usize;
+            if !self.marked_objects.lock().contains(&addr) {
+                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
+                    crate::gc_run_finalizer_for_handle(handle);
+                }
+                if allocator.note_value_dropped(ptr) {
+                    collected += 1;
+                    unsafe {
+                        std::ptr::drop_in_place(ptr as *mut Value);
+                    }
+                }
+            }
+        }
+        self.marked_objects.lock().clear();
 
         self.collections_performed += 1;
         self.total_objects_collected += collected;
@@ -127,17 +145,19 @@ impl MarkSweepCollector {
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects
-    fn mark_phase(&mut self, roots: &[GcPtr<Value>], max_generation: usize) -> Result<()> {
+    fn mark_phase(
+        &mut self,
+        allocator: &GenerationalAllocator,
+        roots: &[GcHandle],
+        _max_generation: usize,
+    ) -> Result<()> {
         log::trace!("Starting mark phase with {} roots", roots.len());
 
         self.marked_objects.lock().clear();
 
         // Mark all objects reachable from roots
         for root in roots.iter().cloned() {
-            let root_ptr: GcPtr<Value> = root;
-            if !root_ptr.is_null() {
-                self.mark_object(root_ptr, max_generation)?;
-            }
+            self.mark_object(allocator, root)?;
         }
 
         log::trace!(
@@ -148,8 +168,20 @@ impl MarkSweepCollector {
     }
 
     /// Mark an object and recursively mark all objects it references
-    fn mark_object(&mut self, obj: GcPtr<Value>, max_generation: usize) -> Result<()> {
-        let ptr = unsafe { obj.as_raw() } as *const u8;
+    fn mark_object(&mut self, allocator: &GenerationalAllocator, obj: GcHandle) -> Result<()> {
+        // SAFETY: this exposes the handle's preserved pointer token for
+        // address-keyed mark bookkeeping. Ownership/liveness is established by
+        // the root set and allocator before sweep.
+        let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
+        let ptr = value_ptr.as_ptr().cast::<u8>();
+        if allocator.find_generation(ptr).is_none() || !allocator.is_live_handle(&obj) {
+            log::debug!(
+                "Ignoring stale GC mark edge {:p}@{}",
+                value_ptr.as_ptr(),
+                obj.epoch()
+            );
+            return Ok(());
+        }
         let ptr_addr = ptr as usize;
 
         // Skip if already marked
@@ -162,143 +194,16 @@ impl MarkSweepCollector {
 
         self.marked_objects.lock().insert(ptr_addr);
 
-        // Recursively mark referenced objects
-        match &*obj {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    // Mark nested Value objects for collection
-                    self.mark_value_contents(cell_value, max_generation)?;
-                }
-            }
-            Value::HandleObject(h) => {
-                let tgt = h.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, max_generation)?;
-                }
-            }
-            Value::Listener(l) => {
-                let tgt = l.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, max_generation)?;
-                }
-                let cb = l.callback.clone();
-                if !cb.is_null() {
-                    self.mark_object(cb, max_generation)?;
-                }
-            }
-            Value::Tensor(_) | Value::SparseTensor(_) | Value::ComplexTensor(_) => {
-                // Matrices don't contain references to other GC objects
-                // (their data is Vec<f64>)
-            }
-            Value::GpuTensor(_) => {
-                // GPU handle contains no GC references
-            }
-            Value::String(_) => {
-                // Strings don't contain references to other GC objects
-            }
-            Value::StringArray(_sa) => {
-                // String arrays hold owned Strings; no nested GC Values
-            }
-            Value::Int(_)
-            | Value::Num(_)
-            | Value::Complex(_, _)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-            | Value::Symbolic(_) => {
-                // Primitive values don't contain references
-            }
-            Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. } => {}
-            Value::ClassRef(_) => {}
-            Value::Closure(c) => {
-                for v in &c.captures {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::Object(obj) => {
-                for v in obj.properties.values() {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::Struct(st) => {
-                for v in st.fields.values() {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::OutputList(values) => {
-                for v in values {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::MException(_e) => {
-                // Contains only strings; no GC references
-            }
-            Value::CharArray(_ca) => {}
+        let mut child_roots = Vec::new();
+        // SAFETY: mark traversal is limited to roots collected from GC-owned
+        // handles validated against allocator liveness above, and `ptr` is only
+        // borrowed during the stop-the-world mark phase before any sweep can
+        // reclaim the object.
+        collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
+        for child in child_roots {
+            self.mark_object(allocator, child)?;
         }
 
-        Ok(())
-    }
-
-    /// Mark objects contained within a Value for garbage collection
-    #[allow(clippy::only_used_in_recursion)]
-    fn mark_value_contents(&mut self, value: &Value, _max_generation: usize) -> Result<()> {
-        match value {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    self.mark_value_contents(cell_value, _max_generation)?;
-                }
-            }
-            Value::HandleObject(h) => {
-                let tgt = h.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, _max_generation)?;
-                }
-            }
-            Value::Listener(l) => {
-                let tgt = l.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, _max_generation)?;
-                }
-                let cb = l.callback.clone();
-                if !cb.is_null() {
-                    self.mark_object(cb, _max_generation)?;
-                }
-            }
-            Value::StringArray(_sa) => {}
-            Value::GpuTensor(_) => {}
-            Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. } => {}
-            Value::ClassRef(_) => {}
-            Value::Closure(c) => {
-                for v in &c.captures {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::Object(obj) => {
-                for v in obj.properties.values() {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::Struct(st) => {
-                for v in st.fields.values() {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::OutputList(values) => {
-                for v in values {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::MException(_e) => {}
-            Value::CharArray(_ca) => {}
-            _ => {
-                // Other value types don't contain GC references yet
-            }
-        }
         Ok(())
     }
 
@@ -442,10 +347,7 @@ impl ConcurrentCollector {
     }
 
     /// Start a concurrent collection in the background
-    pub fn start_concurrent_collection(
-        &mut self,
-        _roots: &[GcPtr<Value>],
-    ) -> Result<CollectionHandle> {
+    pub fn start_concurrent_collection(&mut self, _roots: &[GcHandle]) -> Result<CollectionHandle> {
         // Use the base collector for actual collection work
         // For simplicity, return a basic result since MarkSweepCollector methods need more context
         let objects_collected = 0; // Would be computed from actual collection
@@ -639,18 +541,81 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_phase_with_roots() {
+    fn test_mark_phase_with_empty_roots() {
         let config = GcConfig::default();
+        let allocator = GenerationalAllocator::new(&config);
         let mut collector = MarkSweepCollector::new(&config);
 
-        // Create some mock roots
-        let roots = vec![GcPtr::null()]; // Null pointer should be handled gracefully
+        let roots = Vec::new();
 
-        // Should not panic with null roots
-        let result = collector.mark_phase(&roots, 0);
+        let result = collector.mark_phase(&allocator, &roots, 0);
         assert!(result.is_ok());
 
-        // No objects should be marked from null roots
         assert_eq!(collector.marked_objects.lock().len(), 0);
+    }
+
+    #[test]
+    fn collector_marks_handles_reachable_through_owned_cell_values() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let target = allocator
+            .allocate(Value::String("alive".to_string()), &stats)
+            .expect("target allocation");
+        let target_addr = target.addr();
+        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+            class_name: "TestHandle".to_string(),
+            target,
+            valid: true,
+        });
+        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
+        let cell_root = allocator
+            .allocate(Value::Cell(cell), &stats)
+            .expect("cell allocation");
+
+        collector
+            .mark_phase(&allocator, &[cell_root], 0)
+            .expect("mark phase should succeed");
+
+        assert!(collector.marked_objects.lock().contains(&target_addr));
+    }
+
+    #[test]
+    fn collector_ignores_stale_handles_reachable_through_live_values() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let stale_target = allocator
+            .allocate(Value::String("stale".to_string()), &stats)
+            .expect("target allocation");
+        let stale_addr = stale_target.addr();
+        let stale_epoch = stale_target
+            .epoch()
+            .checked_add(1)
+            .expect("epoch increment");
+        let stale_handle =
+            unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
+
+        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+            class_name: "TestHandle".to_string(),
+            target: stale_handle,
+            valid: true,
+        });
+        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
+        let cell_root = allocator
+            .allocate(Value::Cell(cell), &stats)
+            .expect("cell allocation");
+
+        collector
+            .mark_phase(&allocator, &[cell_root], 0)
+            .expect("stale nested handles should not abort marking");
+
+        let marked = collector.marked_objects.lock();
+        assert!(marked.contains(&cell_root.addr()));
+        assert!(!marked.contains(&stale_addr));
     }
 }

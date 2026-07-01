@@ -8,7 +8,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 
-use super::common::tensor_to_surface_grid;
+use super::common::tensor_to_surface_grid_matlab_xy;
 use super::contour::{
     build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_gpu_plot,
     build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
@@ -352,12 +352,12 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             }
         }
 
-        let grid = tensor_to_surface_grid(
+        let grid = tensor_to_surface_grid_matlab_xy(
             z_input
                 .into_tensor(name)
                 .map_err(map_contourf_invalid_argument)?,
-            x_axis.len(),
             y_axis.len(),
+            x_axis.len(),
             name,
         )
         .map_err(map_contourf_invalid_argument)?;
@@ -429,6 +429,16 @@ pub(crate) mod tests {
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        }
+    }
+
+    fn matrix_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
+        Tensor {
+            data: data.to_vec(),
+            shape: vec![rows, cols],
+            rows,
+            cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
     }
@@ -524,6 +534,21 @@ pub(crate) mod tests {
             ],
         )
         .expect("contourf should accept scalar level counts with explicit axes");
+        assert!(handle.is_finite());
+    }
+
+    #[test]
+    fn contourf_accepts_non_square_meshgrid_axes() {
+        setup_plot_tests();
+        let handle = contourf_builtin(
+            Value::Tensor(matrix_from(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0], 2, 3)),
+            vec![
+                Value::Tensor(matrix_from(&[1.0, 2.0, 1.0, 2.0, 1.0, 2.0], 2, 3)),
+                Value::Tensor(matrix_from(&[0.0, 1.0, 1.0, 0.0, 2.0, 3.0], 2, 3)),
+                Value::Num(12.0),
+            ],
+        )
+        .expect("contourf should accept non-square meshgrid axes");
         assert!(handle.is_finite());
     }
 

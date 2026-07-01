@@ -1,0 +1,91 @@
+{
+  "title": "audioinfo",
+  "category": "io/audio",
+  "keywords": [
+    "audioinfo",
+    "audio",
+    "metadata",
+    "wav",
+    "flac",
+    "aiff",
+    "mp3",
+    "ogg",
+    "sample rate",
+    "channels"
+  ],
+  "summary": "Read metadata from an audio file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. Audio metadata inspection reads container headers and does not involve acceleration providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::audio::tests",
+    "integration": [
+      "builtins::io::audio::tests::audioinfo_reads_wav_metadata",
+      "builtins::io::audio::tests::audioinfo_reads_flac_streaminfo",
+      "builtins::io::audio::tests::audioinfo_parses_mp3_frame_header",
+      "builtins::io::audio::tests::audioinfo_rejects_unknown_data"
+    ]
+  },
+  "description": "`info = audioinfo(filename)` returns a MATLAB-style metadata structure for supported audio containers.",
+  "behaviors": [
+    "Accepts scalar string, scalar string-array, or row character-vector filenames and reads through RunMat's filesystem abstraction.",
+    "Recognizes WAV/RF64 RIFF containers, FLAC STREAMINFO metadata, AIFF/AIFC COMM metadata, Ogg/Vorbis identification headers, and MPEG audio frame headers.",
+    "Returns stable fields: `Filename`, `CompressionMethod`, `NumChannels`, `SampleRate`, `TotalSamples`, `Duration`, `BitsPerSample`, `BitRate`, `FileSize`, and `Format`.",
+    "`TotalSamples`, `Duration`, `BitsPerSample`, or `BitRate` are `NaN` when the container does not expose enough information in headers alone.",
+    "For MP3 files, metadata is estimated from the first valid MPEG audio frame header after an optional ID3v2 tag. Variable-rate files may require future decoder support for exact duration.",
+    "Malformed or unsupported audio files raise a descriptive format error rather than returning partial metadata."
+  ],
+  "examples": [
+    {
+      "description": "Read WAV metadata",
+      "input": "info = audioinfo(\"sample.wav\");\ninfo.SampleRate\ninfo.NumChannels"
+    },
+    {
+      "description": "Use duration and total sample count",
+      "input": "info = audioinfo(\"speech.flac\");\nseconds = info.Duration;\nframes = info.TotalSamples;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `audioinfo` decode audio samples?",
+      "answer": "No. It reads container metadata only. Sample decoding belongs to `audioread`."
+    },
+    {
+      "question": "Which formats are supported?",
+      "answer": "WAV/RF64, FLAC, AIFF/AIFC, Ogg/Vorbis, and MPEG audio frame headers, including common MP3 files."
+    },
+    {
+      "question": "Why are some fields `NaN`?",
+      "answer": "Some compressed formats do not expose exact sample count, bit depth, or duration in their primary headers. RunMat preserves the field shape and uses `NaN` for unavailable metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/audio/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/mod.rs"
+  },
+  "gpu_residency": "`audioinfo` is a host file-I/O operation and returns a host struct. No GPU residency is created or consumed.",
+  "gpu_behavior": [
+    "`audioinfo` does not launch provider kernels or participate in fusion. It reads audio container headers from the active filesystem provider and constructs a metadata struct on the host."
+  ]
+}

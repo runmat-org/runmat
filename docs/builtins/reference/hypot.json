@@ -9,7 +9,6 @@
     "elementwise"
   ],
   "summary": "Compute element-wise Euclidean norms with hypot in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

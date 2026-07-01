@@ -1,6 +1,6 @@
 [package]
 name = "runmat-builtins"
-version = "0.5.0"
+version = "0.5.3"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -17,6 +17,9 @@ runmat-gc-api = { workspace = true }
 runmat-thread-local = { workspace = true }
 indexmap = { version = "1.9", features = ["std"] }
 once_cell = { workspace = true }
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
 
 [dev-dependencies]
 runmat-macros = { workspace = true }

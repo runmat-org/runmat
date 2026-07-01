@@ -7,6 +7,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack stairs vertices directly on the GPU.
+#[derive(Clone, Debug)]
 pub struct StairsGpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,
@@ -108,7 +109,8 @@ pub fn pack_vertices_from_xy(
         size: output_size,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST,
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
 

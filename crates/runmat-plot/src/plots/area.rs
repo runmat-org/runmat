@@ -1,9 +1,13 @@
 //! Area plot implementation (filled area under curve)
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::axis::OwnedAxisData;
+use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct AreaPlot {
@@ -21,9 +25,65 @@ pub struct AreaPlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<AreaGpuSource>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AreaGpuSource {
+    pub x_axis: OwnedAxisData,
+    pub y_buffer: Arc<wgpu::Buffer>,
+    pub rows: usize,
+    pub cols: usize,
+    pub target_col: usize,
+    pub scalar: ScalarType,
 }
 
 impl AreaPlot {
+    pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
+        if !self.x.is_empty() && self.x.len() == self.y.len() {
+            return Ok((self.x.clone(), self.y.clone()));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() {
+            return Err(format!(
+                "area plot has partial CPU source data: x has {} values, y has {} values",
+                self.x.len(),
+                self.y.len()
+            ));
+        }
+
+        if let Some(source) = &self.gpu_source {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "area plot has GPU source data but no shared WGPU context is installed".to_string()
+            })?;
+            let x = source
+                .x_axis
+                .export_f64(&context.device, &context.queue, source.rows, source.scalar)
+                .await?;
+            let all_y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.y_buffer,
+                source.rows * source.cols,
+                source.scalar,
+            )
+            .await?;
+            let offset = source.target_col * source.rows;
+            let y = all_y
+                .get(offset..offset + source.rows)
+                .ok_or_else(|| "area plot GPU source column is out of range".to_string())?
+                .to_vec();
+            return Ok((x, y));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "area plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new()))
+    }
+
     pub fn new(x: Vec<f64>, y: Vec<f64>) -> Result<Self, String> {
         if x.len() != y.len() || x.is_empty() {
             return Err("area: X and Y must be same non-zero length".to_string());
@@ -43,6 +103,7 @@ impl AreaPlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
         })
     }
     pub fn from_gpu_buffer(
@@ -68,7 +129,12 @@ impl AreaPlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
         }
+    }
+    pub fn with_gpu_source(mut self, source: AreaGpuSource) -> Self {
+        self.gpu_source = Some(source);
+        self
     }
     pub fn with_style(mut self, color: Vec4, baseline: f64) -> Self {
         self.color = color;
@@ -78,6 +144,7 @@ impl AreaPlot {
     }
     pub fn with_lower_curve(mut self, lower_y: Vec<f64>) -> Self {
         self.lower_y = Some(lower_y);
+        self.gpu_source = None;
         self.dirty = true;
         self
     }

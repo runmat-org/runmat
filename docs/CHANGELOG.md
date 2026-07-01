@@ -2,6 +2,144 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.5.6](https://github.com/runmat-org/runmat/compare/v0.5.5...v0.5.6) - June 2026
+
+_June 28, 2026_
+
+### Desktop
+
+#### Added
+- Add a Command Window (REPL) for interactive RunMat execution, with terminal-style editing, command history, multiline input, selection/copy, LSP-backed syntax highlighting, persisted session transcripts, runtime variables, and figure integration
+- Add richer default sandbox content from file-backed fixtures, including a CAD STEP file, vibration dataset, 2D and 3D examples, signal filtering, flow-field, thermal diffusion, and a markdown welcome document
+- Add Mermaid diagram rendering and editing support in markdown documents alongside existing math and code rendering
+
+#### Changed
+- Improve runtime panel behavior so script and REPL runs keep variables, figures, and selected sessions aligned without unnecessary figure-output placeholder flicker
+- Improve plot, terminal, variable-table, and inspector layouts across narrow panels, resized workspaces, Safari, and Tauri
+- Load default sandbox files from a dedicated fixture directory instead of inlining them in code
+
+#### Fixed
+- Fix Monaco semantic-token timing so files receive highlighting on initial load
+- Fix REPL workspace probes so inspecting variables after a script run does not clear or hide existing figures
+- Fix markdown editor Mermaid blocks so diagrams render consistently with the markdown renderer
+
+### Runtime
+
+#### Changed
+- Preserve comments in detailed lexer and LSP token streams while filtering them from parser-facing tokenization, enabling comment-aware semantic highlighting without changing parser behavior
+- Suppress final-expression output for command-form calls so commands such as `clc` do not emit `ans`
+- Improve MIR read-before-assignment analysis through lowered temporary statements so diagnostics better reflect real initialization state
+
+#### Fixed
+- Fix `contour`, `contourf`, and `contour3` validation for MATLAB-style vector and meshgrid coordinate inputs
+- Fix CPU rendering and export of textured and image-mode surfaces so heatmap-like plots render through textured quads with correct colormap data
+
+---
+
+## [v0.5.5](https://github.com/runmat-org/runmat/compare/v0.5.3...v0.5.5) - June 2026
+
+_June 26, 2026_
+
+### Runtime
+
+#### Added
+- Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
+- Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
+- Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+- Add generalized eigenvalue support through `eig(A, B)`
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](/docs/fea) for details. We will share more details as this work matures.
+
+#### Changed
+- Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
+- Improve plotting and scene export behavior, including async replay/export handling, image export ownership, geometry renderer grid toggles, colormap command syntax, and portable rendering metadata
+- Harden runtime filesystem and diagnostic-path behavior so source paths, CWD-sensitive workflows, remote writes, create-new semantics, and WASM provider paths stay consistent across native, browser, and Windows environments
+
+#### Fixed
+- Fix GC safety by replacing dereference-oriented pointer APIs with opaque handles, explicit root guards, guarded borrow access, thread-local rooting, and Miri-backed soundness coverage
+- Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
+- Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
+- Fix `clear` inside active VM execution frames so hidden loop slots are preserved and browser/desktop workers do not trap or close response channels
+- Fix interactive `input()` evaluation on native by removing nested executor blocking from the input hook path
+- Fix MAT-file load robustness for compressed Level-5 payloads, endian variants, broader numeric storage classes, UTF char encodings, sparse matrices, and clearer unsupported-format diagnostics
+
+### Agent
+
+#### Added
+- Added “Fix with RunMat Agent” to execution errors for easy agent-assisted fixes
+
+#### Changed
+- Improve browser Agent transport so turn submission, approvals, and resumes are scheduled work instead of long-running worker RPCs, allowing progress views and parallel/new Agent sessions to respond promptly
+- Gate FEA/geometry Agent tools and model-visible guidance behind the same product feature flags as the desktop UI
+
+#### Fixed
+- Fix Agent prompt stickiness so only the active/current running turn is treated as sticky context
+- Fix usage-cap and insufficient-credit flows so desktop shows upgrade interruptions instead of generic failures
+
+### Development
+
+#### Changed
+- Document OCCT/CMake build requirements, add no-OCCT build support, align Linux and Windows runner bootstrap scripts, and move runtime WASM helper scripts into the runtime script namespace
+
+---
+
+## [v0.5.3](https://github.com/runmat-org/runmat/compare/v0.5.2...v0.5.3) - June 2026
+
+_June 17, 2026_
+
+### Runtime
+
+#### Added
+- Add broader symbolic math coverage — `syms`, `sym`, symbolic function declarations such as `syms y(x)`, symbolic powers, and scalar `limit` workflows now execute through parser, HIR, runtime, VM, and WASM paths
+- Add signal, linear-algebra, and math builtins — `hilbert`, `unwrap`, `pulstran`, `rectpuls`, `tripuls`, `gauspuls`, `upsample`, `downsample`, `null`, and `heaviside` now cover common signal-processing, numeric, and symbolic scripts
+- Add spreadsheet and file-selection workflows — `spreadsheetImportOptions`, `uigetfile`, expanded path commands, and provider-aware `cd` behavior now work across local, sandboxed, remote, and WASM filesystem providers
+- Add root-locus plotting and output forms for transfer-function models
+
+#### Changed
+- Expand MATLAB command and call syntax support, including command-form path arguments, `grid minor`, `axis image`, and name-value call arguments written as `Name=value`
+- Improve plotting property compatibility for `figure`, `gca`, axes `FontSize`, figure `Name`, `NumberTitle`, `Visible`, `Color`, `BackgroundColor`, and get/set/dot-property access paths
+
+#### Fixed
+- Fix browser/WASM runtime traps in plotting and timing paths, including WebGPU plotting presentation, tic/toc handle encoding, and symptom-regression coverage for node and Chrome execution
+- Fix zero-output semantic function statement calls so direct, nested, persisted, and dynamic-eval functions do not request an output when MATLAB statement semantics require none
+- Fix `fzero` optional outputs so `[x,fval]`, `[x,fval,exitflag]`, and `[x,fval,exitflag,output]` return ordered MATLAB-compatible results
+- Fix byte-oriented `csvread` range reads so non-UTF-8 or nonnumeric content outside the selected numeric rectangle does not fail selected CSV imports
+- Fix production name-resolution regressions for common builtins such as `rand`, `randn`, `tic`, `toc`, `gca`, `whos`, `tf`, and `null`
+
+### Sandbox
+
+#### Changed
+- Keep filesystem and path operations provider-aware across native, sandboxed, remote, and WASM backends while preserving native process-cwd behavior where appropriate
+
+---
+
+## [v0.5.2](https://github.com/runmat-org/runmat/compare/v0.5.0...v0.5.2) - June 2026
+
+_June 13, 2026_
+
+### Runtime
+
+#### Added
+- Add sparse matrix support — `sparse` now introduces a sparse runtime value with display, metadata, `class`, `whos`, indexing, element-wise arithmetic, reductions, transposes, `find`, `nnz`, JSON/string conversion, WASM wire previews, and GPU fallback/residency integration
+- Add optimization and linear-algebra builtins — `linprog` and `rref` now execute through runtime, VM, docs metadata, and generated builtin registration paths
+- Add table and import workflows — `readtable`, table objects, table `Properties`, dot/paren/brace table access and assignment, variable renaming, `height`, `width`, `groupsummary`, table-aware `sortrows`, datetime import support, and spreadsheet/text import plumbing cover common MATLAB tabular scripts
+- Add image and signal builtins — `imhist` and `butter` now cover histogram and Butterworth-filter workflows with runtime, VM, docs metadata, and WebAssembly registry integration
+- Add SISO transfer-function control workflows — `tf('s')`, `tf('z', Ts)`, transfer-function algebra, `feedback`, `dcgain`, `pole`, `isstable`, `stepinfo`, and multi-system `step` plotting/output forms now cover common control scripts
+- Add MATLAB script execution support through `run`, including script side effects, plotting hooks, warnings, console output, and workspace updates across runtime and VM paths
+
+#### Changed
+- Generate and validate the WASM builtin registry from source-backed metadata, preserving proc-macro metadata so browser/runtime builds fail early when builtin coverage drifts
+- Refresh builtin documentation and reference metadata for the new sparse, optimization, table, image, signal, control, and script-execution builtins
+- Improve runtime dispatch, workspace, callable identity, and name-resolution plumbing needed by newly added builtins and workspace-visible zero-argument builtin calls
+
+#### Fixed
+- Fix workspace-first bare builtin reads so unshadowed builtins resolve correctly while assigned or loaded workspace variables still shadow builtin names
+- Harden sparse allocation and conversion paths, including extreme dimension checks, sparse triplet validation, sparse logical conversion, sparse preview truncation reporting, and sparse-to-dense guardrails before large tensors are materialized
+- Bound WASM wire payload previews so large values cannot exceed preview limits
+- Guard snapshot header bounds during snapshot loading
+- Fix a Windows CSV release issue in bytecode compilation paths
+
+---
+
 ## [v0.5.0 ](https://github.com/runmat-org/runmat/compare/v0.4.9...v0.5.0) - June 2026
 
 _June 3, 2026_

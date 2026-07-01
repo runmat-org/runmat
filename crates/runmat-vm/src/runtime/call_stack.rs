@@ -104,3 +104,11 @@ pub fn attach_call_frames(
     err.context.call_frames_elided = elided;
     err
 }
+
+pub(crate) fn reset_thread_state_for_tests() {
+    CALL_STACK.with(|stack| {
+        *stack.borrow_mut() = CallStackState::default();
+    });
+    CALL_STACK_LIMIT.with(|limit| limit.set(DEFAULT_CALLSTACK_LIMIT));
+    ERROR_NAMESPACE.with(|namespace| namespace.borrow_mut().clear());
+}

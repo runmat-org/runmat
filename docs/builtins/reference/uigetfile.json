@@ -10,7 +10,6 @@
     "ui"
   ],
   "summary": "Open a host file-selection dialog and return the selected file name and path.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -8,7 +8,6 @@
     "mask"
   ],
   "summary": "Create logical arrays filled with `true` values using MATLAB-compatible size forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

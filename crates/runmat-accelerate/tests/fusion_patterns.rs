@@ -280,6 +280,111 @@ fn detects_image_normalize_group() {
                 .as_ref()
                 .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
                 .unwrap_or(true));
+            assert!(
+                pattern.clamp_zero,
+                "clamped image normalize script should set clamp_zero"
+            );
+        }
+        _ => panic!("missing image normalize pattern"),
+    }
+}
+
+#[test]
+fn detects_image_normalize_group_with_vecdim_and_clamp() {
+    let source = r#"
+    rng(0); B=2; H=4; W=5;
+    gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+    imgs = rand(B, H, W, 'single');
+    mu = single(mean(imgs, [2 3], 'native'));
+    sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+    out = single(((imgs - mu) ./ sigma) * gain + bias);
+    out = max(out, single(0));
+    out = single(out .^ gamma);
+    mse = mean((out - imgs).^2, 'all');
+
+    fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+    "#;
+    let graph = compile_graph(source);
+    let groups = detect_fusion_groups(&graph);
+    let plan = FusionPlan::from_graph(&graph, &groups);
+    let image_group = plan
+        .groups
+        .iter()
+        .find(|g| matches!(g.group.kind, FusionKind::ImageNormalize))
+        .expect("image normalize group not found for vecdim clamped form");
+    match image_group.pattern.as_ref() {
+        Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
+            assert!(
+                pattern.clamp_zero,
+                "clamped vecdim image normalize script should set clamp_zero"
+            );
+        }
+        _ => panic!("missing image normalize pattern"),
+    }
+}
+
+#[test]
+fn detects_image_normalize_group_with_cast_wrapped_clamp() {
+    let source = r#"
+    rng(0); B=2; H=4; W=5;
+    gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+    imgs = rand(B, H, W, 'single');
+    mu = single(mean(imgs, [2 3], 'native'));
+    sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+    out = single(((imgs - mu) ./ sigma) * gain + bias);
+    out = single(max(out, single(0)));
+    out = out .^ gamma;
+    "#;
+    let graph = compile_graph(source);
+    let groups = detect_fusion_groups(&graph);
+    let plan = FusionPlan::from_graph(&graph, &groups);
+    let image_group = plan
+        .groups
+        .iter()
+        .find(|g| matches!(g.group.kind, FusionKind::ImageNormalize))
+        .expect("image normalize group not found for cast-wrapped clamp");
+    match image_group.pattern.as_ref() {
+        Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
+            assert!(
+                pattern.clamp_zero,
+                "cast-wrapped max clamp should set clamp_zero"
+            );
+        }
+        _ => panic!("missing image normalize pattern"),
+    }
+}
+
+#[test]
+fn detects_image_normalize_group_with_vecdim_without_clamp() {
+    let source = r#"
+    rng(0); B=2; H=4; W=5;
+    gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+    imgs = rand(B, H, W, 'single');
+    mu = mean(imgs, [2 3]);
+    sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
+    out = ((imgs - mu) ./ sigma) * gain + bias;
+    out = out .^ gamma;
+    mse = mean((out - imgs).^2, 'all');
+
+    fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+    "#;
+    let graph = compile_graph(source);
+    let groups = detect_fusion_groups(&graph);
+    let plan = FusionPlan::from_graph(&graph, &groups);
+    let image_group = plan
+        .groups
+        .iter()
+        .find(|g| matches!(g.group.kind, FusionKind::ImageNormalize))
+        .expect("image normalize group not found for vecdim exact form");
+    match image_group.pattern.as_ref() {
+        Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
+            assert!(
+                !pattern.clamp_zero,
+                "unclamped image normalize script should preserve unclamped semantics"
+            );
         }
         _ => panic!("missing image normalize pattern"),
     }

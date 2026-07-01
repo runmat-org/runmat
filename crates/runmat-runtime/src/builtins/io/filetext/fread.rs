@@ -503,7 +503,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
             &FREAD_ERROR_INVALID_IDENTIFIER,
         )
     })?;
-    let handle = registry::take_handle(fid).ok_or_else(|| {
+    let handle = registry::shared_handle(fid).ok_or_else(|| {
         fread_error_with_message(
             FREAD_ERROR_INVALID_IDENTIFIER.message,
             &FREAD_ERROR_INVALID_IDENTIFIER,

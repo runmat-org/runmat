@@ -48,7 +48,6 @@ export type BuiltinDoc = {
   keywords: string[];
   summary: string;
   hero_image?: string;
-  references?: string[];
   description?: string;
   behaviors?: string[];
   extended_capabilities?: string[];

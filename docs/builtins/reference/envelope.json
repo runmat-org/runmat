@@ -1,0 +1,93 @@
+{
+  "title": "envelope",
+  "category": "math/signal",
+  "keywords": [
+    "envelope",
+    "analytic signal",
+    "Hilbert",
+    "RMS",
+    "peak envelope",
+    "signal processing"
+  ],
+  "summary": "Compute upper and lower signal envelopes.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Analytic, analytic-FIR, and RMS envelope modes keep real GPU tensors resident through provider-side kernels. Peak interpolation gathers because extrema selection plus spline interpolation is sparse and irregular."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::envelope::tests"
+  },
+  "description": "`envelope(x)` returns upper and lower envelopes for a finite real signal vector or for each column of a finite real matrix. The default analytic mode removes each channel mean, computes the magnitude of the analytic signal, and adds the mean back to the upper and lower bounds.",
+  "behaviors": [
+    "`yupper = envelope(x)` returns the upper envelope.",
+    "`[yupper, ylower] = envelope(x)` returns both bounds.",
+    "`envelope(x, n)` uses analytic mode and accepts `n` for MATLAB call-form compatibility.",
+    "`envelope(x, n, 'analytic')` computes an FFT-domain analytic envelope.",
+    "`envelope(x, wl, 'rms')` computes a centered sliding RMS envelope over a window of `wl` samples.",
+    "`envelope(x, np, 'peak')` detects local maxima/minima separated by at least `np` samples and interpolates them with a spline curve.",
+    "Statement form with no outputs plots the signal with the upper and lower envelopes."
+  ],
+  "examples": [
+    {
+      "description": "Analytic envelope of an amplitude-modulated tone",
+      "input": "t = (0:127) / 128;\nx = (1.25 + 0.5*sin(2*pi*t)) .* sin(2*pi*8*t);\n[up, lo] = envelope(x);"
+    },
+    {
+      "description": "Centered moving RMS envelope",
+      "input": "x = [0 3 4 0];\n[up, lo] = envelope(x, 3, 'rms');"
+    },
+    {
+      "description": "Peak envelope",
+      "input": "x = [0 2 0 -1 0 3 0];\n[up, lo] = envelope(x, 2, 'peak');"
+    },
+    {
+      "description": "Column-wise matrix envelopes",
+      "input": "x = [sin(0:0.1:10)' cos(0:0.1:10)'];\n[up, lo] = envelope(x);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the default envelope method?",
+      "answer": "The default is analytic-envelope mode using the magnitude of the analytic signal."
+    },
+    {
+      "question": "How are matrix inputs handled?",
+      "answer": "`envelope` processes each matrix column independently and returns outputs with the same shape as the input."
+    },
+    {
+      "question": "Does `envelope` plot when no outputs are requested?",
+      "answer": "Yes. Statement form renders the signal, upper envelope, and lower envelope using the line-plot pipeline."
+    }
+  ],
+  "links": [
+    {
+      "label": "hilbert",
+      "url": "./hilbert"
+    },
+    {
+      "label": "pchip",
+      "url": "./pchip"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/envelope.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/envelope.rs"
+  }
+}

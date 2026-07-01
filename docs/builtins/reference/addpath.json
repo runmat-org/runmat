@@ -10,7 +10,6 @@
     "-frozen"
   ],
   "summary": "Add folders to the MATLAB/RunMat search path for function and script resolution.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

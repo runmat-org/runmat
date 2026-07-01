@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Integrate polynomial coefficient vectors in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB polyint documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -20,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Real-valued coefficient vectors stay on the GPU when the provider exposes the polyint hook; complex outputs fall back to the host."
+    "notes": "Real and complex-interleaved coefficient vectors stay on the GPU when the provider exposes the polyint hook; complex integration constants use host integration and re-upload complex-interleaved results."
   },
   "fusion": {
     "elementwise": false,
@@ -41,7 +38,7 @@
     "Leading zeros are preserved. Integrating `[0 0 5]` produces `[0 0 5 0]`, matching MATLAB.",
     "Empty inputs integrate to the constant of integration (default `0`). Specifying a constant `k` yields `[k]`.",
     "The orientation of the input vector is preserved: row vectors stay row vectors, column vectors stay column vectors, and scalars return a row vector.",
-    "When coefficients reside on the GPU, RunMat gathers them to the host, performs the integration, and re-uploads real-valued results so downstream kernels retain residency."
+    "When coefficients reside on the GPU, RunMat uses the provider hook for real or complex-interleaved coefficient vectors when possible. Host fallback results are re-uploaded as real or complex-interleaved GPU tensors when GPU residency was requested."
   ],
   "examples": [
     {
@@ -71,7 +68,7 @@
     },
     {
       "description": "Working with gpuArray inputs",
-      "input": "g = gpuArray([1 -4 6]);\nq = polyint(g);          % Gathered to host, integrated, and re-uploaded\nresult = gather(q)",
+      "input": "g = gpuArray([1 -4 6]);\nq = polyint(g);          % Integrated on the provider when supported\nresult = gather(q)",
       "output": "result = [0.3333  -2  6  0]"
     }
   ],
@@ -94,7 +91,7 @@
     },
     {
       "question": "Will the result stay on the GPU?",
-      "answer": "Real-valued outputs are re-uploaded to the GPU when a provider is available. Complex outputs remain on the host because current providers do not expose complex tensor handles."
+      "answer": "Yes when the input was GPU-resident and an acceleration provider is available. Real outputs and complex-interleaved outputs are both returned as gpuArray values; complex integration constants may compute on the host first and then re-upload."
     },
     {
       "question": "How precise is the computation?",
@@ -131,8 +128,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/poly/polyint.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/polyint.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` just for `polyint`. When inputs already live on the GPU and a provider is active, RunMat keeps the data on the device and executes the integration there for real-valued coefficients. For complex inputs, or when no provider hook is available, the runtime falls back to the host implementation transparently.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` just for `polyint`. When inputs already live on the GPU and a provider is active, RunMat keeps real and complex-interleaved coefficient vectors on the device when the provider hook supports them. Host fallback results are re-uploaded when GPU residency was requested.",
   "gpu_behavior": [
-    "When a GPU provider is registered and the coefficient vector is real-valued, RunMat calls the provider's dedicated `polyint` kernel. The input stays on the device, the kernel divides each coefficient by the appropriate power, and the supplied constant of integration is written directly into device memory. If the coefficients or the constant are complex, or if the provider reports that the hook is unavailable, the runtime gathers data back to the host, performs the integration in double precision, and re-uploads the result when it is purely real."
+    "When a GPU provider is registered and the coefficient vector is real or complex-interleaved with a real integration constant, RunMat calls the provider's dedicated `polyint` kernel. The input stays on the device, the kernel divides each coefficient lane by the appropriate power, and writes the real constant term directly into device memory.",
+    "If the integration constant is complex, or if the provider hook is unavailable, the runtime gathers data back to the host, performs the integration in double precision, and re-uploads the real or complex result when GPU residency was requested."
   ]
 }

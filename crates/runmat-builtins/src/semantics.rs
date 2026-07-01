@@ -322,7 +322,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
-        "uigetfile" => BuiltinSemantics {
+        "uigetfile" | "uiputfile" => BuiltinSemantics {
             compatibility: BuiltinCompatibility::InteractiveOnly,
             async_behavior: BuiltinAsyncBehavior::MaySuspend,
             effects: BuiltinEffects::none()

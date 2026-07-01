@@ -9,7 +9,6 @@
     "permutation"
   ],
   "summary": "Compute LU decompositions with partial pivoting in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

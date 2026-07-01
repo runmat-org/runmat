@@ -37,6 +37,11 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         [y, t] = step(T, 0:0.5:2);
         info = stepinfo(y, t, dcgain(T));
         p = pole(T);
+        zsys = tf([1 3 2], [1 4]);
+        z = zero(zsys);
+        sys_ss = ss([0 1; -4 -0.5], [0; 1], [1 0], 0);
+        pss = pole(sys_ss);
+        [wn, zeta, dp] = damp(T);
         stable = isstable(T);
         ss = dcgain(T);
         H = 2 / s;
@@ -48,6 +53,14 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         assert(info.RiseTime >= 0 || isnan(info.RiseTime));
         assert(info.Overshoot >= 0);
         assert(all(real(p) < 0));
+        assert(length(z) == 2);
+        assert(any(abs(z + 1) < 1e-6));
+        assert(any(abs(z + 2) < 1e-6));
+        assert(length(pss) == 2);
+        assert(length(wn) == length(dp));
+        assert(length(zeta) == length(dp));
+        assert(all(wn >= 0));
+        assert(all(zeta > 0));
         assert(hn(1) == 2);
         assert(hd(1) == 1);
         assert(hd(2) == 0);

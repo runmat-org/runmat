@@ -6,11 +6,14 @@ const DEFAULT_SCATTER_TARGET_POINTS: u32 = 250_000;
 const MIN_SCATTER_TARGET_POINTS: u32 = 16_384;
 const DEFAULT_SURFACE_VERTEX_BUDGET: u64 = 400_000;
 const MIN_SURFACE_VERTEX_BUDGET: u64 = 65_536;
+const DEFAULT_SCENE_EXPORT_BUDGET_BYTES: u64 = 8 * 1024 * 1024;
+const MIN_SCENE_EXPORT_BUDGET_BYTES: u64 = 1024;
 const SCATTER_EXTENT_REFERENCE: f32 = 250.0;
 const SURFACE_EXTENT_REFERENCE: f32 = 500.0;
 
 static SCATTER_TARGET_POINTS: AtomicU32 = AtomicU32::new(DEFAULT_SCATTER_TARGET_POINTS);
 static SURFACE_VERTEX_BUDGET: AtomicU64 = AtomicU64::new(DEFAULT_SURFACE_VERTEX_BUDGET);
+static SCENE_EXPORT_BUDGET_BYTES: AtomicU64 = AtomicU64::new(DEFAULT_SCENE_EXPORT_BUDGET_BYTES);
 
 /// Returns the target number of scatter points we aim to draw per dispatch
 /// before enabling compute-side decimation. The value can be overridden by
@@ -37,6 +40,15 @@ pub(crate) fn surface_vertex_budget() -> u64 {
 pub fn set_surface_vertex_budget(value: u64) {
     let clamped = value.max(MIN_SURFACE_VERTEX_BUDGET);
     SURFACE_VERTEX_BUDGET.store(clamped, Ordering::Relaxed);
+}
+
+pub(crate) fn scene_export_budget_bytes() -> usize {
+    SCENE_EXPORT_BUDGET_BYTES.load(Ordering::Relaxed) as usize
+}
+
+pub fn set_scene_export_budget_bytes(value: usize) {
+    let clamped = (value as u64).max(MIN_SCENE_EXPORT_BUDGET_BYTES);
+    SCENE_EXPORT_BUDGET_BYTES.store(clamped, Ordering::Relaxed);
 }
 
 #[derive(Debug, Clone, Copy)]

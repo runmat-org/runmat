@@ -79,26 +79,41 @@ WASM CI builds the runtime for `wasm32-unknown-unknown`, then runs the headless 
 ```bash
 rustup target add wasm32-unknown-unknown
 scripts/regenerate-wasm-registry.sh
-cargo build -p runmat-wasm --target wasm32-unknown-unknown
+cargo build -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host
 scripts/test-wasm-headless.sh
 ```
 
-`scripts/test-wasm-headless.sh` regenerates the WASM registry with the atomic production `plot-web` flow, checks `runmat-core` for wasm compatibility, and runs browser-based WASM tests. To include runtime browser tests:
+`scripts/test-wasm-headless.sh` regenerates the WASM registry with the atomic production `plot-web,occt-wasm-host` flow, checks `runmat-core` for wasm compatibility with the same OCCT host feature enabled, and runs browser-based WASM tests. To include runtime browser tests:
 
 ```bash
 RUNMAT_WASM_INCLUDE_RUNTIME=1 scripts/test-wasm-headless.sh
 ```
 
-Focused WASM regression suites are available for symptom and replay coverage:
+Focused WASM regression suites are available through the runtime dispatcher:
 
 ```bash
-scripts/test-wasm-regression-suite.sh symptom-closure
-scripts/test-wasm-regression-suite.sh replay-smoke
+scripts/runtime/test-wasm-regression-suite.sh symptom-closure
+scripts/runtime/test-wasm-regression-suite.sh replay-smoke
 ```
 
 Those wrappers run the appropriate `wasm-pack test --node` and `wasm-pack test --chrome --headless` targets under `crates/runmat-wasm/tests`.
 They also regenerate the WASM builtin registry before running tests, so focused
 regressions exercise the same builtin catalog as packaged browser builds.
+
+The symptom-closure suite includes the shared signal compatibility harness in
+`crates/runmat-runtime/tests/fixtures/signal_compatibility_harness.m`. The same
+fixture is also run by the CLI integration test
+`test_signal_compatibility_harness_cli`, covering CSV import, MAT-file
+save/load, FFT magnitude/indexing, filter/conv, and signal window functions
+through both host and JavaScript filesystem providers.
+
+## FEA Script Tests
+
+FEA governance, calibration, reporting, and artifact scripts use stdlib `unittest` tests:
+
+```bash
+scripts/test-fea-scripts.sh
+```
 
 ## Macro UI Tests
 

@@ -11,6 +11,7 @@ pub mod errorbar;
 pub mod figure;
 pub mod line;
 pub mod line3;
+pub mod mesh;
 pub mod patch;
 pub mod pie;
 pub mod quiver;
@@ -22,23 +23,30 @@ pub mod stem;
 pub mod surface;
 pub mod volume;
 
-pub use area::AreaPlot;
+pub use area::{AreaGpuSource, AreaPlot};
 pub use bar::BarChart;
 pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
 pub use figure::{
-    AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
+    AxesKind, AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use line3::Line3Plot;
+pub use mesh::{
+    MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField,
+    MeshTriangleRange, MeshVectorField,
+};
 pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
-pub use quiver::QuiverPlot;
+pub use quiver::{QuiverGpuSource, QuiverPlot};
 pub use reference_line::{ReferenceLine, ReferenceLineOrientation};
 pub use scatter::{MarkerStyle, ScatterPlot};
 pub use scatter3::Scatter3Plot;
 pub use stairs::StairsPlot;
 pub use stem::StemPlot;
-pub use surface::{ColorMap, ShadingMode, SurfacePlot, SurfaceStatistics};
+pub use surface::{
+    ColorMap, ShadingMode, SurfaceGpuColorGridSource, SurfaceGpuSource, SurfacePlot,
+    SurfaceStatistics,
+};
 pub use volume::*;

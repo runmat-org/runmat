@@ -5,60 +5,36 @@
 //! execution context (stacks, global variables, etc.).
 
 use crate::Value;
-use crate::{GcError, GcPtr, Result};
+use crate::{GcError, GcHandle, Result};
+use runmat_gc_api::{GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 use runmat_time::Instant;
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Recursively collect GC roots from a Value.
+/// Recursively collect immediate GC roots from an owned Value tree.
 ///
-/// This is a shared helper used by all root types to traverse nested
-/// values (cells and structs) and collect GC pointers.
-fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
-    match value {
-        Value::Cell(cells) => {
-            for cell_value in &cells.data {
-                roots.push(cell_value.clone());
-                let inner = unsafe { &*cell_value.as_raw() };
-                collect_value_roots(inner, roots);
-            }
+/// This helper deliberately does not dereference collected `GcHandle`s. Root
+/// scanning should discover handles reachable from ordinary Rust-owned values;
+/// the collector is responsible for tracing each discovered GC object.
+pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle>) {
+    struct RootCollector<'a> {
+        roots: &'a mut Vec<GcHandle>,
+    }
+
+    impl Tracer for RootCollector<'_> {
+        fn mark(&mut self, handle: GcHandle) {
+            self.roots.push(handle);
         }
-        Value::Struct(struct_value) => {
-            for field_value in struct_value.fields.values() {
-                collect_value_roots(field_value, roots);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Unique identifier for a GC root
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RootId(pub usize);
-
-/// Trait for objects that can serve as GC roots
-pub trait GcRoot: Send + Sync {
-    /// Scan this root and return all reachable GC pointers
-    fn scan(&self) -> Vec<GcPtr<Value>>;
-
-    /// Get a human-readable description of this root
-    fn description(&self) -> String;
-
-    /// Get the estimated size of objects reachable from this root
-    fn estimated_size(&self) -> usize {
-        0 // Default implementation
     }
 
-    /// Check if this root is still active
-    fn is_active(&self) -> bool {
-        true // Most roots are always active
-    }
+    value.trace(&mut RootCollector { roots });
 }
 
 /// A root representing an interpreter's value stack
 pub struct StackRoot {
     /// Reference to the stack (non-owning)
-    stack_ptr: *const Vec<Value>,
+    stack: NonNull<Vec<Value>>,
     description: String,
 }
 
@@ -67,36 +43,27 @@ impl StackRoot {
     ///
     /// # Safety
     ///
-    /// The stack pointer must remain valid for the lifetime of this root
-    pub unsafe fn new(stack: *const Vec<Value>, description: String) -> Self {
-        Self {
-            stack_ptr: stack,
-            description,
-        }
+    /// The stack must remain valid and allocated for the whole period this root
+    /// is registered with a `RootScanner`. Collection must not scan this root
+    /// concurrently with mutation of the referenced vector.
+    pub unsafe fn new(stack: NonNull<Vec<Value>>, description: String) -> Self {
+        Self { stack, description }
     }
 }
 
-// Safety: StackRoot is used in a single-threaded context where the pointer
-// remains valid and is not shared across threads unsafely
-unsafe impl Send for StackRoot {}
-unsafe impl Sync for StackRoot {}
-
 impl GcRoot for StackRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
-        unsafe {
-            if self.stack_ptr.is_null() {
-                return Vec::new();
-            }
+    fn scan(&self) -> Vec<GcHandle> {
+        // SAFETY: `StackRoot::new` requires the vector to remain valid while the
+        // root is registered. The VM registration guard unregisters before the
+        // stack vector is dropped.
+        let stack = unsafe { self.stack.as_ref() };
+        let mut roots = Vec::new();
 
-            let stack = &*self.stack_ptr;
-            let mut roots = Vec::new();
-
-            for value in stack {
-                collect_value_roots(value, &mut roots);
-            }
-
-            roots
+        for value in stack {
+            collect_value_roots(value, &mut roots);
         }
+
+        roots
     }
 
     fn description(&self) -> String {
@@ -104,25 +71,20 @@ impl GcRoot for StackRoot {
     }
 
     fn estimated_size(&self) -> usize {
-        unsafe {
-            if self.stack_ptr.is_null() {
-                return 0;
-            }
-
-            let stack = &*self.stack_ptr;
-            stack.len() * std::mem::size_of::<Value>()
-        }
+        // SAFETY: same invariant as `scan`.
+        let stack = unsafe { self.stack.as_ref() };
+        stack.len() * std::mem::size_of::<Value>()
     }
 
     fn is_active(&self) -> bool {
-        !self.stack_ptr.is_null()
+        true
     }
 }
 
 /// A root representing an array of variables
 pub struct VariableArrayRoot {
     /// Reference to the variable array (non-owning)  
-    vars_ptr: *const Vec<Value>,
+    vars: NonNull<Vec<Value>>,
     description: String,
 }
 
@@ -131,36 +93,27 @@ impl VariableArrayRoot {
     ///
     /// # Safety
     ///
-    /// The variables pointer must remain valid for the lifetime of this root
-    pub unsafe fn new(vars: *const Vec<Value>, description: String) -> Self {
-        Self {
-            vars_ptr: vars,
-            description,
-        }
+    /// The variables vector must remain valid and allocated for the whole period
+    /// this root is registered with a `RootScanner`. Collection must not scan
+    /// this root concurrently with mutation of the referenced vector.
+    pub unsafe fn new(vars: NonNull<Vec<Value>>, description: String) -> Self {
+        Self { vars, description }
     }
 }
 
-// Safety: VariableArrayRoot is used in a single-threaded context where the pointer
-// remains valid and is not shared across threads unsafely
-unsafe impl Send for VariableArrayRoot {}
-unsafe impl Sync for VariableArrayRoot {}
-
 impl GcRoot for VariableArrayRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
-        unsafe {
-            if self.vars_ptr.is_null() {
-                return Vec::new();
-            }
+    fn scan(&self) -> Vec<GcHandle> {
+        // SAFETY: `VariableArrayRoot::new` requires the vector to remain valid
+        // while the root is registered. The VM registration guard unregisters
+        // before the variables vector is dropped.
+        let vars = unsafe { self.vars.as_ref() };
+        let mut roots = Vec::new();
 
-            let vars = &*self.vars_ptr;
-            let mut roots = Vec::new();
-
-            for value in vars {
-                collect_value_roots(value, &mut roots);
-            }
-
-            roots
+        for value in vars {
+            collect_value_roots(value, &mut roots);
         }
+
+        roots
     }
 
     fn description(&self) -> String {
@@ -168,18 +121,13 @@ impl GcRoot for VariableArrayRoot {
     }
 
     fn estimated_size(&self) -> usize {
-        unsafe {
-            if self.vars_ptr.is_null() {
-                return 0;
-            }
-
-            let vars = &*self.vars_ptr;
-            vars.len() * std::mem::size_of::<Value>()
-        }
+        // SAFETY: same invariant as `scan`.
+        let vars = unsafe { self.vars.as_ref() };
+        vars.len() * std::mem::size_of::<Value>()
     }
 
     fn is_active(&self) -> bool {
-        !self.vars_ptr.is_null()
+        true
     }
 }
 
@@ -212,7 +160,7 @@ impl GlobalRoot {
 }
 
 impl GcRoot for GlobalRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
+    fn scan(&self) -> Vec<GcHandle> {
         let mut roots = Vec::new();
         for value in &self.values {
             collect_value_roots(value, &mut roots);
@@ -279,17 +227,14 @@ impl RootScanner {
     }
 
     /// Scan all roots and return reachable objects
-    pub fn scan_roots(&self) -> Result<Vec<GcPtr<Value>>> {
+    pub fn scan_roots(&self) -> Result<Vec<GcHandle>> {
         log::trace!("Starting root scan");
         let scan_start = Instant::now();
 
         let roots = self.roots.read();
         let mut all_roots = Vec::new();
-        let mut inactive_roots = Vec::new();
-
         for (&root_id, root) in roots.iter() {
             if !root.is_active() {
-                inactive_roots.push(root_id);
                 continue;
             }
 
@@ -302,17 +247,6 @@ impl RootScanner {
             );
 
             all_roots.extend(root_objects);
-        }
-
-        drop(roots);
-
-        // Clean up inactive roots
-        if !inactive_roots.is_empty() {
-            let mut roots = self.roots.write();
-            for root_id in inactive_roots {
-                log::debug!("Removing inactive root {}", root_id.0);
-                roots.remove(&root_id);
-            }
         }
 
         // Update statistics
@@ -328,6 +262,32 @@ impl RootScanner {
         );
 
         Ok(all_roots)
+    }
+
+    /// Remove inactive roots from this thread-local scanner.
+    ///
+    /// The GC-level registration accounting lives outside `RootScanner`, so the
+    /// caller must decrement its active-root accounting by the returned count.
+    pub fn remove_inactive_roots(&self) -> usize {
+        let inactive_ids = {
+            let roots = self.roots.read();
+            roots
+                .iter()
+                .filter_map(|(&root_id, root)| (!root.is_active()).then_some(root_id))
+                .collect::<Vec<_>>()
+        };
+        if inactive_ids.is_empty() {
+            return 0;
+        }
+
+        let mut roots = self.roots.write();
+        let mut removed = 0usize;
+        for root_id in inactive_ids {
+            if roots.remove(&root_id).is_some() {
+                removed += 1;
+            }
+        }
+        removed
     }
 
     /// Get information about all registered roots
@@ -360,19 +320,16 @@ impl RootScanner {
         }
     }
 
-    /// Remove all inactive roots
-    pub fn cleanup_inactive_roots(&self) -> usize {
-        let mut roots = self.roots.write();
-        let initial_count = roots.len();
-
-        roots.retain(|_, root| root.is_active());
-
-        let removed_count = initial_count - roots.len();
-        if removed_count > 0 {
-            log::debug!("Cleaned up {removed_count} inactive roots");
-        }
-
-        removed_count
+    /// Clear roots registered in this scanner.
+    ///
+    /// This is intended for whole-context teardown and test reset. Normal root
+    /// lifetimes should unregister through `unregister_root` so external
+    /// accounting remains paired with registration.
+    pub fn clear(&self) {
+        self.roots.write().clear();
+        self.next_id.store(1, Ordering::Relaxed);
+        self.scans_performed.store(0, Ordering::Relaxed);
+        self.total_roots_found.store(0, Ordering::Relaxed);
     }
 }
 
@@ -382,27 +339,14 @@ impl Default for RootScanner {
     }
 }
 
-/// Information about a registered root
-#[derive(Debug, Clone)]
-pub struct RootInfo {
-    pub id: RootId,
-    pub description: String,
-    pub estimated_size: usize,
-    pub is_active: bool,
-}
-
-/// Statistics for the root scanner
-#[derive(Debug, Clone)]
-pub struct RootScannerStats {
-    pub registered_roots: usize,
-    pub scans_performed: usize,
-    pub total_roots_found: usize,
-    pub average_roots_per_scan: f64,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+
+    fn ptr_addr(ptr: GcHandle) -> usize {
+        ptr.addr()
+    }
 
     #[test]
     fn test_global_root() {
@@ -413,8 +357,91 @@ mod tests {
         assert!(root.is_active());
 
         let scanned = root.scan();
-        // Currently returns empty since we don't have GC-allocated Values yet
         assert_eq!(scanned.len(), 0);
+    }
+
+    #[test]
+    fn global_root_scans_direct_handle_and_listener_targets() {
+        crate::gc_test_context(|| {
+            let target =
+                crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
+                    .expect("target allocation");
+            let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
+                .expect("callback allocation");
+
+            let values = vec![
+                Value::HandleObject(HandleRef {
+                    class_name: "widget".to_string(),
+                    target,
+                    valid: true,
+                }),
+                Value::Listener(Listener {
+                    id: 1,
+                    target,
+                    target_class_name: "widget".to_string(),
+                    event_name: "Changed".to_string(),
+                    callback,
+                    enabled: true,
+                    valid: true,
+                }),
+            ];
+
+            let root = GlobalRoot::new(values, "handles".to_string());
+            let scanned = root.scan();
+            let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+
+            assert!(scanned_addrs.contains(&ptr_addr(target)));
+            assert!(scanned_addrs.contains(&ptr_addr(callback)));
+        });
+    }
+
+    #[test]
+    fn global_root_scans_owned_nested_value_containers() {
+        crate::gc_test_context(|| {
+            let handle_target =
+                crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
+                    .expect("target allocation");
+            let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
+                .expect("callback allocation");
+
+            let handle = Value::HandleObject(HandleRef {
+                class_name: "nested".to_string(),
+                target: handle_target,
+                valid: true,
+            });
+            let listener = Value::Listener(Listener {
+                id: 7,
+                target: handle_target,
+                target_class_name: "nested".to_string(),
+                event_name: "Changed".to_string(),
+                callback,
+                enabled: true,
+                valid: true,
+            });
+
+            let mut object = ObjectInstance::new("owner".to_string());
+            object.properties.insert("h".to_string(), handle.clone());
+
+            let mut struct_value = StructValue::new();
+            struct_value.fields.insert(
+                "closure".to_string(),
+                Value::Closure(Closure {
+                    function_name: "f".to_string(),
+                    bound_function: None,
+                    captures: vec![listener],
+                }),
+            );
+            struct_value
+                .fields
+                .insert("object".to_string(), Value::Object(object));
+
+            let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
+            let scanned = root.scan();
+            let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+
+            assert!(scanned_addrs.contains(&ptr_addr(handle_target)));
+            assert!(scanned_addrs.contains(&ptr_addr(callback)));
+        });
     }
 
     #[test]
@@ -426,7 +453,7 @@ mod tests {
         let root_id = scanner.register_root(root).expect("should register");
 
         let roots = scanner.scan_roots().expect("should scan");
-        assert_eq!(roots.len(), 0); // No GC pointers yet
+        assert_eq!(roots.len(), 0); // No GC handles yet
 
         let info = scanner.root_info();
         assert_eq!(info.len(), 1);
@@ -442,21 +469,21 @@ mod tests {
     fn test_stack_root() {
         let stack = vec![Value::Num(1.0), Value::Bool(true)];
 
-        let root = unsafe { StackRoot::new(&stack as *const _, "test stack".to_string()) };
+        let root = unsafe { StackRoot::new(NonNull::from(&stack), "test stack".to_string()) };
 
         assert_eq!(root.description(), "test stack");
         assert!(root.is_active());
         assert!(root.estimated_size() > 0);
 
         let scanned = root.scan();
-        assert_eq!(scanned.len(), 0); // No GC pointers in current implementation
+        assert_eq!(scanned.len(), 0);
     }
 
     #[test]
     fn test_variable_array_root() {
         let vars = vec![Value::Num(42.0), Value::String("test".to_string())];
 
-        let root = unsafe { VariableArrayRoot::new(&vars as *const _, "test vars".to_string()) };
+        let root = unsafe { VariableArrayRoot::new(NonNull::from(&vars), "test vars".to_string()) };
 
         assert_eq!(root.description(), "test vars");
         assert!(root.is_active());

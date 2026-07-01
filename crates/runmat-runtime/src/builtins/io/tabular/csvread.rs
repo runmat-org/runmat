@@ -957,6 +957,7 @@ pub(crate) mod tests {
     use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
 
     fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         futures::executor::block_on(super::csvread_builtin(path, rest))
     }
 

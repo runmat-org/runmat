@@ -1,5 +1,5 @@
-use crate::core::{Camera, PipelineType, ProjectionType, RenderData};
-use crate::plots::{Figure, PlotElement};
+use crate::core::{Camera, ImageData, PipelineType, ProjectionType, RenderData};
+use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
 use font8x8::{UnicodeFonts, BASIC_FONTS};
 use glam::{Vec2, Vec3, Vec4};
@@ -22,6 +22,7 @@ struct AxesView {
     show_grid: bool,
     show_minor_grid: bool,
     show_box: bool,
+    axes_kind: AxesKind,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -451,6 +452,14 @@ fn compute_plot_rect(viewport: (u32, u32, u32, u32), has_3d: bool) -> (u32, u32,
     (px, py, pw.max(1), ph.max(1))
 }
 
+fn square_plot_rect(rect: (u32, u32, u32, u32)) -> (u32, u32, u32, u32) {
+    let (x, y, w, h) = rect;
+    let size = w.min(h).max(1);
+    let x = x + (w.saturating_sub(size) / 2);
+    let y = y + (h.saturating_sub(size) / 2);
+    (x, y, size, size)
+}
+
 fn project_2d(
     pos: Vec3,
     plot_rect: (u32, u32, u32, u32),
@@ -508,6 +517,7 @@ fn axes_has_3d_content(figure: &Figure, axes_index: usize) -> bool {
             idx == axes_index
                 && match plot {
                     PlotElement::Surface(surface) => !surface.image_mode,
+                    PlotElement::Mesh(_) => true,
                     PlotElement::Patch(patch) => {
                         patch.force_3d() || patch.vertices().iter().any(|p| p.z.abs() > 1e-6)
                     }
@@ -798,6 +808,20 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let top = py as i32;
     let bottom = (py + ph.saturating_sub(1)) as i32;
 
+    if axes.axes_kind == AxesKind::Polar {
+        draw_polar_axes_decorations(
+            canvas,
+            axes,
+            (left, right, top, bottom),
+            grid_color,
+            minor_grid_color,
+            frame_color,
+            text_color,
+        );
+        draw_axes_titles_and_labels(canvas, axes, text_color);
+        return;
+    }
+
     if axes.show_minor_grid {
         let subdivisions = 5;
         for i in 0..=(6 * subdivisions) {
@@ -939,6 +963,10 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         );
     }
 
+    draw_axes_titles_and_labels(canvas, axes, text_color);
+}
+
+fn draw_axes_titles_and_labels(canvas: &mut Canvas, axes: &AxesView, text_color: [u8; 4]) {
     if let Some(title) = &axes.title {
         draw_text_centered(
             canvas,
@@ -970,6 +998,93 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             axes.label_scale,
             text_color,
         );
+    }
+}
+
+fn draw_polar_axes_decorations(
+    canvas: &mut Canvas,
+    axes: &AxesView,
+    bounds: (i32, i32, i32, i32),
+    grid_color: [u8; 4],
+    minor_grid_color: [u8; 4],
+    frame_color: [u8; 4],
+    text_color: [u8; 4],
+) {
+    let (left, right, top, bottom) = bounds;
+    let cx = (left + right) as f32 * 0.5;
+    let cy = (top + bottom) as f32 * 0.5;
+    let max_r = ((right - left).min(bottom - top) as f32 * 0.5).max(1.0);
+
+    if axes.show_minor_grid {
+        for i in 1..30 {
+            if i % 5 == 0 {
+                continue;
+            }
+            draw_screen_circle(canvas, cx, cy, max_r * i as f32 / 30.0, minor_grid_color);
+        }
+    }
+    if axes.show_grid {
+        for i in 1..=6 {
+            draw_screen_circle(canvas, cx, cy, max_r * i as f32 / 6.0, grid_color);
+        }
+        for i in 0..12 {
+            let theta = i as f32 * std::f32::consts::TAU / 12.0;
+            let x = cx + theta.cos() * max_r;
+            let y = cy - theta.sin() * max_r;
+            canvas.draw_line(
+                ScreenVertex {
+                    x: cx,
+                    y: cy,
+                    z: 0.0,
+                    color: grid_color,
+                },
+                ScreenVertex {
+                    x,
+                    y,
+                    z: 0.0,
+                    color: grid_color,
+                },
+                1.0,
+                0,
+                false,
+            );
+            if i % 3 == 0 {
+                let label = format!("{}deg", i * 30);
+                draw_text_centered(
+                    canvas,
+                    (cx + theta.cos() * (max_r + 18.0)) as i32,
+                    (cy - theta.sin() * (max_r + 18.0)) as i32,
+                    &label,
+                    axes.tick_scale,
+                    with_alpha(text_color, 0.9),
+                );
+            }
+        }
+    }
+
+    if axes.show_box {
+        draw_screen_circle(canvas, cx, cy, max_r, frame_color);
+    }
+}
+
+fn draw_screen_circle(canvas: &mut Canvas, cx: f32, cy: f32, radius: f32, color: [u8; 4]) {
+    const SEGMENTS: usize = 96;
+    if !radius.is_finite() || radius <= 0.0 {
+        return;
+    }
+    let mut prev = None;
+    for i in 0..=SEGMENTS {
+        let theta = i as f32 * std::f32::consts::TAU / SEGMENTS as f32;
+        let point = ScreenVertex {
+            x: cx + theta.cos() * radius,
+            y: cy - theta.sin() * radius,
+            z: 0.0,
+            color,
+        };
+        if let Some(prev) = prev {
+            canvas.draw_line(prev, point, 1.0, 0, false);
+        }
+        prev = Some(point);
     }
 }
 
@@ -1365,9 +1480,13 @@ pub async fn render_figure_rgba_bytes(
         .collect();
     let axes_sizes: Vec<(u32, u32)> = viewports
         .iter()
-        .zip(has_3d_flags.iter())
-        .map(|(vp, has_3d)| {
-            let rect = compute_plot_rect(*vp, *has_3d);
+        .enumerate()
+        .map(|(axes_index, vp)| {
+            let has_3d = has_3d_flags[axes_index];
+            let mut rect = compute_plot_rect(*vp, has_3d);
+            if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
+                rect = square_plot_rect(rect);
+            }
             (rect.2.max(1), rect.3.max(1))
         })
         .collect();
@@ -1383,7 +1502,10 @@ pub async fn render_figure_rgba_bytes(
     for axes_index in 0..axes_count {
         let has_3d = has_3d_flags[axes_index];
         let viewport = viewports[axes_index];
-        let plot_rect = compute_plot_rect(viewport, has_3d);
+        let mut plot_rect = compute_plot_rect(viewport, has_3d);
+        if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
+            plot_rect = square_plot_rect(plot_rect);
+        }
         let bounds_2d = choose_axes_bounds(&figure, axes_index, &render_items);
         let (bmin, bmax) = choose_axes_bounds_3d(axes_index, &render_items, bounds_2d);
         let camera_3d = if has_3d {
@@ -1419,6 +1541,7 @@ pub async fn render_figure_rgba_bytes(
             show_grid,
             show_minor_grid,
             show_box,
+            axes_kind: figure.axes_kind(axes_index),
         });
     }
 
@@ -1519,18 +1642,118 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
             }
         }
         PipelineType::Textured => {
-            for tri in render_data.vertices.chunks_exact(3) {
-                let (Some(p0), Some(p1), Some(p2)) = (
-                    project_vertex(&tri[0], axes),
-                    project_vertex(&tri[1], axes),
-                    project_vertex(&tri[2], axes),
-                ) else {
-                    continue;
-                };
-                canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+            if draw_textured_image(canvas, render_data, axes) {
+                return;
+            }
+
+            if let Some(indices) = &render_data.indices {
+                for tri in indices.chunks_exact(3) {
+                    let (Some(v0), Some(v1), Some(v2)) = (
+                        render_data.vertices.get(tri[0] as usize),
+                        render_data.vertices.get(tri[1] as usize),
+                        render_data.vertices.get(tri[2] as usize),
+                    ) else {
+                        continue;
+                    };
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(v0, axes),
+                        project_vertex(v1, axes),
+                        project_vertex(v2, axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
+            } else {
+                for tri in render_data.vertices.chunks_exact(3) {
+                    let (Some(p0), Some(p1), Some(p2)) = (
+                        project_vertex(&tri[0], axes),
+                        project_vertex(&tri[1], axes),
+                        project_vertex(&tri[2], axes),
+                    ) else {
+                        continue;
+                    };
+                    canvas.fill_triangle(p0, p1, p2, axes.has_3d_content);
+                }
             }
         }
     }
+}
+
+fn draw_textured_image(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesView) -> bool {
+    let Some(ImageData::Rgba8 {
+        width,
+        height,
+        data,
+    }) = render_data.image.as_ref()
+    else {
+        return false;
+    };
+    if *width == 0 || *height == 0 || data.len() < (*width as usize * *height as usize * 4) {
+        return false;
+    }
+
+    let projected: Vec<ScreenVertex> = render_data
+        .vertices
+        .iter()
+        .filter_map(|vertex| project_vertex(vertex, axes))
+        .collect();
+    if projected.is_empty() {
+        return false;
+    }
+
+    let min_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_x = projected
+        .iter()
+        .map(|vertex| vertex.x)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.width as f32 - 1.0) as i32;
+    let min_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::INFINITY, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_y = projected
+        .iter()
+        .map(|vertex| vertex.y)
+        .fold(f32::NEG_INFINITY, f32::max)
+        .ceil()
+        .min(canvas.height as f32 - 1.0) as i32;
+    if min_x > max_x || min_y > max_y {
+        return false;
+    }
+
+    let dst_w = (max_x - min_x).max(1) as f32;
+    let dst_h = (max_y - min_y).max(1) as f32;
+    let src_w = (*width).saturating_sub(1).max(1) as f32;
+    let src_h = (*height).saturating_sub(1).max(1) as f32;
+    let depth = projected.iter().map(|vertex| vertex.z).sum::<f32>() / projected.len() as f32;
+
+    for y in min_y..=max_y {
+        let v = (y - min_y) as f32 / dst_h;
+        let src_y = (v * src_h).round().clamp(0.0, src_h) as usize;
+        for x in min_x..=max_x {
+            let u = (x - min_x) as f32 / dst_w;
+            let src_x = (u * src_w).round().clamp(0.0, src_w) as usize;
+            let src = (src_y * *width as usize + src_x) * 4;
+            canvas.blend_pixel(
+                x,
+                y,
+                [data[src], data[src + 1], data[src + 2], data[src + 3]],
+                depth,
+                axes.has_3d_content,
+            );
+        }
+    }
+
+    true
 }
 
 pub fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {

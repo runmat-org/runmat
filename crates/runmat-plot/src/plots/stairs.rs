@@ -1,9 +1,12 @@
 //! Stairs (step) plot implementation
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
     vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
     RenderData, Vertex,
 };
+use crate::gpu::stairs::StairsGpuInputs;
+use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::LineMarkerAppearance;
 use glam::{Vec3, Vec4};
 
@@ -21,6 +24,7 @@ pub struct StairsPlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_inputs: Option<StairsGpuInputs>,
     marker: Option<LineMarkerAppearance>,
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
@@ -28,6 +32,52 @@ pub struct StairsPlot {
 }
 
 impl StairsPlot {
+    pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
+        if !self.x.is_empty() && self.x.len() == self.y.len() {
+            return Ok((self.x.clone(), self.y.clone()));
+        }
+        if !self.x.is_empty() || !self.y.is_empty() {
+            return Err(format!(
+                "stairs plot has partial CPU source data: x has {} values, y has {} values",
+                self.x.len(),
+                self.y.len()
+            ));
+        }
+
+        if let Some(inputs) = &self.gpu_inputs {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "stairs plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let len = inputs.len as usize;
+            let x = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            return Ok((x, y));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "stairs plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new()))
+    }
+
     pub fn new(x: Vec<f64>, y: Vec<f64>) -> Result<Self, String> {
         if x.len() != y.len() || x.is_empty() {
             return Err("stairs: X and Y must be same non-zero length".to_string());
@@ -45,6 +95,7 @@ impl StairsPlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_inputs: None,
             marker: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
@@ -72,6 +123,7 @@ impl StairsPlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_inputs: None,
             marker: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
@@ -84,7 +136,12 @@ impl StairsPlot {
         self.line_width = line_width.max(0.5);
         self.dirty = true;
         self.marker_dirty = true;
-        self.drop_gpu();
+        self.drop_gpu_render_cache();
+        self
+    }
+
+    pub fn with_gpu_source_inputs(mut self, inputs: StairsGpuInputs) -> Self {
+        self.gpu_inputs = Some(inputs);
         self
     }
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
@@ -112,7 +169,7 @@ impl StairsPlot {
         }
     }
 
-    fn drop_gpu(&mut self) {
+    fn drop_gpu_render_cache(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;

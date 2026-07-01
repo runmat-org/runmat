@@ -1,6 +1,7 @@
 use js_sys::{Array, Function, Promise, Reflect};
 use runmat_filesystem::{
     DirEntry, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection, ReadManyEntry,
+    SaveFileDialogRequest, SaveFileDialogSelection,
 };
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -10,7 +11,8 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::convert::{
     js_error, js_value_to_bytes, map_js_error, open_file_request_to_js, parse_dir_entries,
-    parse_metadata, parse_open_file_selection, path_to_string,
+    parse_metadata, parse_open_file_selection, parse_save_file_selection, path_to_string,
+    save_file_request_to_js,
 };
 
 #[derive(Clone)]
@@ -31,6 +33,7 @@ pub(super) struct JsFsFuncs {
     rename: Option<Function>,
     set_readonly: Option<Function>,
     select_file_open: Option<Function>,
+    select_file_save: Option<Function>,
 }
 
 impl JsFsFuncs {
@@ -55,6 +58,7 @@ impl JsFsFuncs {
             rename: get_fn(bindings, "rename")?,
             set_readonly: get_fn(bindings, "setReadonly")?,
             select_file_open: get_fn(bindings, "selectFileOpen")?,
+            select_file_save: get_fn(bindings, "selectFileSave")?,
         })
     }
 
@@ -310,6 +314,21 @@ impl JsFsFuncs {
             .map_err(|err| map_js_error("selectFileOpen", err))?;
         let value = resolve_maybe_promise(value, "selectFileOpen").await?;
         parse_open_file_selection(value)
+    }
+
+    pub(super) async fn select_file_save_async(
+        &self,
+        request: &SaveFileDialogRequest,
+    ) -> io::Result<Option<SaveFileDialogSelection>> {
+        let Some(func) = &self.select_file_save else {
+            return Ok(None);
+        };
+        let js_request = save_file_request_to_js(request)?;
+        let value = func
+            .call1(&self.bindings, &js_request)
+            .map_err(|err| map_js_error("selectFileSave", err))?;
+        let value = resolve_maybe_promise(value, "selectFileSave").await?;
+        parse_save_file_selection(value)
     }
 
     fn require_fn<'a>(

@@ -15,8 +15,10 @@ use crate::runtime::workspace::{
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::collections::{HashMap, HashSet};
+
+type VmResult<T> = Result<T, RuntimeError>;
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -192,10 +194,12 @@ fn for_each_gpu_handle_in_value_with_visited(
             Ok(())
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)?;
+                runmat_gc::gc_with_value(&handle.target, |target| {
+                    for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)
+                })
+                .map_err(|e| RuntimeError::new(format!("invalid handle target: {e}")))??;
             }
             Ok(())
         }
@@ -474,54 +478,76 @@ fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
     }
 }
 
-fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) {
+fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) -> VmResult<()> {
     let mut visited_handle_targets = HashSet::new();
-    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets);
+    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets)
 }
 
 fn collect_spawn_task_ids_in_value_with_visited(
     value: &Value,
     output: &mut HashSet<u64>,
     visited_handle_targets: &mut HashSet<usize>,
-) {
+) -> VmResult<()> {
     if let Some(task_id) = spawn_task_id_from_value(value) {
         output.insert(task_id);
     }
     match value {
         Value::Cell(cell) => {
             for entry in &cell.data {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Struct(struct_value) => {
             for entry in struct_value.fields.values() {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Object(object_value) => {
             for entry in object_value.properties.values() {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Closure(closure) => {
             for entry in &closure.captures {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::OutputList(values) => {
             for entry in values {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                collect_spawn_task_ids_in_value_with_visited(
-                    target,
-                    output,
-                    visited_handle_targets,
-                );
+                runmat_gc::gc_with_value(&handle.target, |target| {
+                    collect_spawn_task_ids_in_value_with_visited(
+                        target,
+                        output,
+                        visited_handle_targets,
+                    )
+                })
+                .map_err(|err| build_runtime_error(err.to_string()).build())??;
             }
         }
         Value::Int(_)
@@ -545,9 +571,10 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
+    Ok(())
 }
 
-fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
+fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> VmResult<bool> {
     let mut visited_handle_targets = HashSet::new();
     value_contains_spawn_task_id_with_visited(value, task_id, &mut visited_handle_targets)
 }
@@ -556,33 +583,80 @@ fn value_contains_spawn_task_id_with_visited(
     value: &Value,
     task_id: u64,
     visited_handle_targets: &mut HashSet<usize>,
-) -> bool {
+) -> VmResult<bool> {
     if spawn_task_id_from_value(value) == Some(task_id) {
-        return true;
+        return Ok(true);
     }
-    match value {
-        Value::Cell(cell) => cell.data.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Struct(struct_value) => struct_value.fields.values().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Object(object_value) => object_value.properties.values().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Closure(closure) => closure.captures.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::OutputList(values) => values.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
-            if !visited_handle_targets.insert(raw_target) {
-                return false;
+    let found = match value {
+        Value::Cell(cell) => {
+            for entry in &cell.data {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
             }
-            let target = unsafe { &*handle.target.as_raw() };
-            value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+            false
+        }
+        Value::Struct(struct_value) => {
+            for entry in struct_value.fields.values() {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::Object(object_value) => {
+            for entry in object_value.properties.values() {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::Closure(closure) => {
+            for entry in &closure.captures {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::OutputList(values) => {
+            for entry in values {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::HandleObject(handle) => {
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
+            if !visited_handle_targets.insert(raw_target) {
+                return Ok(false);
+            }
+            runmat_gc::gc_with_value(&handle.target, |target| {
+                value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+            })
+            .map_err(|err| build_runtime_error(err.to_string()).build())??
         }
         Value::Int(_)
         | Value::Num(_)
@@ -604,7 +678,8 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => false,
-    }
+    };
+    Ok(found)
 }
 
 fn spawn_task_id_still_live(
@@ -614,30 +689,29 @@ fn spawn_task_id_still_live(
     context: &crate::bytecode::program::ExecutionContext,
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) -> bool {
-    if stack
-        .iter()
-        .any(|value| value_contains_spawn_task_id(value, task_id))
-    {
-        return true;
+) -> VmResult<bool> {
+    for value in stack {
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
+        }
     }
     for (index, value) in vars.iter().enumerate() {
         if excluded_var == Some(index) {
             continue;
         }
-        if value_contains_spawn_task_id(value, task_id) {
-            return true;
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
         }
     }
     for (index, value) in context.locals.iter().enumerate() {
         if excluded_local == Some(index) {
             continue;
         }
-        if value_contains_spawn_task_id(value, task_id) {
-            return true;
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
 fn retire_spawn_task_id_if_dropped(
@@ -647,14 +721,15 @@ fn retire_spawn_task_id_if_dropped(
     vars: &[Value],
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) {
+) -> VmResult<()> {
     let mut task_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(value, &mut task_ids);
+    collect_spawn_task_ids_in_value(value, &mut task_ids)?;
     for id in task_ids {
-        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
+        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local)? {
             context.spawned_task_ids.remove(&id);
         }
     }
+    Ok(())
 }
 
 fn retire_spawn_task_id_if_replaced(
@@ -665,14 +740,14 @@ fn retire_spawn_task_id_if_replaced(
     vars: &[Value],
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) {
+) -> VmResult<()> {
     let mut current_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(current, &mut current_ids);
+    collect_spawn_task_ids_in_value(current, &mut current_ids)?;
     if current_ids.is_empty() {
-        return;
+        return Ok(());
     }
     let mut incoming_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids);
+    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids)?;
     for current_id in current_ids {
         if incoming_ids.contains(&current_id) {
             continue;
@@ -684,10 +759,11 @@ fn retire_spawn_task_id_if_replaced(
             context,
             excluded_var,
             excluded_local,
-        ) {
+        )? {
             context.spawned_task_ids.remove(&current_id);
         }
     }
+    Ok(())
 }
 
 #[cfg(feature = "native-accel")]
@@ -701,7 +777,11 @@ fn clear_popped_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear popped GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -715,7 +795,11 @@ fn clear_scope_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear dropped local GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -734,7 +818,11 @@ fn clear_overwritten_var_residency_excluding_live_values(
         }
     }
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear overwritten variable GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -753,7 +841,11 @@ fn clear_overwritten_local_residency_excluding_live_values(
             live.push(value.clone());
         }
     }
-    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear overwritten local GPU residency: {err}");
+    }
 }
 
 pub async fn dispatch_instruction(
@@ -966,7 +1058,7 @@ pub async fn dispatch_instruction(
                     vars,
                     Some(*index),
                     None,
-                );
+                )?;
                 #[cfg(feature = "native-accel")]
                 clear_overwritten_var_residency_excluding_live_values(
                     &vars[*index],
@@ -1003,7 +1095,7 @@ pub async fn dispatch_instruction(
                             vars,
                             None,
                             Some(local_index),
-                        );
+                        )?;
                         #[cfg(feature = "native-accel")]
                         clear_overwritten_local_residency_excluding_live_values(
                             &current_value,
@@ -1022,7 +1114,7 @@ pub async fn dispatch_instruction(
                         vars,
                         Some(*offset),
                         None,
-                    );
+                    )?;
                     #[cfg(feature = "native-accel")]
                     clear_overwritten_var_residency_excluding_live_values(
                         &vars[*offset],
@@ -1069,7 +1161,7 @@ pub async fn dispatch_instruction(
         }
         Instr::Pop => {
             if let Some(value) = stack.pop() {
-                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None);
+                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None)?;
                 #[cfg(feature = "native-accel")]
                 clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
             }
@@ -1139,11 +1231,7 @@ pub async fn dispatch_instruction(
         Instr::ExitScope(local_count) => {
             for _ in 0..*local_count {
                 if let Some(value) = context.locals.pop() {
-                    if let Some(id) = spawn_task_id_from_value(&value) {
-                        if !spawn_task_id_still_live(id, stack, vars, context, None, None) {
-                            context.spawned_task_ids.remove(&id);
-                        }
-                    }
+                    retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None)?;
                     #[cfg(feature = "native-accel")]
                     clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
                     #[cfg(not(feature = "native-accel"))]
@@ -2509,7 +2597,8 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before drop"
         );
-        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None)
+            .expect("retire dropped task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping a spawn task handle should retire its task id"
@@ -2550,7 +2639,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("retire replaced task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "replacing task handle with a non-task value should retire its task id"
@@ -2579,7 +2669,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("keep replaced task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "replacing a task handle with itself should keep the task id live"
@@ -2601,7 +2692,8 @@ mod tests {
             "spawn should register task id before alias drop"
         );
         let vars = vec![wrapped.clone()];
-        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None)
+            .expect("keep aliased dropped task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "dropping one alias should keep task id when another alias remains live"
@@ -2630,7 +2722,8 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before nested drop"
         );
-        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None)
+            .expect("retire nested dropped task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping nested spawn task handle should retire its task id"
@@ -2656,7 +2749,8 @@ mod tests {
             valid: true,
         });
         let vars = vec![wrapped.clone()];
-        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None)
+            .expect("keep aliased nested dropped task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "dropping nested alias should keep task id when direct alias remains live"
@@ -2693,7 +2787,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("retire nested replaced task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "replacing nested task handle with non-task value should retire its task id"
@@ -2727,7 +2822,8 @@ mod tests {
             &vars,
             None,
             None,
-        );
+        )
+        .expect("keep aliased nested replaced task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "replacing nested alias should keep task id when a live alias remains"
@@ -2761,7 +2857,8 @@ mod tests {
             &[],
             None,
             Some(0),
-        );
+        )
+        .expect("retire excluded local task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "local-slot replacement should retire nested task id when excluded local is the only alias"
@@ -2796,7 +2893,8 @@ mod tests {
             &[],
             None,
             Some(0),
-        );
+        )
+        .expect("keep other local alias task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "local-slot replacement should keep nested task id when another local alias remains live"

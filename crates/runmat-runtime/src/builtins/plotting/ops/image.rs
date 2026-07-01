@@ -409,12 +409,20 @@ fn build_truecolor_image_surface_gpu(
             0.0,
         ),
     );
-    let mut surface = SurfacePlot::from_gpu_buffer(rows, cols, gpu_vertices, rows * cols, bounds)
+    let mut surface = SurfacePlot::from_gpu_buffer(cols, rows, gpu_vertices, rows * cols, bounds)
         .with_flatten_z(true)
         .with_image_mode(true)
-        .with_shading(ShadingMode::None);
+        .with_shading(ShadingMode::None)
+        .with_gpu_color_grid_source(runmat_plot::plots::SurfaceGpuColorGridSource {
+            image_buffer: image_ref.buffer.clone(),
+            rows,
+            cols,
+            channels: channels as usize,
+            scalar,
+        });
     surface.x_data = x_host;
     surface.y_data = y_host;
+    surface.z_data = Some(vec![vec![0.0; rows]; cols]);
     Ok(surface)
 }
 
@@ -640,11 +648,11 @@ mod tests {
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
             panic!("expected surface")
         };
-        assert_eq!(surface.x_data, vec![10.0, 15.0, 20.0]);
         assert_eq!(
-            surface.y_data,
-            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+            surface.x_data,
+            vec![10.0, 13.333333333333332, 16.666666666666664, 20.0]
         );
+        assert_eq!(surface.y_data, vec![1.0, 3.0, 5.0]);
     }
 
     #[test]

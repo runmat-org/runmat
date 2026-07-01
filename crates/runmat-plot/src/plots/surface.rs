@@ -2,10 +2,14 @@
 //!
 //! High-performance GPU-accelerated 3D surface rendering.
 
+use crate::context::shared_wgpu_context;
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    BoundingBox, DrawCall, GpuVertexBuffer, ImageData, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::axis::OwnedAxisData;
+use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::sync::Arc;
 
 /// High-performance GPU-accelerated 3D surface plot
 #[derive(Debug, Clone)]
@@ -54,6 +58,27 @@ pub struct SurfacePlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_source: Option<SurfaceGpuSource>,
+    gpu_color_grid_source: Option<SurfaceGpuColorGridSource>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SurfaceGpuSource {
+    pub x_axis: OwnedAxisData,
+    pub y_axis: OwnedAxisData,
+    pub z_buffer: Arc<wgpu::Buffer>,
+    pub x_len: usize,
+    pub y_len: usize,
+    pub scalar: ScalarType,
+}
+
+#[derive(Clone, Debug)]
+pub struct SurfaceGpuColorGridSource {
+    pub image_buffer: Arc<wgpu::Buffer>,
+    pub rows: usize,
+    pub cols: usize,
+    pub channels: usize,
+    pub scalar: ScalarType,
 }
 
 /// Color mapping schemes
@@ -87,6 +112,39 @@ pub enum ColorMap {
     Custom(Vec4, Vec4), // (min_color, max_color)
 }
 
+impl ColorMap {
+    pub const CANONICAL_NAMES: &[&str] = &[
+        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
+        "summer", "autumn", "winter", "gray", "bone", "copper", "pink", "lines",
+    ];
+
+    pub const ALIASES: &[&str] = &["grey"];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "parula" => Some(Self::Parula),
+            "viridis" => Some(Self::Viridis),
+            "plasma" => Some(Self::Plasma),
+            "inferno" => Some(Self::Inferno),
+            "magma" => Some(Self::Magma),
+            "turbo" => Some(Self::Turbo),
+            "jet" => Some(Self::Jet),
+            "hot" => Some(Self::Hot),
+            "cool" => Some(Self::Cool),
+            "spring" => Some(Self::Spring),
+            "summer" => Some(Self::Summer),
+            "autumn" => Some(Self::Autumn),
+            "winter" => Some(Self::Winter),
+            "gray" | "grey" => Some(Self::Gray),
+            "bone" => Some(Self::Bone),
+            "copper" => Some(Self::Copper),
+            "pink" => Some(Self::Pink),
+            "lines" => Some(Self::Lines),
+            _ => None,
+        }
+    }
+}
+
 /// Surface shading modes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShadingMode {
@@ -113,6 +171,94 @@ impl Default for ShadingMode {
 }
 
 impl SurfacePlot {
+    pub async fn export_scene_grid_data(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<Vec<f64>>), String> {
+        if let Some(z) = &self.z_data {
+            return Ok((self.x_data.clone(), self.y_data.clone(), z.clone()));
+        }
+
+        if let Some(source) = &self.gpu_source {
+            let context = shared_wgpu_context().ok_or_else(|| {
+                "surface plot has GPU source data but no shared WGPU context is installed"
+                    .to_string()
+            })?;
+            let x = source
+                .x_axis
+                .export_f64(&context.device, &context.queue, source.x_len, source.scalar)
+                .await?;
+            let y = source
+                .y_axis
+                .export_f64(&context.device, &context.queue, source.y_len, source.scalar)
+                .await?;
+            let z_flat = readback_scalar_buffer_f64(
+                &context.device,
+                &context.queue,
+                &source.z_buffer,
+                source.x_len * source.y_len,
+                source.scalar,
+            )
+            .await?;
+            let mut z = Vec::with_capacity(source.x_len);
+            for row in 0..source.x_len {
+                let start = row * source.y_len;
+                z.push(
+                    z_flat
+                        .get(start..start + source.y_len)
+                        .ok_or_else(|| "surface GPU source grid is out of range".to_string())?
+                        .to_vec(),
+                );
+            }
+            return Ok((x, y, z));
+        }
+
+        if self.gpu_vertices.is_some() {
+            return Err(
+                "surface plot has GPU render vertices but no exportable source data".to_string(),
+            );
+        }
+
+        Ok((Vec::new(), Vec::new(), Vec::new()))
+    }
+
+    pub async fn export_scene_color_grid(&self) -> Result<Option<Vec<Vec<Vec4>>>, String> {
+        if let Some(grid) = &self.color_grid {
+            return Ok(Some(grid.clone()));
+        }
+
+        let Some(source) = &self.gpu_color_grid_source else {
+            return Ok(None);
+        };
+        let context = shared_wgpu_context().ok_or_else(|| {
+            "surface image has GPU color data but no shared WGPU context is installed".to_string()
+        })?;
+        let values = readback_scalar_buffer_f64(
+            &context.device,
+            &context.queue,
+            &source.image_buffer,
+            source.rows * source.cols * source.channels,
+            source.scalar,
+        )
+        .await?;
+        let mut grid = vec![vec![Vec4::ZERO; source.rows]; source.cols];
+        let plane = source.rows * source.cols;
+        for (col, grid_row) in grid.iter_mut().enumerate() {
+            for (row, color) in grid_row.iter_mut().enumerate() {
+                let base = row + source.rows * col;
+                let r = values.get(base).copied().unwrap_or(0.0) as f32;
+                let g = values.get(base + plane).copied().unwrap_or(0.0) as f32;
+                let b = values.get(base + (2 * plane)).copied().unwrap_or(0.0) as f32;
+                let a = if source.channels == 4 {
+                    values.get(base + (3 * plane)).copied().unwrap_or(1.0) as f32
+                } else {
+                    1.0
+                };
+                *color = Vec4::new(r, g, b, a);
+            }
+        }
+        Ok(Some(grid))
+    }
+
     /// Create a new surface plot from meshgrid data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, z_data: Vec<Vec<f64>>) -> Result<Self, String> {
         // Validate dimensions
@@ -163,6 +309,8 @@ impl SurfacePlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_source: None,
+            gpu_color_grid_source: None,
         })
     }
 
@@ -202,7 +350,19 @@ impl SurfacePlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_source: None,
+            gpu_color_grid_source: None,
         }
+    }
+
+    pub fn with_gpu_source(mut self, source: SurfaceGpuSource) -> Self {
+        self.gpu_source = Some(source);
+        self
+    }
+
+    pub fn with_gpu_color_grid_source(mut self, source: SurfaceGpuColorGridSource) -> Self {
+        self.gpu_color_grid_source = Some(source);
+        self
     }
 
     fn drop_gpu_if_possible(&mut self) {
@@ -246,6 +406,7 @@ impl SurfacePlot {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+        self.gpu_source = None;
     }
 
     /// Set color mapping
@@ -313,6 +474,7 @@ impl SurfacePlot {
     /// Provide explicit per-vertex colors (RGB[A])
     pub fn with_color_grid(mut self, grid: Vec<Vec<Vec4>>) -> Self {
         self.color_grid = Some(grid);
+        self.gpu_color_grid_source = None;
         self.dirty = true;
         self.drop_gpu_if_possible();
         self
@@ -578,6 +740,10 @@ impl SurfacePlot {
             self.y_len
         );
 
+        if self.image_mode && self.z_data.is_some() && self.gpu_vertices.is_none() {
+            return self.image_render_data();
+        }
+
         let using_gpu = self.gpu_vertices.is_some();
         let bounds = self.bounds();
         let vertices = if using_gpu {
@@ -634,6 +800,110 @@ impl SurfacePlot {
             material,
             draw_calls: vec![draw_call],
             image: None,
+        }
+    }
+
+    fn image_render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
+        let x_min = bounds.min.x;
+        let x_max = bounds.max.x;
+        let y_min = bounds.min.y;
+        let y_max = bounds.max.y;
+        let z_rows = self
+            .z_data
+            .as_ref()
+            .expect("image-mode surfaces require host color data");
+        let width = self.x_len.max(1);
+        let height = self.y_len.max(1);
+        let color_limits = self.color_limits.or_else(|| {
+            let mut min_z = f64::INFINITY;
+            let mut max_z = f64::NEG_INFINITY;
+            for row in z_rows {
+                for &z in row {
+                    if z.is_finite() {
+                        min_z = min_z.min(z);
+                        max_z = max_z.max(z);
+                    }
+                }
+            }
+            if min_z.is_finite() && max_z.is_finite() {
+                Some((min_z, max_z))
+            } else {
+                None
+            }
+        });
+        let (min_z, max_z) = color_limits.unwrap_or((0.0, 1.0));
+        let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
+        let mut data = Vec::with_capacity(width * height * 4);
+
+        for row in 0..height {
+            let y_idx = height - 1 - row;
+            for x_idx in 0..width {
+                let color = if let Some(grid) = &self.color_grid {
+                    grid[x_idx][y_idx]
+                } else {
+                    let z = z_rows[x_idx][y_idx];
+                    let t = ((z - min_z) / z_range) as f32;
+                    let rgb = self.colormap.map_value(t.clamp(0.0, 1.0));
+                    Vec4::new(rgb.x, rgb.y, rgb.z, self.alpha)
+                };
+                data.push((color.x.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.y.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.z.clamp(0.0, 1.0) * 255.0).round() as u8);
+                data.push((color.w.clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+        }
+
+        let vertices = vec![
+            Vertex {
+                position: [x_min, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_min, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 1.0],
+            },
+            Vertex {
+                position: [x_max, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [1.0, 0.0],
+            },
+            Vertex {
+                position: [x_min, y_max, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, self.alpha],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3];
+
+        RenderData {
+            pipeline_type: PipelineType::Textured,
+            vertices,
+            indices: Some(indices.clone()),
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material: Material {
+                albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: 4,
+                index_offset: Some(0),
+                index_count: Some(indices.len()),
+                instance_count: 1,
+            }],
+            image: Some(ImageData::Rgba8 {
+                width: width as u32,
+                height: height as u32,
+                data,
+            }),
         }
     }
 }
@@ -914,15 +1184,8 @@ pub mod matlab_compat {
         z: Vec<Vec<f64>>,
         colormap: &str,
     ) -> Result<SurfacePlot, String> {
-        let cmap = match colormap {
-            "jet" => ColorMap::Jet,
-            "hot" => ColorMap::Hot,
-            "cool" => ColorMap::Cool,
-            "viridis" => ColorMap::Viridis,
-            "plasma" => ColorMap::Plasma,
-            "gray" | "grey" => ColorMap::Gray,
-            _ => return Err(format!("Unknown colormap: {colormap}")),
-        };
+        let cmap =
+            ColorMap::from_name(colormap).ok_or_else(|| format!("Unknown colormap: {colormap}"))?;
 
         Ok(SurfacePlot::new(x, y, z)?.with_colormap(cmap))
     }
@@ -995,6 +1258,45 @@ mod tests {
     }
 
     #[test]
+    fn image_mode_surface_uses_textured_render_data() {
+        let x = vec![0.0, 1.0];
+        let y = vec![10.0, 20.0];
+        let z = vec![vec![0.0, 0.25], vec![0.75, 1.0]];
+
+        let mut surface = SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_image_mode(true)
+            .with_colormap(ColorMap::Gray)
+            .with_color_limits(Some((0.0, 1.0)));
+        let render_data = surface.render_data();
+
+        assert_eq!(render_data.pipeline_type, PipelineType::Textured);
+        assert_eq!(render_data.vertices.len(), 4);
+        assert_eq!(
+            render_data.indices.as_deref(),
+            Some(&[0, 1, 2, 0, 2, 3][..])
+        );
+
+        let Some(ImageData::Rgba8 {
+            width,
+            height,
+            data,
+        }) = render_data.image
+        else {
+            panic!("image-mode surfaces should carry an RGBA texture payload");
+        };
+        assert_eq!((width, height), (2, 2));
+        assert_eq!(data.len(), 16);
+
+        // Image data is row-major, top-to-bottom. The top image row corresponds to
+        // the highest Y data row.
+        assert_eq!(&data[0..4], &[64, 64, 64, 255]);
+        assert_eq!(&data[4..8], &[255, 255, 255, 255]);
+        assert_eq!(&data[8..12], &[0, 0, 0, 255]);
+        assert_eq!(&data[12..16], &[191, 191, 191, 255]);
+    }
+
+    #[test]
     fn test_colormap_mapping() {
         let jet = ColorMap::Jet;
 
@@ -1048,5 +1350,54 @@ mod tests {
 
         let colormap_surface = surf_with_colormap(x, y, z, "viridis").unwrap();
         assert_eq!(colormap_surface.colormap, ColorMap::Viridis);
+    }
+
+    #[test]
+    fn colormap_from_name_accepts_canonical_names_and_aliases() {
+        let cases = [
+            ("parula", ColorMap::Parula),
+            ("viridis", ColorMap::Viridis),
+            ("plasma", ColorMap::Plasma),
+            ("inferno", ColorMap::Inferno),
+            ("magma", ColorMap::Magma),
+            ("turbo", ColorMap::Turbo),
+            ("jet", ColorMap::Jet),
+            ("hot", ColorMap::Hot),
+            ("cool", ColorMap::Cool),
+            ("spring", ColorMap::Spring),
+            ("summer", ColorMap::Summer),
+            ("autumn", ColorMap::Autumn),
+            ("winter", ColorMap::Winter),
+            ("gray", ColorMap::Gray),
+            ("grey", ColorMap::Gray),
+            ("bone", ColorMap::Bone),
+            ("copper", ColorMap::Copper),
+            ("pink", ColorMap::Pink),
+            ("lines", ColorMap::Lines),
+        ];
+
+        for (name, expected) in cases {
+            assert_eq!(ColorMap::from_name(name), Some(expected), "{name}");
+        }
+        for name in ColorMap::CANONICAL_NAMES
+            .iter()
+            .chain(ColorMap::ALIASES.iter())
+            .copied()
+        {
+            assert!(
+                ColorMap::from_name(name).is_some(),
+                "colormap table entry should parse: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn colormap_from_name_normalizes_and_rejects_unknown_names() {
+        assert_eq!(ColorMap::from_name(" Turbo "), Some(ColorMap::Turbo));
+        assert_eq!(ColorMap::from_name("GREY"), Some(ColorMap::Gray));
+        assert_eq!(ColorMap::from_name("hsv"), None);
+        assert!(!ColorMap::CANONICAL_NAMES.contains(&"hsv"));
+        assert!(!ColorMap::ALIASES.contains(&"hsv"));
+        assert_eq!(ColorMap::from_name("not-a-colormap"), None);
     }
 }

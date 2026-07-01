@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::runtime::{
-    AccelerateConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig, PlottingConfig,
-    RunMatRuntimeConfig, TelemetryConfig,
+    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
+    PlottingConfig, RunMatRuntimeConfig, TelemetryConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,7 @@ struct RuntimeFileSection {
     gc: Option<GcConfig>,
     accelerate: Option<AccelerateConfig>,
     plotting: Option<PlottingConfig>,
+    fea: Option<FeaConfig>,
 }
 
 impl RuntimeFileSection {
@@ -72,6 +73,9 @@ impl RuntimeFileSection {
         if let Some(plotting) = self.plotting {
             config.plotting = plotting;
         }
+        if let Some(fea) = self.fea {
+            config.fea = fea;
+        }
     }
 }
 
@@ -90,6 +94,7 @@ impl From<&RunMatRuntimeConfig> for RuntimeFileDocument {
                 gc: Some(value.gc.clone()),
                 accelerate: Some(value.accelerate.clone()),
                 plotting: Some(value.plotting.clone()),
+                fea: Some(value.fea.clone()),
             },
         }
     }
@@ -149,6 +154,19 @@ jit = { enabled = true, threshold = 10, optimization_level = "speed" }
 gc = { preset = "low-latency", young_size_mb = 128, threads = 8, collect_stats = false }
 accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = true, wgpu_power_preference = "auto", wgpu_force_fallback_adapter = false, auto_offload = { enabled = true, calibrate = true, profile_path = ".runmat/auto_offload.json", log_level = "trace" } }
 plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_target_points = 250000, surface_vertex_budget = 400000 }
+
+[runtime.fea]
+# artifact_store = "filesystem" # default; use "in_memory" for ephemeral/test runs
+# artifact_root = "artifacts"
+# study_artifact_root = "artifacts/studies"
+# geometry_prep_artifact_root = "artifacts/geometry-prep"
+# thermo_field_artifact_root = "artifacts/thermo-fields"
+# artifact_max_runs = 0
+# artifact_max_runs_per_kind = 0
+# geometry_prep_max_artifacts = 0
+# geometry_prep_max_artifacts_per_geometry = 0
+# geometry_prep_max_age_seconds = 0
+geometry_prep_require_latest_revision = true
 "#;
     sample.to_string()
 }

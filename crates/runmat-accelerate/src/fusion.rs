@@ -1,11 +1,11 @@
-#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
-use std::sync::{Arc, OnceLock, RwLock, Weak};
+use std::fmt::Write as _;
+use std::hash::{Hash, Hasher};
+use std::rc::{Rc, Weak};
+use std::sync::OnceLock;
 
-use once_cell::sync::Lazy;
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::Value;
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,10 @@ use crate::graph::{
 };
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
+
+/// Fusion plans can contain `Value` constants, including GC handles. Keep them
+/// thread-confined so the type system does not imply cross-thread GC safety.
+pub type FusionPlanRef = Rc<FusionPlan>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
@@ -77,6 +81,8 @@ pub struct ImageNormalizePattern {
     pub gain: Option<ImageScalar>,
     pub bias: Option<ImageScalar>,
     pub gamma: Option<ImageScalar>,
+    #[serde(default)]
+    pub clamp_zero: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -666,32 +672,24 @@ pub struct ActiveFusion {
 }
 
 struct ActiveContext {
-    plan: Arc<FusionPlan>,
+    plan: FusionPlanRef,
     active_group: Option<usize>,
 }
 
-static PLAN_CACHE: Lazy<RwLock<HashMap<usize, Weak<FusionPlan>>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-
-#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
+    static PLAN_CACHE: RefCell<HashMap<u64, Weak<FusionPlan>>> = RefCell::new(HashMap::new());
     static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
 }
-#[cfg(target_arch = "wasm32")]
-static ACTIVE_PLAN: Lazy<Mutex<Option<ActiveContext>>> = Lazy::new(|| Mutex::new(None));
 
-#[cfg(not(target_arch = "wasm32"))]
+fn with_plan_cache<R>(f: impl FnOnce(&mut HashMap<u64, Weak<FusionPlan>>) -> R) -> R {
+    PLAN_CACHE.with(|cache| f(&mut cache.borrow_mut()))
+}
+
 fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
     ACTIVE_PLAN.with(|ctx| {
         let mut slot = ctx.borrow_mut();
         f(&mut slot)
     })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
-    let mut slot = ACTIVE_PLAN.lock().expect("active plan mutex poisoned");
-    f(&mut slot)
 }
 
 fn fusion_debug_enabled() -> bool {
@@ -706,7 +704,7 @@ pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
     candidate_group_count: usize,
-) -> Option<Arc<FusionPlan>> {
+) -> Option<FusionPlanRef> {
     let graph = graph?;
     if candidate_group_count == 0 {
         if !groups.is_empty() && fusion_debug_enabled() {
@@ -735,21 +733,32 @@ pub fn prepare_fusion_plan(
         }
         return None;
     }
-    let key = graph as *const AccelGraph as usize;
-    if let Some(plan) = PLAN_CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&key).and_then(|weak| weak.upgrade()))
-    {
+    let key = fusion_plan_cache_key(graph, &groups, candidate_group_count);
+    if let Some(plan) = with_plan_cache(|cache| cache.get(&key).and_then(|weak| weak.upgrade())) {
         return Some(plan);
     }
 
     let plan = FusionPlan::from_graph(graph, &groups);
-    let plan = Arc::new(plan);
-    if let Ok(mut guard) = PLAN_CACHE.write() {
-        guard.insert(key, Arc::downgrade(&plan));
-    }
+    let plan = Rc::new(plan);
+    with_plan_cache(|cache| {
+        cache.insert(key, Rc::downgrade(&plan));
+    });
     Some(plan)
+}
+
+fn fusion_plan_cache_key(
+    graph: &AccelGraph,
+    groups: &[FusionGroup],
+    candidate_group_count: usize,
+) -> u64 {
+    let mut text = String::new();
+    let _ = write!(
+        &mut text,
+        "candidates={candidate_group_count};graph={graph:?};groups={groups:?}"
+    );
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
@@ -822,7 +831,7 @@ fn node_within_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
     node.span.start >= span.start && node.span.end <= span.end
 }
 
-pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
+pub fn activate_fusion_plan(plan: Option<FusionPlanRef>) {
     with_active_context(|slot| {
         *slot = plan.map(|plan| ActiveContext {
             plan,
@@ -2334,6 +2343,7 @@ fn detect_image_normalize(
             gain: match_info.gain.clone(),
             bias: match_info.bias.clone(),
             gamma: match_info.gamma.clone(),
+            clamp_zero: match_info.clamp_zero,
         };
 
         groups.push(FusionGroup {
@@ -2890,6 +2900,9 @@ fn primitive_expr(
         }
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
             let (lhs, rhs) = binary(exprs)?;
+            if expr_is_literal(rhs.as_str(), 2.0) {
+                return Some(format!("({lhs} * {lhs})"));
+            }
             Some(format!("pow({lhs}, {rhs})"))
         }
         PrimitiveOp::Neg => {
@@ -2902,6 +2915,18 @@ fn primitive_expr(
         }
         _ => None,
     }
+}
+
+fn expr_is_literal(expr: &str, expected: f64) -> bool {
+    let trimmed = expr.trim();
+    let literal = trimmed
+        .strip_prefix("f64(")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or(trimmed);
+    literal
+        .parse::<f64>()
+        .map(|value| (value - expected).abs() <= f64::EPSILON)
+        .unwrap_or(false)
 }
 
 fn builtin_expr(
@@ -3230,6 +3255,7 @@ struct ImageNormalizeMatch {
     gain: Option<ImageScalar>,
     bias: Option<ImageScalar>,
     gamma: Option<ImageScalar>,
+    clamp_zero: bool,
 }
 
 fn analyze_image_normalize(
@@ -3276,12 +3302,21 @@ fn analyze_image_normalize(
         _ => Some(gamma_scalar),
     };
 
-    let (clamp_node_id, clamp_input_vid) =
-        split_max_with_zero_scalar(graph, pow_node.inputs[0], assigned, &mut nodes)?;
-    if assigned.contains(&clamp_node_id) {
-        img_norm_fail!("clamp node already assigned");
-    }
-    nodes.push(clamp_node_id);
+    let mut clamp_nodes = Vec::new();
+    let pow_base_vid = peel_numeric_casts(graph, pow_node.inputs[0], assigned, &mut clamp_nodes)?;
+    let (clamp_input_vid, clamp_zero) = if let Some((clamp_node_id, clamp_input_vid)) =
+        split_max_with_zero_scalar(graph, pow_base_vid, assigned, &mut clamp_nodes)
+    {
+        if assigned.contains(&clamp_node_id) {
+            img_norm_fail!("clamp node already assigned");
+        }
+        nodes.extend(clamp_nodes);
+        nodes.push(clamp_node_id);
+        (clamp_input_vid, true)
+    } else {
+        nodes.extend(clamp_nodes);
+        (pow_base_vid, false)
+    };
 
     let pre_bias_vid = peel_numeric_casts(graph, clamp_input_vid, assigned, &mut nodes)?;
     let (pre_gain_vid, bias_opt) = if let Some((add_node_id, base_vid, bias_scalar)) =
@@ -3442,6 +3477,7 @@ fn analyze_image_normalize(
         gain: gain_opt,
         bias: bias_opt,
         gamma: gamma_opt,
+        clamp_zero,
     })
 }
 
@@ -3546,6 +3582,38 @@ mod tests {
         assert!(
             plan.is_some(),
             "semantic candidate evidence should allow executable fusion plan preparation"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_cache_is_thread_local_rc() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+
+        let first = prepare_fusion_plan(Some(&graph), &groups, 1).expect("first plan");
+        let second = prepare_fusion_plan(Some(&graph), &groups, 1).expect("cached plan");
+
+        assert!(
+            std::rc::Rc::ptr_eq(&first, &second),
+            "fusion plans should be reused within the current thread without implying Send/Sync ownership"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_cache_distinguishes_graph_content() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let first = prepare_fusion_plan(Some(&graph), &groups, 1).expect("first plan");
+
+        let mut changed_graph = simple_elementwise_graph();
+        changed_graph.nodes[0].label = AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv);
+        let changed_groups = detect_fusion_groups(&changed_graph);
+        let second =
+            prepare_fusion_plan(Some(&changed_graph), &changed_groups, 1).expect("second plan");
+
+        assert!(
+            !std::rc::Rc::ptr_eq(&first, &second),
+            "fusion plan cache must not reuse a plan for a different graph that happens to occupy a reused address"
         );
     }
 

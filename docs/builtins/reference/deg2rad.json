@@ -10,7 +10,6 @@
     "elementwise"
   ],
   "summary": "Convert angles from degrees to radians in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -33,6 +33,21 @@ pub fn input_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num, Type::tensor()])
 }
 
+pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
+}
+
+pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::tensor()
+}
+
+pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::cell()
+}
+
 pub fn fclose_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -210,6 +225,11 @@ pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
 }
 
+pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
+}
+
 pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return struct_type(args, _ctx);
@@ -271,9 +291,23 @@ pub fn tempname_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
+pub fn unzip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::cell_of(Type::String)
+}
+
 pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::logical()])
+}
+
+pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![
+        Type::tensor(),
+        Type::OutputList(vec![Type::tensor(), Type::cell()]),
+        Type::OutputList(vec![Type::tensor(), Type::cell(), Type::cell()]),
+    ])
 }
 
 pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -370,6 +404,12 @@ mod tests {
         Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
     );
     assert_resolver!(fwrite_type_resolver, fwrite_type, &[], Type::Num);
+    assert_resolver!(
+        unzip_type_resolver,
+        unzip_type,
+        &[],
+        Type::cell_of(Type::String)
+    );
 
     assert_resolver!(
         weboptions_type_resolver,
@@ -483,6 +523,12 @@ mod tests {
         Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
     );
     assert_resolver!(
+        uiputfile_type_resolver,
+        uiputfile_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
+    );
+    assert_resolver!(
         getenv_type_resolver,
         getenv_type,
         &[],
@@ -500,6 +546,21 @@ mod tests {
     assert_resolver!(tempdir_type_resolver, tempdir_type, &[], Type::String);
     assert_resolver!(tempname_type_resolver, tempname_type, &[], Type::String);
 
+    assert_resolver!(
+        audioinfo_type_resolver,
+        struct_type,
+        &[],
+        Type::Struct { known_fields: None }
+    );
+    assert_resolver!(audioread_type_resolver, audioread_type, &[], Type::tensor());
+    assert_resolver!(
+        importdata_type_resolver,
+        importdata_type,
+        &[],
+        Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
+    );
+    assert_resolver!(textscan_type_resolver, textscan_type, &[], Type::cell());
+
     assert_resolver!(csvread_type_resolver, tensor_type, &[], Type::tensor());
     assert_resolver!(csvwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(dlmread_type_resolver, tensor_type, &[], Type::tensor());
@@ -510,6 +571,7 @@ mod tests {
         &[],
         Type::Union(vec![Type::tensor(), Type::logical()])
     );
+    assert_resolver!(writecell_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(writematrix_type_resolver, num_type, &[], Type::Num);
 
     assert_resolver!(

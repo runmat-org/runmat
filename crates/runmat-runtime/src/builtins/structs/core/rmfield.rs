@@ -293,7 +293,7 @@ fn string_array_to_names(array: &StringArray) -> BuiltinResult<Vec<String>> {
 fn cell_to_names(cell: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut output = Vec::with_capacity(cell.data.len());
     for (index, handle) in cell.data.iter().enumerate() {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let name =
             expect_scalar_name(value).map_err(|err| field_name_error(err, Some(index + 1)))?;
         output.push(name);
@@ -387,7 +387,7 @@ fn remove_fields_from_struct_array(
 
     let mut updated: Vec<Value> = Vec::with_capacity(array.data.len());
     for handle in &array.data {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let Value::Struct(st) = value else {
             return Err(rmfield_error(&RMFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
         };
@@ -412,7 +412,7 @@ fn missing_field_error(name: &str) -> RuntimeError {
 fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
-        .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+        .all(|handle| matches!(handle, Value::Struct(_)))
 }
 
 #[cfg(test)]
@@ -517,7 +517,7 @@ pub(crate) mod tests {
             panic!("expected struct array");
         };
         for handle in &updated.data {
-            let value = unsafe { &*handle.as_raw() };
+            let value = handle;
             let Value::Struct(st) = value else {
                 panic!("expected struct element");
             };

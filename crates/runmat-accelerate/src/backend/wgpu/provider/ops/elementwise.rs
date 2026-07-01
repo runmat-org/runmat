@@ -10,6 +10,10 @@ use super::backend_shared::{
 use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
+use crate::backend::wgpu::shaders::elementwise::{
+    complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
+    complex_from_real_shader, complex_unary_shader, ComplexBinaryOp, ComplexUnaryOp,
+};
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
     ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
@@ -23,14 +27,30 @@ use crate::backend::wgpu::shaders::logical::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
+    fn effective_storage_for_entry(
+        &self,
+        handle: &GpuTensorHandle,
+        entry: &super::backend_types::BufferEntry,
+    ) -> runmat_accelerate_api::GpuTensorStorage {
+        if runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            || entry.storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        }
+    }
+
     pub(crate) fn logical_islogical_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
         let _ = self.get_entry(a)?;
         Ok(runmat_accelerate_api::handle_is_logical(a))
     }
 
     pub(crate) fn logical_isreal_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
-        let _ = self.get_entry(a)?;
-        Ok(true)
+        let entry = self.get_entry(a)?;
+        Ok(self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
     }
 
     pub(crate) fn unary_double_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -41,6 +61,262 @@ impl WgpuProvider {
         }
         let entry = self.get_entry(a)?;
         Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+    }
+
+    pub(crate) fn complex_from_real_exec(&self, real: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(real)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(real)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex_from_real requires a real-valued input"
+        );
+        let out_len = entry
+            .len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex_from_real: output length overflow"))?;
+        let handle = if out_len == 0 {
+            let buffer = self.create_storage_buffer(0, "runmat-complex-from-real-empty");
+            self.register_existing_buffer_with_storage(
+                buffer,
+                entry.shape,
+                out_len,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+        } else {
+            let shader = complex_from_real_shader(self.precision);
+            let out = self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                std::slice::from_ref(real),
+                &entry.shape,
+                out_len,
+            )?;
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            out
+        };
+        Ok(handle)
+    }
+
+    pub(crate) fn complex_from_real_imag_exec(
+        &self,
+        real: &GpuTensorHandle,
+        imag: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_real = self.get_entry(real)?;
+        let entry_imag = self.get_entry(imag)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(real)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(imag)
+                    != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex_from_real_imag requires real-valued inputs"
+        );
+
+        let real_scalar = entry_real.len == 1;
+        let imag_scalar = entry_imag.len == 1;
+        let out_shape = if entry_real.shape == entry_imag.shape {
+            entry_real.shape.clone()
+        } else if real_scalar {
+            entry_imag.shape.clone()
+        } else if imag_scalar {
+            entry_real.shape.clone()
+        } else {
+            return Err(anyhow!(
+                "complex_from_real_imag: shape mismatch between inputs"
+            ));
+        };
+        let logical_len = out_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex_from_real_imag: output shape overflow"))?;
+        let out_len = logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex_from_real_imag: output length overflow"))?;
+        let handle = if out_len == 0 {
+            let buffer = self.create_storage_buffer(0, "runmat-complex-from-real-imag-empty");
+            self.register_existing_buffer_with_storage(
+                buffer,
+                out_shape,
+                out_len,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+        } else {
+            let shader = complex_from_real_imag_shader(self.precision, real_scalar, imag_scalar);
+            let out = self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                &[real.clone(), imag.clone()],
+                &out_shape,
+                out_len,
+            )?;
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            out
+        };
+        Ok(handle)
+    }
+
+    pub(crate) fn unary_sin_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sin, true)
+    }
+
+    pub(crate) fn unary_sinc_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sinc, true)
+    }
+
+    pub(crate) fn unary_cos_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Cos, true)
+    }
+
+    pub(crate) fn unary_sinh_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sinh, true)
+    }
+
+    pub(crate) fn unary_cosh_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Cosh, true)
+    }
+
+    pub(crate) fn unary_tan_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Tan, true)
+    }
+
+    pub(crate) fn unary_sign_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sign, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sign, true)
+    }
+
+    pub(crate) fn unary_real_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len));
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Real, false)
+    }
+
+    pub(crate) fn unary_imag_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.fill_exec(&entry.shape, 0.0);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Imag, false)
+    }
+
+    pub(crate) fn unary_abs_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Abs, false)
+    }
+
+    pub(crate) fn unary_conj_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Conj, true)
+    }
+
+    pub(crate) fn unary_angle_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Angle, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Angle, false)
+    }
+
+    fn complex_unary_exec(
+        &self,
+        a: &GpuTensorHandle,
+        op: ComplexUnaryOp,
+        output_complex: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        ensure!(
+            self.effective_storage_for_entry(a, &entry)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex unary operation requires complex-interleaved input"
+        );
+        ensure!(
+            entry.len % 2 == 0,
+            "complex unary operation requires even interleaved buffer length"
+        );
+        let len = if output_complex {
+            entry.len
+        } else {
+            entry.len / 2
+        };
+        let shader = complex_unary_shader(op, self.precision);
+        let out = self.fused_elementwise_with_telemetry_exec(
+            &shader,
+            std::slice::from_ref(a),
+            &entry.shape,
+            len,
+        )?;
+        if output_complex {
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+        }
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+            runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
+        }
+        Ok(out)
     }
 
     pub(crate) fn unary_pow2_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -532,6 +808,52 @@ impl WgpuProvider {
         scalar: f64,
     ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
+        if runmat_accelerate_api::handle_storage(a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            let scalar_handle = self.fill_exec(&entry_a.shape, scalar)?;
+            let binary_op = match op {
+                crate::backend::wgpu::types::ScalarOpCode::Add => {
+                    crate::backend::wgpu::types::BinaryOpCode::Add
+                }
+                crate::backend::wgpu::types::ScalarOpCode::Sub => {
+                    crate::backend::wgpu::types::BinaryOpCode::Sub
+                }
+                crate::backend::wgpu::types::ScalarOpCode::Mul => {
+                    crate::backend::wgpu::types::BinaryOpCode::Mul
+                }
+                crate::backend::wgpu::types::ScalarOpCode::Div => {
+                    crate::backend::wgpu::types::BinaryOpCode::Div
+                }
+                crate::backend::wgpu::types::ScalarOpCode::RSub => {
+                    let result = self.binary_op_exec(
+                        crate::backend::wgpu::types::BinaryOpCode::Sub,
+                        &scalar_handle,
+                        a,
+                    );
+                    let _ = self.free_exec(&scalar_handle);
+                    return result;
+                }
+                crate::backend::wgpu::types::ScalarOpCode::RDiv => {
+                    let result = self.binary_op_exec(
+                        crate::backend::wgpu::types::BinaryOpCode::Div,
+                        &scalar_handle,
+                        a,
+                    );
+                    let _ = self.free_exec(&scalar_handle);
+                    return result;
+                }
+                _ => {
+                    let _ = self.free_exec(&scalar_handle);
+                    return Err(anyhow!(
+                        "complex scalar operation is not supported for this operator"
+                    ));
+                }
+            };
+            let result = self.binary_op_exec(binary_op, a, &scalar_handle);
+            let _ = self.free_exec(&scalar_handle);
+            return result;
+        }
         let len = entry_a.len;
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-scalar-out")?;
         if len == 0 {
@@ -641,6 +963,16 @@ impl WgpuProvider {
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
+        let storage_a = self.effective_storage_for_entry(a, &entry_a);
+        let storage_b = self.effective_storage_for_entry(b, &entry_b);
+        if storage_a == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            || storage_b == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            if entry_a.shape != entry_b.shape {
+                return self.complex_binary_broadcast_exec(op, a, b, &entry_a, &entry_b);
+            }
+            return self.complex_binary_op_exec(op, a, b, &entry_a, &entry_b);
+        }
         if entry_a.shape != entry_b.shape {
             // Attempt general N-D broadcasted binary op
             return self.binary_op_broadcast_exec(op, a, b);
@@ -743,6 +1075,200 @@ impl WgpuProvider {
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
     }
+
+    fn complex_binary_op_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        entry_a: &super::backend_types::BufferEntry,
+        entry_b: &super::backend_types::BufferEntry,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            entry_a.shape == entry_b.shape,
+            "complex binary operation requires matching logical shapes"
+        );
+        let complex_op = ComplexBinaryOp::try_from_binary_op(op)
+            .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
+        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let logical_len = entry_a
+            .shape
+            .iter()
+            .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+            .ok_or_else(|| anyhow!("complex binary operation output length overflow"))?;
+        ensure!(
+            !lhs_complex || entry_a.len == logical_len.saturating_mul(2),
+            "complex lhs storage length does not match logical shape"
+        );
+        ensure!(
+            lhs_complex || entry_a.len == logical_len,
+            "real lhs storage length does not match logical shape"
+        );
+        ensure!(
+            !rhs_complex || entry_b.len == logical_len.saturating_mul(2),
+            "complex rhs storage length does not match logical shape"
+        );
+        ensure!(
+            rhs_complex || entry_b.len == logical_len,
+            "real rhs storage length does not match logical shape"
+        );
+        let out_len = logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex binary operation output length overflow"))?;
+        let handle = if out_len == 0 {
+            let buffer = self.create_storage_buffer(0, "runmat-complex-binary-out");
+            self.register_existing_buffer_with_storage(
+                buffer,
+                entry_a.shape.clone(),
+                0,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+        } else {
+            let shader =
+                complex_binary_shader(complex_op, self.precision, lhs_complex, rhs_complex);
+            let out = self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                out_len,
+            )?;
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            out
+        };
+        Ok(handle)
+    }
+
+    fn complex_binary_broadcast_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        entry_a: &super::backend_types::BufferEntry,
+        entry_b: &super::backend_types::BufferEntry,
+    ) -> Result<GpuTensorHandle> {
+        use crate::backend::wgpu::params::BCAST_MAX_RANK;
+
+        let complex_op = ComplexBinaryOp::try_from_binary_op(op)
+            .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
+        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+
+        let mut shape_a = entry_a.shape.clone();
+        let mut shape_b = entry_b.shape.clone();
+        let rank = shape_a.len().max(shape_b.len());
+        if rank > BCAST_MAX_RANK {
+            return Err(anyhow!("complex broadcast rank exceeds limit"));
+        }
+        if shape_a.len() < rank {
+            let pad = rank - shape_a.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_a);
+            shape_a = v;
+        }
+        if shape_b.len() < rank {
+            let pad = rank - shape_b.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_b);
+            shape_b = v;
+        }
+
+        let mut out_shape = vec![1usize; rank];
+        for i in 0..rank {
+            let da = shape_a[i];
+            let db = shape_b[i];
+            if da == db {
+                out_shape[i] = da;
+            } else if da == 1 {
+                out_shape[i] = db;
+            } else if db == 1 {
+                out_shape[i] = da;
+            } else {
+                return Err(anyhow!("shape mismatch for complex broadcast"));
+            }
+        }
+
+        let logical_len = out_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
+        let a_logical_len = shape_a
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
+        let b_logical_len = shape_b
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
+        let expected_a_len = a_logical_len
+            .checked_mul(if lhs_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
+        let expected_b_len = b_logical_len
+            .checked_mul(if rhs_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
+        ensure!(
+            entry_a.len == expected_a_len,
+            "complex broadcast lhs storage length does not match logical shape"
+        );
+        ensure!(
+            entry_b.len == expected_b_len,
+            "complex broadcast rhs storage length does not match logical shape"
+        );
+
+        let out_len = logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
+        if out_len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-complex-bcast-out");
+            return Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                out_shape,
+                0,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            ));
+        }
+        if out_len > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(
+                "complex_binary_broadcast",
+                out_len,
+            ));
+        }
+
+        let mut stride_a = vec![0u32; rank];
+        let mut stride_b = vec![0u32; rank];
+        let mut s = 1u64;
+        for i in 0..rank {
+            stride_a[i] = if shape_a[i] == 1 { 0 } else { s as u32 };
+            s = s
+                .checked_mul(shape_a[i] as u64)
+                .ok_or_else(|| anyhow!("complex broadcast lhs stride overflow"))?;
+        }
+        s = 1;
+        for i in 0..rank {
+            stride_b[i] = if shape_b[i] == 1 { 0 } else { s as u32 };
+            s = s
+                .checked_mul(shape_b[i] as u64)
+                .ok_or_else(|| anyhow!("complex broadcast rhs stride overflow"))?;
+        }
+
+        let shader =
+            complex_binary_broadcast_shader(complex_op, self.precision, lhs_complex, rhs_complex);
+        let handle =
+            self.fused_elementwise_exec(&shader, &[a.clone(), b.clone()], &out_shape, out_len)?;
+        runmat_accelerate_api::set_handle_storage(
+            &handle,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        );
+        Ok(handle)
+    }
+
     fn binary_op_broadcast_exec(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,
@@ -1413,5 +1939,340 @@ impl WgpuProvider {
             handles.push(handle);
         }
         Ok(handles)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+
+    async fn complex_pair(
+        provider: &'static dyn AccelProvider,
+        real: &[f64],
+        imag: &[f64],
+        shape: &[usize],
+    ) -> GpuTensorHandle {
+        let hr = provider
+            .upload(&HostTensorView { data: real, shape })
+            .expect("upload real");
+        let hi = provider
+            .upload(&HostTensorView { data: imag, shape })
+            .expect("upload imag");
+        provider
+            .complex_from_real_imag(&hr, &hi)
+            .await
+            .expect("complex_from_real_imag")
+    }
+
+    fn assert_interleaved_close(got: &[f64], expected: &[(f64, f64)]) {
+        assert_eq!(got.len(), expected.len() * 2);
+        const EPS: f64 = 1e-5;
+        for (idx, (re, im)) in expected.iter().enumerate() {
+            assert!(
+                (got[idx * 2] - re).abs() < EPS,
+                "real lane {idx}: got {}, expected {re}",
+                got[idx * 2]
+            );
+            assert!(
+                (got[idx * 2 + 1] - im).abs() < EPS,
+                "imag lane {idx}: got {}, expected {im}",
+                got[idx * 2 + 1]
+            );
+        }
+    }
+
+    fn sin_complex_host(re: f64, im: f64) -> (f64, f64) {
+        (re.sin() * im.cosh(), re.cos() * im.sinh())
+    }
+
+    fn cos_complex_host(re: f64, im: f64) -> (f64, f64) {
+        (re.cos() * im.cosh(), -re.sin() * im.sinh())
+    }
+
+    fn tan_complex_host(re: f64, im: f64) -> (f64, f64) {
+        let two_re = 2.0 * re;
+        let two_im = 2.0 * im;
+        let inv_cosh = 1.0 / two_im.cosh();
+        let denom = 1.0 + two_re.cos() * inv_cosh;
+        ((two_re.sin() * inv_cosh) / denom, two_im.tanh() / denom)
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_binary_ops_match_cpu() {
+        crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register wgpu provider");
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let shape = [2, 2];
+        let a = complex_pair(
+            provider,
+            &[1.0, -2.0, 3.5, 0.5],
+            &[0.5, 4.0, -1.0, -2.5],
+            &shape,
+        )
+        .await;
+        let b = complex_pair(
+            provider,
+            &[2.0, 0.25, -1.0, 4.0],
+            &[-1.0, 0.75, 2.0, -0.5],
+            &shape,
+        )
+        .await;
+
+        let add = provider.elem_add(&a, &b).await.expect("complex add");
+        let sub = provider.elem_sub(&a, &b).await.expect("complex sub");
+        let mul = provider.elem_mul(&a, &b).await.expect("complex mul");
+        let div = provider.elem_div(&a, &b).await.expect("complex div");
+
+        for handle in [&add, &sub, &mul, &div] {
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+        }
+
+        let add_host = provider.download(&add).await.expect("download add");
+        let sub_host = provider.download(&sub).await.expect("download sub");
+        let mul_host = provider.download(&mul).await.expect("download mul");
+        let div_host = provider.download(&div).await.expect("download div");
+        assert_eq!(add_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(add_host.shape, shape.to_vec());
+
+        let lhs = [(1.0, 0.5), (-2.0, 4.0), (3.5, -1.0), (0.5, -2.5)];
+        let rhs = [(2.0, -1.0), (0.25, 0.75), (-1.0, 2.0), (4.0, -0.5)];
+        let expected_add: Vec<(f64, f64)> = lhs
+            .iter()
+            .zip(rhs.iter())
+            .map(|((ar, ai), (br, bi))| (ar + br, ai + bi))
+            .collect();
+        let expected_sub: Vec<(f64, f64)> = lhs
+            .iter()
+            .zip(rhs.iter())
+            .map(|((ar, ai), (br, bi))| (ar - br, ai - bi))
+            .collect();
+        let expected_mul: Vec<(f64, f64)> = lhs
+            .iter()
+            .zip(rhs.iter())
+            .map(|((ar, ai), (br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+            .collect();
+        let expected_div: Vec<(f64, f64)> = lhs
+            .iter()
+            .zip(rhs.iter())
+            .map(|((ar, ai), (br, bi))| {
+                let denom = br * br + bi * bi;
+                ((ar * br + ai * bi) / denom, (ai * br - ar * bi) / denom)
+            })
+            .collect();
+
+        assert_interleaved_close(&add_host.data, &expected_add);
+        assert_interleaved_close(&sub_host.data, &expected_sub);
+        assert_interleaved_close(&mul_host.data, &expected_mul);
+        assert_interleaved_close(&div_host.data, &expected_div);
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_unary_trig_ops_match_cpu() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let input = [(0.5, 0.75), (2.0, -0.25), (-0.75, 0.5)];
+        let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
+        let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
+        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+
+        let sin = provider.unary_sin(&handle).await.expect("complex sin");
+        let cos = provider.unary_cos(&handle).await.expect("complex cos");
+        let tan = provider.unary_tan(&handle).await.expect("complex tan");
+
+        for handle in [&sin, &cos, &tan] {
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+        }
+
+        let sin_host = provider.download(&sin).await.expect("download sin");
+        let cos_host = provider.download(&cos).await.expect("download cos");
+        let tan_host = provider.download(&tan).await.expect("download tan");
+        assert_eq!(sin_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(cos_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(tan_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(sin_host.shape, vec![3, 1]);
+        assert_eq!(cos_host.shape, vec![3, 1]);
+        assert_eq!(tan_host.shape, vec![3, 1]);
+
+        assert_interleaved_close(
+            &sin_host.data,
+            &input.map(|(re, im)| sin_complex_host(re, im)),
+        );
+        assert_interleaved_close(
+            &cos_host.data,
+            &input.map(|(re, im)| cos_complex_host(re, im)),
+        );
+        assert_interleaved_close(
+            &tan_host.data,
+            &input.map(|(re, im)| tan_complex_host(re, im)),
+        );
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_unary_trig_large_imag_edges_are_not_nan() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let input = [
+            (0.0, 90.0),
+            (0.0, -90.0),
+            (std::f64::consts::FRAC_PI_2, 90.0),
+            (std::f64::consts::FRAC_PI_2, -90.0),
+            (0.25, 90.0),
+            (-0.25, -90.0),
+            (90.0, 0.0),
+            (-90.0, 0.0),
+            (0.0, 50.0),
+        ];
+        let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
+        let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
+        let shape = [input.len(), 1];
+        let handle = complex_pair(provider, &real, &imag, &shape).await;
+
+        let sin = provider.unary_sin(&handle).await.expect("complex sin");
+        let sinc = provider.unary_sinc(&handle).await.expect("complex sinc");
+        let cos = provider.unary_cos(&handle).await.expect("complex cos");
+        let sinh = provider.unary_sinh(&handle).await.expect("complex sinh");
+        let cosh = provider.unary_cosh(&handle).await.expect("complex cosh");
+        let tan = provider.unary_tan(&handle).await.expect("complex tan");
+
+        let sin_host = provider.download(&sin).await.expect("download sin");
+        let sinc_host = provider.download(&sinc).await.expect("download sinc");
+        let cos_host = provider.download(&cos).await.expect("download cos");
+        let sinh_host = provider.download(&sinh).await.expect("download sinh");
+        let cosh_host = provider.download(&cosh).await.expect("download cosh");
+        let tan_host = provider.download(&tan).await.expect("download tan");
+        assert_eq!(sin_host.shape, vec![9, 1]);
+        assert_eq!(sinc_host.shape, vec![9, 1]);
+        assert_eq!(cos_host.shape, vec![9, 1]);
+        assert_eq!(sinh_host.shape, vec![9, 1]);
+        assert_eq!(cosh_host.shape, vec![9, 1]);
+        assert_eq!(tan_host.shape, vec![9, 1]);
+
+        assert_eq!(sin_host.data[0], 0.0, "sin(0 + 90i) real lane");
+        assert!(
+            sin_host.data[1].is_finite(),
+            "sin(0 + 90i) imag lane must be finite"
+        );
+        assert_eq!(sin_host.data[2], 0.0, "sin(0 - 90i) real lane");
+        assert!(
+            sin_host.data[3].is_finite(),
+            "sin(0 - 90i) imag lane must be finite"
+        );
+        assert!(
+            cos_host.data[0].is_finite(),
+            "cos(0 + 90i) real lane must be finite"
+        );
+        assert!(
+            cos_host.data[1].abs() < 1e-5,
+            "cos(0 + 90i) imag lane got {}",
+            cos_host.data[1]
+        );
+        assert!(
+            cos_host.data[2].is_finite(),
+            "cos(0 - 90i) real lane must be finite"
+        );
+        assert!(
+            cos_host.data[3].abs() < 1e-5,
+            "cos(0 - 90i) imag lane got {}",
+            cos_host.data[3]
+        );
+        assert!(
+            tan_host.data[16].abs() < 1e-5,
+            "tan(0 + 50i) real lane got {}",
+            tan_host.data[16]
+        );
+        assert!(
+            (tan_host.data[17] - 1.0).abs() < 1e-5,
+            "tan(0 + 50i) imag lane got {}",
+            tan_host.data[17]
+        );
+        for (idx, lane) in sin_host
+            .data
+            .iter()
+            .chain(sinc_host.data.iter())
+            .chain(cos_host.data.iter())
+            .chain(sinh_host.data.iter())
+            .chain(cosh_host.data.iter())
+            .chain(tan_host.data.iter())
+            .enumerate()
+        {
+            assert!(lane.is_finite(), "lane {idx} was not finite");
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_real_mix_and_scalar_ops_stay_complex() {
+        crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register wgpu provider");
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let shape = [3, 1];
+        let complex = complex_pair(provider, &[1.0, -2.0, 4.0], &[0.5, 3.0, -1.5], &shape).await;
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[2.0, -1.0, 0.25],
+                shape: &shape,
+            })
+            .expect("upload real");
+
+        let mixed = provider
+            .elem_mul(&complex, &real)
+            .await
+            .expect("complex .* real");
+        let scalar = provider.scalar_rdiv(&complex, 2.0).expect("2 ./ complex");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&mixed),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&scalar),
+            GpuTensorStorage::ComplexInterleaved
+        );
+
+        let mixed_host = provider.download(&mixed).await.expect("download mixed");
+        let scalar_host = provider.download(&scalar).await.expect("download scalar");
+        assert_interleaved_close(&mixed_host.data, &[(2.0, 1.0), (2.0, -3.0), (1.0, -0.375)]);
+        let expected_scalar = [
+            (1.6, -0.8),
+            (-0.3076923076923077, -0.46153846153846156),
+            (0.4383561643835616, 0.1643835616438356),
+        ];
+        assert_interleaved_close(&scalar_host.data, &expected_scalar);
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_repmat_preserves_interleaved_storage() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let scalar = complex_pair(provider, &[2.0], &[-3.0], &[1, 1]).await;
+        let tiled = provider.repmat(&scalar, &[3, 1]).expect("complex repmat");
+
+        assert_eq!(tiled.shape, vec![3, 1]);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&tiled),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let host = provider.download(&tiled).await.expect("download tiled");
+        assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_interleaved_close(&host.data, &[(2.0, -3.0), (2.0, -3.0), (2.0, -3.0)]);
     }
 }

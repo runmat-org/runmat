@@ -470,7 +470,7 @@ pub struct RepmatParams {
     pub len: u32,
     pub offset: u32,
     pub rank: u32,
-    pub _pad: u32,
+    pub storage_factor: u32,
     pub base_shape: [AlignedU32; REPMAT_MAX_RANK],
     pub new_shape: [AlignedU32; REPMAT_MAX_RANK],
     pub base_strides: [AlignedU32; REPMAT_MAX_RANK],
@@ -674,6 +674,7 @@ pub struct ImageNormalizeUniforms {
 pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;
 pub const IMAGE_NORMALIZE_FLAG_BIAS: u32 = 1 << 1;
 pub const IMAGE_NORMALIZE_FLAG_GAMMA: u32 = 1 << 2;
+pub const IMAGE_NORMALIZE_FLAG_CLAMP_ZERO: u32 = 1 << 3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

@@ -1164,10 +1164,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                assert_eq!(
-                    unsafe { &*ca.data[0].as_raw() },
-                    &Value::String("123".into())
-                );
+                assert_eq!(&ca.data[0], &Value::String("123".into()));
             }
             other => panic!("unexpected output {other:?}"),
         }
@@ -1187,15 +1184,15 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                let token_cell = unsafe { &*ca.data[0].as_raw() };
+                let token_cell = &ca.data[0];
                 match token_cell {
                     Value::Cell(inner) => {
                         assert_eq!(inner.data.len(), 3);
-                        let year = unsafe { &*inner.data[0].as_raw() };
+                        let year = &inner.data[0];
                         assert_eq!(year, &Value::String("2024".into()));
-                        let month = unsafe { &*inner.data[1].as_raw() };
+                        let month = &inner.data[1];
                         assert_eq!(month, &Value::String("03".into()));
-                        let day = unsafe { &*inner.data[2].as_raw() };
+                        let day = &inner.data[2];
                         assert_eq!(day, &Value::String("14".into()));
                     }
                     other => panic!("unexpected nested value {other:?}"),
@@ -1238,11 +1235,11 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
                 assert_eq!(ca.data.len(), 3);
-                let year = unsafe { &*ca.data[0].as_raw() };
+                let year = &ca.data[0];
                 assert_eq!(year, &Value::String("2024".into()));
-                let month = unsafe { &*ca.data[1].as_raw() };
+                let month = &ca.data[1];
                 assert_eq!(month, &Value::String("03".into()));
-                let day = unsafe { &*ca.data[2].as_raw() };
+                let day = &ca.data[2];
                 assert_eq!(day, &Value::String("14".into()));
             }
             other => panic!("expected cell row of tokens, got {other:?}"),
@@ -1314,7 +1311,7 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 2);
                 for ptr in &ca.data {
-                    match unsafe { &*ptr.as_raw() } {
+                    match ptr {
                         Value::Cell(split) => assert_eq!(split.data.len(), 3),
                         other => panic!("unexpected nested value {other:?}"),
                     }
@@ -1403,7 +1400,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 2);
-                let first = unsafe { &*ca.data[0].as_raw() };
+                let first = &ca.data[0];
                 match first {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1417,7 +1414,7 @@ pub(crate) mod tests {
                     }
                     other => panic!("unexpected struct {other:?}"),
                 }
-                let second = unsafe { &*ca.data[1].as_raw() };
+                let second = &ca.data[1];
                 match second {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1450,7 +1447,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                let matrix = unsafe { &*ca.data[0].as_raw() };
+                let matrix = &ca.data[0];
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![3, 2]);
@@ -1485,7 +1482,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
                 assert_eq!(ca.data.len(), 1);
-                let inner = unsafe { &*ca.data[0].as_raw() };
+                let inner = &ca.data[0];
                 match inner {
                     Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0]),
                     other => panic!("unexpected inner value {other:?}"),
@@ -1517,22 +1514,22 @@ pub(crate) mod tests {
                 assert_eq!(ca.cols, 2);
                 assert_eq!(ca.data.len(), 4);
                 // Row 0, Col 0
-                match unsafe { &*ca.data[0].as_raw() } {
+                match &ca.data[0] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 0, Col 1
-                match unsafe { &*ca.data[1].as_raw() } {
+                match &ca.data[1] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1, Col 0
-                match unsafe { &*ca.data[2].as_raw() } {
+                match &ca.data[2] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1, Col 1
-                match unsafe { &*ca.data[3].as_raw() } {
+                match &ca.data[3] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
@@ -1569,21 +1566,21 @@ pub(crate) mod tests {
                 assert_eq!(ca.cols, 2);
                 assert_eq!(ca.data.len(), 4);
                 // Row 0, Col 0 should have one match
-                match unsafe { &*ca.data[0].as_raw() } {
+                match &ca.data[0] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 0, Col 1 should have one match
-                match unsafe { &*ca.data[1].as_raw() } {
+                match &ca.data[1] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1 entries should be empty
-                match unsafe { &*ca.data[2].as_raw() } {
+                match &ca.data[2] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                match unsafe { &*ca.data[3].as_raw() } {
+                match &ca.data[3] {
                     Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
@@ -1609,11 +1606,11 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                match unsafe { &*ca.data[0].as_raw() } {
+                match &ca.data[0] {
                     Value::String(s) => assert_eq!(s, "AbC"),
                     Value::Cell(inner) => {
                         assert_eq!(inner.data.len(), 1);
-                        match unsafe { &*inner.data[0].as_raw() } {
+                        match &inner.data[0] {
                             Value::String(s) => assert_eq!(s, "AbC"),
                             other => panic!("unexpected match value {other:?}"),
                         }
@@ -1661,7 +1658,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 1);
-                match unsafe { &*ca.data[0].as_raw() } {
+                match &ca.data[0] {
                     Value::String(s) => assert_eq!(s, "first\nsecond"),
                     Value::Cell(inner) => {
                         // When forceCellOutput influences outer container, the inner should still be the match

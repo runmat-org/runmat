@@ -1419,7 +1419,8 @@ async fn build_histogram_gpu_chart_async(
         bounds,
         style.face_rgba(),
         style.bar_width,
-    );
+    )
+    .with_gpu_source(bar_inputs.clone(), 0, 1);
     bar.label = Some(HIST_DEFAULT_LABEL.to_string());
     let counts_f32 = runmat_plot::gpu::util::readback_f32_buffer(
         &context.device,

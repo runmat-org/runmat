@@ -11,7 +11,6 @@
     "logical"
   ],
   "summary": "Import numeric data from delimited text files with MATLAB-compatible `readmatrix` behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -98,7 +97,7 @@
   "faqs": [
     {
       "question": "What file encodings does `readmatrix` support?",
-      "answer": "The builtin reads UTF-8 text files by default. If a file starts with a UTF-8 byte-order mark, it is ignored automatically. For other encodings, convert the file with `fileread`/`string` or external tools before calling `readmatrix`."
+      "answer": "The builtin reads UTF-8 text files by default and ignores a leading UTF-8 byte-order mark automatically. Use the `'Encoding'` name-value option or an options struct field to read supported non-UTF-8 text encodings such as `'windows-1252'`."
     },
     {
       "question": "Does `readmatrix` support Excel or binary files?",
@@ -154,11 +153,11 @@
     },
     {
       "question": "How do I customise import options for `readmatrix` with `detectImportOptions`?",
-      "answer": "— Call `detectImportOptions` first, tweak the returned struct, then pass it to `readmatrix` as the second argument. For example: `opts = detectImportOptions('data.csv'); opts.DataLines = [4 Inf]; opts.Delimiter = ','; A = readmatrix('data.csv', opts);`. This is the MATLAB-recommended workflow when the file needs more than a couple of overrides, and RunMat accepts the same option struct directly."
+      "answer": "— Call `detectImportOptions` first, tweak the returned struct, then pass it to `readmatrix` as the second argument. For example: `opts = detectImportOptions('data.csv'); opts.NumHeaderLines = 1; opts.Delimiter = ','; A = readmatrix('data.csv', opts);`. This is the MATLAB-recommended workflow when the file needs more than a couple of overrides, and RunMat accepts the same option struct directly."
     },
     {
       "question": "How do I read a UTF-8 CSV file that starts with a byte-order mark?",
-      "answer": "— `readmatrix` reads UTF-8 by default and silently strips a leading UTF-8 BOM (`EF BB BF`), so no extra option is needed. In MATLAB you can also make the encoding explicit with `readmatrix('data.csv', 'Encoding', 'UTF-8')`. For other encodings, convert the file to UTF-8 up front (for example with `iconv`) or read it via `fileread` and parse the result manually."
+      "answer": "— `readmatrix` reads UTF-8 by default and silently strips a leading UTF-8 BOM (`EF BB BF`), so no extra option is needed. You can also make the encoding explicit with `readmatrix('data.csv', 'Encoding', 'UTF-8')`, or supply another supported text encoding such as `readmatrix('legacy.csv', 'Encoding', 'windows-1252')`."
     },
     {
       "question": "Which MATLAB release introduced `readmatrix`?",

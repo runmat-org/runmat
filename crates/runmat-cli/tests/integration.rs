@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,14 +17,26 @@ fn get_binary_path() -> PathBuf {
 
 // Helper function to run runmat with arguments
 fn run_runmat(args: &[&str]) -> std::process::Output {
+    run_runmat_in_dir(args, None)
+}
+
+fn run_runmat_in_dir(args: &[&str], current_dir: Option<&Path>) -> std::process::Output {
+    let os_args = args.iter().map(OsStr::new).collect::<Vec<_>>();
+    run_runmat_in_dir_os(&os_args, current_dir)
+}
+
+fn run_runmat_in_dir_os(args: &[&OsStr], current_dir: Option<&Path>) -> std::process::Output {
     let temp_dir = TempDir::new().expect("failed to create temp dir for config");
     let config_path = write_test_config(temp_dir.path());
-    Command::new(get_binary_path())
+    let mut command = Command::new(get_binary_path());
+    command
         .args(args)
         .env("RUNMAT_CONFIG", &config_path)
-        .env("NO_GUI", "1")
-        .output()
-        .expect("Failed to execute runmat binary")
+        .env("NO_GUI", "1");
+    if let Some(dir) = current_dir {
+        command.current_dir(dir);
+    }
+    command.output().expect("Failed to execute runmat binary")
 }
 
 fn write_test_config(dir: &Path) -> PathBuf {
@@ -63,6 +76,34 @@ result = z + 5
         output.status.success(),
         "End-to-end script execution failed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_signal_compatibility_harness_cli() {
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("signal_compatibility_harness.m");
+    fs::write(
+        &script_path,
+        include_str!("../../runmat-runtime/tests/fixtures/signal_compatibility_harness.m"),
+    )
+    .unwrap();
+
+    let output = run_runmat_in_dir_os(
+        &[OsStr::new("run"), script_path.as_os_str()],
+        Some(temp_dir.path()),
+    );
+    assert!(
+        output.status.success(),
+        "Signal compatibility harness failed. stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RESULT_signal_compat csv=4 fft=2.0 conv=-1.0 mat=1.0"),
+        "Signal compatibility harness produced unexpected stdout: {stdout}"
     );
 }
 

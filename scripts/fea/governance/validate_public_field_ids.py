@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Validate public FEA field-id literals and interim payload enum variants.
+
+Benchmark fixture ids and other non-field strings are checked by their own
+governance paths rather than by this contract guard.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_CONTRACT_PATHS = (
+    REPO_ROOT / "crates/runmat-analysis/fea/src/contracts/mod.rs",
+    REPO_ROOT / "crates/runmat-runtime/src/analysis/contracts.rs",
+)
+FIELD_NAMESPACE_RE = re.compile(
+    r'"((?:structural|modal|acoustic|thermal|transient|nonlinear|'
+    r"thermo_mechanical|electro_thermal|em|cfd|cht|fsi)\.[^\"]+)\""
+)
+FORBIDDEN_TOKENS = ("proxy", "placeholder")
+PLACEHOLDER_ENUM_VARIANT_RE = re.compile(r"^\s*(Placeholder[A-Za-z0-9_]*)\b")
+
+
+def public_field_ids(paths: list[Path]) -> list[tuple[Path, int, str]]:
+    field_ids: list[tuple[Path, int, str]] = []
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for match in FIELD_NAMESPACE_RE.finditer(line):
+                field_ids.append((path, line_number, match.group(1)))
+    return field_ids
+
+
+def placeholder_enum_variants(paths: list[Path]) -> list[tuple[Path, int, str]]:
+    variants: list[tuple[Path, int, str]] = []
+    for path in paths:
+        in_public_enum = False
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("pub enum "):
+                in_public_enum = True
+                continue
+            if not in_public_enum:
+                continue
+            if stripped.startswith("}"):
+                in_public_enum = False
+                continue
+            match = PLACEHOLDER_ENUM_VARIANT_RE.match(line)
+            if match:
+                variants.append((path, line_number, match.group(1)))
+    return variants
+
+
+def display_path(path: Path) -> Path:
+    try:
+        return path.relative_to(REPO_ROOT)
+    except ValueError:
+        return path
+
+
+def validate(paths: list[Path]) -> list[str]:
+    errors: list[str] = []
+    for path, line_number, field_id in public_field_ids(paths):
+        lowered = field_id.lower()
+        if any(token in lowered for token in FORBIDDEN_TOKENS):
+            errors.append(
+                f"{display_path(path)}:{line_number}: forbidden public field id '{field_id}'"
+            )
+    for path, line_number, variant in placeholder_enum_variants(paths):
+        errors.append(
+            f"{display_path(path)}:{line_number}: forbidden public placeholder enum variant '{variant}'"
+        )
+    return errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    paths = [Path(arg) for arg in args] if args else list(DEFAULT_CONTRACT_PATHS)
+    errors = validate(paths)
+    if errors:
+        print("public FEA field-id validation failed:", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+    print("public FEA field-id validation passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

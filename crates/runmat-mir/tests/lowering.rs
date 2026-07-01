@@ -755,6 +755,21 @@ fn diagnostics_report_maybe_assigned_local_read_after_branch() {
 }
 
 #[test]
+fn diagnostics_do_not_report_assigned_locals_in_short_circuit_temps() {
+    let mir = lower_mir(
+        "frameSkip = 4; nSteps = 10; for n = 1:nSteps; if mod(n, frameSkip) == 0 || n == nSteps; x = n; end; end",
+    );
+    let diagnostics = analyze_assembly(&mir).diagnostics;
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+        "assigned locals should not produce definite-assignment diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn summary_records_function_outputs_and_store_entry() {
     let mir = lower_mir("function y = f(x); y = x; end");
     let body = mir.bodies.values().next().unwrap();

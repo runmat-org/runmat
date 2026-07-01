@@ -12,10 +12,14 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use runmat_builtins::{BuiltinErrorDescriptor, Value};
-#[cfg(not(target_arch = "wasm32"))]
-use runmat_gc_api::GcPtr;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
+pub mod analysis;
 pub mod dispatcher;
+pub mod geometry;
+pub mod operations;
 
 pub mod callsite;
 pub mod console;
@@ -46,6 +50,41 @@ pub const CALL_BOUND_METHOD_BUILTIN_NAME: &str = "__runmat_call_bound_method__";
 pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
 pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
+pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
+
+fn object_handle_flag_valid(obj: &runmat_builtins::ObjectInstance) -> bool {
+    !matches!(
+        obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
+        Some(Value::Bool(false))
+    )
+}
+
+pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
+    if !handle.valid {
+        return false;
+    }
+    is_handle_target_valid(handle)
+}
+
+pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> bool {
+    runmat_gc::gc_with_value(&handle.target, |target| match target {
+        Value::Object(obj) => object_handle_flag_valid(obj),
+        _ => false,
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn set_handle_valid(handle: &runmat_builtins::HandleRef, valid: bool) -> bool {
+    runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
+        Value::Object(obj) => {
+            obj.properties
+                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
+            true
+        }
+        _ => false,
+    })
+    .unwrap_or(false)
+}
 
 pub fn object_property_getter_name(field: &str) -> String {
     format!("get.{field}")
@@ -57,6 +96,79 @@ pub fn object_property_setter_name(field: &str) -> String {
 
 pub(crate) fn current_requested_outputs() -> usize {
     crate::output_count::current_output_count().unwrap_or(1)
+}
+
+thread_local! {
+    static CONSTRUCTOR_RECEIVER_STACK: std::cell::RefCell<Vec<Value>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct ConstructorReceiverPollGuard;
+
+impl Drop for ConstructorReceiverPollGuard {
+    fn drop(&mut self) {
+        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+fn push_constructor_receiver_for_poll(receiver: Value) -> ConstructorReceiverPollGuard {
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+        stack.borrow_mut().push(receiver);
+    });
+    ConstructorReceiverPollGuard
+}
+
+pub(crate) struct ConstructorReceiverFuture<Fut> {
+    receiver: Value,
+    future: Pin<Box<Fut>>,
+}
+
+impl<Fut: Future> Future for ConstructorReceiverFuture<Fut> {
+    type Output = Fut::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let _guard = push_constructor_receiver_for_poll(self.receiver.clone());
+        self.future.as_mut().poll(cx)
+    }
+}
+
+pub(crate) fn with_constructor_receiver<Fut>(
+    receiver: Value,
+    future: Fut,
+) -> ConstructorReceiverFuture<Fut>
+where
+    Fut: Future,
+{
+    ConstructorReceiverFuture {
+        receiver,
+        future: Box::pin(future),
+    }
+}
+
+fn constructor_receiver_class_name(receiver: &Value) -> Option<&str> {
+    match receiver {
+        Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        _ => None,
+    }
+}
+
+fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .find(|receiver| {
+                constructor_receiver_class_name(receiver).is_some_and(|receiver_class| {
+                    receiver_class == class_name
+                        || runmat_builtins::is_class_or_subclass(receiver_class, class_name)
+                })
+            })
+            .cloned()
+    })
 }
 
 fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
@@ -118,11 +230,12 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     match receiver {
         Value::Object(obj) => Some(obj.class_name.clone()),
         Value::HandleObject(handle) => {
-            let target = unsafe { &*handle.target.as_raw() };
-            Some(match target {
+            let class_name = runmat_gc::gc_with_value(&handle.target, |target| match target {
                 Value::Object(obj) => obj.class_name.clone(),
                 _ => handle.class_name.clone(),
             })
+            .unwrap_or_else(|_| handle.class_name.clone());
+            Some(class_name)
         }
         _ => None,
     }
@@ -288,23 +401,9 @@ pub use blas::*;
 pub use lapack::*;
 
 pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
-            .map_err(|e| format!("Cell creation error: {e}"))?;
-        Ok(Value::Cell(ca))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let handles: Vec<GcPtr<Value>> = values
-            .into_iter()
-            .map(|v| runmat_gc::gc_allocate(v).map_err(|e| format!("Cell creation error: {e}")))
-            .collect::<Result<_, _>>()?;
-        let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
-            .map_err(|e| format!("Cell creation error: {e}"))?;
-        Ok(Value::Cell(ca))
-    }
+    let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
+        .map_err(|e| format!("Cell creation error: {e}"))?;
+    Ok(Value::Cell(ca))
 }
 
 pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
@@ -407,36 +506,50 @@ pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::Buil
 
 pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
     match v {
-        Value::HandleObject(h) => Ok(Value::Bool(runmat_builtins::is_handle_valid(&h))),
+        Value::HandleObject(h) => Ok(Value::Bool(crate::is_handle_valid(&h))),
         Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
         _ => Ok(Value::Bool(false)),
     }
 }
 
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 
 #[derive(Default)]
 struct EventRegistry {
     next_id: u64,
     listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>>,
+    listener_roots: std::collections::HashMap<u64, ListenerRoots>,
 }
 
-static EVENT_REGISTRY: OnceLock<Mutex<EventRegistry>> = OnceLock::new();
+struct ListenerRoots {
+    _target: runmat_gc::ExplicitRoot,
+    _callback: runmat_gc::ExplicitRoot,
+}
 
-fn events() -> &'static Mutex<EventRegistry> {
-    EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
+thread_local! {
+    static EVENT_REGISTRY: RefCell<EventRegistry> = RefCell::new(EventRegistry::default());
+}
+
+#[cfg(test)]
+fn reset_event_registry_for_test() {
+    EVENT_REGISTRY.with(|registry| {
+        *registry.borrow_mut() = EventRegistry::default();
+    });
 }
 
 pub(crate) fn invalidate_listener_registration(listener_id: u64) {
-    let mut reg = events().lock().unwrap();
-    for listeners in reg.listeners.values_mut() {
-        for listener in listeners.iter_mut() {
-            if listener.id == listener_id {
-                listener.valid = false;
-                listener.enabled = false;
+    EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        for listeners in registry.listeners.values_mut() {
+            for listener in listeners.iter_mut() {
+                if listener.id == listener_id {
+                    listener.valid = false;
+                    listener.enabled = false;
+                }
             }
         }
-    }
+        registry.listener_roots.remove(&listener_id);
+    });
 }
 
 pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
@@ -527,8 +640,23 @@ pub(crate) async fn addlistener_builtin(
     callback: Value,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
-        Value::Object(o) => o as *const _ as usize,
+        Value::HandleObject(h) => {
+            if !crate::is_handle_valid(h) {
+                return Err(build_runtime_error("addlistener: target handle is invalid")
+                    .with_builtin("addlistener")
+                    .with_identifier("RunMat:AddListenerTargetInvalid")
+                    .build());
+            }
+            runmat_gc::gc_handle_addr(&h.target)
+        }
+        Value::Object(_) => {
+            return Err(
+                build_runtime_error("addlistener: target object must be a handle object")
+                    .with_builtin("addlistener")
+                    .with_identifier("RunMat:AddListenerTargetInvalid")
+                    .build(),
+            )
+        }
         _ => {
             return Err(
                 build_runtime_error("addlistener: target must be handle or object")
@@ -538,32 +666,47 @@ pub(crate) async fn addlistener_builtin(
             )
         }
     };
-    let mut reg = events().lock().unwrap();
-    let id = {
-        reg.next_id += 1;
-        reg.next_id
-    };
-    let tgt_gc = match target {
-        Value::HandleObject(h) => h.target,
-        Value::Object(o) => {
-            runmat_gc::gc_allocate(Value::Object(o)).map_err(|e| format!("gc: {e}"))?
+    let id = EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.next_id += 1;
+        registry.next_id
+    });
+    let (target_root, target_class_name) = match target {
+        Value::HandleObject(h) => {
+            let class_name = h.class_name.clone();
+            (
+                runmat_gc::gc_root(h.target).map_err(|e| format!("gc: {e}"))?,
+                class_name,
+            )
         }
         _ => unreachable!(),
     };
     let callback = canonicalize_listener_callback(callback);
-    let cb_gc = runmat_gc::gc_allocate(callback).map_err(|e| format!("gc: {e}"))?;
+    let callback_root = runmat_gc::gc_allocate_rooted(callback).map_err(|e| format!("gc: {e}"))?;
     let listener = runmat_builtins::Listener {
         id,
-        target: tgt_gc,
+        target: target_root.handle(),
+        target_class_name,
         event_name: event_name.clone(),
-        callback: cb_gc,
+        callback: callback_root.handle(),
         enabled: true,
         valid: true,
     };
-    reg.listeners
-        .entry((key_ptr, event_name))
-        .or_default()
-        .push(listener.clone());
+    EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry
+            .listeners
+            .entry((key_ptr, event_name))
+            .or_default()
+            .push(listener.clone());
+        registry.listener_roots.insert(
+            id,
+            ListenerRoots {
+                _target: target_root,
+                _callback: callback_root,
+            },
+        );
+    });
     Ok(Value::Listener(listener))
 }
 
@@ -573,8 +716,23 @@ pub(crate) async fn notify_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
-        Value::Object(o) => o as *const _ as usize,
+        Value::HandleObject(h) => {
+            if !crate::is_handle_valid(h) {
+                return Err(build_runtime_error("notify: target handle is invalid")
+                    .with_builtin("notify")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build());
+            }
+            runmat_gc::gc_handle_addr(&h.target)
+        }
+        Value::Object(_) => {
+            return Err(
+                build_runtime_error("notify: target object must be a handle object")
+                    .with_builtin("notify")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build(),
+            )
+        }
         _ => {
             return Err(
                 build_runtime_error("notify: target must be handle or object")
@@ -585,22 +743,27 @@ pub(crate) async fn notify_builtin(
         }
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
-    {
-        let reg = events().lock().unwrap();
-        if let Some(list) = reg.listeners.get(&(key_ptr, event_name.clone())) {
+    EVENT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        if let Some(list) = registry.listeners.get(&(key_ptr, event_name.clone())) {
             for l in list {
                 if l.valid && l.enabled {
                     to_call.push(l.clone());
                 }
             }
         }
-    }
+    });
     for l in to_call {
         // Call callback via feval-like protocol.
         let mut args = Vec::new();
         args.push(target.clone());
         args.extend(rest.iter().cloned());
-        let cbv: Value = (*l.callback).clone();
+        let cbv: Value = runmat_gc::gc_clone_value(&l.callback).map_err(|e| {
+            build_runtime_error(format!("notify: invalid listener callback handle: {e}"))
+                .with_builtin("notify")
+                .with_identifier("RunMat:NotifyInvalidCallback")
+                .build()
+        })?;
         let should_dispatch = match &cbv {
             Value::String(s) => !s.trim().is_empty(),
             Value::StringArray(sa) => sa.data.len() == 1 && !sa.data[0].trim().is_empty(),
@@ -739,67 +902,129 @@ pub async fn call_super_constructor(
     super_class_name: String,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let receiver = create_class_object(class_name).await?;
-    let ctor_name = super_class_name
-        .rsplit('.')
-        .next()
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or(super_class_name.as_str());
-    let ctor_lookup = runmat_builtins::lookup_method(&super_class_name, ctor_name)
-        .or_else(|| runmat_builtins::lookup_method(&super_class_name, &super_class_name));
-    let Some((ctor, _owner)) = ctor_lookup else {
+    let receiver = if let Some(active) = active_constructor_receiver_for(&class_name) {
+        active
+    } else {
+        create_class_object(class_name).await?
+    };
+    let ctor_result = with_constructor_receiver(receiver.clone(), async {
+        let ctor_name = super_class_name
+            .rsplit('.')
+            .next()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(super_class_name.as_str());
+        let ctor_lookup = runmat_builtins::lookup_method(&super_class_name, ctor_name)
+            .or_else(|| runmat_builtins::lookup_method(&super_class_name, &super_class_name));
+        let Some((ctor, _owner)) = ctor_lookup else {
+            return Ok::<Option<Value>, RuntimeError>(None);
+        };
+        let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &ctor.function_name,
+            &args,
+            1,
+        )
+        .await
+        else {
+            return Ok::<Option<Value>, RuntimeError>(None);
+        };
+        Ok::<Option<Value>, RuntimeError>(Some(result?))
+    })
+    .await?;
+    let Some(ctor_result) = ctor_result else {
         return Ok(receiver);
     };
-    let Some(result) =
-        crate::user_functions::try_call_semantic_function_by_name(&ctor.function_name, &args, 1)
-            .await
-    else {
-        return Ok(receiver);
-    };
-    let ctor_result = result?;
     fn merge_parent_props_into_object(
         receiver_obj: &mut runmat_builtins::ObjectInstance,
         ctor_result: Value,
-    ) {
+        owner: Option<&runmat_gc::GcHandle>,
+    ) -> Result<(), RuntimeError> {
         match ctor_result {
             Value::Object(parent_obj) => {
                 for (name, value) in parent_obj.properties {
+                    if let Some(owner) = owner {
+                        runmat_gc::gc_record_handle_write(owner, &value);
+                    }
                     receiver_obj.properties.insert(name, value);
                 }
             }
             Value::HandleObject(parent_handle) => {
-                let raw_parent = unsafe { parent_handle.target.as_raw() };
-                if !raw_parent.is_null() {
-                    if let Value::Object(parent_obj) = unsafe { (&*raw_parent).clone() } {
+                if let Some(owner) = owner {
+                    if parent_handle.target == *owner {
+                        if parent_handle.valid {
+                            return Ok(());
+                        }
+                        return Err(build_runtime_error(
+                            "super constructor returned invalid parent handle",
+                        )
+                        .build());
+                    }
+                }
+                if !is_handle_valid(&parent_handle) {
+                    return Err(build_runtime_error(
+                        "super constructor returned invalid parent handle",
+                    )
+                    .build());
+                }
+                match runmat_gc::gc_clone_value(&parent_handle.target).map_err(|e| {
+                    build_runtime_error(format!(
+                        "super constructor returned stale parent handle: {e}"
+                    ))
+                    .build()
+                })? {
+                    Value::Object(parent_obj) => {
                         for (name, value) in parent_obj.properties {
+                            if let Some(owner) = owner {
+                                runmat_gc::gc_record_handle_write(owner, &value);
+                            }
                             receiver_obj.properties.insert(name, value);
                         }
+                    }
+                    _ => {
+                        return Err(build_runtime_error(
+                            "super constructor returned non-object parent handle",
+                        )
+                        .build());
                     }
                 }
             }
             Value::Struct(parent_fields) => {
                 for (name, value) in parent_fields.fields {
+                    if let Some(owner) = owner {
+                        runmat_gc::gc_record_handle_write(owner, &value);
+                    }
                     receiver_obj.properties.insert(name, value);
                 }
             }
             _ => {}
         }
+        Ok(())
     }
     match receiver {
         Value::Object(mut receiver_obj) => {
-            merge_parent_props_into_object(&mut receiver_obj, ctor_result);
+            merge_parent_props_into_object(&mut receiver_obj, ctor_result, None)?;
             Ok(Value::Object(receiver_obj))
         }
         Value::HandleObject(handle) => {
-            let raw = unsafe { handle.target.as_raw_mut() };
-            if !raw.is_null() {
-                if let Value::Object(mut receiver_obj) = unsafe { (&*raw).clone() } {
-                    merge_parent_props_into_object(&mut receiver_obj, ctor_result);
-                    unsafe {
-                        *raw = Value::Object(receiver_obj);
+            let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+                if let Value::Object(receiver_obj) = target {
+                    if !object_handle_flag_valid(receiver_obj) {
+                        return Err(build_runtime_error(
+                            "super constructor receiver handle is invalid",
+                        )
+                        .build());
                     }
+                    merge_parent_props_into_object(receiver_obj, ctor_result, Some(&handle.target))
+                } else {
+                    Err(
+                        build_runtime_error("super constructor receiver target is not an object")
+                            .build(),
+                    )
                 }
-            }
+            })
+            .map_err(|e| {
+                build_runtime_error(format!("super constructor receiver invalid: {e}")).build()
+            })?;
+            merged?;
             Ok(Value::HandleObject(handle))
         }
         _ => Ok(receiver),
@@ -1377,7 +1602,7 @@ mod tests {
     use super::*;
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, PropertyDef};
+    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, PropertyDef};
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -1389,6 +1614,14 @@ mod tests {
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("{}_{}", prefix, id)
+    }
+
+    fn listener_gc_test(test: impl FnOnce()) {
+        runmat_gc::gc_test_context(|| {
+            reset_event_registry_for_test();
+            test();
+            reset_event_registry_for_test();
+        });
     }
 
     #[test]
@@ -1446,6 +1679,18 @@ mod tests {
                 "missing signature {label} for {name}"
             );
         }
+    }
+
+    #[test]
+    fn non_object_handle_targets_are_invalid() {
+        let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
+        let handle = HandleRef {
+            class_name: "MalformedHandle".to_string(),
+            target,
+            valid: true,
+        };
+
+        assert!(!is_handle_valid(&handle));
     }
 
     #[test]
@@ -2841,6 +3086,72 @@ mod tests {
     }
 
     #[test]
+    fn addlistener_rejects_invalid_handle_target_with_identifier() {
+        listener_gc_test(|| {
+            let target = runmat_builtins::HandleRef {
+                class_name: "EventTarget".to_string(),
+                target: runmat_gc::gc_allocate(Value::Object(
+                    runmat_builtins::ObjectInstance::new("EventTarget".to_string()),
+                ))
+                .expect("allocate target"),
+                valid: true,
+            };
+            assert!(set_handle_valid(&target, false));
+
+            let err = block_on(addlistener_builtin(
+                Value::HandleObject(target),
+                "Changed".to_string(),
+                Value::FunctionHandle("sin".to_string()),
+            ))
+            .expect_err("addlistener should reject invalid handle target");
+            assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+        });
+    }
+
+    #[test]
+    fn addlistener_preserves_handle_target_when_callback_allocation_collects() {
+        runmat_gc::gc_test_context(|| {
+            reset_event_registry_for_test();
+            let config = runmat_gc::GcConfig {
+                young_generation_size: 64 * 1024 * 1024,
+                minor_gc_threshold: 0.35,
+                major_gc_threshold: 0.9,
+                ..runmat_gc::GcConfig::default()
+            };
+            runmat_gc::gc_configure(config).expect("configure aggressive periodic minor GC");
+
+            for i in 0..30 {
+                let _ = runmat_gc::gc_allocate(Value::Num(i as f64)).expect("seed allocation");
+            }
+
+            let target =
+                block_on(new_handle_object_builtin("EventTarget".to_string())).expect("target");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "ChangedSoundness".to_string(),
+                Value::FunctionHandle("sin".to_string()),
+            ))
+            .expect("listener registered");
+
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let target = runmat_gc::gc_clone_value(&listener.target)
+                .expect("listener target should survive construction");
+            assert!(matches!(
+                target,
+                Value::Object(ref object) if object.class_name == "EventTarget"
+            ));
+            assert_eq!(
+                runmat_gc::gc_clone_value(&listener.callback)
+                    .expect("listener callback should survive construction"),
+                Value::FunctionHandle("sin".to_string())
+            );
+            reset_event_registry_for_test();
+        });
+    }
+
+    #[test]
     fn notify_rejects_non_object_target_with_identifier() {
         let err = block_on(notify_builtin(
             Value::Num(1.0),
@@ -2853,224 +3164,248 @@ mod tests {
 
     #[test]
     fn addlistener_function_handle_prefers_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "event_callback").then_some(61)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let listener = block_on(addlistener_builtin(
-            target,
-            "Changed".to_string(),
-            Value::FunctionHandle("event_callback".to_string()),
-        ))
-        .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::BoundFunctionHandle { name, function }
-                if name == "event_callback" && *function == 61
-        ));
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "event_callback").then_some(61)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::FunctionHandle("event_callback".to_string()),
+            ))
+            .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::BoundFunctionHandle { name, function }
+                    if name == "event_callback" && *function == 61
+            ));
+        });
     }
 
     #[test]
     fn addlistener_external_function_handle_prefers_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "pkg.event_callback").then_some(62)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let listener = block_on(addlistener_builtin(
-            target,
-            "Changed".to_string(),
-            Value::ExternalFunctionHandle("pkg.event_callback".to_string()),
-        ))
-        .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::BoundFunctionHandle { name, function }
-                if name == "pkg.event_callback" && *function == 62
-        ));
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "pkg.event_callback").then_some(62)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::ExternalFunctionHandle("pkg.event_callback".to_string()),
+            ))
+            .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::BoundFunctionHandle { name, function }
+                    if name == "pkg.event_callback" && *function == 62
+            ));
+        });
     }
 
     #[test]
     fn addlistener_string_handle_prefers_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "event_callback").then_some(63)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let listener = block_on(addlistener_builtin(
-            target,
-            "Changed".to_string(),
-            Value::String("@event_callback".to_string()),
-        ))
-        .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::BoundFunctionHandle { name, function }
-                if name == "event_callback" && *function == 63
-        ));
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "event_callback").then_some(63)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::String("@event_callback".to_string()),
+            ))
+            .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::BoundFunctionHandle { name, function }
+                    if name == "event_callback" && *function == 63
+            ));
+        });
     }
 
     #[test]
     fn addlistener_char_handle_prefers_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "event_callback").then_some(64)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let listener = block_on(addlistener_builtin(
-            target,
-            "Changed".to_string(),
-            Value::CharArray(runmat_builtins::CharArray::new_row("@event_callback")),
-        ))
-        .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::BoundFunctionHandle { name, function }
-                if name == "event_callback" && *function == 64
-        ));
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "event_callback").then_some(64)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::CharArray(runmat_builtins::CharArray::new_row("@event_callback")),
+            ))
+            .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::BoundFunctionHandle { name, function }
+                    if name == "event_callback" && *function == 64
+            ));
+        });
     }
 
     #[test]
     fn addlistener_string_array_handle_prefers_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "event_callback").then_some(66)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let callback =
-            runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
-                .expect("string array");
-        let listener = block_on(addlistener_builtin(
-            target,
-            "Changed".to_string(),
-            Value::StringArray(callback),
-        ))
-        .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::BoundFunctionHandle { name, function }
-                if name == "event_callback" && *function == 66
-        ));
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "event_callback").then_some(66)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let callback =
+                runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
+                    .expect("string array");
+            let listener = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::StringArray(callback),
+            ))
+            .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::BoundFunctionHandle { name, function }
+                    if name == "event_callback" && *function == 66
+            ));
+        });
     }
 
     #[test]
     fn addlistener_closure_prefers_embedded_semantic_identity_when_resolved() {
-        let _resolver_guard =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "event_callback").then_some(65)
-            })));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let callback = Value::Closure(runmat_builtins::Closure {
-            function_name: "event_callback".to_string(),
-            bound_function: None,
-            captures: vec![Value::Num(9.0)],
+        listener_gc_test(|| {
+            let _resolver_guard =
+                crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                    (name == "event_callback").then_some(65)
+                })));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let callback = Value::Closure(runmat_builtins::Closure {
+                function_name: "event_callback".to_string(),
+                bound_function: None,
+                captures: vec![Value::Num(9.0)],
+            });
+            let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
+                .expect("listener registered");
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
+            assert!(matches!(
+                &callback,
+                Value::Closure(runmat_builtins::Closure {
+                    function_name,
+                    bound_function: Some(65),
+                    captures,
+                }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
+            ));
         });
-        let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
-            .expect("listener registered");
-        let Value::Listener(listener) = listener else {
-            panic!("expected listener value");
-        };
-        assert!(matches!(
-            &*listener.callback,
-            Value::Closure(runmat_builtins::Closure {
-                function_name,
-                bound_function: Some(65),
-                captures,
-            }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
-        ));
     }
 
     #[test]
     fn notify_semantic_function_handle_uses_semantic_identity() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let seen_calls = Arc::clone(&calls);
-        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |function, args, requested_outputs| {
-                assert_eq!(function, 44);
-                assert_eq!(requested_outputs, 0);
-                assert_eq!(args.len(), 1);
-                assert!(matches!(args[0], Value::HandleObject(_)));
-                seen_calls.fetch_add(1, Ordering::SeqCst);
-                Box::pin(async { Ok(Value::Num(0.0)) })
-            },
-        )));
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let callback = Value::BoundFunctionHandle {
-            name: "event_callback".to_string(),
-            function: 44,
-        };
+        listener_gc_test(|| {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let seen_calls = Arc::clone(&calls);
+            let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+                move |function, args, requested_outputs| {
+                    assert_eq!(function, 44);
+                    assert_eq!(requested_outputs, 0);
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Value::HandleObject(_)));
+                    seen_calls.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async { Ok(Value::Num(0.0)) })
+                },
+            )));
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let callback = Value::BoundFunctionHandle {
+                name: "event_callback".to_string(),
+                function: 44,
+            };
 
-        block_on(addlistener_builtin(
-            target.clone(),
-            "Changed".to_string(),
-            callback,
-        ))
-        .expect("listener registered");
-        block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
-            .expect("notify succeeds");
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+            block_on(addlistener_builtin(
+                target.clone(),
+                "Changed".to_string(),
+                callback,
+            ))
+            .expect("listener registered");
+            block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+                .expect("notify succeeds");
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        });
     }
 
     #[test]
     fn notify_char_handle_callback_surfaces_unresolved_identifier() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        block_on(addlistener_builtin(
-            target.clone(),
-            "Changed".to_string(),
-            Value::CharArray(runmat_builtins::CharArray::new_row(
-                "@definitely_missing_callback",
-            )),
-        ))
-        .expect("listener registered");
-        let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
-            .expect_err("unresolved char callback should fail");
-        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        listener_gc_test(|| {
+            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            block_on(addlistener_builtin(
+                target.clone(),
+                "Changed".to_string(),
+                Value::CharArray(runmat_builtins::CharArray::new_row(
+                    "@definitely_missing_callback",
+                )),
+            ))
+            .expect("listener registered");
+            let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+                .expect_err("unresolved char callback should fail");
+            assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        });
     }
 
     #[test]
     fn notify_string_array_handle_callback_surfaces_unresolved_identifier() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let target =
-            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
-        let callback = runmat_builtins::StringArray::new(
-            vec!["@definitely_missing_callback".to_string()],
-            vec![1, 1],
-        )
-        .expect("string array");
-        block_on(addlistener_builtin(
-            target.clone(),
-            "Changed".to_string(),
-            Value::StringArray(callback),
-        ))
-        .expect("listener registered");
-        let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
-            .expect_err("unresolved string-array callback should fail");
-        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        listener_gc_test(|| {
+            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+            let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
+                .expect("handle target");
+            let callback = runmat_builtins::StringArray::new(
+                vec!["@definitely_missing_callback".to_string()],
+                vec![1, 1],
+            )
+            .expect("string array");
+            block_on(addlistener_builtin(
+                target.clone(),
+                "Changed".to_string(),
+                Value::StringArray(callback),
+            ))
+            .expect("listener registered");
+            let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+                .expect_err("unresolved string-array callback should fail");
+            assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        });
     }
 
     #[test]

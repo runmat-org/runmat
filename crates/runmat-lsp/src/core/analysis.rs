@@ -5278,6 +5278,39 @@ end
     }
 
     #[test]
+    fn diagnostics_do_not_report_logical_index_lint_for_numeric_indexing() {
+        let text = "a = 0:pi/100:2*pi; b = sin(a); c = a(1:10);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let diags = diagnostics_for_document(text, &analysis);
+        let has_logical_index_lint = diags.iter().any(|d| match &d.code {
+            Some(lsp_types::NumberOrString::String(code)) => code == "lint.shape.logical_index",
+            _ => false,
+        });
+        assert!(
+            !has_logical_index_lint,
+            "unexpected logical index diagnostic: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn hover_reports_indexed_slice_shape_for_assigned_symbol() {
+        let text = "a = 0:pi/100:2*pi; c = a(1:22); d = c;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+
+        let c_use_offset = text.rfind('c').expect("c usage offset");
+        let c_use_position = offset_to_position(text, c_use_offset);
+        let c_hover = hover_at(text, &analysis, &c_use_position).expect("c hover");
+        let c_value = match c_hover.contents {
+            lsp_types::HoverContents::Markup(markup) => markup.value,
+            other => panic!("unexpected hover contents {other:?}"),
+        };
+
+        assert!(c_value.contains("Tensor"), "unexpected c hover {c_value}");
+        assert!(c_value.contains("1 x 22"), "unexpected c hover {c_value}");
+    }
+
+    #[test]
     fn semantic_tokens_encode_function_parameter_and_local_roles() {
         let text = "function y = foo(x)\nlocal = x + 1;\ny = local;\nend\nz = foo(1);";
         let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
@@ -5338,6 +5371,24 @@ end
             lsp_types::SemanticTokenType::FUNCTION,
         );
         assert_modifier_at(text, &decoded, sin_offset, 1);
+    }
+
+    #[test]
+    fn semantic_tokens_include_comments() {
+        let text = "% Grid\nx = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
+        let tokens = semantic_tokens_full(text, &analysis).expect("semantic tokens");
+        let legend = semantic_tokens_legend();
+        let decoded = decode_semantic_tokens(text, &tokens);
+        let comment_offset = text.find('%').expect("comment offset");
+
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            comment_offset,
+            lsp_types::SemanticTokenType::COMMENT,
+        );
     }
 
     #[test]

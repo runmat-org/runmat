@@ -42,7 +42,7 @@ pub enum Value {
 | --- | --- | --- |
 | Scalars | `Int`, `Num`, `Complex`, `Bool`, `String` | Scalar `Num` is a MATLAB double. Integer scalars preserve their integer class through `IntValue`. |
 | Dense arrays | `Tensor`, `ComplexTensor`, `LogicalArray`, `StringArray`, `CharArray` | Dense array payloads own Rust buffers directly. Shapes follow MATLAB column-major semantics. |
-| Aggregates | `Cell`, `Struct` | Cells store GC pointers for elements. Struct fields preserve insertion order through `IndexMap`. |
+| Aggregates | `Cell`, `Struct` | Cells own `Value` elements directly. Struct fields preserve insertion order through `IndexMap`. |
 | Objects and handles | `Object`, `HandleObject`, `Listener`, `ClassRef`, `MException` | These carry class, identity, event, metaclass, or exception semantics for object-oriented and diagnostic paths. |
 | Callables | `FunctionHandle`, `ExternalFunctionHandle`, `MethodFunctionHandle`, `BoundFunctionHandle`, `Closure` | Callable values preserve different resolution policies for builtins, semantic functions, methods, closures, and external-boundary calls. |
 | Acceleration | `GpuTensor` | GPU-resident tensor handle owned by an acceleration provider. Host materialization happens only when an operation requires it. |
@@ -87,9 +87,9 @@ Text has three representations:
 
 Most `Value` payloads are ordinary Rust-owned data. They are cloned, moved through the VM stack, stored in workspace maps, and dropped by normal Rust ownership.
 
-Values that need stable identity or shared reachability use `GcPtr<Value>`. The main cases are cells, handle-object targets, listener targets/callbacks, selected object/struct payloads, and bridge values that must remain address-stable while runtime code holds references.
+Values that need stable identity, cycle reachability, finalizers, or bridge identity use opaque `GcHandle` tokens. The main cases are handle-object targets, listener targets/callbacks, selected object/struct payloads, provider-owned resources that need finalizers, and bridge values that must remain address-stable while runtime code holds references. Cell arrays own their elements as ordinary `Value`s; a cell element may contain a handle, but cells do not GC-allocate every element.
 
-The GC owns the outer `Value` allocation. Nested buffers such as tensor data, strings, vectors, and maps remain owned by Rust values inside that allocation. The collector is non-moving, so surviving `GcPtr<Value>` addresses stay stable.
+The GC owns the outer `Value` allocation. Nested buffers such as tensor data, strings, vectors, and maps remain owned by Rust values inside that allocation. The collector is non-moving, so surviving `GcHandle` identities stay stable. A `GcHandle` is not a Rust reference; value access goes through checked GC APIs and guarded `GcValueRef` / `GcValueMut` borrows.
 
 For details on allocation, roots, barriers, and finalizers, see [Memory Management](/docs/runtime/gc).
 
@@ -152,7 +152,7 @@ flowchart TD
   VM["VM stack and variables<br/>Vec<Value>"]
   Builtins["runtime builtins<br/>Value inputs and outputs"]
   Workspace["session workspace<br/>workspace_values"]
-  GC["GC-managed identity<br/>GcPtr<Value>"]
+  GC["GC-managed identity<br/>GcHandle"]
   GPU["Accelerate provider<br/>Value::GpuTensor"]
   Host["host ABI<br/>ExecutionOutcome / WASM wire"]
 

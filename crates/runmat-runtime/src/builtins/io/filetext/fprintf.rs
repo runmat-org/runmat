@@ -475,7 +475,7 @@ fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
                 )
             })?;
             ensure_writable(&info)?;
-            let handle = registry::take_handle(fid).ok_or_else(|| {
+            let handle = registry::shared_handle(fid).ok_or_else(|| {
                 fprintf_error_with_message(
                     FPRINTF_ERROR_INVALID_IDENTIFIER.message,
                     &FPRINTF_ERROR_INVALID_IDENTIFIER,

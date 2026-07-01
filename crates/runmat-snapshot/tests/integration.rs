@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::rc::Rc;
 use tempfile::tempdir;
 
 use runmat_gc::gc_test_context;
@@ -320,8 +320,8 @@ fn test_snapshot_manager() {
         let snapshot1 = manager.load_snapshot(&snapshot_path).unwrap();
         let snapshot2 = manager.load_snapshot(&snapshot_path).unwrap();
 
-        // Should be the same Arc (cached)
-        assert!(Arc::ptr_eq(&snapshot1, &snapshot2));
+        // Should be the same Rc (cached)
+        assert!(Rc::ptr_eq(&snapshot1, &snapshot2));
 
         // Test cache stats
         let (cache_entries, cache_size) = manager.cache_stats();
@@ -461,7 +461,9 @@ fn test_concurrent_loading() {
                 let cfg = Arc::clone(&config);
                 thread::spawn(move || {
                     let mut loader = SnapshotLoader::new((*cfg).clone());
-                    loader.load(&*path)
+                    loader
+                        .load(&*path)
+                        .map(|(snapshot, stats)| (snapshot.metadata.runmat_version, stats))
                 })
             })
             .collect();

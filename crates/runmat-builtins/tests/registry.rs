@@ -242,11 +242,11 @@ fn test_cell_arrays() {
     if let Value::Cell(contents) = cell {
         assert_eq!(contents.data.len(), 3);
         assert_eq!(
-            &*contents.data[0],
+            &contents.data[0],
             &Value::Int(runmat_builtins::IntValue::I32(1))
         );
-        assert_eq!(&*contents.data[1], &Value::String("test".to_string()));
-        assert_eq!(&*contents.data[2], &Value::Bool(false));
+        assert_eq!(&contents.data[1], &Value::String("test".to_string()));
+        assert_eq!(&contents.data[2], &Value::Bool(false));
     } else {
         panic!("Expected Cell value");
     }

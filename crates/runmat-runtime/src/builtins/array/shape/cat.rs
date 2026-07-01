@@ -879,8 +879,7 @@ fn concat_cell_rows(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(total_rows * cols);
     for arr in arrays {
         for handle in arr.data {
-            let value = unsafe { &*handle.as_raw() }.clone();
-            values.push(value);
+            values.push(handle);
         }
     }
     let cell =
@@ -911,7 +910,7 @@ fn concat_cell_cols(arrays: Vec<CellArray>) -> BuiltinResult<Value> {
         for arr in &arrays {
             for col in 0..arr.cols {
                 let idx = row * arr.cols + col;
-                let value = unsafe { &*arr.data[idx].as_raw() }.clone();
+                let value = arr.data[idx].clone();
                 values.push(value);
             }
         }

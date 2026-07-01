@@ -1,13 +1,15 @@
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
-    AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
-    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PatchEdgeColorMode,
-    PatchFaceColorMode, PatchPlot, PlotElement, PlotType, QuiverPlot, ReferenceLine,
-    ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot,
-    SurfacePlot, TextStyle,
+    AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
+    Figure, LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshDeformation,
+    MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField, MeshTriangleRange,
+    MeshVectorField, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot, PlotElement, PlotType,
+    QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode,
+    StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt};
 
 /// High-level event emitted whenever a figure changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +50,118 @@ pub struct FigureScene {
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
     pub plots: Vec<ScenePlot>,
+}
+
+pub const DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneExportPolicy {
+    pub max_scene_bytes: usize,
+}
+
+impl Default for SceneExportPolicy {
+    fn default() -> Self {
+        Self {
+            max_scene_bytes: DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES,
+        }
+    }
+}
+
+pub fn resolve_scene_export_policy(max_scene_bytes: Option<usize>) -> SceneExportPolicy {
+    SceneExportPolicy {
+        max_scene_bytes: max_scene_bytes
+            .filter(|bytes| *bytes > 0)
+            .unwrap_or(DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneExportErrorKind {
+    BudgetExceeded,
+    UnexportableGpuData,
+    Serialization,
+    Readback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneExportError {
+    pub kind: SceneExportErrorKind,
+    pub message: String,
+}
+
+impl SceneExportError {
+    fn budget_exceeded(used: usize, added: usize, max: usize) -> Self {
+        Self {
+            kind: SceneExportErrorKind::BudgetExceeded,
+            message: format!(
+                "figure scene export exceeds budget: {} + {} bytes > {} bytes",
+                used, added, max
+            ),
+        }
+    }
+
+    fn unexportable(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::UnexportableGpuData,
+            message: message.into(),
+        }
+    }
+
+    fn serialization(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::Serialization,
+            message: message.into(),
+        }
+    }
+
+    fn readback(message: impl Into<String>) -> Self {
+        Self {
+            kind: SceneExportErrorKind::Readback,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for SceneExportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for SceneExportError {}
+
+#[derive(Debug, Clone, Copy)]
+struct SceneExportBudget {
+    max_bytes: usize,
+    used_bytes: usize,
+}
+
+impl SceneExportBudget {
+    fn new(policy: SceneExportPolicy) -> Self {
+        Self {
+            max_bytes: policy.max_scene_bytes,
+            used_bytes: 0,
+        }
+    }
+
+    fn reserve_plot(&mut self, plot: &ScenePlot) -> Result<(), SceneExportError> {
+        let bytes = serde_json::to_vec(plot)
+            .map_err(|err| SceneExportError::serialization(err.to_string()))?;
+        self.reserve_bytes(bytes.len())
+    }
+
+    fn reserve_bytes(&mut self, byte_len: usize) -> Result<(), SceneExportError> {
+        let next = self.used_bytes.saturating_add(byte_len);
+        if next > self.max_bytes {
+            return Err(SceneExportError::budget_exceeded(
+                self.used_bytes,
+                byte_len,
+                self.max_bytes,
+            ));
+        }
+        self.used_bytes = next;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +351,40 @@ pub enum ScenePlot {
         #[serde(default)]
         force_3d: bool,
     },
+    Mesh {
+        #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+        vertices: Vec<[f32; 3]>,
+        triangles: Vec<[u32; 3]>,
+        mesh_id: Option<String>,
+        face_color_rgba: [f32; 4],
+        edge_color_rgba: [f32; 4],
+        face_alpha: f32,
+        edge_alpha: f32,
+        edge_width: f32,
+        #[serde(default)]
+        edge_mode: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        feature_edge_groups: Vec<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        vertex_colors_rgba: Vec<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        triangle_colors_rgba: Vec<[f32; 4]>,
+        axes_index: u32,
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        regions: Vec<SerializedMeshRegion>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlighted_region_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlight_color_rgba: Option<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scalar_field: Option<Box<SerializedMeshScalarField>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vector_field: Option<Box<SerializedMeshVectorField>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deformation: Option<Box<SerializedMeshDeformation>>,
+        visible: bool,
+    },
     Line3 {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
@@ -346,7 +494,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 2;
+    pub const SCHEMA_VERSION: u32 = 3;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -359,6 +507,58 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots,
+        }
+    }
+
+    pub async fn capture_for_export(
+        figure: &Figure,
+        policy: SceneExportPolicy,
+    ) -> Result<Self, SceneExportError> {
+        let snapshot = FigureSnapshot::capture(figure);
+        let mut budget = SceneExportBudget::new(policy);
+        let mut plots = Vec::new();
+
+        for (idx, plot) in figure.plots().enumerate() {
+            let scene_plot =
+                ScenePlot::from_plot_for_export(plot, figure_axis_index(figure, idx)).await?;
+            budget.reserve_plot(&scene_plot)?;
+            plots.push(scene_plot);
+        }
+
+        Ok(Self {
+            schema_version: Self::SCHEMA_VERSION,
+            layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots,
+        })
+    }
+
+    pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
+        let mut figure = Figure::new()
+            .with_grid(scene.show_grid)
+            .with_legend(false)
+            .with_axis_equal(scene.axis_equal);
+        figure.title = scene.title.clone();
+        figure.x_label = Some("X".to_string());
+        figure.y_label = Some("Y".to_string());
+        figure.z_label = Some("Z".to_string());
+        figure.set_axes_view(0, -38.0, 24.0);
+        let snapshot = FigureSnapshot::capture(&figure);
+        let plots = scene
+            .chunks
+            .iter()
+            .filter_map(scene_chunk_to_mesh_plot)
+            .collect::<Vec<_>>();
+
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            layout: FigureLayout {
+                axes_rows: 1,
+                axes_cols: 1,
+                axes_indices: vec![0; plots.len()],
+            },
             metadata: snapshot.metadata,
             plots,
         }
@@ -405,6 +605,30 @@ impl FigureScene {
         Ok(figure)
     }
 
+    pub fn into_geometry_scene(
+        self,
+        scene_id: impl Into<String>,
+        revision: u64,
+    ) -> Result<crate::GeometryScene, String> {
+        self.validate_schema_version()?;
+        let scene_id = scene_id.into();
+        let mut chunks = Vec::new();
+        for (plot_index, plot) in self.plots.into_iter().enumerate() {
+            append_geometry_scene_chunks(&scene_id, plot_index, plot, &mut chunks)?;
+        }
+        if chunks.is_empty() {
+            return Err("figure scene does not contain renderable mesh plots".to_string());
+        }
+        let mut scene = crate::GeometryScene::new(scene_id, revision, chunks).with_title(
+            self.metadata
+                .title
+                .unwrap_or_else(|| "Geometry Preview".to_string()),
+        );
+        scene.show_grid = self.metadata.grid_enabled;
+        scene.axis_equal = self.metadata.axis_equal;
+        Ok(scene)
+    }
+
     fn validate_schema_version(&self) -> Result<(), String> {
         if self.schema_version == 0 || self.schema_version > FigureScene::SCHEMA_VERSION {
             return Err(format!(
@@ -413,7 +637,7 @@ impl FigureScene {
                 FigureScene::SCHEMA_VERSION
             ));
         }
-        if self.schema_version < FigureScene::SCHEMA_VERSION
+        if self.schema_version < 2
             && self
                 .plots
                 .iter()
@@ -421,11 +645,193 @@ impl FigureScene {
         {
             return Err(format!(
                 "patch plots require figure scene schema version {}",
-                FigureScene::SCHEMA_VERSION
+                2
+            ));
+        }
+        if self.schema_version < 3
+            && self
+                .plots
+                .iter()
+                .any(|plot| matches!(plot, ScenePlot::Mesh { .. }))
+        {
+            return Err(format!(
+                "mesh plots require figure scene schema version {}",
+                3
             ));
         }
         Ok(())
     }
+}
+
+fn append_geometry_scene_chunks(
+    scene_id: &str,
+    plot_index: usize,
+    plot: ScenePlot,
+    chunks: &mut Vec<crate::GeometrySceneChunk>,
+) -> Result<(), String> {
+    let ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id,
+        face_color_rgba,
+        edge_color_rgba,
+        face_alpha,
+        edge_alpha,
+        edge_width,
+        edge_mode,
+        feature_edge_groups,
+        vertex_colors_rgba,
+        triangle_colors_rgba,
+        axes_index: _,
+        label,
+        regions,
+        highlighted_region_id,
+        highlight_color_rgba,
+        scalar_field,
+        vector_field,
+        deformation,
+        visible,
+    } = plot
+    else {
+        return Ok(());
+    };
+
+    if !visible {
+        return Ok(());
+    }
+
+    let region_metadata = regions
+        .iter()
+        .cloned()
+        .map(crate::geometry_scene::GeometrySceneRegion::from)
+        .collect::<Vec<_>>();
+    let mesh_id_for_chunk = mesh_id
+        .clone()
+        .unwrap_or_else(|| format!("mesh_{}", plot_index + 1));
+    let mut mesh = MeshPlot::new(vertices.into_iter().map(xyz_to_vec3).collect(), triangles)?;
+    mesh.set_mesh_id(mesh_id.clone());
+    mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+    mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+    mesh.set_face_alpha(face_alpha);
+    mesh.set_edge_alpha(edge_alpha);
+    mesh.set_edge_width(edge_width);
+    mesh.set_edge_mode(parse_mesh_edge_mode(&edge_mode));
+    if !feature_edge_groups.is_empty() {
+        mesh.set_feature_edge_groups(Some(feature_edge_groups))?;
+    }
+    if !vertex_colors_rgba.is_empty() {
+        mesh.set_vertex_colors(Some(
+            vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    if !triangle_colors_rgba.is_empty() {
+        mesh.set_triangle_colors(Some(
+            triangle_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    mesh.set_label(label.clone());
+    mesh.set_regions(regions.into_iter().map(Into::into).collect());
+    mesh.set_highlighted_region_id(highlighted_region_id);
+    if let Some(color) = highlight_color_rgba {
+        mesh.set_highlight_color(rgba_to_vec4(color));
+    }
+    if let Some(field) = scalar_field {
+        mesh.set_scalar_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = vector_field {
+        mesh.set_vector_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = deformation {
+        mesh.set_deformation(Some((*field).into()))?;
+    }
+
+    let face_render_data = mesh.render_data();
+    chunks.push(
+        crate::GeometrySceneChunk::from_render_data(
+            format!("{scene_id}:{mesh_id_for_chunk}:faces:{plot_index}"),
+            face_render_data,
+        )
+        .with_mesh_id(mesh_id_for_chunk.clone())
+        .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
+        .with_regions(region_metadata),
+    );
+
+    if let Some(edge_render_data) = mesh.edge_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:edges:{plot_index}"),
+                edge_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} edges",
+                label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    if let Some(vector_render_data) = mesh.vector_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:vectors:{plot_index}"),
+                vector_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} vectors",
+                label.unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    Ok(())
+}
+
+fn scene_chunk_to_mesh_plot(
+    chunk: &crate::geometry_scene::GeometrySceneChunk,
+) -> Option<ScenePlot> {
+    if chunk.render_data.pipeline_type != crate::core::PipelineType::Triangles {
+        return None;
+    }
+    let indices = chunk.indices.as_ref()?;
+    if indices.len() < 3 {
+        return None;
+    }
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|item| [item[0], item[1], item[2]])
+        .collect::<Vec<_>>();
+    if triangles.is_empty() {
+        return None;
+    }
+    let vertices = chunk
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect::<Vec<_>>();
+    Some(ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id: chunk.mesh_id.clone(),
+        face_color_rgba: chunk.material.albedo.to_array(),
+        edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
+        face_alpha: chunk.material.albedo.w,
+        edge_alpha: 0.0,
+        edge_width: 0.0,
+        edge_mode: "none".to_string(),
+        feature_edge_groups: Vec::new(),
+        vertex_colors_rgba: Vec::new(),
+        triangle_colors_rgba: Vec::new(),
+        axes_index: 0,
+        label: chunk.label.clone(),
+        regions: chunk.regions.iter().map(Into::into).collect(),
+        highlighted_region_id: None,
+        highlight_color_rgba: Some([0.98, 0.78, 0.22, 1.0]),
+        scalar_field: None,
+        vector_field: None,
+        deformation: None,
+        visible: chunk.visible,
+    })
 }
 
 fn figure_axis_index(figure: &Figure, plot_index: usize) -> u32 {
@@ -645,6 +1051,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
+    pub axes_kind: SerializedAxesKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -698,6 +1106,36 @@ pub struct SerializedAxesMetadata {
     pub world_text_annotations: Vec<SerializedTextAnnotation>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SerializedAxesKind {
+    #[default]
+    Cartesian,
+    Polar,
+}
+
+fn is_cartesian_axes_kind(value: &SerializedAxesKind) -> bool {
+    *value == SerializedAxesKind::Cartesian
+}
+
+impl From<AxesKind> for SerializedAxesKind {
+    fn from(value: AxesKind) -> Self {
+        match value {
+            AxesKind::Cartesian => Self::Cartesian,
+            AxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
+impl From<SerializedAxesKind> for AxesKind {
+    fn from(value: SerializedAxesKind) -> Self {
+        match value {
+            SerializedAxesKind::Cartesian => Self::Cartesian,
+            SerializedAxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedTextAnnotation {
@@ -706,9 +1144,69 @@ pub struct SerializedTextAnnotation {
     pub style: SerializedTextStyle,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshRegion {
+    pub region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_ranges: Vec<SerializedMeshTriangleRange>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshTriangleRange {
+    pub start: u32,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshScalarField {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub location: String,
+    #[serde(deserialize_with = "deserialize_vec_f32_lossy")]
+    pub values: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_limits: Option<[f32; 2]>,
+    pub colormap: String,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshVectorField {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub location: String,
+    #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+    pub vectors: Vec<[f32; 3]>,
+    pub scale: f32,
+    pub stride: usize,
+    pub color_rgba: [f32; 4],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshDeformation {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+    pub displacements: Vec<[f32; 3]>,
+    pub scale: f32,
+}
+
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -749,6 +1247,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -807,6 +1306,188 @@ impl From<SerializedTextAnnotation> for crate::plots::figure::TextAnnotation {
     }
 }
 
+impl From<&MeshRegion> for SerializedMeshRegion {
+    fn from(value: &MeshRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<&crate::geometry_scene::GeometrySceneRegion> for SerializedMeshRegion {
+    fn from(value: &crate::geometry_scene::GeometrySceneRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<SerializedMeshRegion> for MeshRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        MeshRegion {
+            region_id: value.region_id,
+            label: value.label,
+            tag: value.tag,
+            triangle_ranges: value.triangle_ranges.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<SerializedMeshRegion> for crate::geometry_scene::GeometrySceneRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        crate::geometry_scene::GeometrySceneRegion::new(
+            value.region_id,
+            value.label,
+            value.tag,
+            value.triangle_ranges.into_iter().map(Into::into).collect(),
+        )
+    }
+}
+
+impl From<MeshTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: MeshTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
+impl From<crate::geometry_scene::GeometrySceneTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: crate::geometry_scene::GeometrySceneTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for MeshTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for crate::geometry_scene::GeometrySceneTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
+    }
+}
+
+impl From<&MeshScalarField> for SerializedMeshScalarField {
+    fn from(value: &MeshScalarField) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            location: value.location.as_str().to_string(),
+            values: value.values.clone(),
+            color_limits: value.color_limits,
+            colormap: value.colormap.clone(),
+            alpha: value.alpha,
+        }
+    }
+}
+
+impl TryFrom<SerializedMeshScalarField> for MeshScalarField {
+    type Error = String;
+
+    fn try_from(value: SerializedMeshScalarField) -> Result<Self, Self::Error> {
+        Ok(Self {
+            field_id: value.field_id,
+            label: value.label,
+            location: MeshFieldLocation::parse(&value.location).ok_or_else(|| {
+                format!("unknown mesh scalar field location '{}'", value.location)
+            })?,
+            values: value.values,
+            color_limits: value.color_limits,
+            colormap: value.colormap,
+            alpha: value.alpha,
+        })
+    }
+}
+
+impl From<&MeshVectorField> for SerializedMeshVectorField {
+    fn from(value: &MeshVectorField) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            location: value.location.as_str().to_string(),
+            vectors: value
+                .vectors
+                .iter()
+                .map(|vector| vector.to_array())
+                .collect(),
+            scale: value.scale,
+            stride: value.stride,
+            color_rgba: vec4_to_rgba(value.color),
+        }
+    }
+}
+
+impl TryFrom<SerializedMeshVectorField> for MeshVectorField {
+    type Error = String;
+
+    fn try_from(value: SerializedMeshVectorField) -> Result<Self, Self::Error> {
+        Ok(Self {
+            field_id: value.field_id,
+            label: value.label,
+            location: MeshFieldLocation::parse(&value.location).ok_or_else(|| {
+                format!("unknown mesh vector field location '{}'", value.location)
+            })?,
+            vectors: value.vectors.into_iter().map(Vec3::from_array).collect(),
+            scale: value.scale,
+            stride: value.stride,
+            color: rgba_to_vec4(value.color_rgba),
+        })
+    }
+}
+
+impl From<&MeshDeformation> for SerializedMeshDeformation {
+    fn from(value: &MeshDeformation) -> Self {
+        Self {
+            field_id: value.field_id.clone(),
+            label: value.label.clone(),
+            displacements: value
+                .displacements
+                .iter()
+                .map(|displacement| displacement.to_array())
+                .collect(),
+            scale: value.scale,
+        }
+    }
+}
+
+impl From<SerializedMeshDeformation> for MeshDeformation {
+    fn from(value: SerializedMeshDeformation) -> Self {
+        Self {
+            field_id: value.field_id,
+            label: value.label,
+            displacements: value
+                .displacements
+                .into_iter()
+                .map(Vec3::from_array)
+                .collect(),
+            scale: value.scale,
+        }
+    }
+}
+
 /// Descriptor for a single plot element within the figure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -831,7 +1512,572 @@ impl PlotDescriptor {
     }
 }
 
+fn validate_required_equal_lengths(
+    kind: &str,
+    fields: &[(&str, usize)],
+) -> Result<(), SceneExportError> {
+    let Some((first_name, first_len)) = fields.first().copied() else {
+        return Ok(());
+    };
+    if first_len == 0 {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required {first_name} values"
+        )));
+    }
+    for (name, len) in fields.iter().copied().skip(1) {
+        if len == 0 {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} is missing required {name} values"
+            )));
+        }
+        if len != first_len {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} length mismatch: {name} has {len} values, expected {first_len}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_surface_grid<T>(
+    kind: &str,
+    x: &[f64],
+    y: &[f64],
+    grid: &[Vec<T>],
+) -> Result<(), SceneExportError> {
+    if x.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required x values"
+        )));
+    }
+    if y.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required y values"
+        )));
+    }
+    if grid.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required grid rows"
+        )));
+    }
+    if grid.len() != x.len() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} row count ({}) must match x length ({})",
+            grid.len(),
+            x.len()
+        )));
+    }
+    for (row_idx, row) in grid.iter().enumerate() {
+        if row.len() != y.len() {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} row {row_idx} length ({}) must match y length ({})",
+                row.len(),
+                y.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl ScenePlot {
+    async fn from_plot_for_export(
+        plot: &PlotElement,
+        axes_index: u32,
+    ) -> Result<Self, SceneExportError> {
+        let scene_plot = match plot {
+            PlotElement::Line(line) => {
+                let (x, y) = line
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "line plot has no exportable scene data",
+                    ));
+                }
+                Self::Line {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                }
+            }
+            PlotElement::ReferenceLine(_) => Self::from_plot(plot, axes_index),
+            PlotElement::Scatter(scatter) => {
+                let (x, y) = scatter
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter plot has no exportable scene data",
+                    ));
+                }
+                Self::Scatter {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(scatter.color),
+                    marker_size: scatter.marker_size,
+                    marker_style: format!("{:?}", scatter.marker_style),
+                    axes_index,
+                    label: scatter.label.clone(),
+                    visible: scatter.visible,
+                }
+            }
+            PlotElement::Bar(bar) => {
+                let values = bar
+                    .export_scene_values()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if values.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "bar chart has no exportable scene data",
+                    ));
+                }
+                Self::Bar {
+                    labels: bar.labels.clone(),
+                    values,
+                    histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
+                    color_rgba: vec4_to_rgba(bar.color),
+                    outline_color_rgba: bar.outline_color.map(vec4_to_rgba),
+                    bar_width: bar.bar_width,
+                    outline_width: bar.outline_width,
+                    orientation: format!("{:?}", bar.orientation),
+                    group_index: bar.group_index as u32,
+                    group_count: bar.group_count as u32,
+                    stack_offsets: bar.stack_offsets().map(|offsets| offsets.to_vec()),
+                    axes_index,
+                    label: bar.label.clone(),
+                    visible: bar.visible,
+                }
+            }
+            PlotElement::ErrorBar(error) => {
+                let (x, y, y_neg, y_pos, x_neg, x_pos) = error
+                    .export_scene_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "errorbar plot has no exportable scene data",
+                    ));
+                }
+                Self::ErrorBar {
+                    x,
+                    y,
+                    err_low: y_neg,
+                    err_high: y_pos,
+                    x_err_low: x_neg,
+                    x_err_high: x_pos,
+                    orientation: format!("{:?}", error.orientation),
+                    color_rgba: vec4_to_rgba(error.color),
+                    line_width: error.line_width,
+                    line_style: format!("{:?}", error.line_style),
+                    cap_width: error.cap_size,
+                    marker_style: error.marker.as_ref().map(|m| format!("{:?}", m.kind)),
+                    marker_size: error.marker.as_ref().map(|m| m.size),
+                    marker_face_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.face_color)),
+                    marker_edge_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.edge_color)),
+                    marker_filled: error.marker.as_ref().map(|m| m.filled),
+                    axes_index,
+                    label: error.label.clone(),
+                    visible: error.visible,
+                }
+            }
+            PlotElement::Stairs(stairs) => {
+                let (x, y) = stairs
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "stairs plot has no exportable scene data",
+                    ));
+                }
+                Self::Stairs {
+                    x,
+                    y,
+                    color_rgba: vec4_to_rgba(stairs.color),
+                    line_width: stairs.line_width,
+                    axes_index,
+                    label: stairs.label.clone(),
+                    visible: stairs.visible,
+                }
+            }
+            PlotElement::Stem(stem) => {
+                let (x, y) = stem
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "stem plot has no exportable scene data",
+                    ));
+                }
+                Self::Stem {
+                    x,
+                    y,
+                    baseline: stem.baseline,
+                    color_rgba: vec4_to_rgba(stem.color),
+                    line_width: stem.line_width,
+                    line_style: format!("{:?}", stem.line_style),
+                    baseline_color_rgba: vec4_to_rgba(stem.baseline_color),
+                    baseline_visible: stem.baseline_visible,
+                    marker_color_rgba: vec4_to_rgba(
+                        stem.marker
+                            .as_ref()
+                            .map(|m| m.face_color)
+                            .unwrap_or(stem.color),
+                    ),
+                    marker_size: stem.marker.as_ref().map(|m| m.size).unwrap_or(0.0),
+                    marker_filled: stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
+                    axes_index,
+                    label: stem.label.clone(),
+                    visible: stem.visible,
+                }
+            }
+            PlotElement::Area(area) => {
+                let (x, y) = area
+                    .export_scene_xy_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "area plot has no exportable scene data",
+                    ));
+                }
+                Self::Area {
+                    x,
+                    y,
+                    lower_y: area.lower_y.clone(),
+                    baseline: area.baseline,
+                    color_rgba: vec4_to_rgba(area.color),
+                    axes_index,
+                    label: area.label.clone(),
+                    visible: area.visible,
+                }
+            }
+            PlotElement::Quiver(quiver) => {
+                let (x, y, u, v) = quiver
+                    .export_scene_vector_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "quiver plot has no exportable scene data",
+                    ));
+                }
+                Self::Quiver {
+                    x,
+                    y,
+                    u,
+                    v,
+                    color_rgba: vec4_to_rgba(quiver.color),
+                    line_width: quiver.line_width,
+                    scale: quiver.scale,
+                    head_size: quiver.head_size,
+                    axes_index,
+                    label: quiver.label.clone(),
+                    visible: quiver.visible,
+                }
+            }
+            PlotElement::Surface(surface) => {
+                let (x, y, z) = surface
+                    .export_scene_grid_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "surface plot has no exportable scene data",
+                    ));
+                }
+                let color_grid = surface
+                    .export_scene_color_grid()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                Self::Surface {
+                    x,
+                    y,
+                    z,
+                    colormap: format!("{:?}", surface.colormap),
+                    shading_mode: format!("{:?}", surface.shading_mode),
+                    wireframe: surface.wireframe,
+                    alpha: surface.alpha,
+                    flatten_z: surface.flatten_z,
+                    image_mode: surface.image_mode,
+                    color_grid_rgba: color_grid.as_ref().map(|grid| {
+                        grid.iter()
+                            .map(|row| row.iter().map(|color| vec4_to_rgba(*color)).collect())
+                            .collect()
+                    }),
+                    color_limits: surface.color_limits.map(|(lo, hi)| [lo, hi]),
+                    axes_index,
+                    label: surface.label.clone(),
+                    visible: surface.visible,
+                }
+            }
+            PlotElement::Patch(_) | PlotElement::Mesh(_) | PlotElement::Pie(_) => {
+                Self::from_plot(plot, axes_index)
+            }
+            PlotElement::Line3(line) => {
+                let (x, y, z) = line
+                    .export_scene_xyz_data()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if x.is_empty() && y.is_empty() && z.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "plot3 line has no exportable scene data",
+                    ));
+                }
+                Self::Line3 {
+                    x,
+                    y,
+                    z,
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                }
+            }
+            PlotElement::Scatter3(scatter3) => {
+                let points = scatter3
+                    .export_scene_points()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if points.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter3 plot has no exportable scene data",
+                    ));
+                }
+                let colors = scatter3
+                    .export_scene_colors(points.len())
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                Self::Scatter3 {
+                    points: points.into_iter().map(vec3_to_xyz).collect(),
+                    colors_rgba: colors.into_iter().map(vec4_to_rgba).collect(),
+                    point_size: scatter3.point_size,
+                    point_sizes: scatter3.point_sizes.clone(),
+                    axes_index,
+                    label: scatter3.label.clone(),
+                    visible: scatter3.visible,
+                }
+            }
+            PlotElement::Contour(contour) => {
+                let vertices = contour
+                    .export_scene_vertices()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "contour plot has no exportable scene data",
+                    ));
+                }
+                Self::Contour {
+                    vertices: vertices.into_iter().map(Into::into).collect(),
+                    bounds_min: vec3_to_xyz(contour.bounds().min),
+                    bounds_max: vec3_to_xyz(contour.bounds().max),
+                    base_z: contour.base_z,
+                    line_width: contour.line_width,
+                    axes_index,
+                    label: contour.label.clone(),
+                    visible: contour.visible,
+                    force_3d: contour.force_3d,
+                }
+            }
+            PlotElement::ContourFill(fill) => {
+                let vertices = fill
+                    .export_scene_vertices()
+                    .await
+                    .map_err(SceneExportError::readback)?;
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "filled contour plot has no exportable scene data",
+                    ));
+                }
+                Self::ContourFill {
+                    vertices: vertices.into_iter().map(Into::into).collect(),
+                    bounds_min: vec3_to_xyz(fill.bounds().min),
+                    bounds_max: vec3_to_xyz(fill.bounds().max),
+                    axes_index,
+                    label: fill.label.clone(),
+                    visible: fill.visible,
+                }
+            }
+        };
+        scene_plot.validate_exportable()?;
+        Ok(scene_plot)
+    }
+
+    fn validate_exportable(&self) -> Result<(), SceneExportError> {
+        match self {
+            ScenePlot::Line { x, y, .. }
+            | ScenePlot::Scatter { x, y, .. }
+            | ScenePlot::Stairs { x, y, .. }
+            | ScenePlot::Stem { x, y, .. }
+            | ScenePlot::Area { x, y, .. } => {
+                validate_required_equal_lengths(
+                    "plot X/Y scene data",
+                    &[("x", x.len()), ("y", y.len())],
+                )?;
+            }
+            ScenePlot::ErrorBar {
+                x,
+                y,
+                err_low,
+                err_high,
+                x_err_low,
+                x_err_high,
+                ..
+            } => {
+                validate_required_equal_lengths(
+                    "errorbar scene data",
+                    &[
+                        ("x", x.len()),
+                        ("y", y.len()),
+                        ("err_low", err_low.len()),
+                        ("err_high", err_high.len()),
+                        ("x_err_low", x_err_low.len()),
+                        ("x_err_high", x_err_high.len()),
+                    ],
+                )?;
+            }
+            ScenePlot::Quiver { x, y, u, v, .. } => {
+                validate_required_equal_lengths(
+                    "quiver vector field scene data",
+                    &[
+                        ("x", x.len()),
+                        ("y", y.len()),
+                        ("u", u.len()),
+                        ("v", v.len()),
+                    ],
+                )?;
+            }
+            ScenePlot::Bar {
+                labels,
+                values,
+                histogram_bin_edges,
+                stack_offsets,
+                ..
+            } => {
+                validate_required_equal_lengths(
+                    "bar value scene data",
+                    &[("labels", labels.len()), ("values", values.len())],
+                )?;
+                if let Some(edges) = histogram_bin_edges {
+                    if edges.len() != values.len() + 1 {
+                        return Err(SceneExportError::unexportable(format!(
+                            "bar histogram bin edge count ({}) must be values length + 1 ({})",
+                            edges.len(),
+                            values.len() + 1
+                        )));
+                    }
+                }
+                if let Some(offsets) = stack_offsets {
+                    if offsets.len() != values.len() {
+                        return Err(SceneExportError::unexportable(format!(
+                            "bar stack offset count ({}) must match value count ({})",
+                            offsets.len(),
+                            values.len()
+                        )));
+                    }
+                }
+            }
+            ScenePlot::Surface {
+                x,
+                y,
+                z,
+                color_grid_rgba,
+                ..
+            } => {
+                validate_surface_grid("surface grid scene data", x, y, z)?;
+                if let Some(color_grid) = color_grid_rgba {
+                    validate_surface_grid("surface color grid scene data", x, y, color_grid)?;
+                }
+            }
+            ScenePlot::Patch {
+                vertices, faces, ..
+            } => {
+                if vertices.is_empty() || faces.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "patch plot has no exportable mesh scene data",
+                    ));
+                }
+            }
+            ScenePlot::Mesh {
+                vertices,
+                triangles,
+                ..
+            } => {
+                if vertices.is_empty() || triangles.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "mesh plot has no exportable mesh scene data",
+                    ));
+                }
+            }
+            ScenePlot::Line3 { x, y, z, .. } => {
+                validate_required_equal_lengths(
+                    "plot3 line scene data",
+                    &[("x", x.len()), ("y", y.len()), ("z", z.len())],
+                )?;
+            }
+            ScenePlot::Scatter3 {
+                points,
+                colors_rgba,
+                point_sizes,
+                ..
+            } => {
+                if points.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "scatter3 plot has no exportable point scene data",
+                    ));
+                }
+                if !colors_rgba.is_empty() && colors_rgba.len() != points.len() {
+                    return Err(SceneExportError::unexportable(format!(
+                        "scatter3 color count ({}) must match point count ({})",
+                        colors_rgba.len(),
+                        points.len()
+                    )));
+                }
+                if let Some(sizes) = point_sizes {
+                    if sizes.len() != points.len() {
+                        return Err(SceneExportError::unexportable(format!(
+                            "scatter3 point size count ({}) must match point count ({})",
+                            sizes.len(),
+                            points.len()
+                        )));
+                    }
+                }
+            }
+            ScenePlot::Contour { vertices, .. } | ScenePlot::ContourFill { vertices, .. } => {
+                if vertices.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "contour plot has no exportable vertex scene data",
+                    ));
+                }
+            }
+            ScenePlot::Pie { values, .. } => {
+                if values.is_empty() {
+                    return Err(SceneExportError::unexportable(
+                        "pie plot has no exportable value scene data",
+                    ));
+                }
+            }
+            ScenePlot::ReferenceLine { .. } => {}
+            ScenePlot::Unsupported { plot_kind, .. } => {
+                return Err(SceneExportError::unexportable(format!(
+                    "unsupported plot kind cannot be exported: {plot_kind:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn from_plot(plot: &PlotElement, axes_index: u32) -> Self {
         match plot {
             PlotElement::Line(line) => Self::Line {
@@ -1002,6 +2248,42 @@ impl ScenePlot {
                 label: patch.label().map(str::to_string),
                 visible: patch.is_visible(),
                 force_3d: patch.force_3d(),
+            },
+            PlotElement::Mesh(mesh) => Self::Mesh {
+                vertices: mesh
+                    .vertices()
+                    .iter()
+                    .map(|point| vec3_to_xyz(*point))
+                    .collect(),
+                triangles: mesh.triangles().to_vec(),
+                mesh_id: mesh.mesh_id().map(str::to_string),
+                face_color_rgba: vec4_to_rgba(mesh.face_color()),
+                edge_color_rgba: vec4_to_rgba(mesh.edge_color()),
+                face_alpha: mesh.face_alpha(),
+                edge_alpha: mesh.edge_alpha(),
+                edge_width: mesh.edge_width(),
+                edge_mode: mesh.edge_mode().as_str().to_string(),
+                feature_edge_groups: mesh
+                    .feature_edge_groups()
+                    .map(|groups| groups.to_vec())
+                    .unwrap_or_default(),
+                vertex_colors_rgba: mesh
+                    .vertex_colors()
+                    .map(|colors| colors.iter().copied().map(vec4_to_rgba).collect())
+                    .unwrap_or_default(),
+                triangle_colors_rgba: mesh
+                    .triangle_colors()
+                    .map(|colors| colors.iter().copied().map(vec4_to_rgba).collect())
+                    .unwrap_or_default(),
+                axes_index,
+                label: mesh.label().map(str::to_string),
+                regions: mesh.regions().iter().map(Into::into).collect(),
+                highlighted_region_id: mesh.highlighted_region_id().map(str::to_string),
+                highlight_color_rgba: Some(vec4_to_rgba(mesh.highlight_color())),
+                scalar_field: mesh.scalar_field().map(|field| Box::new(field.into())),
+                vector_field: mesh.vector_field().map(|field| Box::new(field.into())),
+                deformation: mesh.deformation().map(|field| Box::new(field.into())),
+                visible: mesh.is_visible(),
             },
             PlotElement::Line3(line) => Self::Line3 {
                 x: line.x_data.clone(),
@@ -1378,6 +2660,69 @@ impl ScenePlot {
                 patch.set_force_3d(force_3d);
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
+            ScenePlot::Mesh {
+                vertices,
+                triangles,
+                mesh_id,
+                face_color_rgba,
+                edge_color_rgba,
+                face_alpha,
+                edge_alpha,
+                edge_width,
+                edge_mode,
+                feature_edge_groups,
+                vertex_colors_rgba,
+                triangle_colors_rgba,
+                axes_index,
+                label,
+                regions,
+                highlighted_region_id,
+                highlight_color_rgba,
+                scalar_field,
+                vector_field,
+                deformation,
+                visible,
+            } => {
+                let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
+                let mut mesh = MeshPlot::new(vertices, triangles)?;
+                mesh.set_mesh_id(mesh_id);
+                mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+                mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+                mesh.set_face_alpha(face_alpha);
+                mesh.set_edge_alpha(edge_alpha);
+                mesh.set_edge_width(edge_width);
+                mesh.set_edge_mode(parse_mesh_edge_mode(&edge_mode));
+                if !feature_edge_groups.is_empty() {
+                    mesh.set_feature_edge_groups(Some(feature_edge_groups))?;
+                }
+                if !vertex_colors_rgba.is_empty() {
+                    mesh.set_vertex_colors(Some(
+                        vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+                    ))?;
+                }
+                if !triangle_colors_rgba.is_empty() {
+                    mesh.set_triangle_colors(Some(
+                        triangle_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+                    ))?;
+                }
+                mesh.set_label(label);
+                mesh.set_regions(regions.into_iter().map(Into::into).collect());
+                mesh.set_highlighted_region_id(highlighted_region_id);
+                if let Some(color) = highlight_color_rgba {
+                    mesh.set_highlight_color(rgba_to_vec4(color));
+                }
+                if let Some(field) = scalar_field {
+                    mesh.set_scalar_field(Some((*field).try_into()?))?;
+                }
+                if let Some(field) = vector_field {
+                    mesh.set_vector_field(Some((*field).try_into()?))?;
+                }
+                if let Some(field) = deformation {
+                    mesh.set_deformation(Some((*field).into()))?;
+                }
+                mesh.set_visible(visible);
+                figure.add_mesh_plot_on_axes(mesh, axes_index as usize);
+            }
             ScenePlot::Line3 {
                 x,
                 y,
@@ -1527,27 +2872,7 @@ fn parse_marker_style(value: &str) -> MarkerStyle {
 }
 
 fn parse_colormap(value: &str) -> ColorMap {
-    match value {
-        "Jet" => ColorMap::Jet,
-        "Hot" => ColorMap::Hot,
-        "Cool" => ColorMap::Cool,
-        "Spring" => ColorMap::Spring,
-        "Summer" => ColorMap::Summer,
-        "Autumn" => ColorMap::Autumn,
-        "Winter" => ColorMap::Winter,
-        "Gray" => ColorMap::Gray,
-        "Bone" => ColorMap::Bone,
-        "Copper" => ColorMap::Copper,
-        "Pink" => ColorMap::Pink,
-        "Lines" => ColorMap::Lines,
-        "Viridis" => ColorMap::Viridis,
-        "Plasma" => ColorMap::Plasma,
-        "Inferno" => ColorMap::Inferno,
-        "Magma" => ColorMap::Magma,
-        "Turbo" => ColorMap::Turbo,
-        "Parula" => ColorMap::Parula,
-        _ => ColorMap::Parula,
-    }
+    ColorMap::from_name(value).unwrap_or(ColorMap::Parula)
 }
 
 fn parse_shading_mode(value: &str) -> ShadingMode {
@@ -1573,6 +2898,10 @@ fn parse_patch_edge_color_mode(value: &str) -> PatchEdgeColorMode {
         "None" => PatchEdgeColorMode::None,
         _ => PatchEdgeColorMode::Color,
     }
+}
+
+fn parse_mesh_edge_mode(value: &str) -> MeshEdgeMode {
+    MeshEdgeMode::parse(value).unwrap_or_default()
 }
 
 fn xyz_to_vec3(value: [f32; 3]) -> Vec3 {
@@ -1657,6 +2986,7 @@ pub enum PlotKind {
     Pie,
     Image,
     Surface,
+    Mesh,
     Patch,
     Scatter3,
     Contour,
@@ -1678,6 +3008,7 @@ impl From<PlotType> for PlotKind {
             PlotType::Quiver => Self::Quiver,
             PlotType::Pie => Self::Pie,
             PlotType::Surface => Self::Surface,
+            PlotType::Mesh => Self::Mesh,
             PlotType::Patch => Self::Patch,
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
@@ -1697,26 +3028,8 @@ fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
 }
 
 fn parse_colormap_name(name: &str) -> crate::plots::surface::ColorMap {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "viridis" => crate::plots::surface::ColorMap::Viridis,
-        "plasma" => crate::plots::surface::ColorMap::Plasma,
-        "inferno" => crate::plots::surface::ColorMap::Inferno,
-        "magma" => crate::plots::surface::ColorMap::Magma,
-        "turbo" => crate::plots::surface::ColorMap::Turbo,
-        "jet" => crate::plots::surface::ColorMap::Jet,
-        "hot" => crate::plots::surface::ColorMap::Hot,
-        "cool" => crate::plots::surface::ColorMap::Cool,
-        "spring" => crate::plots::surface::ColorMap::Spring,
-        "summer" => crate::plots::surface::ColorMap::Summer,
-        "autumn" => crate::plots::surface::ColorMap::Autumn,
-        "winter" => crate::plots::surface::ColorMap::Winter,
-        "gray" | "grey" => crate::plots::surface::ColorMap::Gray,
-        "bone" => crate::plots::surface::ColorMap::Bone,
-        "copper" => crate::plots::surface::ColorMap::Copper,
-        "pink" => crate::plots::surface::ColorMap::Pink,
-        "lines" => crate::plots::surface::ColorMap::Lines,
-        _ => crate::plots::surface::ColorMap::Parula,
-    }
+    crate::plots::surface::ColorMap::from_name(name)
+        .unwrap_or(crate::plots::surface::ColorMap::Parula)
 }
 
 fn vec4_to_rgba(value: Vec4) -> [f32; 4] {
@@ -1739,6 +3052,17 @@ where
     Ok(values
         .into_iter()
         .map(|value| value.unwrap_or(f64::NAN))
+        .collect())
+}
+
+fn deserialize_vec_f32_lossy<'de, D>(deserializer: D) -> Result<Vec<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<Option<f32>>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|value| value.unwrap_or(f32::NAN))
         .collect())
 }
 
@@ -1830,9 +3154,151 @@ where
 mod tests {
     use super::*;
     use crate::plots::{
-        Figure, Line3Plot, LinePlot, PatchPlot, Scatter3Plot, ScatterPlot, SurfacePlot,
+        AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
+        MeshPlot, PatchPlot, PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation,
+        Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
     };
     use glam::{Vec3, Vec4};
+
+    #[test]
+    fn async_scene_export_covers_every_plot_element_variant() {
+        let bounds = BoundingBox::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0));
+        let cases: Vec<(&str, PlotElement)> = vec![
+            (
+                "line",
+                PlotElement::Line(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "scatter",
+                PlotElement::Scatter(ScatterPlot::new(vec![0.0, 1.0], vec![2.0, 3.0]).unwrap()),
+            ),
+            (
+                "bar",
+                PlotElement::Bar(
+                    BarChart::new(vec!["A".into(), "B".into()], vec![1.0, 2.0]).unwrap(),
+                ),
+            ),
+            (
+                "errorbar",
+                PlotElement::ErrorBar(Box::new(
+                    ErrorBar::new_vertical(
+                        vec![0.0, 1.0],
+                        vec![1.0, 2.0],
+                        vec![0.1, 0.2],
+                        vec![0.3, 0.4],
+                    )
+                    .unwrap(),
+                )),
+            ),
+            (
+                "stairs",
+                PlotElement::Stairs(StairsPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "stem",
+                PlotElement::Stem(StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "area",
+                PlotElement::Area(AreaPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap()),
+            ),
+            (
+                "quiver",
+                PlotElement::Quiver(
+                    QuiverPlot::new(vec![0.0], vec![0.0], vec![1.0], vec![1.0]).unwrap(),
+                ),
+            ),
+            (
+                "pie",
+                PlotElement::Pie(PieChart::new(vec![1.0, 2.0], None).unwrap()),
+            ),
+            (
+                "surface",
+                PlotElement::Surface(
+                    SurfacePlot::new(
+                        vec![0.0, 1.0],
+                        vec![0.0, 1.0],
+                        vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+                    )
+                    .unwrap(),
+                ),
+            ),
+            (
+                "mesh",
+                PlotElement::Mesh(Box::new(
+                    MeshPlot::new(
+                        vec![
+                            Vec3::new(0.0, 0.0, 0.0),
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                        ],
+                        vec![[0, 1, 2]],
+                    )
+                    .unwrap(),
+                )),
+            ),
+            (
+                "patch",
+                PlotElement::Patch(
+                    PatchPlot::new(
+                        vec![
+                            Vec3::new(0.0, 0.0, 0.0),
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                        ],
+                        vec![vec![0, 1, 2]],
+                    )
+                    .unwrap(),
+                ),
+            ),
+            (
+                "line3",
+                PlotElement::Line3(
+                    Line3Plot::new(vec![0.0, 1.0], vec![1.0, 2.0], vec![2.0, 3.0]).unwrap(),
+                ),
+            ),
+            (
+                "scatter3",
+                PlotElement::Scatter3(Scatter3Plot::new(vec![Vec3::new(0.0, 0.0, 0.0)]).unwrap()),
+            ),
+            (
+                "contour",
+                PlotElement::Contour(ContourPlot::from_vertices(
+                    vec![
+                        Vertex::new(Vec3::new(0.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(1.0, 1.0, 0.0), Vec4::ONE),
+                    ],
+                    0.0,
+                    bounds,
+                )),
+            ),
+            (
+                "contour_fill",
+                PlotElement::ContourFill(ContourFillPlot::from_vertices(
+                    vec![
+                        Vertex::new(Vec3::new(0.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(1.0, 0.0, 0.0), Vec4::ONE),
+                        Vertex::new(Vec3::new(0.0, 1.0, 0.0), Vec4::ONE),
+                    ],
+                    bounds,
+                )),
+            ),
+            (
+                "reference_line",
+                PlotElement::ReferenceLine(
+                    ReferenceLine::new(ReferenceLineOrientation::Vertical, 0.5).unwrap(),
+                ),
+            ),
+        ];
+
+        for (name, plot) in cases {
+            let scene_plot = futures::executor::block_on(ScenePlot::from_plot_for_export(&plot, 0))
+                .unwrap_or_else(|err| panic!("{name} export failed: {err}"));
+            scene_plot
+                .validate_exportable()
+                .unwrap_or_else(|err| panic!("{name} validation failed: {err}"));
+        }
+    }
 
     #[test]
     fn capture_snapshot_reflects_layout_and_metadata() {
@@ -1862,6 +3328,100 @@ mod tests {
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
         assert!(!snapshot.metadata.grid_enabled);
+    }
+
+    #[test]
+    fn surface_scene_validation_uses_surface_plot_orientation() {
+        let scene_plot = ScenePlot::Surface {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![10.0, 20.0],
+            z: vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            colormap: "Parula".to_string(),
+            shading_mode: "Smooth".to_string(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_grid_rgba: Some(vec![
+                vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                vec![[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
+                vec![[1.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 1.0]],
+            ]),
+            color_limits: None,
+            axes_index: 0,
+            label: None,
+            visible: true,
+        };
+        scene_plot.validate_exportable().unwrap();
+
+        let transposed = ScenePlot::Surface {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![10.0, 20.0],
+            z: vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+            colormap: "Parula".to_string(),
+            shading_mode: "Smooth".to_string(),
+            wireframe: false,
+            alpha: 1.0,
+            flatten_z: false,
+            image_mode: false,
+            color_grid_rgba: None,
+            color_limits: None,
+            axes_index: 0,
+            label: None,
+            visible: true,
+        };
+        let err = transposed.validate_exportable().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("row count (2) must match x length (3)"));
+    }
+
+    #[test]
+    fn image_mode_surface_scene_roundtrip_preserves_color_grid() {
+        let snapshot = FigureSnapshot::capture(&Figure::new());
+        let scene = FigureScene {
+            schema_version: FigureScene::SCHEMA_VERSION,
+            layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots: vec![ScenePlot::Surface {
+                x: vec![0.0, 1.0],
+                y: vec![10.0, 20.0, 30.0],
+                z: vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
+                colormap: "Parula".to_string(),
+                shading_mode: "None".to_string(),
+                wireframe: false,
+                alpha: 1.0,
+                flatten_z: true,
+                image_mode: true,
+                color_grid_rgba: Some(vec![
+                    vec![
+                        [1.0, 0.0, 0.0, 1.0],
+                        [0.0, 1.0, 0.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                    ],
+                    vec![
+                        [1.0, 1.0, 0.0, 1.0],
+                        [1.0, 0.0, 1.0, 1.0],
+                        [0.0, 1.0, 1.0, 1.0],
+                    ],
+                ]),
+                color_limits: None,
+                axes_index: 0,
+                label: None,
+                visible: true,
+            }],
+        };
+
+        let rebuilt = scene.into_figure().expect("image surface scene restores");
+        let Some(PlotElement::Surface(surface)) = rebuilt.plots().next() else {
+            panic!("expected surface plot");
+        };
+        assert!(surface.image_mode);
+        assert!(surface.flatten_z);
+        let grid = surface.color_grid.as_ref().expect("color grid");
+        assert_eq!(grid.len(), 2);
+        assert_eq!(grid[0].len(), 3);
+        assert_eq!(grid[1][2], Vec4::new(0.0, 1.0, 1.0, 1.0));
     }
 
     #[test]
@@ -1963,15 +3523,163 @@ mod tests {
 
         let mut scene = FigureScene::capture(&figure);
         assert!(matches!(scene.plots.first(), Some(ScenePlot::Patch { .. })));
-        scene.schema_version = FigureScene::SCHEMA_VERSION - 1;
+        scene.schema_version = 1;
 
         let err = scene
             .into_figure()
             .expect_err("older patch schema must fail");
-        assert!(err.contains(&format!(
-            "patch plots require figure scene schema version {}",
-            FigureScene::SCHEMA_VERSION
-        )));
+        assert!(err.contains("patch plots require figure scene schema version 2"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_mesh_plot() {
+        let mut figure = Figure::new();
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        mesh.set_mesh_id(Some("mesh_1".to_string()));
+        mesh.set_label(Some("mesh tri".to_string()));
+        mesh.set_face_alpha(0.7);
+        mesh.set_edge_width(0.25);
+        mesh.set_edge_mode(MeshEdgeMode::Feature);
+        mesh.set_feature_edge_groups(Some(vec![3]))
+            .expect("feature group should be accepted");
+        mesh.set_vertex_colors(Some(vec![
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+            Vec4::new(0.3, 0.4, 0.5, 1.0),
+        ]))
+        .expect("vertex colors should be accepted");
+        mesh.set_triangle_colors(Some(vec![Vec4::new(0.3, 0.4, 0.5, 1.0)]))
+            .expect("triangle color should be accepted");
+        mesh.set_regions(vec![MeshRegion::new(
+            "region_default",
+            Some("Default Region".to_string()),
+            Some("mesh_default".to_string()),
+            vec![MeshTriangleRange::new(0, 1)],
+        )]);
+        mesh.set_highlighted_region_id(Some("region_default".to_string()));
+        figure.add_mesh_plot(mesh);
+
+        let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, FigureScene::SCHEMA_VERSION);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        let rebuilt = scene.into_figure().expect("mesh scene restore");
+        let Some(PlotElement::Mesh(mesh)) = rebuilt.plots().next() else {
+            panic!("expected mesh plot");
+        };
+        assert_eq!(mesh.mesh_id(), Some("mesh_1"));
+        assert_eq!(mesh.triangles(), &[[0, 1, 2]]);
+        assert_eq!(mesh.label(), Some("mesh tri"));
+        assert!((mesh.face_alpha() - 0.7).abs() < f32::EPSILON);
+        assert!((mesh.edge_width() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(mesh.edge_mode(), MeshEdgeMode::Feature);
+        assert_eq!(mesh.feature_edge_groups().unwrap(), &[3]);
+        assert_eq!(
+            mesh.vertex_colors()
+                .and_then(|colors| colors.first().copied()),
+            Some(Vec4::new(0.3, 0.4, 0.5, 1.0))
+        );
+        assert_eq!(
+            mesh.triangle_colors()
+                .and_then(|colors| colors.first().copied()),
+            Some(Vec4::new(0.3, 0.4, 0.5, 1.0))
+        );
+        assert_eq!(mesh.regions().len(), 1);
+        assert_eq!(mesh.regions()[0].region_id, "region_default");
+        assert_eq!(mesh.highlighted_region_id(), Some("region_default"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_mesh_fea_overlays() {
+        let mut figure = Figure::new();
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        mesh.set_scalar_field(Some(MeshScalarField {
+            field_id: "fea.structural.von_mises".to_string(),
+            label: Some("Von Mises".to_string()),
+            location: MeshFieldLocation::Vertex,
+            values: vec![0.0, 0.5, 1.0],
+            color_limits: Some([0.0, 1.0]),
+            colormap: "viridis".to_string(),
+            alpha: 0.8,
+        }))
+        .unwrap();
+        mesh.set_vector_field(Some(MeshVectorField {
+            field_id: "fea.em.flux_density".to_string(),
+            label: Some("Flux density".to_string()),
+            location: MeshFieldLocation::Triangle,
+            vectors: vec![Vec3::new(0.0, 0.0, 1.0)],
+            scale: 0.25,
+            stride: 1,
+            color: Vec4::new(0.9, 0.7, 0.2, 1.0),
+        }))
+        .unwrap();
+        mesh.set_deformation(Some(MeshDeformation {
+            field_id: "fea.structural.displacement".to_string(),
+            label: Some("Displacement".to_string()),
+            displacements: vec![Vec3::ZERO, Vec3::Z, Vec3::ZERO],
+            scale: 0.5,
+        }))
+        .unwrap();
+        figure.add_mesh_plot(mesh);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("mesh scene restore");
+        let Some(PlotElement::Mesh(mesh)) = rebuilt.plots().next() else {
+            panic!("expected mesh plot");
+        };
+        assert_eq!(
+            mesh.scalar_field().map(|field| field.field_id.as_str()),
+            Some("fea.structural.von_mises")
+        );
+        assert_eq!(
+            mesh.vector_field().map(|field| field.field_id.as_str()),
+            Some("fea.em.flux_density")
+        );
+        assert_eq!(
+            mesh.deformation().map(|field| field.field_id.as_str()),
+            Some("fea.structural.displacement")
+        );
+    }
+
+    #[test]
+    fn figure_scene_rejects_mesh_in_older_schema() {
+        let mut figure = Figure::new();
+        figure.add_mesh_plot(
+            MeshPlot::new(
+                vec![
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ],
+                vec![[0, 1, 2]],
+            )
+            .unwrap(),
+        );
+
+        let mut scene = FigureScene::capture(&figure);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        scene.schema_version = 2;
+
+        let err = scene
+            .into_figure()
+            .expect_err("older mesh schema must fail");
+        assert!(err.contains("mesh plots require figure scene schema version 3"));
     }
 
     #[test]
@@ -2328,6 +4036,7 @@ mod tests {
         figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
+        figure.set_axes_kind(1, AxesKind::Polar);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
@@ -2352,6 +4061,7 @@ mod tests {
         assert!(meta.minor_grid_explicit);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
+        assert_eq!(meta.axes_kind, AxesKind::Polar);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));

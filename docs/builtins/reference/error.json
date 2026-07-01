@@ -9,7 +9,6 @@
     "message"
   ],
   "summary": "Throw exceptions with identifiers and formatted messages in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

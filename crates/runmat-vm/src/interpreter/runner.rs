@@ -75,7 +75,9 @@ fn ensure_wasm_builtins_registered() {
 
 #[cfg(feature = "native-accel")]
 fn clear_residency(value: &Value) {
-    accel_residency::clear_value(value);
+    if let Err(err) = accel_residency::clear_value(value) {
+        log::warn!("failed to clear GPU residency: {err}");
+    }
 }
 
 pub async fn invoke_semantic_function_value(
@@ -267,7 +269,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
     #[cfg(feature = "native-accel")]
-    clear_semantic_function_temp_residency(&result_vars, &output_values);
+    clear_semantic_function_temp_residency(&result_vars, &output_values, &updated_captures);
     Ok((
         output_value(output_values, requested_outputs),
         updated_captures,
@@ -610,7 +612,7 @@ fn value_is_text(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) => true,
         Value::CharArray(chars) => chars.rows == 1,
-        Value::Cell(cell) => cell.data.iter().all(|entry| match &**entry {
+        Value::Cell(cell) => cell.data.iter().all(|entry| match &entry {
             Value::CharArray(chars) => chars.rows == 1,
             Value::String(_) => true,
             _ => false,
@@ -834,16 +836,36 @@ fn output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
 }
 
 #[cfg(feature = "native-accel")]
-fn clear_semantic_function_temp_residency(result_vars: &[Value], output_values: &[Value]) {
+fn clear_semantic_function_temp_residency(
+    result_vars: &[Value],
+    output_values: &[Value],
+    updated_captures: &[Value],
+) {
     let mut keep_values = output_values.to_vec();
+    keep_values.extend(updated_captures.iter().cloned());
     keep_values.extend(runtime_globals::collect_thread_roots());
     let keep = Value::OutputList(keep_values);
     for value in result_vars {
-        accel_residency::clear_value_excluding(value, &keep);
+        if let Err(err) = accel_residency::clear_value_excluding(value, &keep) {
+            log::warn!("failed to clear temporary semantic function GPU residency: {err}");
+        }
     }
 }
 
 pub async fn interpret_with_vars(
+    bytecode: &Bytecode,
+    initial_vars: &mut Vec<Value>,
+    current_function_name: Option<&str>,
+) -> VmResult<InterpreterOutcome> {
+    runmat_runtime::data::with_tx_registry_scope(interpret_with_vars_inner(
+        bytecode,
+        initial_vars,
+        current_function_name,
+    ))
+    .await
+}
+
+async fn interpret_with_vars_inner(
     bytecode: &Bytecode,
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
@@ -1349,9 +1371,12 @@ async fn run_interpreter_inner(
         let mut live_values = Vec::with_capacity(vars.len() + context.locals.len());
         live_values.extend(vars.iter().cloned());
         live_values.extend(context.locals.iter().cloned());
+        live_values.extend(runtime_globals::collect_thread_roots());
         let live_values = Value::OutputList(live_values);
         for value in &stack {
-            accel_residency::clear_value_excluding(value, &live_values);
+            if let Err(err) = accel_residency::clear_value_excluding(value, &live_values) {
+                log::warn!("failed to clear stack GPU residency: {err}");
+            }
         }
     }
     sync_initial_vars(initial_vars, &vars);

@@ -1,0 +1,96 @@
+{
+  "title": "damp",
+  "category": "control",
+  "keywords": [
+    "damp",
+    "damping ratio",
+    "natural frequency",
+    "poles",
+    "control system",
+    "tf",
+    "ss"
+  ],
+  "summary": "Return natural frequencies, damping ratios, and poles for control models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`damp` computes pole-derived control metadata on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`damp` is model analysis and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::damp::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`damp(sys)` analyzes supported control models by deriving natural frequencies and damping ratios from their poles.",
+  "behaviors": [
+    "Supports SISO `tf` objects and `ss` state-space objects.",
+    "Returns `wn` and `zeta` as `N x 1` real column vectors.",
+    "Returns poles as an `N x 1` real vector when all poles are real, or an `N x 1` complex vector when any pole has a nonzero imaginary part.",
+    "For continuous-time models, `wn = abs(p)` and `zeta = -real(p) / wn`.",
+    "For discrete-time models, damping metrics use the equivalent continuous pole `log(p) / Ts`, while the `p` output preserves the original discrete pole.",
+    "Static-gain transfer functions return empty column vectors."
+  ],
+  "examples": [
+    {
+      "description": "Second-order transfer function",
+      "input": "G = tf(1, [100 50 400]);\n[wn, zeta, p] = damp(G)",
+      "output": "wn contains values near 2, zeta contains values near 0.125, and p contains the complex pole pair."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `damp` cancel pole-zero pairs?",
+      "answer": "No. For `tf` objects it analyzes the stored denominator polynomial."
+    },
+    {
+      "question": "Does `damp` support discrete-time systems?",
+      "answer": "Yes. Natural frequency and damping ratio are computed from `log(p) / Ts`; the returned poles remain in the discrete domain."
+    }
+  ],
+  "links": [
+    {
+      "label": "pole",
+      "url": "./pole"
+    },
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "ss",
+      "url": "./ss"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/damp.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/damp.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "wn = damp(sys)\n[wn, zeta] = damp(sys)\n[wn, zeta, p] = damp(sys)",
+      "output": "Column vectors for natural frequencies, damping ratios, and poles."
+    },
+    "points": [
+      "`sys` must be a supported `tf` or `ss` model.",
+      "At most three output arguments are supported."
+    ]
+  },
+  "validation": {
+    "summary": "`damp` validates model metadata, extracts poles from transfer-function denominators or state-space state matrices, and materializes MATLAB-style column outputs. Tests cover continuous and discrete transfer functions, state-space models, output counts, and descriptor metadata.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/damp.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/damp.rs"
+    }
+  },
+  "gpu_residency": "`damp` returns host-resident vectors."
+}

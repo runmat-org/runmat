@@ -174,11 +174,11 @@ mod tests {
         let AxisSource::Host(y_vals) = y_axis else {
             panic!("expected host Y axis")
         };
-        assert_eq!(x_vals, vec![10.0, 15.0, 20.0]);
         assert_eq!(
-            y_vals,
-            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+            x_vals,
+            vec![10.0, 13.333333333333332, 16.666666666666664, 20.0]
         );
+        assert_eq!(y_vals, vec![1.0, 3.0, 5.0]);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -325,8 +325,8 @@ pub async fn image_axis_sources_from_xy_values(
 ) -> BuiltinResult<(AxisSource, AxisSource)> {
     let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, builtin).await?;
     Ok((
-        normalize_image_axis_source(x_axis, rows, builtin, "X").await?,
-        normalize_image_axis_source(y_axis, cols, builtin, "Y").await?,
+        normalize_image_axis_source(x_axis, cols, builtin, "X").await?,
+        normalize_image_axis_source(y_axis, rows, builtin, "Y").await?,
     ))
 }
 

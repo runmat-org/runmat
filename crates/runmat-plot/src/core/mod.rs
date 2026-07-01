@@ -13,7 +13,7 @@ pub mod renderer;
 pub mod scene;
 pub mod viewport;
 
-pub use camera::{Camera, CameraController, MouseButton, ProjectionType};
+pub use camera::{Camera, CameraController, CameraViewPreset, MouseButton, ProjectionType};
 pub use depth::{ClipPolicy, DepthMode};
 pub use gpu_pack::GpuPackContext;
 pub use interaction::{EventHandler, KeyCode, PlotEvent};

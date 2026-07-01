@@ -388,7 +388,7 @@ async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
 fn exist_handle(value: &Value) -> ExistResultKind {
     match value {
         Value::HandleObject(handle) => {
-            if runmat_builtins::is_handle_valid(handle) {
+            if crate::is_handle_valid(handle) {
                 ExistResultKind::Variable
             } else {
                 ExistResultKind::NotFound

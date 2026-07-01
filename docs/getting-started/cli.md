@@ -71,7 +71,22 @@ The explicit form is:
 runmat run analysis.m
 ```
 
+`runmat run` also runs `.fea` study and parametric sweep files:
+
+```bash
+runmat run studies/bracket_static.fea
+runmat run --json studies/bracket_static.fea
+```
+
+The default `.fea` output is a concise run summary with the `run_id`, quality status, evidence path, and a `fea.results("<run_id>")` post-processing hint. Use `--json` when automation needs structured output.
+
 RunMat also resolves configured project entrypoints. If a project has `runmat.toml` with an entrypoint named `main`, this works:
+
+```toml
+% runmat.toml
+[entrypoints.main]
+path = "src/main.m"
+```
 
 ```bash
 runmat run main
@@ -86,6 +101,20 @@ runmat run src/main
 ```
 
 Execution uses the same session pipeline as other hosts: parse, lower, compile, run, emit streams, update workspace, and report structured diagnostics.
+
+## Check
+
+Use `runmat check` before running a `.m` script or `.fea` study:
+
+```bash
+runmat check analysis.m
+runmat check studies/bracket_static.fea
+runmat check --json studies/bracket_static.fea
+```
+
+For `.m` files, check parses and compiles the script without executing it. For `.fea` files, check loads geometry, resolves selectors, validates the study or sweep, and builds the solve plan without running the solver.
+
+The default output is human-readable. JSON mode returns structured validation and plan payloads for CI and tooling.
 
 ## Pass Runtime Options
 

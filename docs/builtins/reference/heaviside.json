@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Compute the element-wise Heaviside step function.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

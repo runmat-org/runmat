@@ -9,7 +9,6 @@
     "elementwise"
   ],
   "summary": "Compute element-wise hyperbolic tangent values across real and complex array inputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,
