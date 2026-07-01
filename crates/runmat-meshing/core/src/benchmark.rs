@@ -6380,6 +6380,9 @@ mod tests {
             ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
                 "boundary_region_mismatch"
             }
+            ConstrainedCavityValidationError::BoundaryOutsideTetMismatch { .. } => {
+                "boundary_outside_tet_mismatch"
+            }
         }
     }
 

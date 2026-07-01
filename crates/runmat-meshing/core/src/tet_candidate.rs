@@ -4990,6 +4990,9 @@ fn diagnostic_constrained_seed_star_cavity_validation_bucket(
         ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
             "constrained_seed_star_refill_boundary_region_mismatch"
         }
+        ConstrainedCavityValidationError::BoundaryOutsideTetMismatch { .. } => {
+            "constrained_seed_star_refill_boundary_outside_tet_mismatch"
+        }
     }
 }
 
@@ -7157,6 +7160,7 @@ fn diagnostic_closed_edge_star_boundary_refill_completion_bucket(
             .iter()
             .map(|face| ConstrainedCavityBoundaryFace {
                 node_ids: *face,
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: reference.region_ids.clone(),
@@ -9495,6 +9499,7 @@ fn diagnostic_constrained_boundary_mismatch_reason(
             .map(
                 |face| crate::constrained_cavity::ConstrainedCavityBoundaryFace {
                     node_ids: *face,
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: Vec::new(),
@@ -9779,6 +9784,9 @@ fn diagnostic_constrained_boundary_mismatch_validation_reason(
         }
         ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
             "boundary_face_mismatch_constrained_boundary_region_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundaryOutsideTetMismatch { .. } => {
+            "boundary_face_mismatch_constrained_boundary_outside_tet_mismatch"
         }
     }
 }
@@ -11647,6 +11655,7 @@ fn constrained_boundary_node_cavity_reconnection_candidates(
             .iter()
             .map(|face| ConstrainedCavityBoundaryFace {
                 node_ids: *face,
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: reference.region_ids.clone(),

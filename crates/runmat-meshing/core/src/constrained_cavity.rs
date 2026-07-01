@@ -29,6 +29,8 @@ pub struct ConstrainedCavity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavityBoundaryFace {
     pub node_ids: [u32; 3],
+    #[serde(default)]
+    pub outside_tet_ids: Vec<u32>,
     pub source_face_id: Option<u32>,
     #[serde(default)]
     pub source_edge_ids: [Option<u32>; 3],
@@ -317,6 +319,11 @@ pub enum ConstrainedCavityValidationError {
         expected_region_ids: Vec<String>,
         candidate_region_ids: Vec<String>,
     },
+    BoundaryOutsideTetMismatch {
+        node_ids: [u32; 3],
+        expected_outside_tet_ids: Vec<u32>,
+        candidate_outside_tet_ids: Vec<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,6 +487,15 @@ fn build_constrained_cavity_from_index_set(
 ) -> ConstrainedCavity {
     let mut target_volume_m3 = 0.0_f64;
     let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
+    let mut all_face_owners = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for (tet_index, tet) in tets.iter().enumerate() {
+        for face in tet_faces(tet.node_ids) {
+            all_face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push(tet_index);
+        }
+    }
     for tet_index in selected {
         let tet = &tets[*tet_index];
         target_volume_m3 += tet.volume_m3;
@@ -497,8 +513,19 @@ fn build_constrained_cavity_from_index_set(
             continue;
         }
         let (tet_index, oriented_face) = owners[0];
+        let mut outside_tet_ids = all_face_owners
+            .get(&sorted_face(oriented_face))
+            .into_iter()
+            .flat_map(|owners| owners.iter())
+            .filter_map(|owner_index| {
+                (!selected.contains(owner_index)).then_some(tets[*owner_index].tet_id)
+            })
+            .collect::<Vec<_>>();
+        outside_tet_ids.sort_unstable();
+        outside_tet_ids.dedup();
         boundary_faces.push(ConstrainedCavityBoundaryFace {
             node_ids: oriented_face,
+            outside_tet_ids,
             source_face_id: None,
             source_edge_ids: [None, None, None],
             region_ids: tets[tet_index].region_ids.clone(),
@@ -932,6 +959,17 @@ pub fn validate_constrained_cavity_boundary_preserved(
         let candidate = candidate_faces
             .get(face_key)
             .expect("candidate face should exist after key comparison");
+        let expected_outside_tet_ids = sorted_u32_ids(&expected.outside_tet_ids);
+        let candidate_outside_tet_ids = sorted_u32_ids(&candidate.outside_tet_ids);
+        if expected_outside_tet_ids != candidate_outside_tet_ids {
+            return Err(
+                ConstrainedCavityValidationError::BoundaryOutsideTetMismatch {
+                    node_ids: *face_key,
+                    expected_outside_tet_ids,
+                    candidate_outside_tet_ids,
+                },
+            );
+        }
         if expected.source_face_id != candidate.source_face_id {
             return Err(
                 ConstrainedCavityValidationError::BoundarySourceFaceMismatch {
@@ -1211,6 +1249,7 @@ fn split_child_boundary_face(
 ) -> ConstrainedCavityBoundaryFace {
     ConstrainedCavityBoundaryFace {
         node_ids,
+        outside_tet_ids: parent.outside_tet_ids.clone(),
         source_face_id: parent.source_face_id,
         source_edge_ids: face_edges(node_ids).map(|edge| {
             perimeter_source_edges
@@ -1230,6 +1269,7 @@ fn three_edge_split_child_boundary_face(
 ) -> ConstrainedCavityBoundaryFace {
     ConstrainedCavityBoundaryFace {
         node_ids,
+        outside_tet_ids: parent.outside_tet_ids.clone(),
         source_face_id: parent.source_face_id,
         source_edge_ids: face_edges(node_ids).map(|edge| {
             let original_edge =
@@ -1265,6 +1305,7 @@ fn edge_split_child_boundary_face(
 ) -> ConstrainedCavityBoundaryFace {
     ConstrainedCavityBoundaryFace {
         node_ids,
+        outside_tet_ids: parent.outside_tet_ids.clone(),
         source_face_id: parent.source_face_id,
         source_edge_ids: face_edges(node_ids).map(|edge| {
             let sorted = sorted_edge(edge);
@@ -6810,6 +6851,7 @@ fn boundary_faces_from_refill_tets(
                     .map(|source| (*source).clone())
                     .unwrap_or(ConstrainedCavityBoundaryFace {
                         node_ids: face,
+                        outside_tet_ids: Vec::new(),
                         source_face_id: None,
                         source_edge_ids: [None, None, None],
                         region_ids: Vec::new(),
@@ -6861,6 +6903,9 @@ fn refill_validation_reason(error: &ConstrainedCavityValidationError) -> &'stati
         }
         ConstrainedCavityValidationError::BoundaryRegionMismatch { .. } => {
             "boundary_region_mismatch"
+        }
+        ConstrainedCavityValidationError::BoundaryOutsideTetMismatch { .. } => {
+            "boundary_outside_tet_mismatch"
         }
         ConstrainedCavityValidationError::EmptyRemovedTetSet
         | ConstrainedCavityValidationError::InvalidTargetVolume { .. }
@@ -6943,6 +6988,13 @@ fn sorted_region_ids(region_ids: &[String]) -> Vec<String> {
     sorted
 }
 
+fn sorted_u32_ids(ids: &[u32]) -> Vec<u32> {
+    let mut sorted = ids.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    sorted
+}
+
 fn tet_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {
     [
         [node_ids[0], node_ids[2], node_ids[1]],
@@ -6993,6 +7045,31 @@ mod tests {
         assert_eq!(cavity.boundary_faces.len(), 6);
         assert!(!boundary_faces.contains(&[0, 1, 2]));
         assert_eq!(cavity.target_volume_m3, 0.60);
+        validate_constrained_cavity(&cavity).expect("extracted cavity should validate");
+    }
+
+    #[test]
+    fn extracted_cavity_tracks_outside_neighbor_tets() {
+        let tets = vec![
+            candidate_tet(4, [0, 1, 2, 3], 0.25, &["left"]),
+            candidate_tet(9, [0, 2, 1, 4], 0.35, &["right"]),
+            candidate_tet(12, [0, 4, 2, 5], 0.20, &["outside"]),
+        ];
+
+        let cavity = constrained_cavity_from_selected_tets(&tets, &[0, 1], vec![])
+            .expect("two selected tets should extract");
+
+        let outside_face = cavity
+            .boundary_faces
+            .iter()
+            .find(|face| sorted_face(face.node_ids) == [0, 2, 4])
+            .expect("shared face with untouched neighbor should remain on cavity boundary");
+        assert_eq!(outside_face.outside_tet_ids, vec![12]);
+        assert!(cavity
+            .boundary_faces
+            .iter()
+            .filter(|face| sorted_face(face.node_ids) != [0, 2, 4])
+            .all(|face| face.outside_tet_ids.is_empty()));
         validate_constrained_cavity(&cavity).expect("extracted cavity should validate");
     }
 
@@ -7759,12 +7836,14 @@ mod tests {
             let next_node_id = (node_id + 1) % ring_count;
             boundary_faces.push(ConstrainedCavityBoundaryFace {
                 node_ids: [top_node_id, node_id, next_node_id],
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: Vec::new(),
             });
             boundary_faces.push(ConstrainedCavityBoundaryFace {
                 node_ids: [bottom_node_id, next_node_id, node_id],
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: Vec::new(),
@@ -7871,6 +7950,7 @@ mod tests {
             .into_iter()
             .map(|node_ids| ConstrainedCavityBoundaryFace {
                 node_ids,
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: Vec::new(),
@@ -7998,12 +8078,14 @@ mod tests {
             boundary_faces: vec![
                 ConstrainedCavityBoundaryFace {
                     node_ids: [0, 1, 2],
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: Vec::new(),
                 },
                 ConstrainedCavityBoundaryFace {
                     node_ids: [3, 4, 5],
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: Vec::new(),
@@ -8069,6 +8151,7 @@ mod tests {
             removed_tet_ids: vec![0],
             boundary_faces: vec![ConstrainedCavityBoundaryFace {
                 node_ids: [0, 1, 2],
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: Vec::new(),
@@ -9029,12 +9112,14 @@ mod tests {
             boundary_faces: vec![
                 ConstrainedCavityBoundaryFace {
                     node_ids: [0, 1, 2],
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: Vec::new(),
                 },
                 ConstrainedCavityBoundaryFace {
                     node_ids: [0, 1, 3],
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: Vec::new(),
@@ -9349,6 +9434,7 @@ mod tests {
                 .into_iter()
                 .map(|node_ids| ConstrainedCavityBoundaryFace {
                     node_ids,
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: vec!["body".to_string()],
@@ -9680,6 +9766,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn boundary_preservation_rejects_outside_neighbor_loss() {
+        let mut cavity = tet_cavity();
+        cavity.boundary_faces[0].outside_tet_ids = vec![99];
+        let candidate_faces = cavity
+            .boundary_faces
+            .iter()
+            .cloned()
+            .map(|mut face| {
+                if sorted_face(face.node_ids) == sorted_face(cavity.boundary_faces[0].node_ids) {
+                    face.outside_tet_ids.clear();
+                }
+                face
+            })
+            .collect::<Vec<_>>();
+
+        let err = validate_constrained_cavity_boundary_preserved(&cavity, &candidate_faces)
+            .expect_err("outside neighbor loss should fail");
+
+        assert_eq!(
+            err,
+            ConstrainedCavityValidationError::BoundaryOutsideTetMismatch {
+                node_ids: sorted_face(cavity.boundary_faces[0].node_ids),
+                expected_outside_tet_ids: vec![99],
+                candidate_outside_tet_ids: Vec::new(),
+            }
+        );
+    }
+
     fn tet_cavity() -> ConstrainedCavity {
         ConstrainedCavity {
             removed_tet_ids: vec![7],
@@ -9697,6 +9812,7 @@ mod tests {
     fn face(node_ids: [u32; 3]) -> ConstrainedCavityBoundaryFace {
         ConstrainedCavityBoundaryFace {
             node_ids,
+            outside_tet_ids: Vec::new(),
             source_face_id: None,
             source_edge_ids: [None, None, None],
             region_ids: Vec::new(),
@@ -9729,6 +9845,7 @@ mod tests {
                 .into_iter()
                 .map(|node_ids| ConstrainedCavityBoundaryFace {
                     node_ids,
+                    outside_tet_ids: Vec::new(),
                     source_face_id: None,
                     source_edge_ids: [None, None, None],
                     region_ids: vec!["body".to_string()],
@@ -9776,6 +9893,7 @@ mod tests {
             .into_iter()
             .map(|node_ids| ConstrainedCavityBoundaryFace {
                 node_ids,
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: vec!["body".to_string()],
@@ -9829,6 +9947,7 @@ mod tests {
             .into_iter()
             .map(|node_ids| ConstrainedCavityBoundaryFace {
                 node_ids,
+                outside_tet_ids: Vec::new(),
                 source_face_id: None,
                 source_edge_ids: [None, None, None],
                 region_ids: vec!["body".to_string()],
@@ -9889,6 +10008,7 @@ mod tests {
     ) -> ConstrainedCavityBoundaryFace {
         ConstrainedCavityBoundaryFace {
             node_ids,
+            outside_tet_ids: Vec::new(),
             source_face_id: Some(source_face_id),
             source_edge_ids,
             region_ids: region_ids.iter().map(|region| region.to_string()).collect(),

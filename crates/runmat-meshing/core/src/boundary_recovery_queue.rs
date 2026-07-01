@@ -358,6 +358,7 @@ mod tests {
     ) -> ConstrainedCavityBoundaryFace {
         ConstrainedCavityBoundaryFace {
             node_ids,
+            outside_tet_ids: Vec::new(),
             source_face_id: Some(source_face_id),
             source_edge_ids: source_edge_ids.map(Some),
             region_ids: region_ids.iter().map(|region| region.to_string()).collect(),
