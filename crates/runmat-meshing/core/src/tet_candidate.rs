@@ -6542,7 +6542,14 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
         };
         let Some(candidates) = candidates else {
             saw_invalid_candidate = true;
-            invalid_candidate_reason.get_or_insert("empty_candidate");
+            let reason = diagnostic_closed_edge_star_empty_candidate_reason(
+                &component,
+                edge,
+                tets,
+                node_points,
+                options,
+            )?;
+            invalid_candidate_reason.get_or_insert(reason);
             continue;
         };
         let candidate_below_count =
@@ -6672,9 +6679,83 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("boundary_face_mismatch_constrained_too_few_boundary_faces") => {
             "component_edge_star_boundary_face_mismatch_constrained_too_few_boundary_faces"
         }
+        Some("closed_edge_star_invalid") => "component_edge_star_closed_cavity_invalid",
+        Some("closed_edge_star_raw_candidate_rejected") => {
+            "component_edge_star_closed_cavity_raw_candidate_rejected"
+        }
+        Some("closed_edge_star_volume_mismatch") => {
+            "component_edge_star_closed_cavity_volume_mismatch"
+        }
+        Some("closed_edge_star_no_triangulation_candidate") => {
+            "component_edge_star_closed_cavity_no_triangulation_candidate"
+        }
         Some("volume_mismatch") => "component_edge_star_volume_mismatch",
         Some("empty_candidate") => "component_edge_star_empty_candidate",
         _ => "component_edge_star_candidate_invalid",
+    }
+}
+
+#[cfg(test)]
+fn diagnostic_closed_edge_star_empty_candidate_reason(
+    adjacent: &[usize],
+    edge: [u32; 2],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let Some(cavity) = closed_edge_star_cavity(adjacent, edge, tets)? else {
+        return Ok("closed_edge_star_invalid");
+    };
+    let reference = &tets[adjacent[0]];
+    let original_volume = adjacent
+        .iter()
+        .map(|index| tets[*index].volume_m3)
+        .sum::<f64>();
+    let triangulations = if cavity.ring.len() == 3 {
+        vec![vec![[cavity.ring[0], cavity.ring[1], cavity.ring[2]]]]
+    } else if cavity.ring.len() > MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE {
+        edge_ring_fan_triangulations(&cavity.ring)
+    } else {
+        edge_ring_triangulations(&cavity.ring)
+    };
+    let mut saw_raw_rejection = false;
+    let mut saw_volume_mismatch = false;
+    for triangulation in triangulations {
+        let mut candidates = Vec::<TetCandidate>::with_capacity(triangulation.len() * 2);
+        let mut raw_rejected = false;
+        for tri in triangulation {
+            if !push_edge_reconnection_triangle_tets(
+                &mut candidates,
+                reference,
+                edge,
+                tri,
+                node_points,
+                options,
+            )? {
+                raw_rejected = true;
+                break;
+            }
+        }
+        if raw_rejected || candidates.is_empty() {
+            saw_raw_rejection = true;
+            continue;
+        }
+        let candidate_volume = candidates
+            .iter()
+            .map(|candidate| candidate.volume_m3)
+            .sum::<f64>();
+        if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+            saw_volume_mismatch = true;
+            continue;
+        }
+        return Ok("closed_edge_star_no_triangulation_candidate");
+    }
+    if saw_raw_rejection {
+        Ok("closed_edge_star_raw_candidate_rejected")
+    } else if saw_volume_mismatch {
+        Ok("closed_edge_star_volume_mismatch")
+    } else {
+        Ok("closed_edge_star_no_triangulation_candidate")
     }
 }
 
@@ -13107,6 +13188,24 @@ mod tests {
             "component_edge_star_boundary_node_count"
         );
         assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_raw_candidate_rejected"
+            )),
+            "component_edge_star_closed_cavity_raw_candidate_rejected"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_volume_mismatch"
+            )),
+            "component_edge_star_closed_cavity_volume_mismatch"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_no_triangulation_candidate"
+            )),
+            "component_edge_star_closed_cavity_no_triangulation_candidate"
+        );
+        assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some("unknown")),
             "component_edge_star_candidate_invalid"
         );
@@ -13429,6 +13528,44 @@ mod tests {
             .expect("open edge-star extraction should evaluate");
 
         assert!(cavity.is_none());
+    }
+
+    #[test]
+    fn closed_edge_star_empty_diagnostic_classifies_invalid_ring() {
+        let points = [
+            [0.0, 0.0, -1.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ];
+        let node_points = points
+            .iter()
+            .enumerate()
+            .map(|(node_id, point)| (node_id as u32, *point))
+            .collect::<BTreeMap<_, _>>();
+        let options = TetCandidateOptions::default();
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 2]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| {
+                let tet_points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, tet_id as u32, &[], node_ids, tet_points, options)
+                    .expect("fixture source tets should be valid")
+            })
+            .collect::<Vec<_>>();
+
+        let reason = diagnostic_closed_edge_star_empty_candidate_reason(
+            &[0, 1, 2],
+            [0, 1],
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(reason, "closed_edge_star_invalid");
     }
 
     #[test]
