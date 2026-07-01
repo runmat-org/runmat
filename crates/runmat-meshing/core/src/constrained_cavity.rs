@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     local_tet_flip::{
-        evaluate_local_tet_flip_quality, two_to_three_face_flip_candidate, LocalTet,
+        evaluate_local_tet_flip_quality, three_to_two_edge_flip_candidate,
+        two_to_three_face_flip_candidate, LocalTet, LocalTetFlipCandidate,
         LocalTetFlipQualityThresholds,
     },
     predicate::{
@@ -6935,58 +6936,11 @@ fn improve_refill_with_local_flips(
                 continue;
             }
 
-            let mut candidate_tets = refill
-                .tets
-                .iter()
-                .enumerate()
-                .filter_map(|(index, tet)| {
-                    (index != left_index && index != right_index).then_some(tet.clone())
-                })
-                .collect::<Vec<_>>();
-            let mut created_tets = Vec::<ConstrainedCavityRefillTet>::new();
-            let mut created_keys = BTreeSet::<[u32; 4]>::new();
-            let mut duplicate_tet = false;
-            for node_ids in &flip.created_tets {
-                let key = sorted_tet_nodes(*node_ids);
-                if !created_keys.insert(key)
-                    || candidate_tets
-                        .iter()
-                        .any(|tet| sorted_tet_nodes(tet.node_ids) == key)
-                {
-                    duplicate_tet = true;
-                    break;
-                }
-                let mut points = [[0.0; 3]; 4];
-                let mut missing_node = false;
-                for (point, node_id) in points.iter_mut().zip(node_ids) {
-                    let Some(coordinates_m) = coordinates.get(node_id) else {
-                        missing_node = true;
-                        break;
-                    };
-                    *point = *coordinates_m;
-                }
-                if missing_node {
-                    duplicate_tet = true;
-                    break;
-                }
-                let Ok(tet) = raw_refill_tet_with_rejection_reason(*node_ids, points, options)
-                else {
-                    duplicate_tet = true;
-                    break;
-                };
-                created_tets.push(tet);
-            }
-            if duplicate_tet {
-                continue;
-            }
-            candidate_tets.extend(created_tets);
-
-            let Ok(mut candidate) =
-                refill_from_tets(cavity, candidate_tets, options.volume_relative_tolerance)
+            let Some(candidate) =
+                refill_from_local_flip_candidate(cavity, &coordinates, refill, &flip, options)
             else {
                 continue;
             };
-            candidate.inserted_nodes = refill.inserted_nodes.clone();
             if !refill_is_better(&candidate, refill) {
                 continue;
             }
@@ -6999,7 +6953,104 @@ fn improve_refill_with_local_flips(
         }
     }
 
+    for left_index in 0..refill.tets.len() {
+        for middle_index in (left_index + 1)..refill.tets.len() {
+            for right_index in (middle_index + 1)..refill.tets.len() {
+                let tets = [
+                    LocalTet {
+                        tet_id: left_index as u32,
+                        node_ids: refill.tets[left_index].node_ids,
+                    },
+                    LocalTet {
+                        tet_id: middle_index as u32,
+                        node_ids: refill.tets[middle_index].node_ids,
+                    },
+                    LocalTet {
+                        tet_id: right_index as u32,
+                        node_ids: refill.tets[right_index].node_ids,
+                    },
+                ];
+                for edge in common_tet_edges(tets.map(|tet| tet.node_ids)) {
+                    let Ok(flip) = three_to_two_edge_flip_candidate(tets, edge) else {
+                        continue;
+                    };
+                    if evaluate_local_tet_flip_quality(&flip, &coordinates, thresholds).is_err() {
+                        continue;
+                    }
+                    let Some(candidate) = refill_from_local_flip_candidate(
+                        cavity,
+                        &coordinates,
+                        refill,
+                        &flip,
+                        options,
+                    ) else {
+                        continue;
+                    };
+                    if !refill_is_better(&candidate, refill) {
+                        continue;
+                    }
+                    if best
+                        .as_ref()
+                        .is_none_or(|current| refill_is_better(&candidate, current))
+                    {
+                        best = Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
     best
+}
+
+fn refill_from_local_flip_candidate(
+    cavity: &ConstrainedCavity,
+    coordinates: &BTreeMap<u32, Point3>,
+    refill: &ConstrainedCavityRefill,
+    flip: &LocalTetFlipCandidate,
+    options: ConstrainedCavityRefillOptions,
+) -> Option<ConstrainedCavityRefill> {
+    let removed_indices = flip
+        .removed_tet_ids
+        .iter()
+        .map(|tet_id| *tet_id as usize)
+        .collect::<BTreeSet<_>>();
+    if removed_indices
+        .iter()
+        .any(|index| *index >= refill.tets.len())
+    {
+        return None;
+    }
+    let mut candidate_tets = refill
+        .tets
+        .iter()
+        .enumerate()
+        .filter_map(|(index, tet)| (!removed_indices.contains(&index)).then_some(tet.clone()))
+        .collect::<Vec<_>>();
+    let mut created_tets = Vec::<ConstrainedCavityRefillTet>::new();
+    let mut created_keys = BTreeSet::<[u32; 4]>::new();
+    for node_ids in &flip.created_tets {
+        let key = sorted_tet_nodes(*node_ids);
+        if !created_keys.insert(key)
+            || candidate_tets
+                .iter()
+                .any(|tet| sorted_tet_nodes(tet.node_ids) == key)
+        {
+            return None;
+        }
+        let mut points = [[0.0; 3]; 4];
+        for (point, node_id) in points.iter_mut().zip(node_ids) {
+            *point = *coordinates.get(node_id)?;
+        }
+        let tet = raw_refill_tet_with_rejection_reason(*node_ids, points, options).ok()?;
+        created_tets.push(tet);
+    }
+    candidate_tets.extend(created_tets);
+
+    let mut candidate =
+        refill_from_tets(cavity, candidate_tets, options.volume_relative_tolerance).ok()?;
+    candidate.inserted_nodes = refill.inserted_nodes.clone();
+    Some(candidate)
 }
 
 fn refill_is_better(
@@ -7070,6 +7121,30 @@ fn sorted_tet_nodes(mut node_ids: [u32; 4]) -> [u32; 4] {
 fn sorted_edge(mut node_ids: [u32; 2]) -> [u32; 2] {
     node_ids.sort();
     node_ids
+}
+
+fn common_tet_edges(tets: [[u32; 4]; 3]) -> Vec<[u32; 2]> {
+    let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+    for tet in tets {
+        for edge in tet_edges(tet) {
+            *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
+        }
+    }
+    edge_counts
+        .into_iter()
+        .filter_map(|(edge, count)| (count == 3).then_some(edge))
+        .collect()
+}
+
+fn tet_edges(node_ids: [u32; 4]) -> [[u32; 2]; 6] {
+    [
+        [node_ids[0], node_ids[1]],
+        [node_ids[0], node_ids[2]],
+        [node_ids[0], node_ids[3]],
+        [node_ids[1], node_ids[2]],
+        [node_ids[1], node_ids[3]],
+        [node_ids[2], node_ids[3]],
+    ]
 }
 
 fn face_edges(node_ids: [u32; 3]) -> [[u32; 2]; 3] {
@@ -8024,6 +8099,101 @@ mod tests {
                 sorted_tet_nodes([0, 1, 3, 4]),
                 sorted_tet_nodes([1, 2, 3, 4]),
                 sorted_tet_nodes([0, 2, 3, 4])
+            ])
+        );
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("flipped refill should preserve boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("flipped refill should preserve volume");
+    }
+
+    #[test]
+    fn boundary_node_refill_applies_quality_gated_three_to_two_flip() {
+        let nodes = vec![
+            ConstrainedCavityNode {
+                node_id: 0,
+                coordinates_m: [0.45, 0.5, 1.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 3,
+                coordinates_m: [0.5, 0.45, -1.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 4,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 5,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+            ConstrainedCavityNode {
+                node_id: 6,
+                coordinates_m: [0.0, 1.0, 0.0],
+            },
+        ];
+        let boundary_nodes = nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let options = refill_options();
+        let baseline_tet_node_ids = [[0, 3, 4, 5], [0, 4, 3, 6], [0, 5, 6, 3]];
+        let baseline_tets = baseline_tet_node_ids
+            .into_iter()
+            .map(|node_ids| {
+                raw_refill_tet_with_rejection_reason(
+                    node_ids,
+                    node_ids.map(|node_id| boundary_nodes[&node_id]),
+                    options,
+                )
+                .expect("baseline tet should pass fixture quality gates")
+            })
+            .collect::<Vec<_>>();
+        let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+        for node_ids in baseline_tet_node_ids {
+            for face in tet_faces(node_ids) {
+                *face_counts.entry(sorted_face(face)).or_default() += 1;
+            }
+        }
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![1, 2, 3],
+            boundary_faces: face_counts
+                .into_iter()
+                .filter_map(|(node_ids, count)| {
+                    (count == 1).then_some(ConstrainedCavityBoundaryFace {
+                        node_ids,
+                        outside_tet_ids: Vec::new(),
+                        source_face_id: None,
+                        source_edge_ids: [None, None, None],
+                        region_ids: vec!["body".to_string()],
+                    })
+                })
+                .collect(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: baseline_tets.iter().map(|tet| tet.volume_m3).sum(),
+        };
+        let baseline = refill_from_tets(&cavity, baseline_tets, options.volume_relative_tolerance)
+            .expect("baseline should preserve the cavity boundary");
+
+        let evaluation =
+            evaluate_constrained_cavity_refill_candidates(&cavity, &nodes, &[], options)
+                .expect("refill evaluation should complete");
+
+        let refill = evaluation.refill.expect("boundary-node refill should pass");
+        assert_eq!(refill.tets.len(), 2);
+        assert!(refill_is_better(&refill, &baseline));
+        assert_eq!(
+            refill
+                .tets
+                .iter()
+                .map(|tet| sorted_tet_nodes(tet.node_ids))
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                sorted_tet_nodes([0, 4, 5, 6]),
+                sorted_tet_nodes([3, 4, 5, 6])
             ])
         );
         validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
