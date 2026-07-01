@@ -3643,7 +3643,10 @@ impl Compiler {
             }
             MirOperand::Local(local) => {
                 let slot = self.mir_local_slot(*local).ok()?;
-                match self.mir_local_end_expr_internal(*local) {
+                match self
+                    .mir_local_single_assignment_rvalue(*local)
+                    .and_then(|value| self.mir_rvalue_end_expr_internal(&value))
+                {
                     Some((expr, true)) => Some(expr),
                     Some((_, false)) | None => Some(EndExpr::Var(slot)),
                 }
@@ -3671,6 +3674,26 @@ impl Compiler {
                 } if *candidate == local => Some(value.clone()),
                 _ => None,
             })
+    }
+
+    fn mir_local_single_assignment_rvalue(
+        &self,
+        local: runmat_mir::MirLocalId,
+    ) -> Option<MirRvalue> {
+        let body = self.body.as_ref()?;
+        let mut assignments = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .filter_map(|stmt| match &stmt.kind {
+                MirStmtKind::Assign {
+                    place: MirPlace::Local(candidate),
+                    value,
+                } if *candidate == local => Some(value),
+                _ => None,
+            });
+        let value = assignments.next()?.clone();
+        assignments.next().is_none().then_some(value)
     }
 
     fn mir_rvalue_end_expr_internal(&self, value: &MirRvalue) -> Option<(EndExpr, bool)> {
@@ -4122,5 +4145,118 @@ fn emit_string_literal(compiler: &mut Compiler, value: &str) {
         compiler.emit(Instr::LoadCharRow(text));
     } else {
         compiler.emit(Instr::LoadString(text));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::{
+        VmAssemblyLayout, VmFrameAbi, VmFunctionLayout, VmSlotId, VmStorageBinding,
+    };
+    use runmat_hir::{FunctionAbi, FunctionId};
+    use runmat_mir::{BasicBlock, BasicBlockId, MirLocal, MirLocalId, MirLocalKind, MirTerminator};
+
+    fn empty_function_abi() -> FunctionAbi {
+        FunctionAbi {
+            fixed_inputs: Vec::new(),
+            varargin: None,
+            fixed_outputs: Vec::new(),
+            varargout: None,
+            implicit_nargin: None,
+            implicit_nargout: None,
+        }
+    }
+
+    fn compiler_with_local_assignments(assignments: Vec<MirRvalue>) -> Compiler {
+        let function = FunctionId(0);
+        let local = MirLocalId(0);
+        let slot = VmSlotId(7);
+        let mut mir_local_slots = HashMap::new();
+        mir_local_slots.insert(local, slot);
+        let mut functions = HashMap::new();
+        functions.insert(
+            function,
+            VmFunctionLayout {
+                function,
+                display_name: "test".to_string(),
+                private_owner_scope: String::new(),
+                frame_abi: VmFrameAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                binding_slots: HashMap::new(),
+                mir_local_slots,
+                captures: Vec::new(),
+                local_count: slot.0 + 1,
+            },
+        );
+        let span = runmat_hir::Span::default();
+        let statements = assignments
+            .into_iter()
+            .map(|value| MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(local),
+                    value,
+                },
+                span,
+            })
+            .collect();
+        Compiler {
+            instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: slot.0 + 1,
+            imports: Vec::new(),
+            var_types: vec![Type::Unknown; slot.0 + 1],
+            layout: Some(VmAssemblyLayout {
+                functions,
+                entrypoints: HashMap::new(),
+                storage_bindings: HashMap::<BindingId, VmStorageBinding>::new(),
+            }),
+            function: Some(function),
+            body: Some(MirBody {
+                function,
+                abi: empty_function_abi(),
+                locals: vec![MirLocal {
+                    id: local,
+                    binding: None,
+                    kind: MirLocalKind::Temporary,
+                    span,
+                }],
+                blocks: vec![BasicBlock {
+                    id: BasicBlockId(0),
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Return(Vec::new()),
+                        span,
+                    },
+                }],
+            }),
+            class_registrations: Vec::new(),
+            current_span: None,
+            pending_place_mutation: None,
+        }
+    }
+
+    #[test]
+    fn range_bound_uses_derived_end_expr_for_single_assignment_local() {
+        let compiler = compiler_with_local_assignments(vec![MirRvalue::End]);
+        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
+        assert!(matches!(expr, Some(EndExpr::End)));
+    }
+
+    #[test]
+    fn range_bound_uses_live_var_for_reassigned_local() {
+        let compiler = compiler_with_local_assignments(vec![
+            MirRvalue::End,
+            MirRvalue::Use(MirOperand::Constant(MirConstant::Number("3".to_string()))),
+        ]);
+        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
+        assert!(matches!(expr, Some(EndExpr::Var(7))));
     }
 }
