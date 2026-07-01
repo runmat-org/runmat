@@ -109,4 +109,31 @@ mod tests {
 
         assert_eq!(result.to_string(), "piecewise(lt(x, 0), -1, gt(x, 0), 1)");
     }
+
+    #[test]
+    fn rejects_too_few_arguments() {
+        let err = block_on(piecewise_builtin(vec![Value::Symbolic(
+            SymbolicExpr::variable("x"),
+        )]))
+        .expect_err("piecewise arity should fail");
+
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:piecewise:InvalidInput")
+        );
+    }
+
+    #[test]
+    fn rejects_nonconvertible_arguments() {
+        let err = block_on(piecewise_builtin(vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::String("unsupported".to_string()),
+        ]))
+        .expect_err("piecewise unsupported argument should fail");
+
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:piecewise:InvalidInput")
+        );
+    }
 }
