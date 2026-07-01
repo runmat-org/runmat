@@ -6702,6 +6702,18 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("closed_edge_star_raw_min_volume_edge1") => {
             "component_edge_star_closed_cavity_raw_min_volume_edge1"
         }
+        Some("closed_edge_star_raw_min_volume_edge0_boundary_refill_no_improvement") => {
+            "component_edge_star_closed_cavity_raw_min_volume_edge0_boundary_refill_no_improvement"
+        }
+        Some("closed_edge_star_raw_min_volume_edge1_boundary_refill_no_improvement") => {
+            "component_edge_star_closed_cavity_raw_min_volume_edge1_boundary_refill_no_improvement"
+        }
+        Some("closed_edge_star_boundary_refill_reconnectable") => {
+            "component_edge_star_closed_cavity_boundary_refill_reconnectable"
+        }
+        Some("closed_edge_star_boundary_refill_rejected") => {
+            "component_edge_star_closed_cavity_boundary_refill_rejected"
+        }
         Some("closed_edge_star_raw_aspect_ratio_edge0") => {
             "component_edge_star_closed_cavity_raw_aspect_ratio_edge0"
         }
@@ -6788,12 +6800,71 @@ fn diagnostic_closed_edge_star_empty_candidate_reason(
         return Ok("closed_edge_star_no_triangulation_candidate");
     }
     if saw_raw_rejection {
-        Ok(raw_rejection_reason.unwrap_or("closed_edge_star_raw_candidate_rejected"))
+        let raw_reason = raw_rejection_reason.unwrap_or("closed_edge_star_raw_candidate_rejected");
+        Ok(diagnostic_closed_edge_star_raw_rejection_bucket(
+            raw_reason,
+            adjacent,
+            tets,
+            node_points,
+            options,
+        )?)
     } else if saw_volume_mismatch {
         Ok("closed_edge_star_volume_mismatch")
     } else {
         Ok("closed_edge_star_no_triangulation_candidate")
     }
+}
+
+#[cfg(test)]
+fn diagnostic_closed_edge_star_raw_rejection_bucket(
+    raw_reason: &'static str,
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let Some((candidates, rejection)) = diagnostic_face_neighbor_cavity_reconnection_candidates(
+        adjacent,
+        tets,
+        node_points,
+        options,
+    )?
+    else {
+        return Ok(raw_reason);
+    };
+    if rejection.is_some() {
+        return Ok(match raw_reason {
+            "closed_edge_star_raw_min_volume_edge0" | "closed_edge_star_raw_min_volume_edge1" => {
+                "closed_edge_star_boundary_refill_rejected"
+            }
+            _ => raw_reason,
+        });
+    }
+    let original_below_count = count_exact_quality_violations(
+        adjacent.iter().map(|index| &tets[*index]),
+        options.min_scaled_jacobian,
+    );
+    let original_min_exact = min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+    let candidate_below_count =
+        count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+    let candidate_min_exact = min_exact_scaled_jacobian(candidates.iter());
+    if cavity_reconnection_improves_quality(
+        candidate_below_count,
+        candidate_min_exact,
+        original_below_count,
+        original_min_exact,
+    ) {
+        return Ok("closed_edge_star_boundary_refill_reconnectable");
+    }
+    Ok(match raw_reason {
+        "closed_edge_star_raw_min_volume_edge0" => {
+            "closed_edge_star_raw_min_volume_edge0_boundary_refill_no_improvement"
+        }
+        "closed_edge_star_raw_min_volume_edge1" => {
+            "closed_edge_star_raw_min_volume_edge1_boundary_refill_no_improvement"
+        }
+        _ => raw_reason,
+    })
 }
 
 #[cfg(test)]
@@ -13306,6 +13377,18 @@ mod tests {
         );
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_raw_min_volume_edge0_boundary_refill_no_improvement"
+            )),
+            "component_edge_star_closed_cavity_raw_min_volume_edge0_boundary_refill_no_improvement"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_boundary_refill_rejected"
+            )),
+            "component_edge_star_closed_cavity_boundary_refill_rejected"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
                 "closed_edge_star_raw_aspect_ratio_edge1"
             )),
             "component_edge_star_closed_cavity_raw_aspect_ratio_edge1"
@@ -14183,6 +14266,51 @@ mod tests {
             .sum::<f64>();
         let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn closed_edge_star_diagnostic_classifies_non_improving_boundary_refill() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [0.0, 0.0, 0.2]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+        ]);
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 2]]
+            .into_iter()
+            .map(|node_ids| {
+                raw_candidate_tet(
+                    0,
+                    0,
+                    &[],
+                    node_ids,
+                    node_ids.map(|node_id| node_points[&node_id]),
+                    options,
+                )
+                .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+
+        let reason = diagnostic_closed_edge_star_empty_candidate_reason(
+            &[0, 1, 2, 3],
+            [0, 1],
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(
+            reason,
+            "closed_edge_star_raw_min_volume_edge0_boundary_refill_no_improvement"
+        );
     }
 
     #[test]
