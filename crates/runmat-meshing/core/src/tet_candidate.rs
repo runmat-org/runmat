@@ -3825,6 +3825,34 @@ fn repair_exact_quality_tets_once(
             continue;
         }
         if let Some((neighbor_indices, candidates, quality_gain_only)) =
+            best_whole_edge_star_cavity_reconnection(
+                tet_index,
+                tets,
+                &edge_adjacency,
+                &node_points,
+                options,
+            )?
+        {
+            if neighbor_indices.iter().any(|index| consumed[*index]) {
+                repaired.push(tet.clone());
+                continue;
+            }
+            for index in neighbor_indices {
+                consumed[index] = true;
+            }
+            summary.changed = true;
+            summary.reconnected_cavity_count += 1;
+            summary.reconnection_quality_gain_count += usize::from(quality_gain_only);
+            append_boundary_recovery_nodes(
+                nodes,
+                &mut node_points,
+                next_node_id,
+                candidates.inserted_nodes,
+            );
+            repaired.extend(candidates.tets);
+            continue;
+        }
+        if let Some((neighbor_indices, candidates, quality_gain_only)) =
             best_componentized_edge_reconnection(
                 tet_index,
                 tets,
@@ -6452,6 +6480,70 @@ fn best_multi_tet_edge_reconnection(
             min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
         let Some(candidates) =
             multi_tet_edge_reconnection_candidates(adjacent, edge, tets, node_points, options)?
+        else {
+            continue;
+        };
+        let candidate_below_count =
+            count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+        let min_exact = min_exact_scaled_jacobian(candidates.iter());
+        if !cavity_reconnection_improves_quality(
+            candidate_below_count,
+            min_exact,
+            original_below_count,
+            original_min_exact,
+        ) {
+            continue;
+        }
+        let quality_gain_only = candidate_below_count == original_below_count;
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_below_count, best_min_exact, _)| {
+                candidate_below_count < *best_below_count
+                    || (candidate_below_count == *best_below_count && min_exact > *best_min_exact)
+            })
+        {
+            best = Some((
+                adjacent.clone(),
+                candidates,
+                candidate_below_count,
+                min_exact,
+                quality_gain_only,
+            ));
+        }
+    }
+    Ok(best.map(|(indices, candidates, _, _, quality_gain_only)| {
+        (indices, candidates, quality_gain_only)
+    }))
+}
+
+fn best_whole_edge_star_cavity_reconnection(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    edge_adjacency: &BTreeMap<[u32; 2], Vec<usize>>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<(Vec<usize>, BoundaryCavityReconnection, bool)>, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut best = None::<(Vec<usize>, BoundaryCavityReconnection, usize, f64, bool)>;
+    for edge in tet_node_edges(tet.node_ids) {
+        let Some(adjacent) = edge_adjacency.get(&edge) else {
+            continue;
+        };
+        if adjacent.len() < 4
+            || adjacent.len() > MAX_EDGE_STAR_RECONNECTION_SIZE
+            || !adjacent.contains(&tet_index)
+            || closed_edge_star_cavity(adjacent, edge, tets)?.is_some()
+        {
+            continue;
+        }
+        let original_below_count = count_exact_quality_violations(
+            adjacent.iter().map(|index| &tets[*index]),
+            options.min_scaled_jacobian,
+        );
+        let original_min_exact =
+            min_exact_scaled_jacobian(adjacent.iter().map(|index| &tets[*index]));
+        let Some(candidates) =
+            face_neighbor_cavity_reconnection_candidates(adjacent, tets, node_points, options)?
         else {
             continue;
         };
@@ -14750,6 +14842,98 @@ mod tests {
                 .count(),
             0
         );
+        let original_volume = reconnected_indices
+            .iter()
+            .map(|index| tets[*index].volume_m3)
+            .sum::<f64>();
+        let candidate_volume = candidates.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((candidate_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn whole_edge_star_cavity_reconnection_repairs_open_ring() {
+        let options = TetCandidateOptions {
+            min_scaled_jacobian: 0.15,
+            max_aspect_ratio: 1.0e6,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, -1.0]),
+            (1, [0.0, 0.0, 1.0]),
+            (2, [0.7071067811865476, -0.7071067811865475, 0.0]),
+            (3, [0.9238795325112867, -0.3826834323650898, 0.05]),
+            (4, [1.0, 0.0, 0.1]),
+            (5, [0.9238795325112867, 0.3826834323650898, 0.15]),
+            (6, [0.7071067811865476, 0.7071067811865475, 0.2]),
+        ]);
+        let mut tets = (0..4)
+            .map(|index| {
+                let node_ids = [0, 1, index as u32 + 2, index as u32 + 3];
+                raw_candidate_tet(
+                    0,
+                    0,
+                    &[],
+                    node_ids,
+                    node_ids.map(|node_id| node_points[&node_id]),
+                    options,
+                )
+                .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        tets[1].exact_scaled_jacobian = 0.01;
+        let edge = [0, 1];
+        let edge_adjacency = tet_edge_adjacency(&tets);
+        let adjacent = edge_adjacency[&edge].clone();
+        assert!(closed_edge_star_cavity(&adjacent, edge, &tets)
+            .expect("edge-star cavity should evaluate")
+            .is_none());
+        assert!(multi_tet_edge_reconnection_candidates(
+            &adjacent,
+            edge,
+            &tets,
+            &node_points,
+            options,
+        )
+        .expect("closed-ring reconnection should evaluate")
+        .is_none());
+        let direct =
+            face_neighbor_cavity_reconnection_candidates(&adjacent, &tets, &node_points, options)
+                .expect("direct cavity refill should evaluate")
+                .expect("direct cavity refill should be available");
+        assert!(
+            count_exact_quality_violations(direct.iter(), options.min_scaled_jacobian)
+                < count_exact_quality_violations(
+                    adjacent.iter().map(|index| &tets[*index]),
+                    options.min_scaled_jacobian
+                )
+        );
+        let target_index = adjacent[0];
+
+        let (reconnected_indices, candidates, quality_gain_only) =
+            best_whole_edge_star_cavity_reconnection(
+                target_index,
+                &tets,
+                &edge_adjacency,
+                &node_points,
+                options,
+            )
+            .expect("whole edge-star cavity should evaluate")
+            .expect("non-closed edge-star cavity should reconnect");
+
+        assert_eq!(reconnected_indices, adjacent);
+        assert!(reconnected_indices
+            .iter()
+            .all(|index| tets[*index].node_ids.contains(&edge[0])
+                && tets[*index].node_ids.contains(&edge[1])));
+        assert!(!quality_gain_only);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        assert_eq!(candidates.inserted_nodes.len(), 0);
         let original_volume = reconnected_indices
             .iter()
             .map(|index| tets[*index].volume_m3)
