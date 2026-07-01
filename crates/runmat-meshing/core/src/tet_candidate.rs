@@ -21,7 +21,9 @@ use crate::{
 };
 
 #[cfg(test)]
-use crate::constrained_cavity::diagnostic_interior_star_quality;
+use crate::constrained_cavity::{
+    diagnostic_boundary_node_completion, diagnostic_interior_star_quality,
+};
 #[cfg(test)]
 use crate::predicate::{point_in_closed_triangle_surface, PointInClosedSurface};
 
@@ -6720,6 +6722,18 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("closed_edge_star_boundary_refill_completion_no_candidate") => {
             "component_edge_star_closed_cavity_boundary_refill_completion_no_candidate"
         }
+        Some("closed_edge_star_boundary_refill_completion_near_quality") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_near_quality"
+        }
+        Some("closed_edge_star_boundary_refill_completion_low_quality") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_low_quality"
+        }
+        Some("closed_edge_star_boundary_refill_completion_no_cap_candidate") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_no_cap_candidate"
+        }
+        Some("closed_edge_star_boundary_refill_completion_other") => {
+            "component_edge_star_closed_cavity_boundary_refill_completion_other"
+        }
         Some("closed_edge_star_boundary_refill_star_scaled_jacobian") => {
             "component_edge_star_closed_cavity_boundary_refill_star_scaled_jacobian"
         }
@@ -6859,7 +6873,17 @@ fn diagnostic_closed_edge_star_raw_rejection_bucket(
     if let Some(rejection) = rejection {
         return Ok(match raw_reason {
             "closed_edge_star_raw_min_volume_edge0" | "closed_edge_star_raw_min_volume_edge1" => {
-                diagnostic_closed_edge_star_boundary_refill_rejection_bucket(rejection)
+                if rejection == "boundary_face_mismatch_constrained_refill_completion_no_candidate"
+                {
+                    diagnostic_closed_edge_star_boundary_refill_completion_bucket(
+                        adjacent,
+                        tets,
+                        node_points,
+                        options,
+                    )?
+                } else {
+                    diagnostic_closed_edge_star_boundary_refill_rejection_bucket(rejection)
+                }
             }
             _ => raw_reason,
         });
@@ -6889,6 +6913,97 @@ fn diagnostic_closed_edge_star_raw_rejection_bucket(
         }
         _ => raw_reason,
     })
+}
+
+#[cfg(test)]
+fn diagnostic_closed_edge_star_boundary_refill_completion_bucket(
+    adjacent: &[usize],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok("closed_edge_star_boundary_refill_completion_other");
+    };
+    let mut original_volume = 0.0_f64;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_node_ids = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok("closed_edge_star_boundary_refill_completion_other");
+        }
+        original_volume += tet.volume_m3;
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_node_ids.extend(face.iter().copied());
+    }
+    let cavity = ConstrainedCavity {
+        removed_tet_ids: adjacent.iter().map(|index| *index as u32).collect(),
+        boundary_faces: boundary_faces
+            .iter()
+            .map(|face| ConstrainedCavityBoundaryFace {
+                node_ids: *face,
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: reference.region_ids.clone(),
+            })
+            .collect(),
+        protected_node_ids: Vec::new(),
+        target_volume_m3: original_volume,
+    };
+    let boundary_nodes = boundary_node_ids
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let diagnostic = diagnostic_boundary_node_completion(
+        &cavity,
+        &boundary_nodes,
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    )
+    .map_err(|_| TetCandidateError::InvalidOptions)?;
+    let best_completion_quality = diagnostic
+        .max_rejected_scaled_jacobian
+        .max(diagnostic.max_split_cap_scaled_jacobian)
+        .max(diagnostic.max_edge_split_cap_scaled_jacobian)
+        .max(diagnostic.max_three_edge_split_cap_scaled_jacobian);
+    if best_completion_quality >= options.min_scaled_jacobian * 0.99 {
+        return Ok("closed_edge_star_boundary_refill_completion_near_quality");
+    }
+    if diagnostic.cap_candidate_count == 0
+        && diagnostic.split_cap_candidate_count == 0
+        && diagnostic.edge_split_cap_candidate_count == 0
+        && diagnostic.three_edge_split_cap_candidate_count == 0
+    {
+        return Ok("closed_edge_star_boundary_refill_completion_no_cap_candidate");
+    }
+    if diagnostic
+        .rejected_by_reason
+        .contains_key("boundary_node_tet_scaled_jacobian")
+    {
+        return Ok("closed_edge_star_boundary_refill_completion_low_quality");
+    }
+    Ok("closed_edge_star_boundary_refill_completion_other")
 }
 
 #[cfg(test)]
@@ -13443,6 +13558,18 @@ mod tests {
                 "closed_edge_star_boundary_refill_boundary_node_scaled_jacobian"
             )),
             "component_edge_star_closed_cavity_boundary_refill_boundary_node_scaled_jacobian"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_boundary_refill_completion_near_quality"
+            )),
+            "component_edge_star_closed_cavity_boundary_refill_completion_near_quality"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_boundary_refill_completion_low_quality"
+            )),
+            "component_edge_star_closed_cavity_boundary_refill_completion_low_quality"
         );
         assert_eq!(
             diagnostic_closed_edge_star_boundary_refill_rejection_bucket(
