@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, SymbolicArray, SymbolicExpr, Tensor, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -58,6 +58,19 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         let matrix = Tensor::new_2d(Vec::new(), rows, cols)
             .map_err(|e| format!("Matrix creation error: {e}"))?;
         stack.push(Value::Tensor(matrix));
+    } else if row_major
+        .iter()
+        .any(|v| matches!(v, Value::Symbolic(_) | Value::SymbolicArray(_)))
+    {
+        let mut data = vec![SymbolicExpr::constant(0.0); total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = scalar_to_symbolic(&row_major[r * cols + c])?;
+            }
+        }
+        let matrix = SymbolicArray::new_2d(data, rows, cols)
+            .map_err(|e| format!("Symbolic matrix creation error: {e}"))?;
+        stack.push(Value::SymbolicArray(matrix));
     } else if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
         let mut data = vec![0u8; total_elements];
         for r in 0..rows {
@@ -106,6 +119,19 @@ fn scalar_to_real(value: &Value) -> Result<f64, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         _ => Ok(value.try_into()?),
+    }
+}
+
+fn scalar_to_symbolic(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
+    match value {
+        Value::Symbolic(expr) => Ok(expr.clone()),
+        Value::SymbolicArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::Num(n) => Ok(SymbolicExpr::constant(*n)),
+        Value::Int(i) => Ok(SymbolicExpr::constant(i.to_f64())),
+        Value::Bool(flag) => Ok(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),
+        _ => Err(RuntimeError::new(format!(
+            "cannot convert {value:?} to symbolic scalar"
+        ))),
     }
 }
 

@@ -173,6 +173,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Complex(_, _) => "complex scalar",
         Value::String(_) => "string scalar",
         Value::Symbolic(_) => "symbolic scalar",
+        Value::SymbolicArray(_) => "symbolic array",
         Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",

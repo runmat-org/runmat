@@ -84,6 +84,16 @@ pub(crate) fn format_type_info(value: &Value) -> String {
                 format!("{}x{} matrix", m.rows(), m.cols())
             }
         }
+        Value::Symbolic(_) => "sym scalar".to_string(),
+        Value::SymbolicArray(array) => {
+            if array.rows() == 1 && array.cols() == 1 {
+                "sym scalar".to_string()
+            } else if array.rows() == 1 || array.cols() == 1 {
+                format!("{}x{} sym vector", array.rows(), array.cols())
+            } else {
+                format!("{}x{} sym matrix", array.rows(), array.cols())
+            }
+        }
         Value::Cell(cells) => {
             if cells.data.len() == 1 {
                 "1x1 cell".to_string()

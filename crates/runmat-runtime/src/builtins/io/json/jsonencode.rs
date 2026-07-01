@@ -437,6 +437,13 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),
         Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string())),
+        Value::SymbolicArray(array) => Ok(JsonValue::Array(
+            array
+                .data
+                .iter()
+                .map(|expr| JsonValue::String(expr.to_string()))
+                .collect(),
+        )),
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
