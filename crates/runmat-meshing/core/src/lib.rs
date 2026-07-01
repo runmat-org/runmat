@@ -103,8 +103,9 @@ pub use field_mapping::{
     BoundaryNodeVectorValue, FieldMappingError,
 };
 pub use local_tet_flip::{
-    local_tet_boundary_faces, three_to_two_edge_flip_candidate, two_to_three_face_flip_candidate,
-    LocalTet, LocalTetFlipCandidate, LocalTetFlipError, LocalTetFlipKind,
+    evaluate_local_tet_flip_quality, local_tet_boundary_faces, three_to_two_edge_flip_candidate,
+    two_to_three_face_flip_candidate, LocalTet, LocalTetFlipCandidate, LocalTetFlipError,
+    LocalTetFlipKind, LocalTetFlipQualityReport, LocalTetFlipQualityThresholds,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
