@@ -14,6 +14,7 @@ pub(crate) mod max;
 pub(crate) mod mean;
 pub(crate) mod median;
 pub(crate) mod min;
+pub(crate) mod moving;
 pub(crate) mod nnz;
 pub(crate) mod prod;
 pub(crate) mod std;

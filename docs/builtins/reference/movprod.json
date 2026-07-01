@@ -1,0 +1,31 @@
+{
+  "title": "movprod",
+  "category": "math/reduction",
+  "keywords": ["movprod", "moving", "window", "product", "omitnan"],
+  "summary": "Compute moving products in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window pass and re-upload the result when an acceleration provider is active."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::math::reduction::moving::tests", "integration": null},
+  "description": "`movprod(A,k)` computes products over a sliding window of length `k`.",
+  "behaviors": [
+    "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
+    "Pass an explicit `dim` to move along a chosen dimension.",
+    "`'includenan'` is the default; `'omitnan'` and `'omitmissing'` skip NaN values inside each window.",
+    "`'Endpoints'` supports `'shrink'` (default), `'discard'`, `'fill'`, and numeric scalar fill values.",
+    "`'SamplePoints', sp` uses a strictly increasing numeric point vector for irregular moving windows. With sample points, RunMat currently supports shrink endpoints.",
+    "Real, logical, integer, scalar, vector, matrix, N-D, complex, and GPU numeric inputs are supported.",
+    "Table/timetable `DataVariables` forms are tracked separately."
+  ],
+  "examples": [
+    {"description": "Moving product with an asymmetric window", "input": "M = movprod([2 NaN 3 4], [1 0], 'omitnan')", "output": "M = [2 2 3 12]"}
+  ],
+  "links": [{"label": "prod", "url": "./prod"}, {"label": "movsum", "url": "./movsum"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"}
+}

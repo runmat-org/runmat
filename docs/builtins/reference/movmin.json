@@ -1,0 +1,32 @@
+{
+  "title": "movmin",
+  "category": "math/reduction",
+  "keywords": ["movmin", "moving", "window", "minimum", "omitnan"],
+  "summary": "Compute moving minimum values in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs currently use a resident fallback: gather once to host for the moving-window pass and re-upload the result when an acceleration provider is active."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::math::reduction::moving::tests", "integration": null},
+  "description": "`movmin(A,k)` returns the minimum value in each sliding window.",
+  "behaviors": [
+    "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
+    "Pass an explicit `dim` to move along a chosen dimension.",
+    "`'omitnan'`/`'omitmissing'` is the default for `movmin`; `'includenan'` propagates NaN values inside each window.",
+    "`'Endpoints'` supports `'shrink'` (default), `'discard'`, `'fill'`, and numeric scalar fill values.",
+    "`'fill'` uses positive infinity for `movmin`, matching MATLAB endpoint fill behavior.",
+    "`'SamplePoints', sp` uses a strictly increasing numeric point vector for irregular moving windows. With sample points, RunMat currently supports shrink endpoints.",
+    "Complex inputs are ordered by magnitude with phase as the tie breaker.",
+    "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
+  ],
+  "examples": [
+    {"description": "Moving minimum with scalar endpoint fill", "input": "M = movmin([4 2 8], 3, 'Endpoints', 0)", "output": "M = [0 2 0]"}
+  ],
+  "links": [{"label": "min", "url": "./min"}, {"label": "movmax", "url": "./movmax"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"}
+}
