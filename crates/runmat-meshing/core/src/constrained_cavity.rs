@@ -252,6 +252,9 @@ pub(crate) struct InteriorStarQualityDiagnostic {
 }
 
 const MAX_ANCHOR_TRIM_STATES: usize = 128;
+const MAX_BOUNDARY_EXACT_COVER_NODES: usize = 20;
+const MAX_BOUNDARY_EXACT_COVER_FACES: usize = 40;
+const MAX_BOUNDARY_EXACT_COVER_CANDIDATES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavityRefillEvaluation {
@@ -4538,7 +4541,10 @@ fn boundary_node_exact_cover_refill_candidate(
     let node_ids = cavity_boundary_node_ids(cavity)
         .into_iter()
         .collect::<Vec<_>>();
-    if node_ids.len() < 4 || node_ids.len() > 8 || cavity.boundary_faces.len() > 16 {
+    if node_ids.len() < 4
+        || node_ids.len() > MAX_BOUNDARY_EXACT_COVER_NODES
+        || cavity.boundary_faces.len() > MAX_BOUNDARY_EXACT_COVER_FACES
+    {
         return Ok(None);
     }
     let boundary_faces = cavity
@@ -4582,7 +4588,7 @@ fn boundary_node_exact_cover_refill_candidate(
             }
         }
     }
-    if candidates.is_empty() || candidates.len() > 80 {
+    if candidates.is_empty() || candidates.len() > MAX_BOUNDARY_EXACT_COVER_CANDIDATES {
         return Ok(None);
     }
     exact_cover_refill_from_candidate_tets(cavity, &candidates, options)
@@ -7717,6 +7723,93 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("exact cover should preserve volume");
+    }
+
+    #[test]
+    fn boundary_node_exact_cover_supports_bounded_multi_ring_bipyramid() {
+        let ring_count = 7_u32;
+        let top_node_id = ring_count;
+        let bottom_node_id = ring_count + 1;
+        let mut nodes = (0..ring_count)
+            .map(|node_id| {
+                let angle = std::f64::consts::TAU * node_id as f64 / ring_count as f64;
+                ConstrainedCavityNode {
+                    node_id,
+                    coordinates_m: [angle.cos(), angle.sin(), 0.0],
+                }
+            })
+            .collect::<Vec<_>>();
+        nodes.push(ConstrainedCavityNode {
+            node_id: top_node_id,
+            coordinates_m: [0.0, 0.0, 1.0],
+        });
+        nodes.push(ConstrainedCavityNode {
+            node_id: bottom_node_id,
+            coordinates_m: [0.0, 0.0, -1.0],
+        });
+
+        let options = refill_options();
+        let node_map = nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let mut boundary_faces = Vec::<ConstrainedCavityBoundaryFace>::new();
+        let mut expected_tets = Vec::<ConstrainedCavityRefillTet>::new();
+        for node_id in 0..ring_count {
+            let next_node_id = (node_id + 1) % ring_count;
+            boundary_faces.push(ConstrainedCavityBoundaryFace {
+                node_ids: [top_node_id, node_id, next_node_id],
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: Vec::new(),
+            });
+            boundary_faces.push(ConstrainedCavityBoundaryFace {
+                node_ids: [bottom_node_id, next_node_id, node_id],
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: Vec::new(),
+            });
+            let tet_node_ids = [top_node_id, bottom_node_id, node_id, next_node_id];
+            expected_tets.push(
+                raw_refill_tet_with_rejection_reason(
+                    tet_node_ids,
+                    tet_node_ids.map(|id| node_map[&id]),
+                    options,
+                )
+                .expect("ring bipyramid tet should pass quality gates"),
+            );
+        }
+        let expected_volume_m3 = expected_tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces,
+            protected_node_ids: Vec::new(),
+            target_volume_m3: expected_volume_m3,
+        };
+        validate_constrained_cavity(&cavity).expect("ring bipyramid cavity should validate");
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let boundary_triangles = cavity_boundary_triangles(&cavity, &boundary_nodes)
+            .expect("fixture boundary should build triangles");
+
+        let refill = boundary_node_exact_cover_refill_candidate(
+            &cavity,
+            &boundary_nodes,
+            &boundary_triangles,
+            options,
+        )
+        .expect("exact cover should evaluate")
+        .expect("bounded ring bipyramid should have an exact cover");
+
+        assert_eq!(refill.tets.len(), ring_count as usize);
+        validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
+            .expect("exact cover should preserve the larger cavity boundary");
+        validate_constrained_cavity_refill_volume(
+            cavity.target_volume_m3,
+            refill.total_volume_m3,
+            options.volume_relative_tolerance,
+        )
+        .expect("exact cover should preserve the larger cavity volume");
     }
 
     #[test]
