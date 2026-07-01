@@ -1,0 +1,105 @@
+{
+  "title": "ndgrid",
+  "category": "array/creation",
+  "keywords": [
+    "ndgrid",
+    "grid",
+    "n-dimensional",
+    "coordinate arrays",
+    "gpu"
+  ],
+  "summary": "Generate full coordinate arrays for an N-D rectangular grid.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "RunMat gathers gpuArray inputs, materializes dense grids on the host, and uploads outputs when GPU residency is requested. Providers may supply a future ndgrid hook to avoid the round trip."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::ndgrid::tests",
+    "integration": "builtins::array::creation::ndgrid::tests::ndgrid_gpu_inputs_roundtrip"
+  },
+  "description": "`ndgrid` expands one or more coordinate vectors into dense N-D coordinate arrays. Each output `Xi` contains copies of the ith grid vector along dimension `i`.",
+  "behaviors": [
+    "`X = ndgrid(x)` returns `x` as a column-vector grid.",
+    "`[X1, X2, ..., Xn] = ndgrid(xg)` reuses the single vector `xg` for every requested output dimension.",
+    "`[X1, X2, ..., Xn] = ndgrid(x1, x2, ..., xn)` returns one grid per input vector.",
+    "Input vectors may be row vectors, column vectors, scalars, or higher-rank arrays with at most one non-singleton dimension.",
+    "The output size is `[length(x1), length(x2), ..., length(xn)]`; the one-output form uses `length(x) x 1`.",
+    "Each output preserves the corresponding input axis class independently: complex axes produce complex outputs, logical axes produce logical outputs, and dense numeric tensors preserve their RunMat dtype metadata.",
+    "Requesting more outputs than supplied vectors is an error unless the single-vector syntax is used."
+  ],
+  "examples": [
+    {
+      "description": "Create a 2-D grid",
+      "input": "x = 1:2:9;\ny = [10 20 30];\n[X, Y] = ndgrid(x, y)",
+      "output": "% X and Y are size 5-by-3."
+    },
+    {
+      "description": "Reuse one vector for multiple dimensions",
+      "input": "v = [0 1];\n[X, Y, Z] = ndgrid(v)",
+      "output": "% X, Y, and Z are size 2-by-2-by-2."
+    },
+    {
+      "description": "Create a 3-D rectangular grid",
+      "input": "[X, Y, Z] = ndgrid(1:4, 1:3, 1:2)"
+    },
+    {
+      "description": "Use GPU vectors",
+      "input": "gx = gpuArray(linspace(-1, 1, 128));\ngy = gpuArray(linspace(0, 2, 64));\n[Xg, Yg] = ndgrid(gx, gy)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `ndgrid` different from `meshgrid`?",
+      "answer": "`ndgrid` uses the first input along the first dimension, the second input along the second dimension, and so on. `meshgrid` swaps the first two dimensions for plotting-oriented X/Y grids."
+    },
+    {
+      "question": "How many dimensions can `ndgrid` create?",
+      "answer": "As many as the requested output count in the single-vector syntax, or as many as the number of supplied vectors in the multi-vector syntax."
+    },
+    {
+      "question": "What happens with empty vectors?",
+      "answer": "Empty vectors produce empty dense grids with the corresponding zero extent."
+    },
+    {
+      "question": "Can `ndgrid` return gpuArray outputs?",
+      "answer": "Yes. gpuArray inputs request gpuArray outputs; RunMat currently gathers inputs, materializes dense grids on the host, and uploads outputs through the owning provider. Upload failures raise an error instead of silently returning host arrays."
+    }
+  ],
+  "links": [
+    {
+      "label": "meshgrid",
+      "url": "./meshgrid"
+    },
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "[X1, X2, ..., Xn] = ndgrid(x1, x2, ..., xn)"
+    },
+    "points": [
+      "`[X1, X2, ..., Xn] = ndgrid(xg)` reuses a single grid vector for every requested dimension.",
+      "`X = ndgrid(x)` returns a one-dimensional grid as a column vector."
+    ]
+  }
+}

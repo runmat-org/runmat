@@ -52680,6 +52680,123 @@
       ]
     },
     {
+      "name": "ndgrid",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[X1, X2, ..., Xn] = ndgrid(xg)",
+          "inputs": [
+            {
+              "name": "xg",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Grid vector reused for every requested output dimension."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full grid coordinates for the first dimension."
+            },
+            {
+              "name": "X2",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Full grid coordinates for the second dimension."
+            },
+            {
+              "name": "Xn",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Full grid coordinates for the nth dimension."
+            }
+          ]
+        },
+        {
+          "label": "[X1, X2, ..., Xn] = ndgrid(x1, x2, ..., xn)",
+          "inputs": [
+            {
+              "name": "x1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Grid vector for the first dimension."
+            },
+            {
+              "name": "x2",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grid vector for the second dimension."
+            },
+            {
+              "name": "xn",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grid vector for the nth dimension."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Full grid coordinates for the first dimension."
+            },
+            {
+              "name": "X2",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Full grid coordinates for the second dimension."
+            },
+            {
+              "name": "Xn",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Full grid coordinates for the nth dimension."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NDGRID.MISSING_AXIS",
+          "identifier": "RunMat:ndgrid:MissingAxis",
+          "when": "No grid vector inputs are provided.",
+          "message": "ndgrid: at least one input vector is required"
+        },
+        {
+          "code": "RM.NDGRID.INVALID_AXIS",
+          "identifier": "RunMat:ndgrid:InvalidAxis",
+          "when": "An input is not numeric vector data.",
+          "message": "ndgrid: inputs must be numeric vectors"
+        },
+        {
+          "code": "RM.NDGRID.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:ndgrid:TooManyOutputs",
+          "when": "More outputs are requested than available input grid vectors.",
+          "message": "ndgrid: too many output arguments for the supplied grid vectors"
+        },
+        {
+          "code": "RM.NDGRID.INTERNAL",
+          "identifier": "RunMat:ndgrid:Internal",
+          "when": "Output allocation, GPU gather, or GPU upload fails.",
+          "message": "ndgrid: internal error"
+        }
+      ]
+    },
+    {
       "name": "ndims",
       "output_mode": "Fixed",
       "completion_policy": "Public",
