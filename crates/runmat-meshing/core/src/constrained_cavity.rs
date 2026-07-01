@@ -1750,7 +1750,11 @@ fn multi_interior_node_refill_candidate(
     }
     let Some(mut refill) = exact_cover_refill_from_candidate_tets(cavity, &refill_tets, options)?
     else {
-        return Ok(Err("multi_interior_exact_cover_not_found"));
+        return Ok(Err(multi_interior_exact_cover_failure_reason(
+            cavity,
+            &refill_tets,
+            options,
+        )));
     };
     let used_node_ids = refill
         .tets
@@ -1776,6 +1780,50 @@ fn selected_multi_interior_nodes(
     });
     nodes.truncate(MAX_MULTI_INTERIOR_REFILL_NODES);
     nodes
+}
+
+#[cfg(test)]
+fn multi_interior_exact_cover_failure_reason(
+    cavity: &ConstrainedCavity,
+    candidates: &[ConstrainedCavityRefillTet],
+    options: ConstrainedCavityRefillOptions,
+) -> &'static str {
+    let mut search =
+        BoundaryExactCoverSearch::new(cavity, candidates, options.volume_relative_tolerance);
+    let (selected, trace) = search.search_with_trace();
+    if selected.is_some() {
+        return "multi_interior_exact_cover_candidate_unclassified";
+    }
+    match trace.dead_end.map(|dead_end| dead_end.reason) {
+        Some("attempt_limit") => "multi_interior_exact_cover_attempt_limit",
+        Some("volume_overflow") => "multi_interior_exact_cover_volume_overflow",
+        Some("boundary_incomplete") => "multi_interior_exact_cover_boundary_incomplete",
+        Some("interior_incomplete") => "multi_interior_exact_cover_interior_incomplete",
+        Some("volume_mismatch") => "multi_interior_exact_cover_volume_mismatch",
+        Some("candidates_exhausted") => "multi_interior_exact_cover_candidates_exhausted",
+        Some("forced_interior_mate_no_candidate_contains_face") => {
+            "multi_interior_exact_cover_forced_mate_missing_candidate"
+        }
+        Some("forced_interior_mate_face_count_conflict") => {
+            "multi_interior_exact_cover_forced_mate_face_count_conflict"
+        }
+        Some("forced_interior_mate_future_mate_conflict") => {
+            "multi_interior_exact_cover_forced_mate_future_conflict"
+        }
+        Some("forced_interior_mate_volume_overflow") => {
+            "multi_interior_exact_cover_forced_mate_volume_overflow"
+        }
+        _ => "multi_interior_exact_cover_not_found",
+    }
+}
+
+#[cfg(not(test))]
+fn multi_interior_exact_cover_failure_reason(
+    _cavity: &ConstrainedCavity,
+    _candidates: &[ConstrainedCavityRefillTet],
+    _options: ConstrainedCavityRefillOptions,
+) -> &'static str {
+    "multi_interior_exact_cover_not_found"
 }
 
 #[cfg(test)]
@@ -8656,6 +8704,23 @@ mod tests {
             options.volume_relative_tolerance,
         )
         .expect("multi-interior refill should preserve volume");
+    }
+
+    #[test]
+    fn multi_interior_exact_cover_failure_reports_candidates_exhausted() {
+        let cavity = two_tet_bipyramid_cavity();
+        let nodes = two_tet_bipyramid_nodes();
+        let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
+            .expect("fixture nodes should cover cavity boundary");
+        let options = refill_options();
+        let lower_points = [0, 1, 2, 3].map(|node_id| boundary_nodes[&node_id]);
+        let lower_tet = raw_refill_tet_with_rejection_reason([0, 1, 2, 3], lower_points, options)
+            .expect("fixture tet should pass quality gates");
+
+        assert_eq!(
+            multi_interior_exact_cover_failure_reason(&cavity, &[lower_tet], options),
+            "multi_interior_exact_cover_candidates_exhausted"
+        );
     }
 
     #[test]
