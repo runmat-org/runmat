@@ -5600,6 +5600,19 @@ pub(crate) fn diagnostic_boundary_recovery_node_relocation_transitions(
                 options,
             )?
             else {
+                let reason = diagnostic_interior_seed_node_relocation_candidate_rejection_reason(
+                    adjacent,
+                    node_id,
+                    relocated_point,
+                    tets,
+                    node_points,
+                    options,
+                )?;
+                *transitions
+                    .entry(diagnostic_boundary_recovery_relocation_rejection_bucket(
+                        reason,
+                    ))
+                    .or_default() += 1;
                 continue;
             };
             saw_candidate = true;
@@ -5630,6 +5643,20 @@ pub(crate) fn diagnostic_boundary_recovery_node_relocation_transitions(
         *transitions.entry("no_boundary_recovery_node").or_default() += 1;
     }
     Ok(transitions)
+}
+
+#[cfg(test)]
+fn diagnostic_boundary_recovery_relocation_rejection_bucket(reason: &'static str) -> &'static str {
+    match reason {
+        "star_boundary_contains_target_node" => "candidate_rejected_star_boundary_contains_node",
+        "relocated_point_on_star_boundary" => "candidate_rejected_point_on_star_boundary",
+        "too_few_star_boundary_faces" => "candidate_rejected_too_few_star_boundary_faces",
+        "component_mismatch" => "candidate_rejected_component_mismatch",
+        "raw_candidate_rejected" => "candidate_rejected_raw_candidate",
+        "volume_mismatch" => "candidate_rejected_volume_mismatch",
+        "accepted" => "candidate_accepted",
+        _ => "candidate_rejected_other",
+    }
 }
 
 fn best_interior_seed_node_untangling(
@@ -6087,14 +6114,16 @@ fn interior_seed_node_relocation_candidates(
     options: TetCandidateOptions,
 ) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
     let reference = &tets[adjacent[0]];
-    if !relocated_seed_point_has_star_boundary_clearance(
+    if relocation_star_boundary_clearance_rejection_reason(
         adjacent,
         interior_node_id,
         relocated_point,
         tets,
         node_points,
         MeshingTolerance::default(),
-    )? {
+    )?
+    .is_some()
+    {
         return Ok(None);
     }
     let original_volume = adjacent
@@ -6139,19 +6168,81 @@ fn interior_seed_node_relocation_candidates(
     Ok(Some(candidates))
 }
 
-fn relocated_seed_point_has_star_boundary_clearance(
+#[cfg(test)]
+fn diagnostic_interior_seed_node_relocation_candidate_rejection_reason(
+    adjacent: &[usize],
+    interior_node_id: u32,
+    relocated_point: [f64; 3],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    if let Some(reason) = relocation_star_boundary_clearance_rejection_reason(
+        adjacent,
+        interior_node_id,
+        relocated_point,
+        tets,
+        node_points,
+        MeshingTolerance::default(),
+    )? {
+        return Ok(reason);
+    }
+    let reference = &tets[adjacent[0]];
+    let original_volume = adjacent
+        .iter()
+        .map(|index| tets[*index].volume_m3)
+        .sum::<f64>();
+    let mut candidates = Vec::<TetCandidate>::with_capacity(adjacent.len());
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id || !tet.node_ids.contains(&interior_node_id) {
+            return Ok("component_mismatch");
+        }
+        let mut points = [[0.0_f64; 3]; 4];
+        for (node_index, node_id) in tet.node_ids.iter().copied().enumerate() {
+            points[node_index] = if node_id == interior_node_id {
+                relocated_point
+            } else {
+                *node_points
+                    .get(&node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id })?
+            };
+        }
+        let Some(candidate) = raw_candidate_tet(
+            tet.component_id,
+            tet.source_surface_element_id,
+            &tet.region_ids,
+            tet.node_ids,
+            points,
+            options,
+        ) else {
+            return Ok("raw_candidate_rejected");
+        };
+        candidates.push(candidate);
+    }
+    let candidate_volume = candidates
+        .iter()
+        .map(|candidate| candidate.volume_m3)
+        .sum::<f64>();
+    if (candidate_volume - original_volume).abs() > original_volume.max(1.0e-18) * 1.0e-9 {
+        return Ok("volume_mismatch");
+    }
+    Ok("accepted")
+}
+
+fn relocation_star_boundary_clearance_rejection_reason(
     adjacent: &[usize],
     interior_node_id: u32,
     relocated_point: [f64; 3],
     tets: &[TetCandidate],
     node_points: &BTreeMap<u32, [f64; 3]>,
     tolerance: MeshingTolerance,
-) -> Result<bool, TetCandidateError> {
+) -> Result<Option<&'static str>, TetCandidateError> {
     let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
     for index in adjacent {
         let tet = &tets[*index];
         if !tet.node_ids.contains(&interior_node_id) {
-            return Ok(false);
+            return Ok(Some("component_mismatch"));
         }
         for face in tet_node_faces(tet.node_ids) {
             *face_counts.entry(sorted_node_face(face)).or_default() += 1;
@@ -6164,7 +6255,7 @@ fn relocated_seed_point_has_star_boundary_clearance(
             continue;
         }
         if face.contains(&interior_node_id) {
-            return Ok(false);
+            return Ok(Some("star_boundary_contains_target_node"));
         }
         shell_face_count += 1;
         let triangle = [
@@ -6179,10 +6270,14 @@ fn relocated_seed_point_has_star_boundary_clearance(
                 .ok_or(TetCandidateError::MissingSurfaceNode { node_id: face[2] })?,
         ];
         if point_triangle_distance(relocated_point, triangle) <= tolerance.absolute_m {
-            return Ok(false);
+            return Ok(Some("relocated_point_on_star_boundary"));
         }
     }
-    Ok(shell_face_count >= 4)
+    if shell_face_count < 4 {
+        Ok(Some("too_few_star_boundary_faces"))
+    } else {
+        Ok(None)
+    }
 }
 
 fn best_three_tet_edge_reconnection(
@@ -15954,24 +16049,137 @@ mod tests {
         ]);
         let adjacent = (0..split_tets.len()).collect::<Vec<_>>();
 
-        assert!(relocated_seed_point_has_star_boundary_clearance(
-            &adjacent,
-            4,
-            split_point,
-            &split_tets,
+        assert_eq!(
+            relocation_star_boundary_clearance_rejection_reason(
+                &adjacent,
+                4,
+                split_point,
+                &split_tets,
+                &node_points,
+                MeshingTolerance::default(),
+            )
+            .expect("clearance should evaluate"),
+            None
+        );
+        assert_eq!(
+            relocation_star_boundary_clearance_rejection_reason(
+                &adjacent,
+                4,
+                [0.25, 0.25, 0.0],
+                &split_tets,
+                &node_points,
+                MeshingTolerance::default(),
+            )
+            .expect("clearance should evaluate"),
+            Some("relocated_point_on_star_boundary")
+        );
+    }
+
+    #[test]
+    fn boundary_recovery_relocation_diagnostic_classifies_boundary_shell_blocker() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [-1.0, 0.0, 0.0]),
+            (4, [0.0, -1.0, 0.0]),
+            (5, [0.0, 0.0, 1.0]),
+            (6, [0.0, 0.0, 0.1]),
+        ]);
+        let mut tets = [
+            [6, 0, 1, 2],
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 1],
+            [6, 1, 4, 5],
+        ]
+        .into_iter()
+        .map(|node_ids| {
+            raw_candidate_tet(
+                0,
+                0,
+                &[],
+                node_ids,
+                node_ids.map(|node_id| node_points[&node_id]),
+                options,
+            )
+            .expect("fixture tet should be valid")
+        })
+        .collect::<Vec<_>>();
+        tets[0].exact_scaled_jacobian = 0.01;
+        let node_adjacency = tet_node_adjacency(&tets);
+        assert!(interior_seed_relocation_scope_matches(
+            node_adjacency[&6].len()
+        ));
+
+        let transitions = diagnostic_boundary_recovery_node_relocation_transitions(
+            0,
+            &tets,
+            &node_adjacency,
+            &BTreeSet::from([6]),
             &node_points,
-            MeshingTolerance::default(),
+            options,
         )
-        .expect("clearance should evaluate"));
-        assert!(!relocated_seed_point_has_star_boundary_clearance(
-            &adjacent,
-            4,
-            [0.25, 0.25, 0.0],
-            &split_tets,
-            &node_points,
-            MeshingTolerance::default(),
-        )
-        .expect("clearance should evaluate"));
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(transitions.get("boundary_recovery_node"), Some(&1));
+        assert!(
+            transitions
+                .get("candidate_rejected_star_boundary_contains_node")
+                .copied()
+                .unwrap_or_default()
+                > 0,
+            "boundary recovery relocation should expose protected boundary shell blockers"
+        );
+    }
+
+    #[test]
+    fn relocated_boundary_star_points_report_shell_target_node() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.01,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [-1.0, 0.0, 0.0]),
+            (4, [0.0, -1.0, 0.0]),
+            (6, [0.0, 0.0, 0.1]),
+        ]);
+        let tets = [[6, 0, 1, 2], [6, 0, 2, 3], [6, 0, 3, 4], [6, 0, 4, 1]]
+            .into_iter()
+            .map(|node_ids| {
+                raw_candidate_tet(
+                    0,
+                    0,
+                    &[],
+                    node_ids,
+                    node_ids.map(|node_id| node_points[&node_id]),
+                    options,
+                )
+                .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            relocation_star_boundary_clearance_rejection_reason(
+                &[0, 1, 2, 3],
+                6,
+                [0.0, 0.0, 0.2],
+                &tets,
+                &node_points,
+                MeshingTolerance::default(),
+            )
+            .expect("clearance should evaluate"),
+            Some("star_boundary_contains_target_node")
+        );
     }
 
     #[test]
