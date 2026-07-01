@@ -217,6 +217,7 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub root_boundary_max_addable_candidate_count: usize,
     pub cover_dead_end_reason: &'static str,
     pub cover_dead_end_depth: usize,
+    pub cover_dead_end_reason_histogram: BTreeMap<&'static str, usize>,
     pub selected_tet_count: usize,
     pub search_attempt_count: usize,
     pub found_cover: bool,
@@ -3657,6 +3658,7 @@ struct BoundaryExactCoverDeadEnd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BoundaryExactCoverTrace {
     dead_end: Option<BoundaryExactCoverDeadEnd>,
+    dead_end_reason_counts: BTreeMap<&'static str, usize>,
 }
 
 #[cfg(test)]
@@ -3752,7 +3754,10 @@ impl<'a> BoundaryExactCoverSearch<'a> {
 
     #[cfg(test)]
     fn search_with_trace(&mut self) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
-        let mut trace = BoundaryExactCoverTrace { dead_end: None };
+        let mut trace = BoundaryExactCoverTrace {
+            dead_end: None,
+            dead_end_reason_counts: BTreeMap::new(),
+        };
         let result =
             self.search_from_traced(0.0, &mut BTreeMap::new(), &mut Vec::new(), &mut trace);
         (result, trace)
@@ -3765,6 +3770,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         selected: &[usize],
         reason: &'static str,
     ) {
+        *trace.dead_end_reason_counts.entry(reason).or_default() += 1;
         if trace.dead_end.is_none() {
             trace.dead_end = Some(BoundaryExactCoverDeadEnd {
                 reason,
@@ -5166,6 +5172,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         root_boundary_max_addable_candidate_count: 0,
         cover_dead_end_reason: "not_evaluated",
         cover_dead_end_depth: 0,
+        cover_dead_end_reason_histogram: BTreeMap::new(),
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -5342,6 +5349,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
         root_availability.max_addable_candidate_count;
     let (selected, trace) = search.search_with_trace();
     diagnostic.search_attempt_count = search.attempts;
+    diagnostic.cover_dead_end_reason_histogram = trace.dead_end_reason_counts;
     if let Some(dead_end) = trace.dead_end {
         diagnostic.cover_dead_end_reason = dead_end.reason;
         diagnostic.cover_dead_end_depth = dead_end.depth;
@@ -5486,6 +5494,7 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         root_boundary_max_addable_candidate_count: 0,
         cover_dead_end_reason: "not_evaluated",
         cover_dead_end_depth: 0,
+        cover_dead_end_reason_histogram: BTreeMap::new(),
         selected_tet_count: 0,
         search_attempt_count: 0,
         found_cover: false,
@@ -5688,6 +5697,7 @@ fn diagnostic_missing_face_shared_cap_stitch_with_link(
         root_availability.max_addable_candidate_count;
     let (selected, trace) = search.search_with_trace();
     diagnostic.search_attempt_count = search.attempts;
+    diagnostic.cover_dead_end_reason_histogram = trace.dead_end_reason_counts;
     if let Some(dead_end) = trace.dead_end {
         diagnostic.cover_dead_end_reason = dead_end.reason;
         diagnostic.cover_dead_end_depth = dead_end.depth;
@@ -8860,6 +8870,10 @@ mod tests {
                 reason: "boundary_face_no_addable_candidate",
                 depth: 0,
             })
+        );
+        assert_eq!(
+            trace.dead_end_reason_counts,
+            BTreeMap::from([("boundary_face_no_addable_candidate", 1)])
         );
     }
 
