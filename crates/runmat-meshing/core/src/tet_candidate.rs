@@ -6307,6 +6307,9 @@ fn best_componentized_edge_reconnection(
         candidate_groups.extend(edge_star_simple_cycle_components(
             adjacent, edge, tet_index, tets,
         )?);
+        candidate_groups.extend(edge_star_simple_path_components(
+            adjacent, edge, tet_index, tets,
+        )?);
         let mut seen_groups = BTreeSet::<Vec<usize>>::new();
         for component in candidate_groups {
             if !seen_groups.insert(component.clone()) {
@@ -6327,22 +6330,37 @@ fn best_componentized_edge_reconnection(
             );
             let original_min_exact =
                 min_exact_scaled_jacobian(component.iter().map(|index| &tets[*index]));
-            let candidates = if component.len() == 3 {
-                three_tet_edge_reconnection_candidates(
-                    &component,
-                    edge,
-                    tets,
-                    node_points,
-                    options,
-                )?
+            let candidates = if closed_edge_star_cavity(&component, edge, tets)?.is_some() {
+                if component.len() == 3 {
+                    three_tet_edge_reconnection_candidates(
+                        &component,
+                        edge,
+                        tets,
+                        node_points,
+                        options,
+                    )?
+                } else {
+                    multi_tet_edge_reconnection_candidates(
+                        &component,
+                        edge,
+                        tets,
+                        node_points,
+                        options,
+                    )?
+                }
             } else {
-                multi_tet_edge_reconnection_candidates(
+                face_neighbor_cavity_reconnection_candidates(
                     &component,
-                    edge,
                     tets,
                     node_points,
                     options,
                 )?
+                .and_then(|candidate| {
+                    candidate
+                        .inserted_nodes
+                        .is_empty()
+                        .then_some(candidate.tets)
+                })
             };
             let Some(candidates) = candidates else {
                 continue;
@@ -6450,6 +6468,9 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
     candidate_groups.extend(edge_star_simple_cycle_components(
         adjacent, edge, tet_index, tets,
     )?);
+    candidate_groups.extend(edge_star_simple_path_components(
+        adjacent, edge, tet_index, tets,
+    )?);
     let mut seen_groups = BTreeSet::<Vec<usize>>::new();
     let mut saw_target_group = false;
     let mut saw_too_small_group = false;
@@ -6480,10 +6501,32 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
         );
         let original_min_exact =
             min_exact_scaled_jacobian(component.iter().map(|index| &tets[*index]));
-        let candidates = if component.len() == 3 {
-            three_tet_edge_reconnection_candidates(&component, edge, tets, node_points, options)?
+        let candidates = if closed_edge_star_cavity(&component, edge, tets)?.is_some() {
+            if component.len() == 3 {
+                three_tet_edge_reconnection_candidates(
+                    &component,
+                    edge,
+                    tets,
+                    node_points,
+                    options,
+                )?
+            } else {
+                multi_tet_edge_reconnection_candidates(
+                    &component,
+                    edge,
+                    tets,
+                    node_points,
+                    options,
+                )?
+            }
         } else {
-            multi_tet_edge_reconnection_candidates(&component, edge, tets, node_points, options)?
+            face_neighbor_cavity_reconnection_candidates(&component, tets, node_points, options)?
+                .and_then(|candidate| {
+                    candidate
+                        .inserted_nodes
+                        .is_empty()
+                        .then_some(candidate.tets)
+                })
         };
         let Some(candidates) = candidates else {
             saw_invalid_candidate = true;
@@ -9432,6 +9475,86 @@ fn edge_star_simple_cycle_components(
             if component.len() == path.len() && component.contains(&tet_index) {
                 components.push(component);
             }
+        }
+    }
+    components.sort();
+    components.dedup();
+    Ok(components)
+}
+
+fn edge_star_simple_path_components(
+    adjacent: &[usize],
+    edge: [u32; 2],
+    tet_index: usize,
+    tets: &[TetCandidate],
+) -> Result<Vec<Vec<usize>>, TetCandidateError> {
+    let mut edge_to_tets = BTreeMap::<[u32; 2], Vec<usize>>::new();
+    let mut graph = BTreeMap::<u32, BTreeSet<u32>>::new();
+    for index in adjacent {
+        let opposite_edge = edge_star_opposite_edge(tets, *index, edge)?;
+        edge_to_tets.entry(opposite_edge).or_default().push(*index);
+        graph
+            .entry(opposite_edge[0])
+            .or_default()
+            .insert(opposite_edge[1]);
+        graph
+            .entry(opposite_edge[1])
+            .or_default()
+            .insert(opposite_edge[0]);
+    }
+    if edge_to_tets.values().any(|owners| owners.len() != 1) {
+        return Ok(Vec::new());
+    }
+
+    let mut components = Vec::<Vec<usize>>::new();
+    let mut visited_nodes = BTreeSet::<u32>::new();
+    for start in graph.keys().copied().collect::<Vec<_>>() {
+        if !visited_nodes.insert(start) {
+            continue;
+        }
+        let mut pending = vec![start];
+        let mut component_nodes = BTreeSet::<u32>::new();
+        while let Some(node_id) = pending.pop() {
+            component_nodes.insert(node_id);
+            if let Some(neighbors) = graph.get(&node_id) {
+                for neighbor in neighbors {
+                    if visited_nodes.insert(*neighbor) {
+                        pending.push(*neighbor);
+                    }
+                }
+            }
+        }
+        let degree_counts = component_nodes
+            .iter()
+            .map(|node_id| {
+                graph
+                    .get(node_id)
+                    .map(|neighbors| {
+                        neighbors
+                            .iter()
+                            .filter(|neighbor| component_nodes.contains(neighbor))
+                            .count()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        if degree_counts.iter().any(|degree| *degree > 2) {
+            continue;
+        }
+        if degree_counts.iter().filter(|degree| **degree == 1).count() != 2 {
+            continue;
+        }
+        let mut component = edge_to_tets
+            .iter()
+            .filter(|(ring_edge, _)| {
+                component_nodes.contains(&ring_edge[0]) && component_nodes.contains(&ring_edge[1])
+            })
+            .flat_map(|(_, owners)| owners.iter().copied())
+            .collect::<Vec<_>>();
+        component.sort_unstable();
+        component.dedup();
+        if component.len() >= 3 && component.contains(&tet_index) {
+            components.push(component);
         }
     }
     components.sort();
@@ -13166,6 +13289,34 @@ mod tests {
             .expect("open edge-star extraction should evaluate");
 
         assert!(cavity.is_none());
+    }
+
+    #[test]
+    fn edge_star_simple_path_components_track_open_boundary_paths() {
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| fixture_tet(tet_id as u32, node_ids))
+            .collect::<Vec<_>>();
+
+        let components = edge_star_simple_path_components(&[0, 1, 2], [0, 1], 1, &tets)
+            .expect("open edge-star path extraction should evaluate");
+
+        assert_eq!(components, vec![vec![0, 1, 2]]);
+    }
+
+    #[test]
+    fn edge_star_simple_path_components_reject_branching_paths() {
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 3, 5]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| fixture_tet(tet_id as u32, node_ids))
+            .collect::<Vec<_>>();
+
+        let components = edge_star_simple_path_components(&[0, 1, 2], [0, 1], 1, &tets)
+            .expect("branching edge-star path extraction should evaluate");
+
+        assert!(components.is_empty());
     }
 
     fn fixture_tet(tet_id: u32, node_ids: [u32; 4]) -> TetCandidate {
