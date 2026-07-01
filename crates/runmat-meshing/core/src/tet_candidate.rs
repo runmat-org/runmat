@@ -2428,7 +2428,14 @@ fn refinement_points_for_tets(
                 let requested_distance_m = distance(candidate_point, *point);
                 ranked.push(RankedRefinementPoint {
                     point: candidate_point,
-                    score: requested_refinement_score(requested_distance_m, target_size_m),
+                    score: requested_refinement_candidate_score(
+                        *point,
+                        candidate_point,
+                        requested_distance_m,
+                        target_size_m,
+                        classifier,
+                        tolerance,
+                    ),
                     requested_id: Some(requested_id),
                     requested_distance_m,
                     quality_driven: false,
@@ -2579,6 +2586,43 @@ fn requested_refinement_score(distance_m: f64, target_size_m: f64) -> f64 {
     1.0e12 - normalized_distance.max(0.0)
 }
 
+fn requested_refinement_candidate_score(
+    requested_point: [f64; 3],
+    candidate_point: [f64; 3],
+    distance_m: f64,
+    target_size_m: f64,
+    classifier: &ComponentSurfaceClassifier,
+    tolerance: MeshingTolerance,
+) -> f64 {
+    let requested_clearance = classifier.nearest_surface_distance(requested_point);
+    let safe_clearance = requested_refinement_boundary_clearance(target_size_m, tolerance);
+    let near_boundary = requested_clearance <= safe_clearance.max(tolerance.absolute_m * 10.0);
+    if !near_boundary {
+        return requested_refinement_score(distance_m, target_size_m);
+    }
+    let candidate_clearance = classifier.nearest_surface_distance(candidate_point);
+    let normalized_clearance = if target_size_m.is_finite() && target_size_m > 0.0 {
+        candidate_clearance / target_size_m
+    } else {
+        candidate_clearance
+    };
+    let normalized_distance = if target_size_m.is_finite() && target_size_m > 0.0 {
+        distance_m / target_size_m
+    } else {
+        distance_m
+    };
+    1.0e12 + normalized_clearance.max(0.0) - normalized_distance.max(0.0) * 1.0e-3
+}
+
+fn requested_refinement_boundary_clearance(target_size_m: f64, tolerance: MeshingTolerance) -> f64 {
+    let target_clearance = if target_size_m.is_finite() && target_size_m > 0.0 {
+        target_size_m * 0.05
+    } else {
+        0.0
+    };
+    target_clearance.max(tolerance.absolute_m * 10.0)
+}
+
 fn requested_refinement_candidate_points(
     requested_point: [f64; 3],
     seed_points: &[[f64; 3]],
@@ -2599,8 +2643,8 @@ fn requested_refinement_candidate_points(
         return candidates;
     }
     let clearance = classifier.nearest_surface_distance(requested_point);
-    let safe_clearance = target_size_m.min(1.0) * 0.01;
-    let near_boundary = clearance <= safe_clearance.max(tolerance.absolute_m * 10.0);
+    let safe_clearance = requested_refinement_boundary_clearance(target_size_m, tolerance);
+    let near_boundary = clearance <= safe_clearance;
     if !near_boundary {
         candidates.push(requested_point);
     }
@@ -4287,6 +4331,13 @@ const MAX_INTERIOR_SEED_RELOCATION_STAR_SIZE: usize = 40;
 pub(crate) const MAX_EDGE_STAR_RECONNECTION_SIZE: usize = 18;
 const MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE: usize = 7;
 const MAX_NODE_CAVITY_EXTRA_GROUP_CANDIDATES: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClosedEdgeStarCavity {
+    indices: Vec<usize>,
+    edge: [u32; 2],
+    ring: Vec<u32>,
+}
 
 fn interior_seed_collapse_scope_matches(
     scope: InteriorSeedCollapseScope,
@@ -9447,24 +9498,16 @@ fn collect_simple_paths_between_ring_nodes(
     }
 }
 
-fn multi_tet_edge_reconnection_candidates(
+fn closed_edge_star_cavity(
     adjacent: &[usize],
     edge: [u32; 2],
     tets: &[TetCandidate],
-    node_points: &BTreeMap<u32, [f64; 3]>,
-    options: TetCandidateOptions,
-) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
-    let reference = &tets[adjacent[0]];
-    let mut original_volume = 0.0_f64;
+) -> Result<Option<ClosedEdgeStarCavity>, TetCandidateError> {
     let mut ring_edges = BTreeSet::<[u32; 2]>::new();
     let mut ring_nodes = BTreeSet::<u32>::new();
     for index in adjacent {
-        let tet = &tets[*index];
-        original_volume += tet.volume_m3;
-        if tet.component_id != reference.component_id
-            || !tet.node_ids.contains(&edge[0])
-            || !tet.node_ids.contains(&edge[1])
-        {
+        let tet = tets.get(*index).ok_or(TetCandidateError::InvalidOptions)?;
+        if !tet.node_ids.contains(&edge[0]) || !tet.node_ids.contains(&edge[1]) {
             return Ok(None);
         }
         let opposite = tet
@@ -9486,21 +9529,52 @@ fn multi_tet_edge_reconnection_candidates(
     if ring.len() != adjacent.len() {
         return Ok(None);
     }
+    Ok(Some(ClosedEdgeStarCavity {
+        indices: adjacent.to_vec(),
+        edge,
+        ring,
+    }))
+}
+
+fn multi_tet_edge_reconnection_candidates(
+    adjacent: &[usize],
+    edge: [u32; 2],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<Vec<TetCandidate>>, TetCandidateError> {
+    let reference = &tets[adjacent[0]];
+    let mut original_volume = 0.0_f64;
+    for index in adjacent {
+        let tet = &tets[*index];
+        original_volume += tet.volume_m3;
+        if tet.component_id != reference.component_id
+            || !tet.node_ids.contains(&edge[0])
+            || !tet.node_ids.contains(&edge[1])
+        {
+            return Ok(None);
+        }
+    }
+    let Some(cavity) = closed_edge_star_cavity(adjacent, edge, tets)? else {
+        return Ok(None);
+    };
+    debug_assert_eq!(cavity.indices, adjacent);
+    debug_assert_eq!(cavity.edge, edge);
 
     let best_fan = best_edge_ring_reconnection_from_triangulations(
-        edge_ring_fan_triangulations(&ring),
+        edge_ring_fan_triangulations(&cavity.ring),
         reference,
         edge,
         node_points,
         original_volume,
         options,
     )?;
-    if best_fan.is_some() || ring.len() > MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE {
+    if best_fan.is_some() || cavity.ring.len() > MAX_EXHAUSTIVE_EDGE_STAR_RECONNECTION_SIZE {
         return Ok(best_fan);
     }
 
     let best_exhaustive = best_edge_ring_reconnection_from_triangulations(
-        edge_ring_triangulations(&ring),
+        edge_ring_triangulations(&cavity.ring),
         reference,
         edge,
         node_points,
@@ -13061,6 +13135,50 @@ mod tests {
                     .all(|triangle| triangle.contains(node_id))
             })
         })
+    }
+
+    #[test]
+    fn closed_edge_star_cavity_tracks_closed_ring() {
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 2]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| fixture_tet(tet_id as u32, node_ids))
+            .collect::<Vec<_>>();
+
+        let cavity = closed_edge_star_cavity(&[0, 1, 2, 3], [0, 1], &tets)
+            .expect("closed edge-star extraction should evaluate")
+            .expect("fixture should form a closed edge-star cavity");
+
+        assert_eq!(cavity.indices, vec![0, 1, 2, 3]);
+        assert_eq!(cavity.edge, [0, 1]);
+        assert_eq!(cavity.ring, vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn closed_edge_star_cavity_rejects_open_ring() {
+        let tets = [[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5]]
+            .into_iter()
+            .enumerate()
+            .map(|(tet_id, node_ids)| fixture_tet(tet_id as u32, node_ids))
+            .collect::<Vec<_>>();
+
+        let cavity = closed_edge_star_cavity(&[0, 1, 2], [0, 1], &tets)
+            .expect("open edge-star extraction should evaluate");
+
+        assert!(cavity.is_none());
+    }
+
+    fn fixture_tet(tet_id: u32, node_ids: [u32; 4]) -> TetCandidate {
+        TetCandidate {
+            tet_id,
+            component_id: 0,
+            node_ids,
+            source_surface_element_id: 0,
+            region_ids: Vec::new(),
+            volume_m3: 1.0,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 1.0,
+        }
     }
 
     #[test]
