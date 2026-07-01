@@ -5161,7 +5161,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![1.0f64; cols];
                 for c in 0..cols {
                     let mut prod = 1.0;
@@ -5186,7 +5186,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -5239,7 +5239,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![0.0f64; cols];
                 for c in 0..cols {
                     let mut s = 0.0;
@@ -5263,7 +5263,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -5527,7 +5527,7 @@ impl AccelProvider for InProcessProvider {
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
-            let out = if dim <= 1 {
+            let out = if dim == 0 {
                 let mut v = vec![f64::NAN; cols];
                 for c in 0..cols {
                     scratch.clear();
@@ -5573,7 +5573,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, out);
-            let shape = if dim <= 1 {
+            let shape = if dim == 0 {
                 vec![1, cols]
             } else {
                 vec![rows, 1]
@@ -6729,7 +6729,7 @@ mod tests {
     }
 
     #[test]
-    fn reduce_min_max_dim1_reduce_row_vector_to_scalar() {
+    fn reduce_dim1_reduces_row_vector_to_scalar() {
         let provider = InProcessProvider::new();
         let data = [3.0, 1.0, 5.0];
         let handle = provider
@@ -6760,6 +6760,27 @@ mod tests {
         assert_eq!(max_values.data, vec![5.0]);
         assert_eq!(max_indices.shape, vec![1, 1]);
         assert_eq!(max_indices.data, vec![3.0]);
+
+        let prod_result =
+            futures::executor::block_on(provider.reduce_prod_dim(&handle, 1)).expect("prod dim1");
+        let prod_values =
+            futures::executor::block_on(provider.download(&prod_result)).expect("prod values");
+        assert_eq!(prod_values.shape, vec![1, 1]);
+        assert_eq!(prod_values.data, vec![15.0]);
+
+        let mean_result =
+            futures::executor::block_on(provider.reduce_mean_dim(&handle, 1)).expect("mean dim1");
+        let mean_values =
+            futures::executor::block_on(provider.download(&mean_result)).expect("mean values");
+        assert_eq!(mean_values.shape, vec![1, 1]);
+        assert_eq!(mean_values.data, vec![3.0]);
+
+        let median_result = futures::executor::block_on(provider.reduce_median_dim(&handle, 1))
+            .expect("median dim1");
+        let median_values =
+            futures::executor::block_on(provider.download(&median_result)).expect("median values");
+        assert_eq!(median_values.shape, vec![1, 1]);
+        assert_eq!(median_values.data, vec![3.0]);
     }
 
     #[test]

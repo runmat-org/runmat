@@ -3643,11 +3643,9 @@ impl Compiler {
             }
             MirOperand::Local(local) => {
                 let slot = self.mir_local_slot(*local).ok()?;
-                let (expr, has_end) = self.mir_local_end_expr_internal(*local)?;
-                if has_end {
-                    Some(expr)
-                } else {
-                    Some(EndExpr::Var(slot))
+                match self.mir_local_end_expr_internal(*local) {
+                    Some((expr, true)) => Some(expr),
+                    Some((_, false)) | None => Some(EndExpr::Var(slot)),
                 }
             }
             MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,

@@ -1113,6 +1113,36 @@ fn runtime_variable_range_bound_slice_uses_live_value() {
 }
 
 #[test]
+fn runtime_call_range_bound_slice_uses_live_value_when_static_analysis_is_unavailable() {
+    let input = r#"
+        a = single([10 20 30 40]);
+        n = numel(a);
+        b = a(1:n);
+        ok = (numel(b) == 4) && (b(4) == 40);
+    "#;
+    let bytecode = compile_source(input).expect("compile call-derived range-bound slice");
+    assert!(
+        bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                Instr::IndexSliceExpr {
+                    range_end_exprs,
+                    ..
+                } if matches!(range_end_exprs.as_slice(), [EndExpr::Var(_)])
+            )
+        }),
+        "expected unresolved call-derived range bound to read the live variable"
+    );
+    let vars = interpret(&bytecode).expect("execute call-derived range-bound slice");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected call-derived slice check to pass, got {vars:?}"
+    );
+}
+
+#[test]
 fn object_range_end_indexing_accepts_mixed_string_selector_payload() {
     let input = r#"
         __register_test_classes();
