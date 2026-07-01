@@ -63274,6 +63274,179 @@
       ]
     },
     {
+      "name": "rescale",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = rescale(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric or logical array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaled output array."
+            }
+          ]
+        },
+        {
+          "label": "R = rescale(A, l, u)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric or logical array."
+            },
+            {
+              "name": "l",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Lower bound for the output interval."
+            },
+            {
+              "name": "u",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Upper bound for the output interval."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaled output array."
+            }
+          ]
+        },
+        {
+          "label": "R = rescale(A, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric or logical array."
+            },
+            {
+              "name": "Name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Name-value option name: \"InputMin\" or \"InputMax\"."
+            },
+            {
+              "name": "Value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Name-value option value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaled output array."
+            }
+          ]
+        },
+        {
+          "label": "R = rescale(A, l, u, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric or logical array."
+            },
+            {
+              "name": "l",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Lower bound for the output interval."
+            },
+            {
+              "name": "u",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Upper bound for the output interval."
+            },
+            {
+              "name": "Name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Name-value option name: \"InputMin\" or \"InputMax\"."
+            },
+            {
+              "name": "Value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Name-value option value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaled output array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RESCALE.INVALID_ARGUMENT",
+          "identifier": "RunMat:rescale:InvalidArgument",
+          "when": "Arguments, name-value pairs, interval bounds, or input range bounds are invalid.",
+          "message": "rescale: invalid argument"
+        },
+        {
+          "code": "RM.RESCALE.INVALID_INPUT",
+          "identifier": "RunMat:rescale:InvalidInput",
+          "when": "Input values cannot be converted to real numeric or logical arrays.",
+          "message": "rescale: invalid input"
+        },
+        {
+          "code": "RM.RESCALE.SIZE_MISMATCH",
+          "identifier": "RunMat:rescale:SizeMismatch",
+          "when": "A bound array cannot be implicitly expanded with the input array.",
+          "message": "rescale: size mismatch"
+        },
+        {
+          "code": "RM.RESCALE.INTERNAL",
+          "identifier": "RunMat:rescale:Internal",
+          "when": "Tensor construction, allocation, or GPU gather fails internally.",
+          "message": "rescale: internal error"
+        }
+      ]
+    },
+    {
       "name": "reshape",
       "output_mode": "Fixed",
       "completion_policy": "Public",
