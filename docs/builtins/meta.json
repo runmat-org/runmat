@@ -64506,6 +64506,54 @@
       ]
     },
     {
+      "name": "realsqrt",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = realsqrt(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric, logical, char, sparse, or gpuArray input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real elementwise square-root result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.REALSQRT.INVALID_INPUT",
+          "identifier": "RunMat:realsqrt:InvalidInput",
+          "when": "Input cannot be interpreted as real numeric, logical, char, sparse, or gpuArray data.",
+          "message": "realsqrt: invalid input"
+        },
+        {
+          "code": "RM.REALSQRT.DOMAIN",
+          "identifier": "RunMat:realsqrt:ComplexResult",
+          "when": "At least one real input value is negative and would require a complex result.",
+          "message": "realsqrt: input must be nonnegative"
+        },
+        {
+          "code": "RM.REALSQRT.INTERNAL",
+          "identifier": "RunMat:realsqrt:Internal",
+          "when": "Internal tensor construction or provider interaction failed.",
+          "message": "realsqrt: internal error"
+        }
+      ]
+    },
+    {
       "name": "rescale",
       "output_mode": "Fixed",
       "completion_policy": "Public",

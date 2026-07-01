@@ -27,6 +27,7 @@ pub(crate) mod pow2;
 pub(crate) mod power;
 pub(crate) mod rdivide;
 pub(crate) mod real;
+pub(crate) mod realsqrt;
 pub(crate) mod rescale;
 pub(crate) mod sign;
 pub(crate) mod single;
