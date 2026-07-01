@@ -22,6 +22,8 @@ use crate::{
 
 #[cfg(test)]
 use crate::constrained_cavity::diagnostic_interior_star_quality;
+#[cfg(test)]
+use crate::predicate::{point_in_closed_triangle_surface, PointInClosedSurface};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TetCandidateOptions {
@@ -4391,6 +4393,9 @@ pub(crate) struct ConstrainedSeedStarCandidateDiagnostic {
     pub group_count: usize,
     pub valid_cavity_count: usize,
     pub interior_candidate_count: usize,
+    pub star_visible_candidate_count: usize,
+    pub min_visible_boundary_face_count: usize,
+    pub visible_boundary_face_count_bins: BTreeMap<usize, usize>,
     pub relaxed_star_candidate_count: usize,
     pub relaxed_star_pass_count: usize,
     pub max_min_scaled_jacobian: f64,
@@ -4495,6 +4500,9 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
         group_count: 0,
         valid_cavity_count: 0,
         interior_candidate_count: 0,
+        star_visible_candidate_count: 0,
+        min_visible_boundary_face_count: usize::MAX,
+        visible_boundary_face_count_bins: BTreeMap::new(),
         relaxed_star_candidate_count: 0,
         relaxed_star_pass_count: 0,
         max_min_scaled_jacobian: 0.0,
@@ -4557,14 +4565,23 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
                 .iter()
                 .flat_map(|face| face.node_ids)
                 .collect::<BTreeSet<_>>();
+            let boundary_node_map = boundary_node_ids
+                .iter()
+                .map(|node_id| {
+                    Ok((
+                        *node_id,
+                        *node_points
+                            .get(node_id)
+                            .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>, TetCandidateError>>()?;
             let boundary_nodes = boundary_node_ids
                 .iter()
                 .map(|node_id| {
                     Ok(ConstrainedCavityNode {
                         node_id: *node_id,
-                        coordinates_m: *node_points
-                            .get(node_id)
-                            .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+                        coordinates_m: boundary_node_map[node_id],
                     })
                 })
                 .collect::<Result<Vec<_>, TetCandidateError>>()?;
@@ -4576,6 +4593,35 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
                 node_points,
             )?;
             diagnostic.interior_candidate_count += interior_candidates.len();
+            let boundary_triangles = cavity
+                .boundary_faces
+                .iter()
+                .map(|face| {
+                    [
+                        boundary_node_map[&face.node_ids[0]],
+                        boundary_node_map[&face.node_ids[1]],
+                        boundary_node_map[&face.node_ids[2]],
+                    ]
+                })
+                .collect::<Vec<_>>();
+            for candidate in &interior_candidates {
+                let visible_count = visible_boundary_face_count_for_star_point(
+                    &cavity,
+                    &boundary_node_map,
+                    &boundary_triangles,
+                    candidate.coordinates_m,
+                    options.min_volume_m3,
+                );
+                diagnostic.min_visible_boundary_face_count = diagnostic
+                    .min_visible_boundary_face_count
+                    .min(visible_count);
+                *diagnostic
+                    .visible_boundary_face_count_bins
+                    .entry(visible_count)
+                    .or_default() += 1;
+                diagnostic.star_visible_candidate_count +=
+                    usize::from(visible_count == cavity.boundary_faces.len());
+            }
             let star_diagnostic = diagnostic_interior_star_quality(
                 &cavity,
                 &boundary_nodes,
@@ -4611,7 +4657,38 @@ pub(crate) fn diagnostic_constrained_seed_star_refill_candidates(
             }
         }
     }
+    if diagnostic.interior_candidate_count == 0 {
+        diagnostic.min_visible_boundary_face_count = 0;
+    }
     Ok(diagnostic)
+}
+
+#[cfg(test)]
+fn visible_boundary_face_count_for_star_point(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, [f64; 3]>,
+    boundary_triangles: &[Triangle3],
+    point: [f64; 3],
+    min_volume_m3: f64,
+) -> usize {
+    cavity
+        .boundary_faces
+        .iter()
+        .filter(|face| {
+            let tet_points = [
+                boundary_nodes[&face.node_ids[0]],
+                boundary_nodes[&face.node_ids[1]],
+                boundary_nodes[&face.node_ids[2]],
+                point,
+            ];
+            tet_signed_volume(tet_points).abs() >= min_volume_m3
+                && point_in_closed_triangle_surface(
+                    tet_centroid(tet_points),
+                    boundary_triangles,
+                    MeshingTolerance::default(),
+                ) == PointInClosedSurface::Inside
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -13977,6 +14054,23 @@ mod tests {
         assert_eq!(candidate_diagnostic.group_count, 1);
         assert_eq!(candidate_diagnostic.valid_cavity_count, 1);
         assert!(candidate_diagnostic.interior_candidate_count >= 2);
+        assert!(candidate_diagnostic.star_visible_candidate_count >= 1);
+        assert_eq!(
+            candidate_diagnostic.min_visible_boundary_face_count,
+            candidate_diagnostic
+                .visible_boundary_face_count_bins
+                .keys()
+                .copied()
+                .min()
+                .expect("visibility bins should be populated")
+        );
+        assert!(
+            candidate_diagnostic
+                .visible_boundary_face_count_bins
+                .keys()
+                .any(|count| *count >= 4),
+            "diagnostic should expose candidate boundary visibility"
+        );
         assert!(candidate_diagnostic.relaxed_star_candidate_count >= 1);
         assert!(candidate_diagnostic.relaxed_star_pass_count >= 1);
         assert!(

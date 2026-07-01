@@ -3160,6 +3160,10 @@ mod tests {
         let mut bad_constrained_seed_star_group_count = 0_usize;
         let mut bad_constrained_seed_star_valid_cavity_count = 0_usize;
         let mut bad_constrained_seed_star_interior_candidate_count = 0_usize;
+        let mut bad_constrained_seed_star_visible_candidate_count = 0_usize;
+        let mut bad_constrained_seed_star_min_visible_boundary_faces = usize::MAX;
+        let mut bad_constrained_seed_star_visible_boundary_face_bins =
+            BTreeMap::<usize, usize>::new();
         let mut bad_constrained_seed_star_relaxed_candidate_count = 0_usize;
         let mut bad_constrained_seed_star_relaxed_pass_count = 0_usize;
         let mut bad_constrained_seed_star_max_min_quality = 0.0_f64;
@@ -3484,6 +3488,20 @@ mod tests {
                 constrained_seed_star_candidates.valid_cavity_count;
             bad_constrained_seed_star_interior_candidate_count +=
                 constrained_seed_star_candidates.interior_candidate_count;
+            bad_constrained_seed_star_visible_candidate_count +=
+                constrained_seed_star_candidates.star_visible_candidate_count;
+            if constrained_seed_star_candidates.interior_candidate_count > 0 {
+                bad_constrained_seed_star_min_visible_boundary_faces =
+                    bad_constrained_seed_star_min_visible_boundary_faces
+                        .min(constrained_seed_star_candidates.min_visible_boundary_face_count);
+            }
+            for (visible_faces, count) in
+                constrained_seed_star_candidates.visible_boundary_face_count_bins
+            {
+                *bad_constrained_seed_star_visible_boundary_face_bins
+                    .entry(visible_faces)
+                    .or_default() += count;
+            }
             bad_constrained_seed_star_relaxed_candidate_count +=
                 constrained_seed_star_candidates.relaxed_star_candidate_count;
             bad_constrained_seed_star_relaxed_pass_count +=
@@ -3622,10 +3640,17 @@ mod tests {
             bad_constrained_seed_star_refill_rejected_by_reason,
         );
         eprintln!(
-            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} worst_corner_bins={:?} rejected_by_reason={:?}",
+            "annular recovery bad_constrained_seed_star_candidates groups={} valid_cavities={} interior_candidates={} visible_candidates={} min_visible_faces={} visible_face_bins={:?} relaxed_candidates={} relaxed_passes={} max_min_quality={:.6} quality_bins={:?} worst_corner_bins={:?} rejected_by_reason={:?}",
             bad_constrained_seed_star_group_count,
             bad_constrained_seed_star_valid_cavity_count,
             bad_constrained_seed_star_interior_candidate_count,
+            bad_constrained_seed_star_visible_candidate_count,
+            if bad_constrained_seed_star_min_visible_boundary_faces == usize::MAX {
+                0
+            } else {
+                bad_constrained_seed_star_min_visible_boundary_faces
+            },
+            bad_constrained_seed_star_visible_boundary_face_bins,
             bad_constrained_seed_star_relaxed_candidate_count,
             bad_constrained_seed_star_relaxed_pass_count,
             bad_constrained_seed_star_max_min_quality,
