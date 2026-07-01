@@ -108,6 +108,10 @@ fn sinc_scalar_host(value: f64) -> f64 {
     scaled.sin() / scaled
 }
 
+fn erf_scalar_host(value: f64) -> f64 {
+    libm::erf(value)
+}
+
 fn sinc_complex_host(re: f64, im: f64) -> (f64, f64) {
     if im == 0.0 {
         return (sinc_scalar_host(re), 0.0);
@@ -3528,6 +3532,28 @@ impl AccelProvider for InProcessProvider {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow::anyhow!("unary_gamma not supported by provider")) })
+    }
+    fn unary_erf<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_erf does not support complex-interleaved buffers"
+            );
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().copied().map(erf_scalar_host).collect();
+            drop(guard);
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let mut guard2 = registry().lock().unwrap();
+            guard2.insert(id, out);
+            Ok(GpuTensorHandle {
+                shape: a.shape.clone(),
+                device_id: 0,
+                buffer_id: id,
+            })
+        })
     }
     fn unary_factorial<'a>(
         &'a self,

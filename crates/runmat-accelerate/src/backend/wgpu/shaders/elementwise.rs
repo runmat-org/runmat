@@ -1143,6 +1143,70 @@ fn heaviside_real(a: f64) -> f64 {
     return 0.5;
 }
 
+fn erf_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (is_inf64(a)) {
+        if (a > 0.0) {
+            return 1.0;
+        }
+        return -1.0;
+    }
+    if (a == 0.0) {
+        return a;
+    }
+    var sign = 1.0;
+    var x = a;
+    if (a < 0.0) {
+        sign = -1.0;
+        x = -a;
+    }
+    if (x >= 6.0) {
+        return sign;
+    }
+    let x2 = x * x;
+    if (x < 3.5) {
+        var sum = x;
+        var term = x;
+        var n: u32 = 1u;
+        loop {
+            if (n >= 120u) {
+                break;
+            }
+            term = term * (-x2 / f64(n));
+            let add = term / f64((2u * n) + 1u);
+            sum = sum + add;
+            if (abs(add) <= 1.0e-16 * max(1.0, abs(sum))) {
+                break;
+            }
+            n = n + 1u;
+        }
+        return sign * 1.1283791670955126 * sum;
+    }
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e300;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 60u) {
+            break;
+        }
+        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-16 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    let erfc_tail = exp(-x2) * asym_sum / (x * 1.772453850905516);
+    return sign * (1.0 - erfc_tail);
+}
+
 fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1203,6 +1267,7 @@ fn apply(a: f64) -> f64 {
         }
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
+        case 35u: { return erf_real(a); }
         default: { return a; }
     }
 }
@@ -1409,6 +1474,70 @@ fn heaviside_real(a: f32) -> f32 {
     return 0.5;
 }
 
+fn erf_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (is_inf32(a)) {
+        if (a > 0.0) {
+            return 1.0;
+        }
+        return -1.0;
+    }
+    if (a == 0.0) {
+        return a;
+    }
+    var sign: f32 = 1.0;
+    var x = a;
+    if (a < 0.0) {
+        sign = -1.0;
+        x = -a;
+    }
+    if (x >= 6.0) {
+        return sign;
+    }
+    let x2 = x * x;
+    if (x < 3.5) {
+        var sum = x;
+        var term = x;
+        var n: u32 = 1u;
+        loop {
+            if (n >= 50u) {
+                break;
+            }
+            term = term * (-x2 / f32(n));
+            let add = term / f32((2u * n) + 1u);
+            sum = sum + add;
+            if (abs(add) <= 1.0e-6 * max(1.0, abs(sum))) {
+                break;
+            }
+            n = n + 1u;
+        }
+        return sign * 1.1283792 * sum;
+    }
+    var asym_sum = 1.0;
+    var asym_term = 1.0;
+    var previous = 1.0e30;
+    var k: u32 = 1u;
+    loop {
+        if (k >= 30u) {
+            break;
+        }
+        asym_term = asym_term * (-(f32((2u * k) - 1u)) / (2.0 * x2));
+        if (abs(asym_term) > previous) {
+            break;
+        }
+        asym_sum = asym_sum + asym_term;
+        previous = abs(asym_term);
+        if (abs(asym_term) <= 1.0e-6 * abs(asym_sum)) {
+            break;
+        }
+        k = k + 1u;
+    }
+    let erfc_tail = exp(-x2) * asym_sum / (x * 1.7724539);
+    return sign * (1.0 - erfc_tail);
+}
+
 fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -1469,6 +1598,7 @@ fn apply(a: f32) -> f32 {
         }
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
+        case 35u: { return erf_real(a); }
         default: { return a; }
     }
 }

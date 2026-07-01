@@ -40,6 +40,7 @@ chrono = { workspace = true }
 libc = "0.2"
 log = { workspace = true }
 tracing = "0.1"
+libm = "0.2"
 num-complex = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"

@@ -21403,6 +21403,48 @@
       ]
     },
     {
+      "name": "erf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = erf(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise error-function result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ERF.INVALID_INPUT",
+          "identifier": "RunMat:erf:InvalidInput",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
+          "message": "erf: invalid input"
+        },
+        {
+          "code": "RM.ERF.INTERNAL",
+          "identifier": "RunMat:erf:Internal",
+          "when": "Internal tensor construction or provider interaction failed.",
+          "message": "erf: internal error"
+        }
+      ]
+    },
+    {
       "name": "exp",
       "output_mode": "Fixed",
       "completion_policy": "Public",

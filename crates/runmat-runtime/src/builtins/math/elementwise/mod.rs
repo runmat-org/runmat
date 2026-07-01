@@ -5,6 +5,7 @@ pub(crate) mod bsxfun;
 pub(crate) mod complex;
 pub(crate) mod conj;
 pub(crate) mod double;
+pub(crate) mod erf;
 pub(crate) mod exp;
 pub(crate) mod expm1;
 pub(crate) mod factorial;
