@@ -9,7 +9,8 @@ use runmat_core::{
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
 use std::io::{self, Read, Write};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use supports_color::Stream;
 
 use crate::commands::session::create_session;
@@ -465,16 +466,87 @@ fn run_shell_escape(command: &str) {
         command_process
     };
 
-    match shell.output() {
-        Ok(output) => {
-            print!("{}", String::from_utf8_lossy(&output.stdout));
-            let _ = io::stdout().flush();
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
-            if !output.status.success() {
-                if let Some(code) = output.status.code() {
-                    eprintln!("Shell command exited with status {code}");
-                } else {
-                    eprintln!("Shell command terminated without exit status");
+    match shell.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(mut child) => {
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+            let (sender, receiver) = mpsc::channel();
+
+            let stdout_thread = stdout.map(|mut stdout| {
+                let sender = sender.clone();
+                std::thread::spawn(move || -> io::Result<()> {
+                    let mut buffer = [0; 8192];
+                    loop {
+                        let bytes_read = stdout.read(&mut buffer)?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        if sender.send((true, buffer[..bytes_read].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })
+            });
+            let stderr_thread = stderr.map(|mut stderr| {
+                let sender = sender.clone();
+                std::thread::spawn(move || -> io::Result<()> {
+                    let mut buffer = [0; 8192];
+                    loop {
+                        let bytes_read = stderr.read(&mut buffer)?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        if sender.send((false, buffer[..bytes_read].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })
+            });
+            drop(sender);
+
+            {
+                let mut stdout = io::stdout().lock();
+                let mut stderr = io::stderr().lock();
+                for (is_stdout, chunk) in receiver {
+                    if is_stdout {
+                        let _ = stdout.write_all(&chunk);
+                        let _ = stdout.flush();
+                    } else {
+                        let _ = stderr.write_all(&chunk);
+                        let _ = stderr.flush();
+                    }
+                }
+            }
+
+            if let Some(stdout_thread) = stdout_thread {
+                match stdout_thread.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => eprintln!("Failed to read shell stdout: {err}"),
+                    Err(_) => eprintln!("Failed to read shell stdout"),
+                }
+            }
+            if let Some(stderr_thread) = stderr_thread {
+                match stderr_thread.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => eprintln!("Failed to read shell stderr: {err}"),
+                    Err(_) => eprintln!("Failed to read shell stderr"),
+                }
+            }
+
+            match child.wait() {
+                Ok(status) => {
+                    if !status.success() {
+                        if let Some(code) = status.code() {
+                            eprintln!("Shell command exited with status {code}");
+                        } else {
+                            eprintln!("Shell command terminated without exit status");
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Failed to wait for shell command: {err}");
                 }
             }
         }
