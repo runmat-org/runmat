@@ -8,7 +8,9 @@ use runmat_core::{
 };
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use supports_color::Stream;
 
 use crate::commands::session::create_session;
@@ -55,10 +57,9 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
         io::stdin()
             .read_to_string(&mut buffer)
             .context("Failed to read piped input")?;
-        for raw_line in buffer.lines() {
-            if !process_repl_line(raw_line, &mut engine, config).await? {
-                break;
-            }
+        if !process_repl_input(&buffer, &mut engine, config).await? {
+            finalize_repl_session(&engine, session_start, repl_run);
+            return Ok(());
         }
         finalize_repl_session(&engine, session_start, repl_run);
         return Ok(());
@@ -70,10 +71,9 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
         let readline = rl.readline("runmat> ");
         match readline {
             Ok(line) => {
-                let line = line.trim();
-                let _ = rl.add_history_entry(line);
+                let _ = rl.add_history_entry(line.as_str());
 
-                if !process_repl_line(line, &mut engine, config).await? {
+                if !process_repl_input(&line, &mut engine, config).await? {
                     break;
                 }
             }
@@ -253,6 +253,7 @@ fn format_runtime_line(
 fn format_help_line(caps: &BannerCapabilities) -> String {
     let help = style_text("help", caps, BannerTone::Bright);
     let info = style_text(".info", caps, BannerTone::Bright);
+    let shell = style_text("!cmd", caps, BannerTone::Bright);
     let exit = style_text("exit", caps, BannerTone::Bright);
     [
         style_text("Enter code to execute, or", caps, BannerTone::Muted),
@@ -261,6 +262,9 @@ fn format_help_line(caps: &BannerCapabilities) -> String {
         format!(" `{exit}`"),
         style_text(" or", caps, BannerTone::Muted),
         format!(" `{info}`"),
+        style_text("; use", caps, BannerTone::Muted),
+        format!(" `{shell}`"),
+        style_text(" for shell", caps, BannerTone::Muted),
         style_text(".", caps, BannerTone::Muted),
     ]
     .concat()
@@ -328,6 +332,24 @@ fn style_text(text: &str, caps: &BannerCapabilities, tone: BannerTone) -> String
     }
 }
 
+async fn process_repl_input(
+    input: &str,
+    engine: &mut RunMatSession,
+    config: &RunMatRuntimeConfig,
+) -> Result<bool> {
+    if input.is_empty() {
+        return process_repl_line("", engine, config).await;
+    }
+
+    for raw_line in input.lines() {
+        if !process_repl_line(raw_line.trim(), engine, config).await? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
 async fn process_repl_line(
     line: &str,
     engine: &mut RunMatSession,
@@ -377,7 +399,11 @@ async fn process_repl_line(
         println!("Statistics reset");
         return Ok(true);
     }
-    if line.is_empty() {
+    if line.trim().is_empty() {
+        return Ok(true);
+    }
+    if let Some(command) = line.trim_start().strip_prefix('!') {
+        run_shell_escape(command);
         return Ok(true);
     }
 
@@ -423,6 +449,113 @@ async fn process_repl_line(
     Ok(true)
 }
 
+fn run_shell_escape(command: &str) {
+    let command = command.trim_start();
+    if command.is_empty() {
+        eprintln!("Shell command is empty");
+        return;
+    }
+
+    let mut shell = if cfg!(windows) {
+        let mut command_process = Command::new("cmd");
+        command_process.args(["/C", command]);
+        command_process
+    } else {
+        let mut command_process = Command::new("sh");
+        command_process.args(["-c", command]);
+        command_process
+    };
+
+    match shell.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(mut child) => {
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+            let (sender, receiver) = mpsc::channel();
+
+            let stdout_thread = stdout.map(|mut stdout| {
+                let sender = sender.clone();
+                std::thread::spawn(move || -> io::Result<()> {
+                    let mut buffer = [0; 8192];
+                    loop {
+                        let bytes_read = stdout.read(&mut buffer)?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        if sender.send((true, buffer[..bytes_read].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })
+            });
+            let stderr_thread = stderr.map(|mut stderr| {
+                let sender = sender.clone();
+                std::thread::spawn(move || -> io::Result<()> {
+                    let mut buffer = [0; 8192];
+                    loop {
+                        let bytes_read = stderr.read(&mut buffer)?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        if sender.send((false, buffer[..bytes_read].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })
+            });
+            drop(sender);
+
+            {
+                let mut stdout = io::stdout().lock();
+                let mut stderr = io::stderr().lock();
+                for (is_stdout, chunk) in receiver {
+                    if is_stdout {
+                        let _ = stdout.write_all(&chunk);
+                        let _ = stdout.flush();
+                    } else {
+                        let _ = stderr.write_all(&chunk);
+                        let _ = stderr.flush();
+                    }
+                }
+            }
+
+            if let Some(stdout_thread) = stdout_thread {
+                match stdout_thread.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => eprintln!("Failed to read shell stdout: {err}"),
+                    Err(_) => eprintln!("Failed to read shell stdout"),
+                }
+            }
+            if let Some(stderr_thread) = stderr_thread {
+                match stderr_thread.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => eprintln!("Failed to read shell stderr: {err}"),
+                    Err(_) => eprintln!("Failed to read shell stderr"),
+                }
+            }
+
+            match child.wait() {
+                Ok(status) => {
+                    if !status.success() {
+                        if let Some(code) = status.code() {
+                            eprintln!("Shell command exited with status {code}");
+                        } else {
+                            eprintln!("Shell command terminated without exit status");
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Failed to wait for shell command: {err}");
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!("Failed to execute shell command: {err}");
+        }
+    }
+}
+
 fn finalize_repl_session(
     engine: &RunMatSession,
     session_start: Instant,
@@ -462,11 +595,13 @@ fn show_repl_help() {
     println!("  .gc-info        Show garbage collector summary with header");
     println!("  .gc-collect     Force garbage collection");
     println!("  .reset-stats    Reset execution statistics");
+    println!("  !cmd            Run a shell command and print its output");
     println!();
     println!("Examples");
     println!("  x = 1 + 2");
     println!("  y = [1, 2; 3, 4]");
     println!("  for i = 1:5; disp(i); end");
+    println!("  !pwd");
     println!();
     println!("Use `.info` for runtime details.");
 }
