@@ -3474,7 +3474,7 @@ struct BoundaryExactCoverTrace {
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ForcedInteriorMateFailure {
-    NoAddableMate,
+    NoAddableMate(ForcedInteriorMateNoAddableReason),
     VolumeOverflow,
 }
 
@@ -3482,8 +3482,33 @@ enum ForcedInteriorMateFailure {
 impl ForcedInteriorMateFailure {
     fn reason(self) -> &'static str {
         match self {
-            ForcedInteriorMateFailure::NoAddableMate => "forced_interior_mate_no_addable_mate",
+            ForcedInteriorMateFailure::NoAddableMate(reason) => reason.as_str(),
             ForcedInteriorMateFailure::VolumeOverflow => "forced_interior_mate_volume_overflow",
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForcedInteriorMateNoAddableReason {
+    NoCandidateContainsFace,
+    FaceCountConflict,
+    FutureMateConflict,
+}
+
+#[cfg(test)]
+impl ForcedInteriorMateNoAddableReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            ForcedInteriorMateNoAddableReason::NoCandidateContainsFace => {
+                "forced_interior_mate_no_candidate_contains_face"
+            }
+            ForcedInteriorMateNoAddableReason::FaceCountConflict => {
+                "forced_interior_mate_face_count_conflict"
+            }
+            ForcedInteriorMateNoAddableReason::FutureMateConflict => {
+                "forced_interior_mate_future_mate_conflict"
+            }
         }
     }
 }
@@ -3765,7 +3790,11 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         loop {
             let forced_candidate = self
                 .forced_interior_mate_traced(face_counts, selected)
-                .ok_or(ForcedInteriorMateFailure::NoAddableMate)?;
+                .ok_or_else(|| {
+                    ForcedInteriorMateFailure::NoAddableMate(
+                        self.forced_interior_mate_no_addable_reason(face_counts, selected),
+                    )
+                })?;
             let Some(candidate_index) = forced_candidate else {
                 return Ok((forced_volume_m3, forced_indices));
             };
@@ -3821,6 +3850,59 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             }
         }
         Some(forced)
+    }
+
+    #[cfg(test)]
+    fn forced_interior_mate_no_addable_reason(
+        &self,
+        face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
+    ) -> ForcedInteriorMateNoAddableReason {
+        for face in face_counts.iter().filter_map(|(face, count)| {
+            (!self.boundary_faces.contains(face) && *count == 1).then_some(*face)
+        }) {
+            let mate_indices = (0..self.candidates.len())
+                .filter(|candidate_index| {
+                    !selected.contains(candidate_index)
+                        && self.candidate_faces[*candidate_index].contains(&face)
+                })
+                .collect::<Vec<_>>();
+            if mate_indices.is_empty() {
+                return ForcedInteriorMateNoAddableReason::NoCandidateContainsFace;
+            }
+            if mate_indices.iter().all(|candidate_index| {
+                self.candidate_faces[*candidate_index]
+                    .iter()
+                    .any(|candidate_face| {
+                        let count = face_counts.get(candidate_face).copied().unwrap_or(0);
+                        if self.boundary_faces.contains(candidate_face) {
+                            count != 0
+                        } else {
+                            count >= 2
+                        }
+                    })
+            }) {
+                return ForcedInteriorMateNoAddableReason::FaceCountConflict;
+            }
+            if mate_indices.iter().all(|candidate_index| {
+                !self.candidate_faces[*candidate_index]
+                    .iter()
+                    .all(|candidate_face| {
+                        let count = face_counts.get(candidate_face).copied().unwrap_or(0);
+                        self.boundary_faces.contains(candidate_face)
+                            || count == 1
+                            || self.interior_face_has_future_mate(
+                                *candidate_index,
+                                *candidate_face,
+                                face_counts,
+                                selected,
+                            )
+                    })
+            }) {
+                return ForcedInteriorMateNoAddableReason::FutureMateConflict;
+            }
+        }
+        ForcedInteriorMateNoAddableReason::NoCandidateContainsFace
     }
 
     fn rollback_selected_candidates(
@@ -7343,7 +7425,77 @@ mod tests {
         let result =
             search.propagate_forced_interior_mates_traced(0.0, &mut face_counts, &mut selected);
 
-        assert_eq!(result, Err(ForcedInteriorMateFailure::NoAddableMate));
+        assert_eq!(
+            result,
+            Err(ForcedInteriorMateFailure::NoAddableMate(
+                ForcedInteriorMateNoAddableReason::NoCandidateContainsFace
+            ))
+        );
+        assert_eq!(face_counts, initial_face_counts);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_forced_mate_face_count_conflict() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: Vec::new(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let candidates = vec![ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 3],
+            volume_m3: 0.1,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        }];
+        let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+        let initial_face_counts =
+            BTreeMap::from([(sorted_face([0, 1, 2]), 1), (sorted_face([0, 1, 3]), 2)]);
+        let mut face_counts = initial_face_counts.clone();
+        let mut selected = Vec::<usize>::new();
+
+        let result =
+            search.propagate_forced_interior_mates_traced(0.0, &mut face_counts, &mut selected);
+
+        assert_eq!(
+            result,
+            Err(ForcedInteriorMateFailure::NoAddableMate(
+                ForcedInteriorMateNoAddableReason::FaceCountConflict
+            ))
+        );
+        assert_eq!(face_counts, initial_face_counts);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_forced_mate_future_mate_conflict() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: Vec::new(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let candidates = vec![ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 3],
+            volume_m3: 0.1,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        }];
+        let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+        let initial_face_counts = BTreeMap::from([(sorted_face([0, 1, 2]), 1)]);
+        let mut face_counts = initial_face_counts.clone();
+        let mut selected = Vec::<usize>::new();
+
+        let result =
+            search.propagate_forced_interior_mates_traced(0.0, &mut face_counts, &mut selected);
+
+        assert_eq!(
+            result,
+            Err(ForcedInteriorMateFailure::NoAddableMate(
+                ForcedInteriorMateNoAddableReason::FutureMateConflict
+            ))
+        );
         assert_eq!(face_counts, initial_face_counts);
         assert!(selected.is_empty());
     }
