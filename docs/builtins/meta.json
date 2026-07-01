@@ -2,6 +2,80 @@
   "version": 1,
   "builtins": [
     {
+      "name": "bsxfun",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = bsxfun(fun, A, B)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Binary function handle or callable text."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left scalar or array input."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right scalar or array input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise callback result after singleton expansion."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BSXFUN.INVALID_FUNCTION",
+          "identifier": "RunMat:bsxfun:InvalidFunction",
+          "when": "The first input cannot be used as a binary function.",
+          "message": "bsxfun: first input must be a function handle or callable name"
+        },
+        {
+          "code": "RM.BSXFUN.INVALID_INPUT",
+          "identifier": "RunMat:bsxfun:InvalidInput",
+          "when": "Input arrays use unsupported types for bsxfun scalar expansion.",
+          "message": "bsxfun: inputs must be numeric, logical, complex, or character arrays"
+        },
+        {
+          "code": "RM.BSXFUN.SIZE_MISMATCH",
+          "identifier": "RunMat:bsxfun:SizeMismatch",
+          "when": "Input arrays are not compatible for singleton expansion.",
+          "message": "bsxfun: input sizes are not compatible for singleton expansion"
+        },
+        {
+          "code": "RM.BSXFUN.FUNCTION_ERROR",
+          "identifier": "RunMat:bsxfun:FunctionError",
+          "when": "The binary function errors or does not return scalar-uniform values.",
+          "message": "bsxfun: callback execution error"
+        },
+        {
+          "code": "RM.BSXFUN.INTERNAL",
+          "identifier": "RunMat:bsxfun:Internal",
+          "when": "Internal output allocation or GPU gather fails.",
+          "message": "bsxfun: internal error"
+        }
+      ]
+    },
+    {
       "name": "DataArray.chunk_shape",
       "output_mode": "Fixed",
       "completion_policy": "Public",
