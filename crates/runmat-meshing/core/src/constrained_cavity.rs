@@ -5638,6 +5638,15 @@ struct LocalCapApexCandidate {
 }
 
 #[cfg(test)]
+const MAX_CAP_SIDE_CONNECTOR_CHAIN_DEPTH: usize = 2;
+#[cfg(test)]
+const MAX_CAP_SIDE_CONNECTOR_CHAIN_FACES_PER_DEPTH: usize = 128;
+#[cfg(test)]
+const MAX_CAP_SIDE_CONNECTORS_PER_CHAIN_FACE: usize = 2;
+#[cfg(test)]
+const MAX_CAP_SIDE_CONNECTOR_CHAIN_CANDIDATES: usize = 512;
+
+#[cfg(test)]
 fn append_cap_side_connector_tets(
     cap_tet_start: usize,
     cap_tet_count: usize,
@@ -5691,6 +5700,131 @@ fn append_cap_side_connector_tets(
         }
     }
     inserted_count
+        + append_cap_side_connector_chain_tets(
+            candidate_tets,
+            seen_tets,
+            node_points,
+            inserted_node_ids,
+            boundary_triangles,
+            options,
+        )
+}
+
+#[cfg(test)]
+fn append_cap_side_connector_chain_tets(
+    candidate_tets: &mut Vec<ConstrainedCavityRefillTet>,
+    seen_tets: &mut BTreeSet<[u32; 4]>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    inserted_node_ids: &BTreeSet<u32>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+) -> usize {
+    let mut inserted_count = 0_usize;
+    let mut processed_faces = BTreeSet::<[u32; 3]>::new();
+    for _ in 0..MAX_CAP_SIDE_CONNECTOR_CHAIN_DEPTH {
+        let frontier = open_inserted_node_faces(candidate_tets, inserted_node_ids)
+            .into_iter()
+            .filter(|face| !processed_faces.contains(face))
+            .take(MAX_CAP_SIDE_CONNECTOR_CHAIN_FACES_PER_DEPTH)
+            .collect::<Vec<_>>();
+        if frontier.is_empty() {
+            break;
+        }
+        let mut inserted_this_depth = 0_usize;
+        for face in frontier {
+            processed_faces.insert(face);
+            let connectors = connector_tets_for_face(
+                face,
+                node_points,
+                seen_tets,
+                boundary_triangles,
+                options,
+                MAX_CAP_SIDE_CONNECTORS_PER_CHAIN_FACE,
+            );
+            for tet in connectors {
+                if inserted_count >= MAX_CAP_SIDE_CONNECTOR_CHAIN_CANDIDATES {
+                    return inserted_count;
+                }
+                if !seen_tets.insert(sorted_tet_nodes(tet.node_ids)) {
+                    continue;
+                }
+                candidate_tets.push(tet);
+                inserted_count += 1;
+                inserted_this_depth += 1;
+            }
+        }
+        if inserted_this_depth == 0 {
+            break;
+        }
+    }
+    inserted_count
+}
+
+#[cfg(test)]
+fn open_inserted_node_faces(
+    candidate_tets: &[ConstrainedCavityRefillTet],
+    inserted_node_ids: &BTreeSet<u32>,
+) -> Vec<[u32; 3]> {
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tet in candidate_tets {
+        for face in tet_faces(tet.node_ids).map(sorted_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    face_counts
+        .into_iter()
+        .filter_map(|(face, count)| {
+            (count == 1
+                && face
+                    .iter()
+                    .any(|node_id| inserted_node_ids.contains(node_id)))
+            .then_some(face)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn connector_tets_for_face(
+    face: [u32; 3],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    seen_tets: &BTreeSet<[u32; 4]>,
+    boundary_triangles: &[Triangle3],
+    options: ConstrainedCavityRefillOptions,
+    limit: usize,
+) -> Vec<ConstrainedCavityRefillTet> {
+    let mut candidates = Vec::<ConstrainedCavityRefillTet>::new();
+    for node_id in node_points.keys().copied() {
+        if face.contains(&node_id) {
+            continue;
+        }
+        let tet_node_ids = [face[0], face[1], face[2], node_id];
+        if seen_tets.contains(&sorted_tet_nodes(tet_node_ids)) {
+            continue;
+        }
+        let tet_points = tet_node_ids.map(|id| node_points[&id]);
+        if point_in_closed_triangle_surface(
+            tet_centroid(tet_points),
+            boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        let Ok(tet) = raw_refill_tet_with_rejection_reason(tet_node_ids, tet_points, options)
+        else {
+            continue;
+        };
+        candidates.push(tet);
+    }
+    candidates.sort_by(|left, right| {
+        right
+            .exact_scaled_jacobian
+            .total_cmp(&left.exact_scaled_jacobian)
+            .then_with(|| left.aspect_ratio.total_cmp(&right.aspect_ratio))
+            .then_with(|| sorted_tet_nodes(left.node_ids).cmp(&sorted_tet_nodes(right.node_ids)))
+    });
+    candidates.truncate(limit);
+    candidates
 }
 
 #[cfg(test)]
@@ -7977,6 +8111,42 @@ mod tests {
             ),
             vec![1, 0, 0]
         );
+    }
+
+    #[test]
+    fn cap_side_connector_chain_adds_mates_for_open_inserted_faces() {
+        let cavity = two_tet_bipyramid_cavity();
+        let mut nodes = boundary_node_coordinates(&cavity, &two_tet_bipyramid_nodes())
+            .expect("fixture nodes should cover cavity");
+        nodes.insert(5, [0.25, 0.25, 0.0]);
+        let boundary_triangles =
+            cavity_boundary_triangles(&cavity, &nodes).expect("fixture boundary should evaluate");
+        let mut candidate_tets = vec![ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 2, 5],
+            volume_m3: 0.1,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        }];
+        let mut seen_tets = candidate_tets
+            .iter()
+            .map(|tet| sorted_tet_nodes(tet.node_ids))
+            .collect::<BTreeSet<_>>();
+
+        let inserted = append_cap_side_connector_chain_tets(
+            &mut candidate_tets,
+            &mut seen_tets,
+            &nodes,
+            &BTreeSet::from([5]),
+            &boundary_triangles,
+            refill_options(),
+        );
+
+        assert!(inserted > 0);
+        assert!(candidate_tets.len() > 1);
+        assert!(candidate_tets
+            .iter()
+            .skip(1)
+            .any(|tet| tet.node_ids.contains(&5)));
     }
 
     #[test]
