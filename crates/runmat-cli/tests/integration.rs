@@ -108,6 +108,70 @@ fn test_signal_compatibility_harness_cli() {
 }
 
 #[test]
+fn test_freqz_fir_response_cli() {
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("freqz_fir_response.m");
+    fs::write(
+        &script_path,
+        r#"
+[H, w] = freqz([1 1], 1, 4);
+fprintf('RESULT_freqz_fir real0=%.1f imag2=%.1f w2=%.4f len=%d\n', real(H(1)), imag(H(3)), w(3), length(H));
+"#,
+    )
+    .unwrap();
+
+    let output = run_runmat_in_dir_os(
+        &[OsStr::new("run"), script_path.as_os_str()],
+        Some(temp_dir.path()),
+    );
+    assert!(
+        output.status.success(),
+        "freqz FIR script failed. stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RESULT_freqz_fir real0=2.0 imag2=-1.0 w2=1.5708 len=4"),
+        "freqz FIR script produced unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_freqz_butter_response_cli() {
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("freqz_butter_response.m");
+    fs::write(
+        &script_path,
+        r#"
+[b, a] = butter(2, 0.25, 'low');
+[H, w] = freqz(b, a, 8);
+m = abs(H);
+fprintf('RESULT_freqz_butter len=%d dc=%.4f lastw=%.4f finite=%d\n', length(H), m(1), w(end), sum(isfinite(m)));
+"#,
+    )
+    .unwrap();
+
+    let output = run_runmat_in_dir_os(
+        &[OsStr::new("run"), script_path.as_os_str()],
+        Some(temp_dir.path()),
+    );
+    assert!(
+        output.status.success(),
+        "freqz butter script failed. stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("RESULT_freqz_butter len=8 dc=1.0000 lastw=2.7489 finite=8"),
+        "freqz butter script produced unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_mortgage_script_output() {
     let temp_dir = TempDir::new().unwrap();
     let script_path = temp_dir.path().join("mortgage.m");
