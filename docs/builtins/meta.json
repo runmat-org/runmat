@@ -11507,6 +11507,48 @@
       ]
     },
     {
+      "name": "cospi",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = cospi(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar, array, logical array, complex value, or gpuArray."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise cos(X*pi) result with exact integer and half-integer handling."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COSPI.INVALID_INPUT",
+          "identifier": "RunMat:cospi:InvalidInput",
+          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
+          "message": "cospi: invalid input"
+        },
+        {
+          "code": "RM.COSPI.INTERNAL",
+          "identifier": "RunMat:cospi:Internal",
+          "when": "Internal gather/conversion/allocation flow failed.",
+          "message": "cospi: internal error"
+        }
+      ]
+    },
+    {
       "name": "cosh",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -69021,6 +69063,48 @@
           "identifier": "RunMat:sind:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "sind: internal error"
+        }
+      ]
+    },
+    {
+      "name": "sinpi",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = sinpi(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar, array, logical array, complex value, or gpuArray."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise sin(X*pi) result with exact integer and half-integer handling."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SINPI.INVALID_INPUT",
+          "identifier": "RunMat:sinpi:InvalidInput",
+          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
+          "message": "sinpi: invalid input"
+        },
+        {
+          "code": "RM.SINPI.INTERNAL",
+          "identifier": "RunMat:sinpi:Internal",
+          "when": "Internal gather/conversion/allocation flow failed.",
+          "message": "sinpi: internal error"
         }
       ]
     },
