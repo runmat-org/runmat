@@ -4460,6 +4460,88 @@ fn best_constrained_interior_seed_star_refill(
 }
 
 #[cfg(test)]
+pub(crate) fn diagnostic_constrained_boundary_recovery_star_refill_reason(
+    tet_index: usize,
+    tets: &[TetCandidate],
+    node_adjacency: &BTreeMap<u32, Vec<usize>>,
+    boundary_recovery_node_ids: &BTreeSet<u32>,
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let tet = &tets[tet_index];
+    let mut saw_node = false;
+    let mut saw_group = false;
+    let mut saw_candidate = false;
+    let mut saw_non_improving = false;
+    for node_id in tet
+        .node_ids
+        .into_iter()
+        .filter(|node_id| boundary_recovery_node_ids.contains(node_id))
+    {
+        saw_node = true;
+        let Some(adjacent) = node_adjacency.get(&node_id) else {
+            continue;
+        };
+        if !adjacent.contains(&tet_index) || adjacent.len() < 5 {
+            continue;
+        }
+        let mut candidate_groups = vec![adjacent.clone()];
+        candidate_groups.extend(
+            interior_seed_star_face_components(node_id, adjacent, tets)
+                .into_iter()
+                .filter(|component| component.len() != adjacent.len()),
+        );
+        let mut seen_groups = BTreeSet::<Vec<usize>>::new();
+        for group in candidate_groups {
+            if !seen_groups.insert(group.clone()) || !group.contains(&tet_index) || group.len() < 5
+            {
+                continue;
+            }
+            saw_group = true;
+            let Some((neighbor_indices, candidates, _)) =
+                constrained_interior_seed_star_refill_candidates(
+                    tet_index,
+                    tets,
+                    &group,
+                    node_points,
+                    options,
+                )?
+            else {
+                return diagnostic_constrained_seed_star_refill_no_candidate_reason(
+                    tet_index,
+                    tets,
+                    &group,
+                    node_points,
+                    options,
+                );
+            };
+            saw_candidate = true;
+            let original_below_count = count_exact_quality_violations(
+                neighbor_indices.iter().map(|index| &tets[*index]),
+                options.min_scaled_jacobian,
+            );
+            let candidate_below_count =
+                count_exact_quality_violations(candidates.iter(), options.min_scaled_jacobian);
+            if candidate_below_count < original_below_count {
+                return Ok("boundary_recovery_star_refill_reconnectable");
+            }
+            saw_non_improving = true;
+        }
+    }
+    if saw_non_improving {
+        Ok("boundary_recovery_star_refill_no_improvement")
+    } else if saw_candidate {
+        Ok("boundary_recovery_star_refill_candidate_unclassified")
+    } else if saw_group {
+        Ok("boundary_recovery_star_refill_no_candidate")
+    } else if saw_node {
+        Ok("boundary_recovery_star_refill_no_valid_group")
+    } else {
+        Ok("boundary_recovery_star_refill_no_recovery_node")
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ConstrainedSeedStarCandidateDiagnostic {
     pub group_count: usize,
@@ -16111,7 +16193,9 @@ mod tests {
             .expect("fixture tet should be valid")
         })
         .collect::<Vec<_>>();
-        tets[0].exact_scaled_jacobian = 0.01;
+        for tet in &mut tets {
+            tet.exact_scaled_jacobian = 0.01;
+        }
         let node_adjacency = tet_node_adjacency(&tets);
         assert!(interior_seed_relocation_scope_matches(
             node_adjacency[&6].len()
@@ -16135,6 +16219,63 @@ mod tests {
                 .unwrap_or_default()
                 > 0,
             "boundary recovery relocation should expose protected boundary shell blockers"
+        );
+    }
+
+    #[test]
+    fn boundary_recovery_shell_refill_diagnostic_reports_quality_limiter() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 1.0e6,
+            min_scaled_jacobian: 0.15,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [1.0, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [-1.0, 0.0, 0.0]),
+            (4, [0.0, -1.0, 0.0]),
+            (5, [0.0, 0.0, 1.0]),
+            (6, [0.0, 0.0, 0.1]),
+        ]);
+        let mut tets = [
+            [6, 0, 1, 2],
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 1],
+            [6, 1, 4, 5],
+        ]
+        .into_iter()
+        .map(|node_ids| {
+            raw_candidate_tet(
+                0,
+                0,
+                &[],
+                node_ids,
+                node_ids.map(|node_id| node_points[&node_id]),
+                options,
+            )
+            .expect("fixture tet should be valid")
+        })
+        .collect::<Vec<_>>();
+        tets[0].exact_scaled_jacobian = 0.01;
+        let original_below_count =
+            count_exact_quality_violations(tets.iter(), options.min_scaled_jacobian);
+        assert!(original_below_count > 0);
+        let node_adjacency = tet_node_adjacency(&tets);
+        let diagnostic_reason = diagnostic_constrained_boundary_recovery_star_refill_reason(
+            0,
+            &tets,
+            &node_adjacency,
+            &BTreeSet::from([6]),
+            &node_points,
+            options,
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(
+            diagnostic_reason,
+            "constrained_seed_star_refill_star_tet_scaled_jacobian"
         );
     }
 

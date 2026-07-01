@@ -2324,6 +2324,7 @@ mod tests {
             diagnostic_boundary_cavity_reconnection_transitions,
             diagnostic_boundary_recovery_node_relocation_transitions,
             diagnostic_cavity_decomposition_transitions,
+            diagnostic_constrained_boundary_recovery_star_refill_reason,
             diagnostic_constrained_seed_star_refill_candidates,
             diagnostic_constrained_seed_star_refill_rejection_reason,
             diagnostic_edge_reconnection_rejection_reason,
@@ -3135,11 +3136,14 @@ mod tests {
         let mut bad_cavity_decomposition_transitions = BTreeMap::<String, usize>::new();
         let mut bad_missing_face_owner_closure_transitions = BTreeMap::<String, usize>::new();
         let mut bad_boundary_recovery_relocation_transitions = BTreeMap::<String, usize>::new();
+        let mut bad_boundary_recovery_shell_refill_rejected_by_reason =
+            BTreeMap::<String, usize>::new();
         let mut bad_node_cavity_transition_sample_count = 0_usize;
         let mut bad_boundary_cavity_transition_sample_count = 0_usize;
         let mut bad_cavity_decomposition_sample_count = 0_usize;
         let mut bad_missing_face_owner_closure_sample_count = 0_usize;
         let mut bad_boundary_recovery_relocation_sample_count = 0_usize;
+        let mut bad_boundary_recovery_shell_refill_sample_count = 0_usize;
         let mut bad_one_ring_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_face_cavity_size_histogram = BTreeMap::<usize, usize>::new();
         let mut bad_node_cavity_size_histogram = BTreeMap::<usize, usize>::new();
@@ -3369,6 +3373,21 @@ mod tests {
                         .entry(transition.to_string())
                         .or_default() += count;
                 }
+            }
+            if bad_boundary_recovery_shell_refill_sample_count < 8 {
+                bad_boundary_recovery_shell_refill_sample_count += 1;
+                let reason = diagnostic_constrained_boundary_recovery_star_refill_reason(
+                    tet_index,
+                    &preparation.tet_candidates.tets,
+                    &node_index_adjacency,
+                    &boundary_recovery_node_ids,
+                    &node_points,
+                    diagnostic_options,
+                )
+                .expect("boundary-recovery shell refill diagnostic should evaluate");
+                *bad_boundary_recovery_shell_refill_rejected_by_reason
+                    .entry(reason.to_string())
+                    .or_default() += 1;
             }
             let (one_ring_size, face_cavity_size, node_cavity_size) = diagnostic_bad_cavity_sizes(
                 tet_index,
@@ -3615,6 +3634,11 @@ mod tests {
         eprintln!(
             "annular recovery bad_boundary_recovery_relocation_transition_sample={} transitions={:?}",
             bad_boundary_recovery_relocation_sample_count, bad_boundary_recovery_relocation_transitions
+        );
+        eprintln!(
+            "annular recovery bad_boundary_recovery_shell_refill_sample={} rejected_by_reason={:?}",
+            bad_boundary_recovery_shell_refill_sample_count,
+            bad_boundary_recovery_shell_refill_rejected_by_reason
         );
         eprintln!(
             "annular recovery bad_cavity_size_histograms one_ring={:?} face_closure={:?} node_closure={:?}",
