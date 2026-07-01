@@ -6798,6 +6798,7 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
             whole_star_group_reason.get_or_insert(
                 diagnostic_whole_edge_star_cavity_reconnection_reason(
                     &component,
+                    edge,
                     tets,
                     node_points,
                     options,
@@ -6898,6 +6899,7 @@ pub(crate) fn diagnostic_edge_reconnection_rejection_reason(
 #[cfg(test)]
 fn diagnostic_whole_edge_star_cavity_reconnection_reason(
     adjacent: &[usize],
+    edge: [u32; 2],
     tets: &[TetCandidate],
     node_points: &BTreeMap<u32, [f64; 3]>,
     options: TetCandidateOptions,
@@ -6917,6 +6919,15 @@ fn diagnostic_whole_edge_star_cavity_reconnection_reason(
         return Ok("empty_candidate");
     };
     if let Some(rejection) = rejection {
+        if rejection == "boundary_face_mismatch_constrained_refill_completion_no_candidate" {
+            return diagnostic_whole_edge_star_boundary_refill_completion_bucket(
+                adjacent,
+                edge,
+                tets,
+                node_points,
+                options,
+            );
+        }
         return Ok(rejection);
     }
     let candidate_below_count =
@@ -6935,8 +6946,127 @@ fn diagnostic_whole_edge_star_cavity_reconnection_reason(
 }
 
 #[cfg(test)]
+fn diagnostic_whole_edge_star_boundary_refill_completion_bucket(
+    adjacent: &[usize],
+    edge: [u32; 2],
+    tets: &[TetCandidate],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<&'static str, TetCandidateError> {
+    let Some(reference) = adjacent.first().map(|index| &tets[*index]) else {
+        return Ok("whole_edge_star_boundary_refill_completion_other");
+    };
+    let mut original_volume = 0.0_f64;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    let mut boundary_node_ids = BTreeSet::<u32>::new();
+    for index in adjacent {
+        let tet = &tets[*index];
+        if tet.component_id != reference.component_id {
+            return Ok("whole_edge_star_boundary_refill_completion_other");
+        }
+        original_volume += tet.volume_m3;
+        for face in tet_node_faces(tet.node_ids).map(sorted_node_face) {
+            *face_counts.entry(face).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| (count == 1).then_some(face))
+        .collect::<BTreeSet<_>>();
+    for face in &boundary_faces {
+        boundary_node_ids.extend(face.iter().copied());
+    }
+    let cavity = ConstrainedCavity {
+        removed_tet_ids: adjacent.iter().map(|index| *index as u32).collect(),
+        boundary_faces: boundary_faces
+            .iter()
+            .map(|face| ConstrainedCavityBoundaryFace {
+                node_ids: *face,
+                outside_tet_ids: Vec::new(),
+                source_face_id: None,
+                source_edge_ids: [None, None, None],
+                region_ids: reference.region_ids.clone(),
+            })
+            .collect(),
+        protected_node_ids: Vec::new(),
+        target_volume_m3: original_volume,
+    };
+    let boundary_nodes = boundary_node_ids
+        .iter()
+        .map(|node_id| {
+            Ok(ConstrainedCavityNode {
+                node_id: *node_id,
+                coordinates_m: *node_points
+                    .get(node_id)
+                    .ok_or(TetCandidateError::MissingSurfaceNode { node_id: *node_id })?,
+            })
+        })
+        .collect::<Result<Vec<_>, TetCandidateError>>()?;
+    let diagnostic = diagnostic_boundary_node_completion(
+        &cavity,
+        &boundary_nodes,
+        ConstrainedCavityRefillOptions {
+            min_volume_m3: options.min_volume_m3,
+            max_aspect_ratio: options.max_aspect_ratio,
+            min_scaled_jacobian: options.min_scaled_jacobian,
+            volume_relative_tolerance: 1.0e-9,
+            min_protected_node_distance_m: 0.0,
+        },
+    )
+    .map_err(|_| TetCandidateError::InvalidOptions)?;
+    Ok(
+        match classify_boundary_refill_completion_diagnostic(
+            &diagnostic,
+            options.min_scaled_jacobian,
+            edge,
+        ) {
+            "closed_edge_star_boundary_refill_completion_near_quality" => {
+                "whole_edge_star_boundary_refill_completion_near_quality"
+            }
+            "closed_edge_star_boundary_refill_completion_no_cap_candidate" => {
+                "whole_edge_star_boundary_refill_completion_no_cap_candidate"
+            }
+            "closed_edge_star_boundary_refill_completion_edge_apex_limited" => {
+                "whole_edge_star_boundary_refill_completion_edge_apex_limited"
+            }
+            "closed_edge_star_boundary_refill_completion_ring_apex_limited" => {
+                "whole_edge_star_boundary_refill_completion_ring_apex_limited"
+            }
+            "closed_edge_star_boundary_refill_completion_unknown_apex_limited" => {
+                "whole_edge_star_boundary_refill_completion_unknown_apex_limited"
+            }
+            "closed_edge_star_boundary_refill_completion_face_limited" => {
+                "whole_edge_star_boundary_refill_completion_face_limited"
+            }
+            _ => "whole_edge_star_boundary_refill_completion_other",
+        },
+    )
+}
+
+#[cfg(test)]
 fn diagnostic_component_edge_star_whole_star_bucket(reason: Option<&'static str>) -> &'static str {
     match reason {
+        Some("whole_edge_star_boundary_refill_completion_near_quality") => {
+            "component_edge_star_whole_star_refill_completion_near_quality"
+        }
+        Some("whole_edge_star_boundary_refill_completion_no_cap_candidate") => {
+            "component_edge_star_whole_star_refill_completion_no_cap_candidate"
+        }
+        Some("whole_edge_star_boundary_refill_completion_edge_apex_limited") => {
+            "component_edge_star_whole_star_refill_completion_edge_apex_limited"
+        }
+        Some("whole_edge_star_boundary_refill_completion_ring_apex_limited") => {
+            "component_edge_star_whole_star_refill_completion_ring_apex_limited"
+        }
+        Some("whole_edge_star_boundary_refill_completion_unknown_apex_limited") => {
+            "component_edge_star_whole_star_refill_completion_unknown_apex_limited"
+        }
+        Some("whole_edge_star_boundary_refill_completion_face_limited") => {
+            "component_edge_star_whole_star_refill_completion_face_limited"
+        }
+        Some("whole_edge_star_boundary_refill_completion_other") => {
+            "component_edge_star_whole_star_refill_completion_other"
+        }
         Some("boundary_face_mismatch_constrained_refill_completion_no_candidate") => {
             "component_edge_star_whole_star_refill_completion_no_candidate"
         }
@@ -15095,7 +15225,7 @@ mod tests {
 
         assert_eq!(
             reason,
-            "component_edge_star_whole_star_refill_completion_no_candidate"
+            "component_edge_star_whole_star_refill_completion_other"
         );
     }
 
