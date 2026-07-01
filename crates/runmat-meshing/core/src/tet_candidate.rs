@@ -3661,6 +3661,16 @@ fn repair_exact_quality_tets_once(
             matches!(node.source, TetCandidateNodeSource::InteriorSeed).then_some(node.node_id)
         })
         .collect::<BTreeSet<_>>();
+    let movable_relocation_node_ids = nodes
+        .iter()
+        .filter_map(|node| {
+            matches!(
+                node.source,
+                TetCandidateNodeSource::InteriorSeed | TetCandidateNodeSource::BoundaryRecovery
+            )
+            .then_some(node.node_id)
+        })
+        .collect::<BTreeSet<_>>();
     let removable_seed_node_ids = nodes
         .iter()
         .filter_map(|node| {
@@ -3740,7 +3750,7 @@ fn repair_exact_quality_tets_once(
                 tet_index,
                 tets,
                 &node_adjacency,
-                &interior_node_ids,
+                &movable_relocation_node_ids,
                 &node_points,
                 options,
             )?
@@ -3760,7 +3770,9 @@ fn repair_exact_quality_tets_once(
                 }
             }
             node_points.insert(interior_node_id, relocated_point);
-            replace_interior_seed_point(interior_seed_points, old_point, relocated_point);
+            if interior_node_ids.contains(&interior_node_id) {
+                replace_interior_seed_point(interior_seed_points, old_point, relocated_point);
+            }
             for index in neighbor_indices {
                 consumed[index] = true;
             }
@@ -15561,6 +15573,94 @@ mod tests {
             ) < 1.0e-12
         );
         assert_eq!(interior_seed_points, vec![[0.0, 0.0, 0.0]]);
+        let repaired_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        assert!((repaired_volume - original_volume).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn repair_relocates_bad_boundary_recovery_star_when_quality_improves() {
+        let options = TetCandidateOptions {
+            max_aspect_ratio: 100.0,
+            min_scaled_jacobian: 0.35,
+            ..TetCandidateOptions::default()
+        };
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 1.0]),
+            (1, [0.0, 0.0, -1.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+            (5, [0.0, -1.0, 0.0]),
+            (6, [0.78, 0.0, 0.0]),
+        ]);
+        let tet_node_ids = [
+            [6, 0, 2, 3],
+            [6, 0, 3, 4],
+            [6, 0, 4, 5],
+            [6, 0, 5, 2],
+            [6, 1, 3, 2],
+            [6, 1, 4, 3],
+            [6, 1, 5, 4],
+            [6, 1, 2, 5],
+        ];
+        let mut tets = tet_node_ids
+            .into_iter()
+            .map(|node_ids| {
+                let points = node_ids.map(|node_id| node_points[&node_id]);
+                raw_candidate_tet(0, 0, &[], node_ids, points, options)
+                    .expect("fixture tet should be valid")
+            })
+            .collect::<Vec<_>>();
+        let original_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
+        let mut nodes = node_points
+            .iter()
+            .map(|(node_id, coordinates_m)| TetCandidateNode {
+                node_id: *node_id,
+                coordinates_m: *coordinates_m,
+                source: if *node_id == 6 {
+                    TetCandidateNodeSource::BoundaryRecovery
+                } else {
+                    TetCandidateNodeSource::Surface
+                },
+            })
+            .collect::<Vec<_>>();
+        let mut interior_seed_points = Vec::new();
+        let mut next_node_id = 7;
+
+        let repair = repair_exact_quality_tets_once(
+            &mut nodes,
+            &mut tets,
+            &mut interior_seed_points,
+            &mut next_node_id,
+            options,
+        )
+        .expect("repair should evaluate");
+
+        assert!(repair.changed);
+        assert_eq!(repair.seed_star_relocation_count, 1);
+        assert_eq!(repair.seed_star_collapse_count, 0);
+        assert_eq!(repair.reconnected_cavity_count, 0);
+        assert_eq!(next_node_id, 7);
+        assert!(
+            interior_seed_points.is_empty(),
+            "boundary-recovery relocation must not create an interior seed record"
+        );
+        assert_eq!(
+            tets.iter()
+                .filter(|tet| tet.exact_scaled_jacobian < options.min_scaled_jacobian)
+                .count(),
+            0
+        );
+        assert!(
+            distance(
+                nodes
+                    .iter()
+                    .find(|node| node.node_id == 6)
+                    .expect("recovery node retained")
+                    .coordinates_m,
+                [0.0, 0.0, 0.0],
+            ) < 1.0e-12
+        );
         let repaired_volume = tets.iter().map(|tet| tet.volume_m3).sum::<f64>();
         assert!((repaired_volume - original_volume).abs() < 1.0e-12);
     }
