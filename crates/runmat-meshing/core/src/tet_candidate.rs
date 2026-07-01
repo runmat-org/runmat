@@ -6683,6 +6683,18 @@ fn diagnostic_component_edge_star_candidate_invalid_bucket(
         Some("closed_edge_star_raw_candidate_rejected") => {
             "component_edge_star_closed_cavity_raw_candidate_rejected"
         }
+        Some("closed_edge_star_raw_min_volume_edge0") => {
+            "component_edge_star_closed_cavity_raw_min_volume_edge0"
+        }
+        Some("closed_edge_star_raw_min_volume_edge1") => {
+            "component_edge_star_closed_cavity_raw_min_volume_edge1"
+        }
+        Some("closed_edge_star_raw_aspect_ratio_edge0") => {
+            "component_edge_star_closed_cavity_raw_aspect_ratio_edge0"
+        }
+        Some("closed_edge_star_raw_aspect_ratio_edge1") => {
+            "component_edge_star_closed_cavity_raw_aspect_ratio_edge1"
+        }
         Some("closed_edge_star_volume_mismatch") => {
             "component_edge_star_closed_cavity_volume_mismatch"
         }
@@ -6719,11 +6731,23 @@ fn diagnostic_closed_edge_star_empty_candidate_reason(
         edge_ring_triangulations(&cavity.ring)
     };
     let mut saw_raw_rejection = false;
+    let mut raw_rejection_reason = None::<&'static str>;
     let mut saw_volume_mismatch = false;
     for triangulation in triangulations {
         let mut candidates = Vec::<TetCandidate>::with_capacity(triangulation.len() * 2);
         let mut raw_rejected = false;
         for tri in triangulation {
+            if let Some(reason) = diagnostic_edge_reconnection_triangle_tets_rejection_reason(
+                reference,
+                edge,
+                tri,
+                node_points,
+                options,
+            )? {
+                raw_rejection_reason.get_or_insert(reason);
+                raw_rejected = true;
+                break;
+            }
             if !push_edge_reconnection_triangle_tets(
                 &mut candidates,
                 reference,
@@ -6751,12 +6775,80 @@ fn diagnostic_closed_edge_star_empty_candidate_reason(
         return Ok("closed_edge_star_no_triangulation_candidate");
     }
     if saw_raw_rejection {
-        Ok("closed_edge_star_raw_candidate_rejected")
+        Ok(raw_rejection_reason.unwrap_or("closed_edge_star_raw_candidate_rejected"))
     } else if saw_volume_mismatch {
         Ok("closed_edge_star_volume_mismatch")
     } else {
         Ok("closed_edge_star_no_triangulation_candidate")
     }
+}
+
+#[cfg(test)]
+fn diagnostic_edge_reconnection_triangle_tets_rejection_reason(
+    reference: &TetCandidate,
+    edge: [u32; 2],
+    tri: [u32; 3],
+    node_points: &BTreeMap<u32, [f64; 3]>,
+    options: TetCandidateOptions,
+) -> Result<Option<&'static str>, TetCandidateError> {
+    for (side, node_ids) in [
+        [edge[0], tri[0], tri[1], tri[2]],
+        [edge[1], tri[0], tri[2], tri[1]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let points = [
+            *node_points
+                .get(&node_ids[0])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[0],
+                })?,
+            *node_points
+                .get(&node_ids[1])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[1],
+                })?,
+            *node_points
+                .get(&node_ids[2])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[2],
+                })?,
+            *node_points
+                .get(&node_ids[3])
+                .ok_or(TetCandidateError::MissingSurfaceNode {
+                    node_id: node_ids[3],
+                })?,
+        ];
+        if tet_signed_volume(points).abs() < options.min_volume_m3 {
+            return Ok(Some(if side == 0 {
+                "closed_edge_star_raw_min_volume_edge0"
+            } else {
+                "closed_edge_star_raw_min_volume_edge1"
+            }));
+        }
+        let aspect_ratio = tet_edge_aspect_ratio(points);
+        if !aspect_ratio.is_finite() || aspect_ratio > options.max_aspect_ratio {
+            return Ok(Some(if side == 0 {
+                "closed_edge_star_raw_aspect_ratio_edge0"
+            } else {
+                "closed_edge_star_raw_aspect_ratio_edge1"
+            }));
+        }
+        if raw_candidate_tet(
+            reference.component_id,
+            reference.source_surface_element_id,
+            &reference.region_ids,
+            node_ids,
+            points,
+            options,
+        )
+        .is_none()
+        {
+            return Ok(Some("closed_edge_star_raw_candidate_rejected"));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -13195,6 +13287,18 @@ mod tests {
         );
         assert_eq!(
             diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_raw_min_volume_edge0"
+            )),
+            "component_edge_star_closed_cavity_raw_min_volume_edge0"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
+                "closed_edge_star_raw_aspect_ratio_edge1"
+            )),
+            "component_edge_star_closed_cavity_raw_aspect_ratio_edge1"
+        );
+        assert_eq!(
+            diagnostic_component_edge_star_candidate_invalid_bucket(Some(
                 "closed_edge_star_volume_mismatch"
             )),
             "component_edge_star_closed_cavity_volume_mismatch"
@@ -13566,6 +13670,28 @@ mod tests {
         .expect("diagnostic should evaluate");
 
         assert_eq!(reason, "closed_edge_star_invalid");
+    }
+
+    #[test]
+    fn edge_reconnection_triangle_diagnostic_classifies_collapsed_side() {
+        let node_points = BTreeMap::from([
+            (0, [0.0, 0.0, 0.0]),
+            (1, [0.0, 0.0, 1.0]),
+            (2, [1.0, 0.0, 0.0]),
+            (3, [0.0, 1.0, 0.0]),
+            (4, [-1.0, 0.0, 0.0]),
+        ]);
+        let reference = fixture_tet(0, [0, 1, 2, 3]);
+        let reason = diagnostic_edge_reconnection_triangle_tets_rejection_reason(
+            &reference,
+            [0, 1],
+            [2, 3, 4],
+            &node_points,
+            TetCandidateOptions::default(),
+        )
+        .expect("diagnostic should evaluate");
+
+        assert_eq!(reason, Some("closed_edge_star_raw_min_volume_edge0"));
     }
 
     #[test]
