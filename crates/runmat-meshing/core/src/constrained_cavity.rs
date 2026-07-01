@@ -3471,6 +3471,23 @@ struct BoundaryExactCoverTrace {
     dead_end: Option<BoundaryExactCoverDeadEnd>,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForcedInteriorMateFailure {
+    NoAddableMate,
+    VolumeOverflow,
+}
+
+#[cfg(test)]
+impl ForcedInteriorMateFailure {
+    fn reason(self) -> &'static str {
+        match self {
+            ForcedInteriorMateFailure::NoAddableMate => "forced_interior_mate_no_addable_mate",
+            ForcedInteriorMateFailure::VolumeOverflow => "forced_interior_mate_volume_overflow",
+        }
+    }
+}
+
 impl<'a> BoundaryExactCoverSearch<'a> {
     fn new(
         cavity: &ConstrainedCavity,
@@ -3592,11 +3609,16 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             self.record_dead_end(trace, selected, "volume_overflow");
             return None;
         }
-        let Some((forced_volume_m3, forced_indices)) =
-            self.propagate_forced_interior_mates(current_volume_m3, face_counts, selected)
-        else {
-            self.record_dead_end(trace, selected, "forced_interior_mate_failed");
-            return None;
+        let (forced_volume_m3, forced_indices) = match self.propagate_forced_interior_mates_traced(
+            current_volume_m3,
+            face_counts,
+            selected,
+        ) {
+            Ok(forced) => forced,
+            Err(reason) => {
+                self.record_dead_end(trace, selected, reason.reason());
+                return None;
+            }
         };
         let current_volume_m3 = current_volume_m3 + forced_volume_m3;
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
@@ -3731,7 +3753,44 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         }
     }
 
+    #[cfg(test)]
+    fn propagate_forced_interior_mates_traced(
+        &self,
+        current_volume_m3: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+    ) -> Result<(f64, Vec<usize>), ForcedInteriorMateFailure> {
+        let mut forced_indices = Vec::<usize>::new();
+        let mut forced_volume_m3 = 0.0;
+        loop {
+            let forced_candidate = self
+                .forced_interior_mate_traced(face_counts, selected)
+                .ok_or(ForcedInteriorMateFailure::NoAddableMate)?;
+            let Some(candidate_index) = forced_candidate else {
+                return Ok((forced_volume_m3, forced_indices));
+            };
+            let next_volume_m3 =
+                current_volume_m3 + forced_volume_m3 + self.candidates[candidate_index].volume_m3;
+            if next_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3 {
+                self.rollback_selected_candidates(&forced_indices, face_counts, selected);
+                return Err(ForcedInteriorMateFailure::VolumeOverflow);
+            }
+            self.add_candidate_faces(candidate_index, face_counts);
+            selected.push(candidate_index);
+            forced_indices.push(candidate_index);
+            forced_volume_m3 += self.candidates[candidate_index].volume_m3;
+        }
+    }
+
     fn forced_interior_mate(
+        &self,
+        face_counts: &BTreeMap<[u32; 3], usize>,
+        selected: &[usize],
+    ) -> Option<Option<usize>> {
+        self.forced_interior_mate_traced(face_counts, selected)
+    }
+
+    fn forced_interior_mate_traced(
         &self,
         face_counts: &BTreeMap<[u32; 3], usize>,
         selected: &[usize],
@@ -7258,6 +7317,65 @@ mod tests {
         assert!(search
             .propagate_forced_interior_mates(0.0, &mut face_counts, &mut selected)
             .is_none());
+        assert_eq!(face_counts, initial_face_counts);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_forced_mate_without_addable_mate() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: Vec::new(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 1.0,
+        };
+        let candidates = vec![ConstrainedCavityRefillTet {
+            node_ids: [4, 5, 6, 7],
+            volume_m3: 0.1,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        }];
+        let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+        let initial_face_counts = BTreeMap::from([(sorted_face([0, 1, 2]), 1)]);
+        let mut face_counts = initial_face_counts.clone();
+        let mut selected = Vec::<usize>::new();
+
+        let result =
+            search.propagate_forced_interior_mates_traced(0.0, &mut face_counts, &mut selected);
+
+        assert_eq!(result, Err(ForcedInteriorMateFailure::NoAddableMate));
+        assert_eq!(face_counts, initial_face_counts);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn exact_cover_trace_reports_forced_mate_volume_overflow() {
+        let cavity = ConstrainedCavity {
+            removed_tet_ids: vec![0],
+            boundary_faces: Vec::new(),
+            protected_node_ids: Vec::new(),
+            target_volume_m3: 0.1,
+        };
+        let candidates = vec![ConstrainedCavityRefillTet {
+            node_ids: [0, 1, 3, 4],
+            volume_m3: 0.2,
+            aspect_ratio: 1.0,
+            exact_scaled_jacobian: 0.5,
+        }];
+        let search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-9);
+        let initial_face_counts = BTreeMap::from([
+            (sorted_face([0, 1, 3]), 1),
+            (sorted_face([0, 1, 4]), 1),
+            (sorted_face([0, 3, 4]), 1),
+            (sorted_face([1, 3, 4]), 1),
+        ]);
+        let mut face_counts = initial_face_counts.clone();
+        let mut selected = Vec::<usize>::new();
+
+        let result =
+            search.propagate_forced_interior_mates_traced(0.0, &mut face_counts, &mut selected);
+
+        assert_eq!(result, Err(ForcedInteriorMateFailure::VolumeOverflow));
         assert_eq!(face_counts, initial_face_counts);
         assert!(selected.is_empty());
     }
