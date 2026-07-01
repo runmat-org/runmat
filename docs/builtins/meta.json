@@ -38794,6 +38794,48 @@
       ]
     },
     {
+      "name": "isdiag",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isdiag(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, sparse, or gpuArray matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the input matrix satisfies the requested structure predicate."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISDIAG.INVALID_INPUT",
+          "identifier": "RunMat:isdiag:InvalidInput",
+          "when": "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
+          "message": "isdiag: invalid input"
+        },
+        {
+          "code": "RM.ISDIAG.INTERNAL",
+          "identifier": "RunMat:isdiag:Internal",
+          "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
+          "message": "isdiag: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "isfield",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -40458,6 +40500,90 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "istril",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = istril(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, sparse, or gpuArray matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the input matrix satisfies the requested structure predicate."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISTRIL.INVALID_INPUT",
+          "identifier": "RunMat:istril:InvalidInput",
+          "when": "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
+          "message": "istril: invalid input"
+        },
+        {
+          "code": "RM.ISTRIL.INTERNAL",
+          "identifier": "RunMat:istril:Internal",
+          "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
+          "message": "istril: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "istriu",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = istriu(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, sparse, or gpuArray matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the input matrix satisfies the requested structure predicate."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISTRIU.INVALID_INPUT",
+          "identifier": "RunMat:istriu:InvalidInput",
+          "when": "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
+          "message": "istriu: invalid input"
+        },
+        {
+          "code": "RM.ISTRIU.INTERNAL",
+          "identifier": "RunMat:istriu:Internal",
+          "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
+          "message": "istriu: internal runtime failure"
         }
       ]
     },

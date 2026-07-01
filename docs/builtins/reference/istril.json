@@ -1,0 +1,113 @@
+{
+  "title": "istril",
+  "category": "math/linalg/structure",
+  "keywords": [
+    "istril",
+    "lower triangular",
+    "matrix structure",
+    "sparse",
+    "gpu"
+  ],
+  "summary": "Determine whether a matrix is lower triangular in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat gathers gpuArray inputs and evaluates the lower-triangular predicate on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::structure::diagonal_triangular::tests",
+    "integration": "builtins::math::linalg::structure::diagonal_triangular::tests::gpu_input_is_gathered"
+  },
+  "description": "`istril(A)` returns true when every element above the main diagonal of matrix `A` is zero.",
+  "behaviors": [
+    "Scalars are lower triangular.",
+    "Diagonal and all-zero matrices are lower triangular.",
+    "Rectangular matrices are supported.",
+    "Dense real, logical, complex, sparse, and gpuArray inputs are supported.",
+    "Complex entries count as nonzero when either real or imaginary part is nonzero.",
+    "NaN values count as nonzero when testing matrix structure.",
+    "Arrays with a non-singleton dimension beyond the second return `false`, matching MATLAB matrix-predicate behavior."
+  ],
+  "examples": [
+    {
+      "description": "Checking a lower-triangular matrix",
+      "input": "A = [1 0 0; 2 3 0; 4 5 6];\ntf = istril(A)",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Detecting a value above the main diagonal",
+      "input": "B = [1 7; 0 2];\ntf = istril(B)",
+      "output": "tf = logical\n   0"
+    },
+    {
+      "description": "Checking a rectangular matrix",
+      "input": "C = [1 0; 2 3; 4 5];\ntf = istril(C)",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Inspecting a GPU-resident matrix",
+      "input": "G = gpuArray(tril(ones(3)));\ntf = istril(G)",
+      "output": "tf = logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What entries does `istril` inspect?",
+      "answer": "Only entries above the main diagonal can make the predicate false."
+    },
+    {
+      "question": "Are diagonal matrices lower triangular?",
+      "answer": "Yes. Diagonal matrices have zeros above the main diagonal, so `istril` returns true."
+    },
+    {
+      "question": "How are sparse matrices handled?",
+      "answer": "RunMat scans stored sparse entries without densifying and returns false only when a stored nonzero appears above the main diagonal."
+    }
+  ],
+  "links": [
+    {
+      "label": "isdiag",
+      "url": "./isdiag"
+    },
+    {
+      "label": "istriu",
+      "url": "./istriu"
+    },
+    {
+      "label": "tril",
+      "url": "./tril"
+    },
+    {
+      "label": "bandwidth",
+      "url": "./bandwidth"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs"
+  },
+  "gpu_residency": "RunMat gathers gpuArray inputs to host memory for this scalar predicate and returns a host logical scalar.",
+  "gpu_behavior": [
+    "`istril` is registered as a structure-analysis fusion sink. GPU-resident inputs are gathered transparently before the host predicate runs, so explicit `gather` calls are optional."
+  ]
+}

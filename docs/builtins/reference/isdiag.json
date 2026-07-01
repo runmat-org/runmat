@@ -1,0 +1,113 @@
+{
+  "title": "isdiag",
+  "category": "math/linalg/structure",
+  "keywords": [
+    "isdiag",
+    "diagonal matrix",
+    "matrix structure",
+    "sparse",
+    "gpu"
+  ],
+  "summary": "Determine whether a matrix is diagonal in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat gathers gpuArray inputs and evaluates the diagonal predicate on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::structure::diagonal_triangular::tests",
+    "integration": "builtins::math::linalg::structure::diagonal_triangular::tests::gpu_input_is_gathered"
+  },
+  "description": "`isdiag(A)` returns true when every nonzero element of matrix `A` lies on the main diagonal.",
+  "behaviors": [
+    "Scalars are diagonal.",
+    "Rectangular matrices can be diagonal when every off-diagonal entry is zero.",
+    "All-zero and empty matrices are diagonal.",
+    "Dense real, logical, complex, sparse, and gpuArray inputs are supported.",
+    "Complex entries count as nonzero when either real or imaginary part is nonzero.",
+    "NaN values count as nonzero when testing matrix structure.",
+    "Arrays with a non-singleton dimension beyond the second return `false`, matching MATLAB matrix-predicate behavior."
+  ],
+  "examples": [
+    {
+      "description": "Checking a diagonal matrix",
+      "input": "A = [4 0 0; 0 5 0; 0 0 6];\ntf = isdiag(A)",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Detecting an off-diagonal value",
+      "input": "B = [1 0; 7 2];\ntf = isdiag(B)",
+      "output": "tf = logical\n   0"
+    },
+    {
+      "description": "Checking a rectangular diagonal matrix",
+      "input": "C = [1 0; 0 2; 0 0];\ntf = isdiag(C)",
+      "output": "tf = logical\n   1"
+    },
+    {
+      "description": "Inspecting a GPU-resident matrix",
+      "input": "G = gpuArray(eye(3));\ntf = isdiag(G)",
+      "output": "tf = logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isdiag` require a square matrix?",
+      "answer": "No. A rectangular matrix is diagonal when all entries off the main diagonal are zero."
+    },
+    {
+      "question": "How are sparse matrices handled?",
+      "answer": "RunMat scans stored sparse entries without densifying and returns false only when a stored nonzero appears off the main diagonal."
+    },
+    {
+      "question": "Does `NaN` count as zero?",
+      "answer": "No. A NaN entry is treated as nonzero for structure predicates."
+    }
+  ],
+  "links": [
+    {
+      "label": "istril",
+      "url": "./istril"
+    },
+    {
+      "label": "istriu",
+      "url": "./istriu"
+    },
+    {
+      "label": "bandwidth",
+      "url": "./bandwidth"
+    },
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/diagonal_triangular.rs"
+  },
+  "gpu_residency": "RunMat gathers gpuArray inputs to host memory for this scalar predicate and returns a host logical scalar.",
+  "gpu_behavior": [
+    "`isdiag` is registered as a structure-analysis fusion sink. GPU-resident inputs are gathered transparently before the host predicate runs, so explicit `gather` calls are optional."
+  ]
+}
