@@ -1,6 +1,7 @@
 pub(crate) mod digits;
 pub(crate) mod int;
 pub(crate) mod limit;
+pub(crate) mod piecewise;
 pub(crate) mod sym;
 pub(crate) mod syms;
 pub(crate) mod vpa;
@@ -17,6 +18,18 @@ pub(crate) enum SymbolicBinaryOp {
     Mul,
     Div,
     Pow,
+}
+
+pub(crate) fn symbolic_named_binary(lhs: &Value, rhs: &Value, name: &str) -> Option<Value> {
+    if !matches!(lhs, Value::Symbolic(_)) && !matches!(rhs, Value::Symbolic(_)) {
+        return None;
+    }
+    let lhs = value_to_symbolic_scalar(lhs)?;
+    let rhs = value_to_symbolic_scalar(rhs)?;
+    Some(symbolic_expr_to_value(SymbolicExpr::function_call(
+        name,
+        vec![lhs, rhs],
+    )))
 }
 
 pub(crate) fn symbolic_binary(lhs: &Value, rhs: &Value, op: SymbolicBinaryOp) -> Option<Value> {
