@@ -7483,7 +7483,13 @@ mod tests {
         assert!(evaluation.refill.is_none());
         assert_eq!(
             evaluation.rejected_by_reason,
-            BTreeMap::from([("boundary_node_tet_scaled_jacobian".to_string(), 1)])
+            BTreeMap::from([
+                ("boundary_node_tet_scaled_jacobian".to_string(), 1),
+                (
+                    "centroid_interior_refill_tet_scaled_jacobian".to_string(),
+                    1,
+                ),
+            ])
         );
     }
 
