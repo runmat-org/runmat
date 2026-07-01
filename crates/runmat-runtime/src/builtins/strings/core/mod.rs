@@ -2,6 +2,7 @@
 
 pub mod char;
 pub mod compose;
+pub mod int2str;
 pub mod num2str;
 pub mod sprintf;
 pub mod str2double;
