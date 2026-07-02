@@ -299,8 +299,7 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&array.shape, "char")?;
-    let rows = array.rows();
-    let cols = array.cols();
+    let (rows, cols) = infer_rows_cols(&array.shape, array.data.len());
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -711,6 +710,27 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 7);
                 assert_eq!(ca.data.iter().collect::<String>(), "x1thetayz     ");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_symbolic_one_dimensional_array_is_row_vector() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![2],
+        )
+        .expect("symbolic array");
+
+        let result = char_builtin(vec![Value::SymbolicArray(array)]).expect("char");
+
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 2);
+                assert_eq!(ca.data, vec!['x', 'y']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
