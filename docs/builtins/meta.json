@@ -41470,6 +41470,67 @@
       ]
     },
     {
+      "name": "lcm",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "L = lcm(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real positive integer scalar, vector, or array."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real positive integer scalar, vector, or array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "L",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least common multiples of A and B."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LCM.INVALID_INPUT",
+          "identifier": "RunMat:lcm:InvalidInput",
+          "when": "Inputs are not real positive integer numeric values, or integer class mixing is unsupported.",
+          "message": "lcm: invalid input"
+        },
+        {
+          "code": "RM.LCM.SIZE_MISMATCH",
+          "identifier": "RunMat:lcm:SizeMismatch",
+          "when": "Inputs are neither the same size nor scalar-expandable.",
+          "message": "lcm: input sizes are not compatible"
+        },
+        {
+          "code": "RM.LCM.OVERFLOW",
+          "identifier": "RunMat:lcm:Overflow",
+          "when": "The least common multiple cannot be represented in the output numeric class.",
+          "message": "lcm: result overflows output type"
+        },
+        {
+          "code": "RM.LCM.INTERNAL",
+          "identifier": "RunMat:lcm:Internal",
+          "when": "GPU gather or tensor construction fails.",
+          "message": "lcm: internal error"
+        }
+      ]
+    },
+    {
       "name": "ldivide",
       "output_mode": "Fixed",
       "completion_policy": "Public",
