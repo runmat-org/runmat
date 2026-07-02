@@ -1,0 +1,104 @@
+{
+  "title": "genvarname",
+  "category": "strings/core",
+  "keywords": [
+    "genvarname",
+    "variable name",
+    "identifier",
+    "legacy",
+    "makeValidName",
+    "makeUniqueStrings"
+  ],
+  "summary": "Construct valid, unique MATLAB variable names from text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-only text conversion. GPU inputs are gathered before processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::genvarname::tests",
+    "integration": null
+  },
+  "description": "`genvarname(str)` converts text into valid MATLAB variable names and makes names unique within the returned set. `genvarname(str, exclusions)` also avoids names listed in `exclusions`.",
+  "behaviors": [
+    "Character row-vector input returns a character row vector.",
+    "String scalar input returns a string scalar.",
+    "String arrays preserve their shape and return string arrays.",
+    "Cell arrays of character vectors or string scalars preserve their shape and return cell arrays of character row vectors.",
+    "Character array input must be a character vector; use a string array or cell array to generate multiple names.",
+    "Whitespace is removed and the following alphabetic character is capitalized.",
+    "Nonalphanumeric, non-underscore characters are replaced by their hexadecimal code.",
+    "Names that do not start with a letter are prefixed with `x`, and MATLAB keywords are repaired with the legacy `xKeyword` form such as `xFor`.",
+    "Names are truncated to `namelengthmax` compatibility length, 63 characters.",
+    "Duplicate generated names and names present in `exclusions` receive numeric suffixes."
+  ],
+  "examples": [
+    {
+      "description": "Generate Unique Names",
+      "input": "v = genvarname({'A','A','A','A'})",
+      "output": "v = {'A','A1','A2','A3'}"
+    },
+    {
+      "description": "Avoid Excluded Names",
+      "input": "v = genvarname('A', {'A','A1'})",
+      "output": "v = 'A2'"
+    },
+    {
+      "description": "Normalize Invalid Text",
+      "input": "v = genvarname('1 a-b')",
+      "output": "v = 'x1A0x2Db'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `genvarname` a modern MATLAB API?",
+      "answer": "No. MATLAB marks `genvarname` for removal and recommends `matlab.lang.makeValidName` with `matlab.lang.makeUniqueStrings`. RunMat supports it for backward compatibility with older MATLAB code."
+    },
+    {
+      "question": "Does `genvarname` create variables?",
+      "answer": "No. It only returns text that can be used as variable names."
+    },
+    {
+      "question": "Are exclusions normalized first?",
+      "answer": "No. Exclusions are treated as already-specified names to avoid, matching the documented role of excluding existing variable names."
+    }
+  ],
+  "links": [
+    {
+      "label": "isvarname",
+      "url": "./isvarname"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/genvarname.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/genvarname.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "varname = genvarname(str)\nvarname = genvarname(str, exclusions)"
+    },
+    "points": [
+      "`str` can be a character array, string scalar/array, or cell array of character vectors/string scalars.",
+      "`exclusions` can be text or a text container of names that generated results must avoid.",
+      "The output preserves the input text container shape where applicable."
+    ]
+  }
+}
