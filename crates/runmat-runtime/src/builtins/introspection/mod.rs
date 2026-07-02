@@ -17,6 +17,7 @@ pub mod feval;
 pub mod function_handle_text;
 pub mod function_metadata;
 pub mod getmethod;
+pub mod input_parser;
 pub mod inputname;
 pub(crate) mod isa;
 pub(crate) mod ischar;
