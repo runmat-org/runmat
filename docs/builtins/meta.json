@@ -21521,6 +21521,48 @@
       ]
     },
     {
+      "name": "erfcinv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = erfcinv(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real single or double input in the interval [0, 2]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise inverse complementary error-function result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ERFCINV.INVALID_INPUT",
+          "identifier": "RunMat:erfcinv:InvalidInput",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
+          "message": "erfcinv: invalid input"
+        },
+        {
+          "code": "RM.ERFCINV.INTERNAL",
+          "identifier": "RunMat:erfcinv:Internal",
+          "when": "Internal tensor construction, gathering, or upload failed.",
+          "message": "erfcinv: internal error"
+        }
+      ]
+    },
+    {
       "name": "exp",
       "output_mode": "Fixed",
       "completion_policy": "Public",
