@@ -32650,6 +32650,167 @@
       ]
     },
     {
+      "name": "histc",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bincounts = histc(x, binranges)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input values to sort into legacy bins."
+            },
+            {
+              "name": "binranges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Monotonically nondecreasing bin endpoints."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bincounts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy histogram bin counts."
+            }
+          ]
+        },
+        {
+          "label": "bincounts = histc(x, binranges, dim)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input values to sort into legacy bins."
+            },
+            {
+              "name": "binranges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Monotonically nondecreasing bin endpoints."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension along which to operate."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bincounts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy histogram bin counts."
+            }
+          ]
+        },
+        {
+          "label": "[bincounts, ind] = histc(x, binranges)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input values to sort into legacy bins."
+            },
+            {
+              "name": "binranges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Monotonically nondecreasing bin endpoints."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bincounts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy histogram bin counts."
+            },
+            {
+              "name": "ind",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based bin index for each input element, or zero when outside all bins."
+            }
+          ]
+        },
+        {
+          "label": "[bincounts, ind] = histc(x, binranges, dim)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input values to sort into legacy bins."
+            },
+            {
+              "name": "binranges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Monotonically nondecreasing bin endpoints."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension along which to operate."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bincounts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy histogram bin counts."
+            },
+            {
+              "name": "ind",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based bin index for each input element, or zero when outside all bins."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HISTC.INVALID_ARGUMENT",
+          "identifier": "RunMat:histc:InvalidArgument",
+          "when": "Arguments are malformed, inconsistent, or unsupported.",
+          "message": "histc: invalid argument"
+        },
+        {
+          "code": "RM.HISTC.INTERNAL",
+          "identifier": "RunMat:histc:Internal",
+          "when": "Internal tensor conversion, GPU gather, or allocation fails.",
+          "message": "histc: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "histcounts",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
