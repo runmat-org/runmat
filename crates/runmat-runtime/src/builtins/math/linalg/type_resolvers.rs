@@ -61,10 +61,15 @@ pub fn transpose_type(args: &[Type], _context: &ResolveContext) -> Type {
         },
         Type::Logical { shape: None } => Type::logical(),
         Type::Num | Type::Int | Type::Bool | Type::String => input.clone(),
+        Type::Struct { .. } => input.clone(),
         Type::Cell { .. } => input.clone(),
         Type::Unknown => Type::Unknown,
         _ => Type::Unknown,
     }
+}
+
+pub fn page_transpose_type(args: &[Type], context: &ResolveContext) -> Type {
+    transpose_type(args, context)
 }
 
 pub fn matmul_type(args: &[Type], ctx: &ResolveContext) -> Type {

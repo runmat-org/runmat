@@ -56898,6 +56898,54 @@
       ]
     },
     {
+      "name": "pagetranspose",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = pagetranspose(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value with the first two dimensions swapped on every page."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PAGETRANSPOSE.INVALID_ARGUMENT",
+          "identifier": "RunMat:pagetranspose:InvalidArgument",
+          "when": "Call does not provide exactly one input argument.",
+          "message": "pagetranspose: expected exactly one input argument"
+        },
+        {
+          "code": "RM.PAGETRANSPOSE.INVALID_INPUT",
+          "identifier": "RunMat:pagetranspose:InvalidInput",
+          "when": "Input type is unsupported for page-wise transpose.",
+          "message": "pagetranspose: unsupported input type"
+        },
+        {
+          "code": "RM.PAGETRANSPOSE.INTERNAL",
+          "identifier": "RunMat:pagetranspose:Internal",
+          "when": "Runtime cannot materialize the page-wise transpose output.",
+          "message": "pagetranspose: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "pause",
       "output_mode": "Fixed",
       "completion_policy": "Public",
