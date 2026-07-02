@@ -53,17 +53,38 @@ fn numeric_scalar_to_symbolic(value: &Value) -> Option<SymbolicExpr> {
     }
 }
 
+fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
+    if shape.len() == 1 && shape[0] != 1 {
+        vec![1, shape[0]]
+    } else if crate::builtins::common::shape::is_scalar_shape(shape) {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
+}
+
 fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicArray>> {
     match value {
         Value::SymbolicArray(array) => {
-            if array.rows() == 0 && array.cols() == 0 {
-                Ok(None)
+            let shape = normalize_symbolic_concat_shape(&array.shape);
+            let rows = shape.first().copied().unwrap_or(0);
+            let cols = shape.get(1).copied().unwrap_or(0);
+            if rows == 0 && cols == 0 {
+                return Ok(None);
+            }
+            if shape != array.shape || array.rows() != rows || array.cols() != cols {
+                SymbolicArray::new_2d(array.data.clone(), rows, cols)
+                    .map(Some)
+                    .map_err(concat_error)
             } else {
                 Ok(Some(array.clone()))
             }
         }
         Value::Tensor(tensor) => {
-            if tensor.rows() == 0 && tensor.cols() == 0 {
+            let shape = normalize_symbolic_concat_shape(&tensor.shape);
+            let rows = shape.first().copied().unwrap_or(0);
+            let cols = shape.get(1).copied().unwrap_or(0);
+            if rows == 0 && cols == 0 {
                 return Ok(None);
             }
             let data = tensor
@@ -71,19 +92,12 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicArra
                 .iter()
                 .map(|value| SymbolicExpr::constant(*value))
                 .collect();
-            SymbolicArray::new_2d(data, tensor.rows(), tensor.cols())
+            SymbolicArray::new_2d(data, rows, cols)
                 .map(Some)
                 .map_err(concat_error)
         }
         Value::LogicalArray(array) => {
-            // Use the same 1-D normalization as value_dimensions to ensure consistency
-            let shape = if array.shape.len() == 1 && array.shape[0] != 1 {
-                vec![1, array.shape[0]]
-            } else if crate::builtins::common::shape::is_scalar_shape(&array.shape) {
-                vec![1, 1]
-            } else {
-                array.shape.clone()
-            };
+            let shape = normalize_symbolic_concat_shape(&array.shape);
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(0);
             if rows == 0 && cols == 0 {
@@ -986,6 +1000,85 @@ mod tests {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
                 vec!["x", "1", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_promotes_one_dimensional_empty_numeric_tensor_as_empty_row() {
+        let empty = Tensor::new(vec![], vec![0]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::Tensor(empty),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 1]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_normalizes_one_dimensional_symbolic_array_as_row() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("y"), SymbolicExpr::variable("z")],
+            vec![2],
+        )
+        .unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::SymbolicArray(array),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "y", "z"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_normalizes_one_dimensional_empty_symbolic_array_as_empty_row() {
+        let empty = SymbolicArray::new(vec![], vec![0]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::SymbolicArray(empty),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 1]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x"]
             );
         } else {
             panic!("Expected symbolic array result");
