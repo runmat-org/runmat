@@ -969,8 +969,10 @@ struct Params {
 
 const PI: f64 = 3.141592653589793;
 const SQRT_TWO_PI: f64 = 2.5066282746310002;
+const LN_SQRT_TWO_PI: f64 = 0.9189385332046727;
 const LANCZOS_G: f64 = 7.0;
 const EPSILON: f64 = 1.0e-12;
+const SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
 const FACTORIAL_MAX: u32 = 170u;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn expm1_precise(a: f64) -> f64 {
@@ -1014,6 +1016,21 @@ fn lanczos_gamma(z: f64) -> f64 {
     sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
     let t = z_minus_one + (LANCZOS_G + 0.5);
     return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn lanczos_gammaln(z: f64) -> f64 {
+    let z_minus_one = z - 1.0;
+    var sum = 0.99999999999980993;
+    sum = sum + 676.5203681218851 / (z_minus_one + 1.0);
+    sum = sum + -1259.1392167224028 / (z_minus_one + 2.0);
+    sum = sum + 771.3234287776531 / (z_minus_one + 3.0);
+    sum = sum + -176.6150291621406 / (z_minus_one + 4.0);
+    sum = sum + 12.507343278686905 / (z_minus_one + 5.0);
+    sum = sum + -0.13857109526572012 / (z_minus_one + 6.0);
+    sum = sum + 0.000009984369578019572 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return LN_SQRT_TWO_PI + (z_minus_one + 0.5) * log(t) - t + log(sum);
 }
 
 fn is_non_positive_integer(x: f64) -> bool {
@@ -1073,6 +1090,25 @@ fn gamma_real(a: f64) -> f64 {
         return PI / (sin_term * gamma_one_minus);
     }
     return lanczos_gamma(a);
+}
+
+fn gammaln_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a == 0.0 || a == pos_inf_f64()) {
+        return pos_inf_f64();
+    }
+    if (a < 0.0) {
+        return nan_f64();
+    }
+    if (a < SMALL_REFLECTION_CUTOFF) {
+        return -log(a);
+    }
+    if (a < 0.5) {
+        return log(PI) - log(sin(PI * a)) - lanczos_gammaln(1.0 - a);
+    }
+    return lanczos_gammaln(a);
 }
 
 fn factorial_real(a: f64) -> f64 {
@@ -1268,6 +1304,7 @@ fn apply(a: f64) -> f64 {
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
         case 35u: { return erf_real(a); }
+        case 36u: { return gammaln_real(a); }
         default: { return a; }
     }
 }
@@ -1300,8 +1337,10 @@ struct Params {
 
 const PI: f32 = 3.1415927;
 const SQRT_TWO_PI: f32 = 2.5066283;
+const LN_SQRT_TWO_PI: f32 = 0.9189385;
 const LANCZOS_G: f32 = 7.0;
 const EPSILON: f32 = 1.0e-5;
+const SMALL_REFLECTION_CUTOFF: f32 = 1.0e-30;
 const FACTORIAL_MAX_F32: u32 = 170u;
 const FACTORIAL_INT_TOL_F32: f32 = 1.0e-4;
 fn expm1_precise(a: f32) -> f32 {
@@ -1345,6 +1384,21 @@ fn lanczos_gamma(z: f32) -> f32 {
     sum = sum + 0.00000015056327 / (z_minus_one + 8.0);
     let t = z_minus_one + (LANCZOS_G + 0.5);
     return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn lanczos_gammaln(z: f32) -> f32 {
+    let z_minus_one = z - 1.0;
+    var sum: f32 = 0.99999994;
+    sum = sum + 676.5204 / (z_minus_one + 1.0);
+    sum = sum + -1259.1393 / (z_minus_one + 2.0);
+    sum = sum + 771.3234 / (z_minus_one + 3.0);
+    sum = sum + -176.61502 / (z_minus_one + 4.0);
+    sum = sum + 12.507343 / (z_minus_one + 5.0);
+    sum = sum + -0.1385711 / (z_minus_one + 6.0);
+    sum = sum + 0.00000998437 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return LN_SQRT_TWO_PI + (z_minus_one + 0.5) * log(t) - t + log(sum);
 }
 
 fn is_non_positive_integer(x: f32) -> bool {
@@ -1404,6 +1458,25 @@ fn gamma_real(a: f32) -> f32 {
         return PI / (sin_term * gamma_one_minus);
     }
     return lanczos_gamma(a);
+}
+
+fn gammaln_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a == 0.0 || a == pos_inf_f32()) {
+        return pos_inf_f32();
+    }
+    if (a < 0.0) {
+        return nan_f32();
+    }
+    if (a < SMALL_REFLECTION_CUTOFF) {
+        return -log(a);
+    }
+    if (a < 0.5) {
+        return log(PI) - log(sin(PI * a)) - lanczos_gammaln(1.0 - a);
+    }
+    return lanczos_gammaln(a);
 }
 
 fn factorial_real(a: f32) -> f32 {
@@ -1599,6 +1672,7 @@ fn apply(a: f32) -> f32 {
         case 33u: { return sinc_real(a); }
         case 34u: { return heaviside_real(a); }
         case 35u: { return erf_real(a); }
+        case 36u: { return gammaln_real(a); }
         default: { return a; }
     }
 }

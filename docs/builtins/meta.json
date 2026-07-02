@@ -30158,6 +30158,54 @@
       ]
     },
     {
+      "name": "gammaln",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = gammaln(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real nonnegative numeric input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Natural logarithm of the gamma function."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GAMMALN.INVALID_INPUT",
+          "identifier": "RunMat:gammaln:InvalidInput",
+          "when": "Input cannot be interpreted as real, nonsparse numeric data.",
+          "message": "gammaln: invalid input"
+        },
+        {
+          "code": "RM.GAMMALN.DOMAIN",
+          "identifier": "RunMat:gammaln:Domain",
+          "when": "At least one real input value is negative.",
+          "message": "gammaln: input must be nonnegative"
+        },
+        {
+          "code": "RM.GAMMALN.INTERNAL",
+          "identifier": "RunMat:gammaln:Internal",
+          "when": "Internal tensor construction or provider interaction failed.",
+          "message": "gammaln: internal error"
+        }
+      ]
+    },
+    {
       "name": "gather",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

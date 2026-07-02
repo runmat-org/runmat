@@ -1,0 +1,568 @@
+//! MATLAB-compatible `gammaln` builtin with GPU-aware semantics for RunMat.
+//!
+//! `gammaln` evaluates the natural logarithm of the gamma function for real,
+//! nonnegative inputs. The CPU implementation uses a log-Lanczos form so large
+//! arguments do not overflow through `log(gamma(x))`.
+
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, NumericDType, Tensor, Value,
+};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::dispatcher::download_handle_async;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const BUILTIN_NAME: &str = "gammaln";
+const PI: f64 = std::f64::consts::PI;
+const LN_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
+const LANCZOS_G: f64 = 7.0;
+const SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
+
+const LANCZOS_COEFFS: [f64; 8] = [
+    676.5203681218851,
+    -1259.1392167224028,
+    771.3234287776531,
+    -176.6150291621406,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.984_369_578_019_572e-6,
+    1.5056327351493116e-7,
+];
+
+const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Natural logarithm of the gamma function.",
+}];
+
+const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real nonnegative numeric input.",
+}];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = gammaln(A)",
+    inputs: &INPUTS,
+    outputs: &OUTPUT,
+}];
+
+const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMALN.INVALID_INPUT",
+    identifier: Some("RunMat:gammaln:InvalidInput"),
+    when: "Input cannot be interpreted as real, nonsparse numeric data.",
+    message: "gammaln: invalid input",
+};
+
+const ERROR_DOMAIN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMALN.DOMAIN",
+    identifier: Some("RunMat:gammaln:Domain"),
+    when: "At least one real input value is negative.",
+    message: "gammaln: input must be nonnegative",
+};
+
+const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMALN.INTERNAL",
+    identifier: Some("RunMat:gammaln:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "gammaln: internal error",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_DOMAIN, ERROR_INTERNAL];
+
+pub const GAMMALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::gammaln")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "gammaln",
+    op_kind: GpuOpKind::Elementwise,
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[
+        ProviderHook::Reduction { name: "reduce_min" },
+        ProviderHook::Unary {
+            name: "unary_gammaln",
+        },
+    ],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "RunMat uses provider gammaln kernels only after proving gpuArray inputs are nonnegative; otherwise it gathers to enforce MATLAB's real-domain input rule.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::gammaln")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "gammaln",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Acts as a fusion sink because negative inputs must raise a domain error instead of producing an elementwise NaN.",
+};
+
+#[runtime_builtin(
+    name = "gammaln",
+    category = "math/elementwise",
+    summary = "Compute the natural logarithm of the gamma function.",
+    keywords = "gammaln,gamma,log gamma,special,elementwise,gpu",
+    accel = "unary",
+    type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::gammaln::GAMMALN_DESCRIPTOR),
+    builtin_path = "crate::builtins::math::elementwise::gammaln"
+)]
+async fn gammaln_builtin(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(handle) => gammaln_gpu(handle).await,
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "complex input is not supported",
+        )),
+        Value::String(_) | Value::StringArray(_) => Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "expected real nonnegative numeric input",
+        )),
+        Value::SparseTensor(_) => Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "sparse input is not supported",
+        )),
+        Value::CharArray(chars) => gammaln_char_array(chars),
+        other => gammaln_real(other),
+    }
+}
+
+async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "complex gpuArray input is not supported",
+        ));
+    }
+
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        match gpu_has_negative_input(provider, &handle).await {
+            Ok(true) => {
+                return Err(error_with_detail(
+                    &ERROR_DOMAIN,
+                    "gpuArray contains negative values",
+                ))
+            }
+            Ok(false) => match provider.unary_gammaln(&handle).await {
+                Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
+                Err(err) if is_unsupported_provider_hook(&err) => {}
+                Err(err) => {
+                    return Err(error_with_detail(
+                        &ERROR_INTERNAL,
+                        format!("provider unary_gammaln failed: {err}"),
+                    ))
+                }
+            },
+            Err(err) => {
+                if err.message() == "interaction pending..." {
+                    return Err(err);
+                }
+                // Fall back to host evaluation when reduction proof is unavailable.
+            }
+        }
+    }
+
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    gammaln_tensor(tensor)
+}
+
+async fn gpu_has_negative_input(
+    provider: &'static dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> BuiltinResult<bool> {
+    let min_handle = provider
+        .reduce_min(handle)
+        .await
+        .map_err(|e| internal_error(format!("gammaln: reduce_min failed: {e}")))?;
+    let download = download_handle_async(provider, &min_handle)
+        .await
+        .map_err(|e| internal_error(format!("gammaln: reduce_min download failed: {e}")));
+    let _ = provider.free(&min_handle);
+    let host = download?;
+    Ok(host.data.iter().any(|&value| value < 0.0))
+}
+
+fn gammaln_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+    gammaln_tensor(tensor)
+}
+
+fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
+    ensure_nonnegative(&tensor.data)?;
+    let dtype = if tensor.dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let data = tensor
+        .data
+        .iter()
+        .map(|&value| cast_output(gammaln_nonnegative_scalar(value), dtype))
+        .collect::<Vec<_>>();
+    let out = Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+    Ok(gammaln_tensor_into_value(out))
+}
+
+fn gammaln_tensor_into_value(tensor: Tensor) -> Value {
+    if tensor.data.len() == 1 && tensor.dtype == NumericDType::F64 {
+        Value::Num(tensor.data[0])
+    } else {
+        Value::Tensor(tensor)
+    }
+}
+
+fn gammaln_char_array(chars: CharArray) -> BuiltinResult<Value> {
+    let data = chars
+        .data
+        .iter()
+        .map(|&ch| gammaln_nonnegative_scalar(ch as u32 as f64))
+        .collect::<Vec<_>>();
+    let out = Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+    Ok(gammaln_tensor_into_value(out))
+}
+
+pub(crate) fn gammaln_nonnegative_scalar(value: f64) -> f64 {
+    if value.is_nan() {
+        return f64::NAN;
+    }
+    if value == 0.0 || value == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    if value < 0.0 {
+        return f64::NAN;
+    }
+    if value < SMALL_REFLECTION_CUTOFF {
+        return -value.ln();
+    }
+    if value < 0.5 {
+        return PI.ln() - (PI * value).sin().ln() - lanczos_gammaln(1.0 - value);
+    }
+    lanczos_gammaln(value)
+}
+
+fn lanczos_gammaln(value: f64) -> f64 {
+    let z_minus_one = value - 1.0;
+    let mut sum = 0.999_999_999_999_809_9;
+    for (idx, coeff) in LANCZOS_COEFFS.iter().enumerate() {
+        sum += coeff / (z_minus_one + (idx + 1) as f64);
+    }
+    let t = z_minus_one + LANCZOS_G + 0.5;
+    LN_SQRT_TWO_PI + (z_minus_one + 0.5) * t.ln() - t + sum.ln()
+}
+
+fn ensure_nonnegative(data: &[f64]) -> BuiltinResult<()> {
+    if data.iter().any(|&value| value < 0.0) {
+        Err(error_with_detail(
+            &ERROR_DOMAIN,
+            "input values must be nonnegative",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn cast_output(value: f64, dtype: NumericDType) -> f64 {
+    if dtype == NumericDType::F32 {
+        value as f32 as f64
+    } else {
+        value
+    }
+}
+
+fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
+    err.to_string().contains("unary_gammaln not supported")
+}
+
+fn internal_error(detail: impl std::fmt::Display) -> RuntimeError {
+    error_with_detail(&ERROR_INTERNAL, detail)
+}
+
+fn error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{
+        ComplexTensor, IntValue, LogicalArray, ResolveContext, SparseTensor, Type,
+    };
+
+    fn call(value: Value) -> BuiltinResult<Value> {
+        block_on(gammaln_builtin(value))
+    }
+
+    fn approx_eq(got: f64, expected: f64, tol: f64) {
+        assert!(
+            (got - expected).abs() <= tol,
+            "got {got}, expected {expected}, tol {tol}"
+        );
+    }
+
+    #[test]
+    fn gammaln_descriptor_signature_covers_core_form() {
+        let labels = GAMMALN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"Y = gammaln(A)"));
+    }
+
+    #[test]
+    fn gammaln_type_preserves_tensor_shape() {
+        let out = numeric_unary_type(
+            &[Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_scalar_values() {
+        match call(Value::Num(1.0)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, 0.0, 1e-14),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match call(Value::Num(5.0)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, 24.0_f64.ln(), 1e-13),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match call(Value::Num(0.5)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, std::f64::consts::PI.sqrt().ln(), 1e-14),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_avoids_overflow_for_large_values() {
+        match call(Value::Num(171.0)).expect("gammaln") {
+            Value::Num(v) => {
+                assert!(v.is_finite());
+                approx_eq(v, 706.573_062_245_787_5, 1e-10);
+            }
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_tiny_positive_values_use_log_asymptote() {
+        let tiny = f64::MIN_POSITIVE / 2.0;
+        match call(Value::Num(tiny)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, -tiny.ln(), 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_tensor_shape_and_single_dtype() {
+        let tensor =
+            Tensor::new_with_dtype(vec![0.5, 1.0, 2.0, 5.0], vec![2, 2], NumericDType::F32)
+                .unwrap();
+        let result = call(Value::Tensor(tensor)).expect("gammaln");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.dtype, NumericDType::F32);
+                approx_eq(t.data[0], std::f32::consts::PI.sqrt().ln() as f64, 1e-7);
+                approx_eq(t.data[1], 0.0, 1e-7);
+                approx_eq(t.data[2], 0.0, 1e-7);
+                approx_eq(t.data[3], 24.0_f32.ln() as f64, 1e-6);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_integer_bool_logical_and_char_promote() {
+        match call(Value::Int(IntValue::I32(5))).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, 24.0_f64.ln(), 1e-13),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match call(Value::Bool(true)).expect("gammaln") {
+            Value::Num(v) => approx_eq(v, 0.0, 1e-14),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+
+        let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+        match call(Value::LogicalArray(logical)).expect("gammaln") {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                approx_eq(t.data[0], 0.0, 1e-14);
+                assert_eq!(t.data[1], f64::INFINITY);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let chars = CharArray::new(vec!['\0', '\u{1}'], 1, 2).unwrap();
+        match call(Value::CharArray(chars)).expect("gammaln") {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.data[0], f64::INFINITY);
+                approx_eq(t.data[1], 0.0, 1e-14);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_nan_zero_and_infinity() {
+        match call(Value::Num(0.0)).expect("gammaln") {
+            Value::Num(v) => assert_eq!(v, f64::INFINITY),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match call(Value::Num(f64::INFINITY)).expect("gammaln") {
+            Value::Num(v) => assert_eq!(v, f64::INFINITY),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match call(Value::Num(f64::NAN)).expect("gammaln") {
+            Value::Num(v) => assert!(v.is_nan()),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_rejects_negative_complex_string_and_sparse_inputs() {
+        let err = call(Value::Num(-0.5)).expect_err("negative should error");
+        assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
+
+        let err = call(Value::Complex(1.0, 1.0)).expect_err("complex should error");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+
+        let complex = ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1]).unwrap();
+        let err = call(Value::ComplexTensor(complex)).expect_err("complex should error");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+
+        let err = call(Value::from("1")).expect_err("string should error");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+
+        let sparse = SparseTensor::zeros(2, 2);
+        let err = call(Value::SparseTensor(sparse)).expect_err("sparse should error");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_gpu_provider_roundtrip() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![0.5, 1.0, 2.0, 5.0, 171.0], vec![1, 5]).unwrap();
+            let view = HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = call(Value::GpuTensor(handle)).expect("gammaln");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 5]);
+            for (got, input) in gathered.data.iter().zip(tensor.data.iter()) {
+                approx_eq(*got, gammaln_nonnegative_scalar(*input), 1e-10);
+            }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gammaln_gpu_negative_errors() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, -0.5], vec![1, 2]).unwrap();
+            let view = HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let err = call(Value::GpuTensor(handle)).expect_err("negative gpu should error");
+            assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn gammaln_wgpu_matches_cpu_elementwise() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let tensor = Tensor::new(vec![0.25, 0.5, 1.0, 2.0, 5.0, 32.0, 171.0], vec![1, 7]).unwrap();
+        let cpu = match gammaln_tensor(tensor.clone()).expect("cpu gammaln") {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected tensor result, got {other:?}"),
+        };
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let view = HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_value = block_on(gammaln_gpu(handle)).expect("gpu gammaln");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        assert_eq!(gathered.shape, cpu.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+        for (got, expected) in gathered.data.iter().zip(cpu.data.iter()) {
+            approx_eq(*got, *expected, tol);
+        }
+    }
+}

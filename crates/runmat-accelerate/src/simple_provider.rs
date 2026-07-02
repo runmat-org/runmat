@@ -61,6 +61,19 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
 
 const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
+const GAMMALN_LN_SQRT_TWO_PI: f64 = 0.918_938_533_204_672_7;
+const GAMMALN_LANCZOS_G: f64 = 7.0;
+const GAMMALN_SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
+const GAMMALN_LANCZOS_COEFFS: [f64; 8] = [
+    676.5203681218851,
+    -1259.1392167224028,
+    771.3234287776531,
+    -176.6150291621406,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.984_369_578_019_572e-6,
+    1.5056327351493116e-7,
+];
 
 #[derive(Clone, Copy)]
 enum WindowKind {
@@ -110,6 +123,37 @@ fn sinc_scalar_host(value: f64) -> f64 {
 
 fn erf_scalar_host(value: f64) -> f64 {
     libm::erf(value)
+}
+
+fn gammaln_scalar_host(value: f64) -> f64 {
+    if value.is_nan() {
+        return f64::NAN;
+    }
+    if value == 0.0 || value == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    if value < 0.0 {
+        return f64::NAN;
+    }
+    if value < GAMMALN_SMALL_REFLECTION_CUTOFF {
+        return -value.ln();
+    }
+    if value < 0.5 {
+        return std::f64::consts::PI.ln()
+            - (std::f64::consts::PI * value).sin().ln()
+            - lanczos_gammaln_scalar_host(1.0 - value);
+    }
+    lanczos_gammaln_scalar_host(value)
+}
+
+fn lanczos_gammaln_scalar_host(value: f64) -> f64 {
+    let z_minus_one = value - 1.0;
+    let mut sum = 0.999_999_999_999_809_9;
+    for (idx, coeff) in GAMMALN_LANCZOS_COEFFS.iter().enumerate() {
+        sum += coeff / (z_minus_one + (idx + 1) as f64);
+    }
+    let t = z_minus_one + GAMMALN_LANCZOS_G + 0.5;
+    GAMMALN_LN_SQRT_TWO_PI + (z_minus_one + 0.5) * t.ln() - t + sum.ln()
 }
 
 fn sinc_complex_host(re: f64, im: f64) -> (f64, f64) {
@@ -3532,6 +3576,24 @@ impl AccelProvider for InProcessProvider {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow::anyhow!("unary_gamma not supported by provider")) })
+    }
+    fn unary_gammaln<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_gammaln does not support complex-interleaved buffers"
+            );
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().copied().map(gammaln_scalar_host).collect();
+            drop(guard);
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
+        })
     }
     fn unary_erf<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
