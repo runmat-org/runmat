@@ -1,6 +1,7 @@
 //! Core string builtins.
 
 pub mod char;
+pub mod compat;
 pub mod compose;
 pub mod genvarname;
 pub mod int2str;

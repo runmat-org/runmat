@@ -1,0 +1,76 @@
+{
+  "title": "splitlines",
+  "category": "strings/transform",
+  "keywords": [
+    "splitlines",
+    "strings",
+    "transform",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Split text at newline boundaries.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::compat::tests",
+    "integration": null
+  },
+  "description": "s = splitlines(text) - Split text at newline boundaries.",
+  "signatures": [
+    {
+      "label": "s = splitlines(text)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Split text at newline boundaries."
+  ],
+  "examples": [
+    "splitlines(\"a\\nb\") returns a two-element string array."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
+  }
+}

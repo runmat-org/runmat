@@ -1,0 +1,85 @@
+{
+  "title": "sscanf",
+  "category": "strings/core",
+  "keywords": [
+    "sscanf",
+    "strings",
+    "core",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Parse formatted values from text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "[A, count, errmsg, nextindex] = sscanf(text, format, size) - Parse formatted values from text.",
+  "signatures": [
+    {
+      "label": "[A, count, errmsg, nextindex] = sscanf(text, format, size)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional arguments."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Parse formatted values from text.",
+    "Supports repeated literal/whitespace-aware scan formats for %f/%e/%g, %d/%i/%u, %s, %c, field widths, assignment suppression, optional size truncation, and requested outputs for count, errmsg, and nextindex.",
+    "String and character scan specifiers return character code values in the numeric output array."
+  ],
+  "examples": [
+    "[A,count,errmsg,nextindex] = sscanf(\"1 2 x\", \"%f\") returns A = [1;2], count = 2, errmsg = \"\", nextindex at the first unconsumed character after the successful scan."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

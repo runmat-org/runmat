@@ -3044,6 +3044,35 @@
       ]
     },
     {
+      "name": "append",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = append(arg1, ...)",
+          "inputs": [
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Values to append."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "area",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -5387,6 +5416,35 @@
           "message": "blackman: internal error"
         }
       ]
+    },
+    {
+      "name": "blanks",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = blanks(n)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "blkdiag",
@@ -11103,6 +11161,100 @@
           "message": "conv2: failed to build complex tensor"
         }
       ]
+    },
+    {
+      "name": "convertCharsToStrings",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = convertCharsToStrings(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "convertContainedStringsToChars",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = convertContainedStringsToChars(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "convertStringsToChars",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[out1, ...] = convertStringsToChars(value1, ...)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "copyfile",
@@ -17984,6 +18136,35 @@
       "errors": []
     },
     {
+      "name": "deblank",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = deblank(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "decomposition",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -19442,6 +19623,42 @@
           "message": "digits: expected a positive integer digit count"
         }
       ]
+    },
+    {
+      "name": "digitsPattern",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = digitsPattern(N)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "dir",
@@ -21819,6 +22036,35 @@
       ]
     },
     {
+      "name": "eraseURLs",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = eraseURLs(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "erf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -22666,6 +22912,78 @@
           "message": "exprnd: internal operation failed"
         }
       ]
+    },
+    {
+      "name": "extractAfter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = extractAfter(text, boundary)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "extractBefore",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = extractBefore(text, boundary)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "extractBetween",
@@ -38471,6 +38789,78 @@
       ]
     },
     {
+      "name": "insertAfter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = insertAfter(text, boundary, newText)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "insertBefore",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = insertBefore(text, boundary, newText)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "int",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -40166,6 +40556,35 @@
       ]
     },
     {
+      "name": "isStringScalar",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isStringScalar(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "isa",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -41006,6 +41425,35 @@
           "message": "isinf: internal error"
         }
       ]
+    },
+    {
+      "name": "isletter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isletter(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "islogical",
@@ -41943,6 +42391,35 @@
       ]
     },
     {
+      "name": "isspace",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isspace(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "issparse",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -42042,6 +42519,42 @@
               "arity": "Required",
               "default": null,
               "description": "True when input is a string scalar or string array."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "isstrprop",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isstrprop(text, category)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
             }
           ]
         }
@@ -43410,6 +43923,42 @@
               "arity": "Required",
               "default": null,
               "description": "Largest dimension extent of input."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "lettersPattern",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = lettersPattern(N)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
             }
           ]
         }
@@ -46367,6 +46916,78 @@
           "message": "mat2cell: internal error"
         }
       ]
+    },
+    {
+      "name": "mat2str",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = mat2str(A)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "matches",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = matches(text, pattern)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "max",
@@ -54949,6 +55570,42 @@
       ]
     },
     {
+      "name": "native2unicode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = native2unicode(bytes, encoding)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "nchoosek",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -55249,6 +55906,27 @@
               "arity": "Required",
               "default": null,
               "description": "Created class object value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "newline",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = newline",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
             }
           ]
         }
@@ -58484,6 +59162,35 @@
           "message": "path: too many input arguments"
         }
       ]
+    },
+    {
+      "name": "pattern",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = pattern(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "pause",
@@ -66021,6 +66728,35 @@
       ]
     },
     {
+      "name": "regexpPattern",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = regexpPattern(expr)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "regexpi",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -66521,6 +67257,42 @@
       ]
     },
     {
+      "name": "replaceBetween",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = replaceBetween(text, start, end, newText)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "repmat",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -66966,6 +67738,35 @@
             }
           ],
           "outputs": []
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "reverse",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = reverse(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
         }
       ],
       "errors": []
@@ -73517,6 +74318,35 @@
       ]
     },
     {
+      "name": "splitlines",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = splitlines(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "spreadsheetImportOptions",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -74063,6 +74893,42 @@
           "message": "ss: internal error"
         }
       ]
+    },
+    {
+      "name": "sscanf",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[A, count, errmsg, nextindex] = sscanf(text, format, size)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "stairs",
@@ -76226,6 +77092,35 @@
       ]
     },
     {
+      "name": "str2num",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[x, tf] = str2num(text)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "strcat",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -76996,6 +77891,42 @@
       "errors": []
     },
     {
+      "name": "strjust",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "s = strjust(text, side)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "strlength",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -77110,6 +78041,49 @@
           "message": "strncmp: internal error"
         }
       ]
+    },
+    {
+      "name": "strncmpi",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = strncmpi(A, B, N)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First text input."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second text input."
+            },
+            {
+              "name": "N",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of leading characters to compare."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical result."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "strrep",
@@ -77401,6 +78375,42 @@
           "message": "strsplit: internal error"
         }
       ]
+    },
+    {
+      "name": "strtok",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[tok, rem] = strtok(text, delimiters)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "strtrim",
@@ -86601,6 +87611,42 @@
           "message": "readtable: unsupported file type"
         }
       ]
+    },
+    {
+      "name": "wildcardPattern",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pat = wildcardPattern",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "write",
