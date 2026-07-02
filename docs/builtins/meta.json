@@ -11871,6 +11871,40 @@
       ]
     },
     {
+      "name": "cputime",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "t = cputime()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Total CPU time used by the current RunMat process in seconds."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CPUTIME.TOO_MANY_INPUTS",
+          "identifier": "RunMat:cputime:TooManyInputs",
+          "when": "Any input arguments are supplied.",
+          "message": "cputime: too many input arguments"
+        },
+        {
+          "code": "RM.CPUTIME.UNAVAILABLE",
+          "identifier": "RunMat:cputime:Unavailable",
+          "when": "The host platform reports that process CPU time is unavailable.",
+          "message": "cputime: process CPU time is unavailable"
+        }
+      ]
+    },
+    {
       "name": "cross",
       "output_mode": "Fixed",
       "completion_policy": "Public",

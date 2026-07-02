@@ -1,3 +1,4 @@
+pub mod cputime;
 pub mod pause;
 pub mod tic;
 pub mod timeit;
