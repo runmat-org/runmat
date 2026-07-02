@@ -6,4 +6,5 @@ pub mod pchip;
 pub mod ppval;
 pub mod spline;
 
+pub(crate) mod gridded_interpolant;
 pub(crate) mod pp;

@@ -37556,6 +37556,234 @@
       ]
     },
     {
+      "name": "griddedInterpolant",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "F = griddedInterpolant",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed value or property."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(x, v)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(gridVecs, V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(X1, X2, ..., Xn, V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(___, Method)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(___, Method, ExtrapolationMethod)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
+          "identifier": "RunMat:griddedInterpolant:InvalidInput",
+          "when": "Grid, value, method, or query inputs are invalid.",
+          "message": "griddedInterpolant: invalid input"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
+          "identifier": "RunMat:griddedInterpolant:UnsupportedMethod",
+          "when": "The requested interpolation or extrapolation method is not implemented by RunMat.",
+          "message": "griddedInterpolant: unsupported interpolation method"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INTERNAL",
+          "identifier": "RunMat:griddedInterpolant:Internal",
+          "when": "Object construction, property access, or interpolation output construction fails.",
+          "message": "griddedInterpolant: internal error"
+        }
+      ]
+    },
+    {
+      "name": "griddedInterpolant.subsref",
+      "output_mode": "Fixed",
+      "completion_policy": "MethodOnly",
+      "signatures": [
+        {
+          "label": "out = griddedInterpolant.subsref(obj, kind, payload)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "griddedInterpolant object."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
+          "identifier": "RunMat:griddedInterpolant:InvalidInput",
+          "when": "Grid, value, method, or query inputs are invalid.",
+          "message": "griddedInterpolant: invalid input"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
+          "identifier": "RunMat:griddedInterpolant:UnsupportedMethod",
+          "when": "The requested interpolation or extrapolation method is not implemented by RunMat.",
+          "message": "griddedInterpolant: unsupported interpolation method"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INTERNAL",
+          "identifier": "RunMat:griddedInterpolant:Internal",
+          "when": "Object construction, property access, or interpolation output construction fails.",
+          "message": "griddedInterpolant: internal error"
+        }
+      ]
+    },
+    {
       "name": "interp1",
       "output_mode": "Fixed",
       "completion_policy": "Public",
