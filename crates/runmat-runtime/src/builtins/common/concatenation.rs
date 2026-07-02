@@ -969,6 +969,31 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn test_hcat_values_promotes_non_scalar_one_dimensional_logical_array() {
+        let logical = runmat_builtins::LogicalArray::new(vec![1, 0], vec![2]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::LogicalArray(logical),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "1", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn test_vcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0)];
         let result = vcat_values(&values).unwrap();

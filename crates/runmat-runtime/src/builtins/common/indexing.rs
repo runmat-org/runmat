@@ -433,7 +433,7 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, SymbolicArray, SymbolicExpr, Value};
 
     #[test]
     fn cell_index_rejects_fractional_before_cast() {
@@ -476,5 +476,23 @@ mod tests {
         .expect("cell");
         let value = block_on(perform_indexing(&Value::Cell(cell), &[2.0])).expect("cell read");
         assert_eq!(value, Value::String("r2c1".to_string()));
+    }
+
+    #[test]
+    fn symbolic_one_dimensional_row_vector_allows_two_dimensional_indexing() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("z"),
+            ],
+            vec![3],
+        )
+        .expect("symbolic array");
+
+        let value = block_on(perform_indexing(&Value::SymbolicArray(array), &[1.0, 2.0]))
+            .expect("symbolic indexing");
+
+        assert!(matches!(value, Value::Symbolic(expr) if expr.to_string() == "y"));
     }
 }

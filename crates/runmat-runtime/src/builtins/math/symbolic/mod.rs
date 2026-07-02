@@ -8,8 +8,11 @@ pub(crate) mod vpa;
 
 use runmat_builtins::{
     symbolic::{is_valid_symbolic_identifier, SymbolicFunction},
-    SymbolicExpr, Tensor, Value,
+    SymbolicArray, SymbolicExpr, Tensor, Value,
 };
+
+use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::shape::is_scalar_shape;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SymbolicBinaryOp {
@@ -18,6 +21,7 @@ pub(crate) enum SymbolicBinaryOp {
     Mul,
     Div,
     Pow,
+    Eq,
 }
 
 pub(crate) fn symbolic_named_binary(lhs: &Value, rhs: &Value, name: &str) -> Option<Value> {
@@ -36,8 +40,120 @@ pub(crate) fn symbolic_binary(lhs: &Value, rhs: &Value, op: SymbolicBinaryOp) ->
         SymbolicBinaryOp::Mul => SymbolicExpr::mul_expr(lhs, rhs),
         SymbolicBinaryOp::Div => SymbolicExpr::div_expr(lhs, rhs),
         SymbolicBinaryOp::Pow => SymbolicExpr::pow_expr(lhs, rhs),
+        SymbolicBinaryOp::Eq => SymbolicExpr::equation(lhs, rhs),
     };
     Some(symbolic_expr_to_value(expr))
+}
+
+pub(crate) fn symbolic_binary_broadcast(
+    lhs: &Value,
+    rhs: &Value,
+    op: SymbolicBinaryOp,
+) -> Result<Option<Value>, String> {
+    if !contains_symbolic_value(lhs) && !contains_symbolic_value(rhs) {
+        return Ok(None);
+    }
+
+    let Some(lhs) = SymbolicOperand::from_value(lhs) else {
+        return Ok(None);
+    };
+    let Some(rhs) = SymbolicOperand::from_value(rhs) else {
+        return Ok(None);
+    };
+
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_idx, rhs_idx) in plan.iter() {
+        let lhs_expr = lhs.expr_at(lhs_idx).clone();
+        let rhs_expr = rhs.expr_at(rhs_idx).clone();
+        data.push(match op {
+            SymbolicBinaryOp::Add => SymbolicExpr::add_expr(lhs_expr, rhs_expr),
+            SymbolicBinaryOp::Sub => SymbolicExpr::sub_expr(lhs_expr, rhs_expr),
+            SymbolicBinaryOp::Mul => SymbolicExpr::mul_expr(lhs_expr, rhs_expr),
+            SymbolicBinaryOp::Div => SymbolicExpr::div_expr(lhs_expr, rhs_expr),
+            SymbolicBinaryOp::Pow => SymbolicExpr::pow_expr(lhs_expr, rhs_expr),
+            SymbolicBinaryOp::Eq => SymbolicExpr::equation(lhs_expr, rhs_expr),
+        });
+    }
+
+    if data.len() == 1 && is_scalar_shape(plan.output_shape()) {
+        return Ok(Some(Value::Symbolic(data.remove(0))));
+    }
+
+    SymbolicArray::new(data, plan.output_shape().to_vec())
+        .map(Value::SymbolicArray)
+        .map(Some)
+}
+
+fn contains_symbolic_value(value: &Value) -> bool {
+    matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_))
+}
+
+struct SymbolicOperand {
+    data: Vec<SymbolicExpr>,
+    shape: Vec<usize>,
+}
+
+impl SymbolicOperand {
+    fn scalar(expr: SymbolicExpr) -> Self {
+        Self {
+            data: vec![expr],
+            shape: vec![1, 1],
+        }
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Symbolic(expr) => Some(Self::scalar(expr.clone())),
+            Value::SymbolicArray(array) => Some(Self {
+                data: array.data.clone(),
+                shape: normalize_symbolic_shape(&array.shape),
+            }),
+            Value::Num(value) => Some(Self::scalar(SymbolicExpr::constant(*value))),
+            Value::Int(value) => Some(Self::scalar(SymbolicExpr::constant(value.to_f64()))),
+            Value::Bool(value) => Some(Self::scalar(SymbolicExpr::constant(if *value {
+                1.0
+            } else {
+                0.0
+            }))),
+            Value::Tensor(tensor) => Some(Self {
+                data: tensor
+                    .data
+                    .iter()
+                    .copied()
+                    .map(SymbolicExpr::constant)
+                    .collect(),
+                shape: normalize_symbolic_shape(&tensor.shape),
+            }),
+            Value::LogicalArray(array) => Some(Self {
+                data: array
+                    .data
+                    .iter()
+                    .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
+                    .collect(),
+                shape: normalize_symbolic_shape(&array.shape),
+            }),
+            _ => None,
+        }
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn expr_at(&self, index: usize) -> &SymbolicExpr {
+        &self.data[index]
+    }
+}
+
+fn normalize_symbolic_shape(shape: &[usize]) -> Vec<usize> {
+    if shape.len() == 1 && shape[0] != 1 {
+        vec![1, shape[0]]
+    } else if is_scalar_shape(shape) {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
 }
 
 fn symbolic_binary_operands(lhs: &Value, rhs: &Value) -> Option<(SymbolicExpr, SymbolicExpr)> {

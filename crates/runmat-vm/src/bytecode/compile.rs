@@ -3982,7 +3982,7 @@ b = 2^x;\n",
     }
 
     #[test]
-    fn compile_rejects_nonscalar_symbolic_power_operand() {
+    fn compile_interprets_nonscalar_symbolic_power_operand() {
         let ast = runmat_parser::parse(
             "\
 syms x\n\
@@ -3994,8 +3994,29 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        block_on(crate::interpret(&bytecode))
-            .expect_err("symbolic power with a non-scalar operand should fail");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let y_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        match &vars[y_export.slot.0] {
+            Value::SymbolicArray(array) => {
+                assert_eq!(array.shape, vec![2, 2]);
+                assert_eq!(
+                    array
+                        .data
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    vec!["x", "x^3", "x^2", "x^4"]
+                );
+            }
+            other => panic!("expected symbolic array, got {other:?}"),
+        }
     }
 
     #[test]

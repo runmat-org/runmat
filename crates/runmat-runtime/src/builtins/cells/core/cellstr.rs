@@ -340,6 +340,7 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{SymbolicArray, SymbolicExpr};
 
     fn cellstr_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cellstr_builtin(value))
@@ -411,6 +412,64 @@ pub(crate) mod tests {
                         "west".to_string(),
                     ]
                 );
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn converts_symbolic_array_with_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a"),
+                SymbolicExpr::variable("c"),
+                SymbolicExpr::variable("b"),
+                SymbolicExpr::variable("d"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let result = cellstr_builtin(Value::SymbolicArray(array)).expect("cellstr");
+
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 2);
+                assert_eq!(cell.cols, 2);
+                assert_eq!(
+                    cell_to_strings(&cell),
+                    vec![
+                        "a".to_string(),
+                        "b".to_string(),
+                        "c".to_string(),
+                        "d".to_string()
+                    ]
+                );
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn converts_one_dimensional_symbolic_array_as_row_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("z"),
+            ],
+            vec![3],
+        )
+        .expect("symbolic array");
+
+        let result = cellstr_builtin(Value::SymbolicArray(array)).expect("cellstr");
+
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.shape, vec![3]);
+                assert_eq!(cell_to_strings(&cell), vec!["x", "y", "z"]);
             }
             other => panic!("expected cell result, got {other:?}"),
         }

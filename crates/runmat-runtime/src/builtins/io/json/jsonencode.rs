@@ -972,8 +972,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicExpr,
-        Tensor,
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicArray,
+        SymbolicExpr, Tensor,
     };
 
     fn as_string(value: Value) -> String {
@@ -1024,6 +1024,26 @@ pub(crate) mod tests {
             block_on(jsonencode_builtin(Value::Symbolic(expr), Vec::new())).expect("jsonencode");
 
         assert_eq!(as_string(encoded), "\"sin(x)/x\"");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn jsonencode_symbolic_array_preserves_matrix_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a"),
+                SymbolicExpr::variable("c"),
+                SymbolicExpr::variable("b"),
+                SymbolicExpr::variable("d"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let encoded = block_on(jsonencode_builtin(Value::SymbolicArray(array), Vec::new()))
+            .expect("jsonencode");
+
+        assert_eq!(as_string(encoded), "[[\"a\",\"b\"],[\"c\",\"d\"]]");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
