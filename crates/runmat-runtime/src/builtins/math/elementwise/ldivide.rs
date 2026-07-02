@@ -364,7 +364,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
-        | Value::Symbolic(_) => Err(ldivide_error_with_detail(
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_) => Err(ldivide_error_with_detail(
             &LDIVIDE_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),

@@ -170,6 +170,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
             .numeric_constant_value()
             .map(|value| Value::Bool(value != 0.0))
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(_) => Err(conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),

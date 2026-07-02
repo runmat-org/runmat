@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, SparseTensor, Tensor, Value,
+    CharArray, LogicalArray, SparseTensor, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -207,6 +207,7 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             .numeric_constant_value()
             .map(Value::Num)
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(array) => double_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -228,6 +229,19 @@ fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
     let tensor = tensor::logical_to_tensor(&array)
         .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn double_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
+    let mut data = Vec::with_capacity(array.data.len());
+    for expr in array.data {
+        data.push(
+            expr.numeric_constant_value()
+                .ok_or_else(|| conversion_error("sym"))?,
+        );
+    }
+    Tensor::new(data, array.shape)
+        .map(Value::Tensor)
+        .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))
 }
 
 fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
@@ -419,7 +433,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, ResolveContext, SparseTensor, SymbolicExpr, Type};
+    use runmat_builtins::{
+        IntValue, ResolveContext, SparseTensor, SymbolicArray, SymbolicExpr, Type,
+    };
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
@@ -492,6 +508,38 @@ pub(crate) mod tests {
             .expect("double");
 
         assert_eq!(result, Value::Num(42.5));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_converts_symbolic_array_constants() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::constant(1.5), SymbolicExpr::constant(2.5)],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let result = double_builtin(Value::SymbolicArray(array), Vec::new()).expect("double");
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.data, vec![1.5, 2.5]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_rejects_symbolic_array_variables() {
+        let array = SymbolicArray::new(vec![SymbolicExpr::variable("x")], vec![1, 1]).unwrap();
+
+        let err = double_builtin(Value::SymbolicArray(array), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), DOUBLE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to double from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

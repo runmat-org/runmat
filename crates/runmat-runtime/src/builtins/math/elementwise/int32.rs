@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, Tensor, Value,
+    CharArray, IntValue, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -169,6 +169,7 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             .numeric_constant_value()
             .map(|value| Value::Int(IntValue::I32(cast_scalar_to_int32(value))))
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(array) => int32_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -194,6 +195,19 @@ fn int32_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
     Ok(int32_value_from_tensor(tensor))
+}
+
+fn int32_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
+    let mut data = Vec::with_capacity(array.data.len());
+    for expr in array.data {
+        let value = expr
+            .numeric_constant_value()
+            .ok_or_else(|| conversion_error("sym"))?;
+        data.push(cast_scalar_to_int32(value) as f64);
+    }
+    Tensor::new(data, array.shape)
+        .map(Value::Tensor)
+        .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))
 }
 
 async fn int32_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -253,7 +267,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
+    use runmat_builtins::{ResolveContext, SymbolicArray, SymbolicExpr, Type};
 
     fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::int32_builtin(value, rest))
@@ -317,6 +331,38 @@ pub(crate) mod tests {
             int32_builtin(Value::Symbolic(SymbolicExpr::constant(3.5)), Vec::new()).expect("int32");
 
         assert_eq!(result, Value::Int(IntValue::I32(4)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int32_converts_symbolic_array_constants() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::constant(3.5), SymbolicExpr::constant(-2.2)],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let result = int32_builtin(Value::SymbolicArray(array), Vec::new()).expect("int32");
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.data, vec![4.0, -2.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int32_rejects_symbolic_array_variables() {
+        let array = SymbolicArray::new(vec![SymbolicExpr::variable("x")], vec![1, 1]).unwrap();
+
+        let err = int32_builtin(Value::SymbolicArray(array), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), INT32_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to int32 from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

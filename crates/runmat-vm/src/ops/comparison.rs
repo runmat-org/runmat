@@ -237,7 +237,10 @@ where
         (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
             stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
         }
-        (Value::Symbolic(_), _) | (_, Value::Symbolic(_)) => {
+        (Value::Symbolic(_), _)
+        | (_, Value::Symbolic(_))
+        | (Value::SymbolicArray(_), _)
+        | (_, Value::SymbolicArray(_)) => {
             stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
         }
         (Value::LogicalArray(la), Value::LogicalArray(lb)) => {

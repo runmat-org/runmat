@@ -90,6 +90,8 @@ pub enum Value {
     ComplexTensor(ComplexTensor),
     /// Scalar symbolic expression used by `sym`, `syms`, and symbolic math builtins.
     Symbolic(SymbolicExpr),
+    /// Dense symbolic array with column-major shape semantics.
+    SymbolicArray(SymbolicArray),
     Cell(CellArray),
     // Struct (scalar or nested). Struct arrays are represented in higher layers;
     // this variant holds a single struct's fields.
@@ -262,6 +264,14 @@ pub struct ComplexTensor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SymbolicArray {
+    pub data: Vec<SymbolicExpr>,
+    pub shape: Vec<usize>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StringArray {
     pub data: Vec<String>,
     pub shape: Vec<usize>,
@@ -369,6 +379,42 @@ impl StringArray {
     }
     pub fn cols(&self) -> usize {
         self.shape.get(1).copied().unwrap_or(1)
+    }
+}
+
+impl SymbolicArray {
+    pub fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return Err(format!(
+                "SymbolicArray data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                shape,
+                expected
+            ));
+        }
+        // Keep the cached `rows`/`cols` fields in lockstep with the `rows()`/`cols()`
+        // accessors so the two never disagree for non-2D shapes.
+        let rows = shape.first().copied().unwrap_or(1);
+        let cols = shape.get(1).copied().unwrap_or(1);
+        Ok(SymbolicArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
+    }
+
+    pub fn new_2d(data: Vec<SymbolicExpr>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn cols(&self) -> usize {
+        self.cols
     }
 }
 
@@ -810,6 +856,45 @@ impl fmt::Display for Tensor {
     }
 }
 
+impl fmt::Display for SymbolicArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.shape.len() {
+            0 | 1 => {
+                write!(f, "[")?;
+                for (i, expr) in self.data.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{expr}")?;
+                }
+                write!(f, "]")
+            }
+            2 => {
+                let rows = self.rows();
+                let cols = self.cols();
+                for r in 0..rows {
+                    writeln!(f)?;
+                    write!(f, "  ")?;
+                    for c in 0..cols {
+                        if c > 0 {
+                            write!(f, "  ")?;
+                        }
+                        write!(f, "{}", self.data[r + c * rows])?;
+                    }
+                }
+                Ok(())
+            }
+            _ => {
+                if should_expand_nd_display(&self.shape) {
+                    write_nd_pages(f, &self.shape, |f, idx| write!(f, "{}", self.data[idx]))
+                } else {
+                    write!(f, "SymbolicArray(shape={:?})", self.shape)
+                }
+            }
+        }
+    }
+}
+
 impl fmt::Display for SparseTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
@@ -1134,6 +1219,11 @@ pub enum Type {
     },
     /// Scalar symbolic expression type.
     Symbolic,
+    /// Symbolic array type with optional shape information.
+    SymbolicArray {
+        /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
+        shape: Option<Vec<Option<usize>>>,
+    },
     /// Cell array type with optional element type information
     Cell {
         /// Optional element type (None means mixed/unknown)
@@ -1331,6 +1421,9 @@ impl Type {
                 shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
             },
             Value::Symbolic(_) => Type::Symbolic,
+            Value::SymbolicArray(array) => Type::SymbolicArray {
+                shape: Some(array.shape.iter().map(|&d| Some(d)).collect()),
+            },
             Value::Cell(cells) => {
                 if cells.data.is_empty() {
                     Type::cell()
@@ -2187,6 +2280,7 @@ impl Trace for Value {
             | Value::SparseTensor(_)
             | Value::ComplexTensor(_)
             | Value::Symbolic(_)
+            | Value::SymbolicArray(_)
             | Value::GpuTensor(_)
             | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
@@ -2223,6 +2317,7 @@ impl fmt::Display for Value {
             Value::SparseTensor(m) => write!(f, "{m}"),
             Value::ComplexTensor(m) => write!(f, "{m}"),
             Value::Symbolic(expr) => write!(f, "{expr}"),
+            Value::SymbolicArray(array) => write!(f, "{array}"),
             Value::Cell(ca) => ca.fmt(f),
 
             Value::GpuTensor(h) => write!(

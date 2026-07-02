@@ -2,7 +2,7 @@
 //!
 //! Implements language-style tensor indexing and access patterns.
 
-use crate::builtins::common::shape::normalize_scalar_shape;
+use crate::builtins::common::shape::{is_scalar_shape, normalize_scalar_shape};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{Tensor, Value};
 
@@ -255,6 +255,56 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::SymbolicArray(array) => {
+            if indices.is_empty() {
+                return Err(indexing_error("At least one index is required"));
+            }
+
+            if indices.len() == 1 {
+                let idx = indices[0] as usize;
+                if idx < 1 || idx > array.data.len() {
+                    return Err(indexing_error_with_identifier(
+                        format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                Ok(Value::Symbolic(array.data[idx - 1].clone()))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize;
+                let col = indices[1] as usize;
+                // Use the same 1-D normalization as value_dimensions to ensure consistency
+                let shape = if array.shape.len() == 1 && array.shape[0] != 1 {
+                    vec![1, array.shape[0]]
+                } else if is_scalar_shape(&array.shape) {
+                    vec![1, 1]
+                } else {
+                    array.shape.clone()
+                };
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+
+                if row < 1 || row > rows {
+                    return Err(indexing_error_with_identifier(
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                if col < 1 || col > cols {
+                    return Err(indexing_error_with_identifier(
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+
+                let linear_idx = (row - 1) + (col - 1) * rows;
+                Ok(Value::Symbolic(array.data[linear_idx].clone()))
+            } else {
+                Err(indexing_error(format!(
+                    "Symbolic arrays support 1 or 2 indices, got {}",
+                    indices.len()
+                )))
+            }
+        }
         Value::StringArray(sa) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));
@@ -383,7 +433,7 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, SymbolicArray, SymbolicExpr, Value};
 
     #[test]
     fn cell_index_rejects_fractional_before_cast() {
@@ -426,5 +476,23 @@ mod tests {
         .expect("cell");
         let value = block_on(perform_indexing(&Value::Cell(cell), &[2.0])).expect("cell read");
         assert_eq!(value, Value::String("r2c1".to_string()));
+    }
+
+    #[test]
+    fn symbolic_one_dimensional_row_vector_allows_two_dimensional_indexing() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("z"),
+            ],
+            vec![3],
+        )
+        .expect("symbolic array");
+
+        let value = block_on(perform_indexing(&Value::SymbolicArray(array), &[1.0, 2.0]))
+            .expect("symbolic indexing");
+
+        assert!(matches!(value, Value::Symbolic(expr) if expr.to_string() == "y"));
     }
 }

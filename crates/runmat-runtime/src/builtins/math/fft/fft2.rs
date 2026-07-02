@@ -375,6 +375,7 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)

@@ -358,7 +358,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
-        | Value::Symbolic(_) => Err(minus_error_with_detail(
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_) => Err(minus_error_with_detail(
             &MINUS_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),

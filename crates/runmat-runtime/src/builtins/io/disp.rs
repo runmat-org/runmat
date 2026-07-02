@@ -191,6 +191,13 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             RenderMode::Nested => vec![quote_double(text)],
         },
         Value::Symbolic(expr) => vec![expr.to_string()],
+        Value::SymbolicArray(array) => match mode {
+            RenderMode::TopLevel => array.to_string().lines().map(ToString::to_string).collect(),
+            RenderMode::Nested => vec![format!(
+                "[{} sym]",
+                dims_to_string(&canonical_dims(&array.shape))
+            )],
+        },
         Value::CharArray(array) => format_char_array(array, mode),
         Value::StringArray(array) => format_string_array(array, mode),
         Value::Num(n) => vec![format_scalar_number(*n)],
@@ -613,6 +620,15 @@ fn summarize_for_cell(value: &Value) -> String {
             }
         }
         Value::Symbolic(expr) => expr.to_string(),
+        Value::SymbolicArray(array) => {
+            if array.data.is_empty() {
+                "[]".to_string()
+            } else if array.data.len() == 1 {
+                array.data[0].to_string()
+            } else {
+                format!("[{} sym]", dims_to_string(&canonical_dims(&array.shape)))
+            }
+        }
         Value::Struct(_) => "[1x1 struct]".to_string(),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)

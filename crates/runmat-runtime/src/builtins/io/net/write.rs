@@ -538,7 +538,7 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
             &WRITE_ERROR_INVALID_DATA,
             "write: complex data is not supported",
         )),
-        Value::Symbolic(_) => Err(write_flow(
+        Value::Symbolic(_) | Value::SymbolicArray(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
             "write: symbolic data is not supported",
         )),

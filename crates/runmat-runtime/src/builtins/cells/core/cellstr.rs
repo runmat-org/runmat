@@ -134,6 +134,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::StringArray(sa) => cellstr_from_string_array(sa),
         Value::String(text) => cellstr_from_string(text),
         Value::Symbolic(expr) => cellstr_from_string(expr.to_string()),
+        Value::SymbolicArray(array) => cellstr_from_symbolic_array(array),
         Value::Cell(cell) => cellstr_from_cell(cell).await,
         Value::LogicalArray(_)
         | Value::Bool(_)
@@ -214,6 +215,25 @@ fn cellstr_from_string_array(sa: StringArray) -> BuiltinResult<Value> {
         let coords = linear_to_multi_row_major(row_major, &shape);
         let column_major = multi_to_linear_column_major(&coords, &shape);
         let text = sa.data[column_major].clone();
+        values.push(Value::CharArray(CharArray::new_row(&text)));
+    }
+    make_cell_with_shape(values, shape)
+        .map_err(|e| cellstr_error_with_message(format!("cellstr: {e}"), &CELLSTR_ERROR_INTERNAL))
+}
+
+fn cellstr_from_symbolic_array(array: runmat_builtins::SymbolicArray) -> BuiltinResult<Value> {
+    let shape = array.shape.clone();
+    let total = array.data.len();
+    if total == 0 {
+        return make_cell_with_shape(Vec::new(), shape).map_err(|e| {
+            cellstr_error_with_message(format!("cellstr: {e}"), &CELLSTR_ERROR_INTERNAL)
+        });
+    }
+    let mut values = Vec::with_capacity(total);
+    for row_major in 0..total {
+        let coords = linear_to_multi_row_major(row_major, &shape);
+        let column_major = multi_to_linear_column_major(&coords, &shape);
+        let text = array.data[column_major].to_string();
         values.push(Value::CharArray(CharArray::new_row(&text)));
     }
     make_cell_with_shape(values, shape)
@@ -320,6 +340,7 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{SymbolicArray, SymbolicExpr};
 
     fn cellstr_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cellstr_builtin(value))
@@ -391,6 +412,64 @@ pub(crate) mod tests {
                         "west".to_string(),
                     ]
                 );
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn converts_symbolic_array_with_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a"),
+                SymbolicExpr::variable("c"),
+                SymbolicExpr::variable("b"),
+                SymbolicExpr::variable("d"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let result = cellstr_builtin(Value::SymbolicArray(array)).expect("cellstr");
+
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 2);
+                assert_eq!(cell.cols, 2);
+                assert_eq!(
+                    cell_to_strings(&cell),
+                    vec![
+                        "a".to_string(),
+                        "b".to_string(),
+                        "c".to_string(),
+                        "d".to_string()
+                    ]
+                );
+            }
+            other => panic!("expected cell result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn converts_one_dimensional_symbolic_array_as_row_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("x"),
+                SymbolicExpr::variable("y"),
+                SymbolicExpr::variable("z"),
+            ],
+            vec![3],
+        )
+        .expect("symbolic array");
+
+        let result = cellstr_builtin(Value::SymbolicArray(array)).expect("cellstr");
+
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.shape, vec![3]);
+                assert_eq!(cell_to_strings(&cell), vec!["x", "y", "z"]);
             }
             other => panic!("expected cell result, got {other:?}"),
         }
