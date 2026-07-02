@@ -299,7 +299,8 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&array.shape, "char")?;
-    let (rows, cols) = infer_rows_cols(&array.shape, array.data.len());
+    let rows = array.rows();
+    let cols = array.cols();
     if rows == 0 {
         return Ok(Vec::new());
     }
