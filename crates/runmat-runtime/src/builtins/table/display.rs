@@ -106,7 +106,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
     }
 }
 
-pub(super) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Option<String> {
+pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Option<String> {
     let code = match object.properties.get("Codes")? {
         Value::Tensor(tensor) => tensor.get2(row, 0).ok()?,
         _ => return None,

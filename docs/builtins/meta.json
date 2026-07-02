@@ -2065,6 +2065,54 @@
       ]
     },
     {
+      "name": "accumarray",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
+        }
+      ]
+    },
+    {
       "name": "acos",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -8930,6 +8978,54 @@
           "identifier": "RunMat:colormap:InvalidArgument",
           "when": "Colormap name is missing, non-string, or unknown.",
           "message": "colormap: invalid argument"
+        }
+      ]
+    },
+    {
+      "name": "combinations",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
         }
       ]
     },
@@ -19293,6 +19389,54 @@
       ]
     },
     {
+      "name": "discretize",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
+        }
+      ]
+    },
+    {
       "name": "disp",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -26822,6 +26966,54 @@
       ]
     },
     {
+      "name": "findgroups",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
+        }
+      ]
+    },
+    {
       "name": "fir1",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -32733,6 +32925,54 @@
       ]
     },
     {
+      "name": "groupcounts",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
+        }
+      ]
+    },
+    {
       "name": "groupsummary",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -32810,6 +33050,54 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "grp2idx",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
         }
       ]
     },
@@ -41424,6 +41712,77 @@
           "identifier": "RunMat:issorted:Internal",
           "when": "Internal conversion/allocation paths fail.",
           "message": "issorted: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "issortedrows",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = issortedrows(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix, character matrix, complex matrix, or table."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Column, direction, comparison, and missing-placement options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when rows are sorted according to the requested row order."
+            }
+          ]
+        },
+        {
+          "label": "tf = issortedrows(A, args...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix, character matrix, complex matrix, or table."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Column, direction, comparison, and missing-placement options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when rows are sorted according to the requested row order."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISSORTEDROWS.INVALID_INPUT",
+          "identifier": "RunMat:issortedrows:InvalidInput",
+          "when": "Input or row-sorting arguments are invalid.",
+          "message": "issortedrows: invalid input"
         }
       ]
     },
@@ -72950,6 +73309,54 @@
           "identifier": "RunMat:split:InternalError",
           "when": "Internal output container construction failed.",
           "message": "split: internal error"
+        }
+      ]
+    },
+    {
+      "name": "splitapply",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "varargout = groupingBuiltin(args...)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "MATLAB-compatible arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin outputs."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GROUPING.INVALID_INPUT",
+          "identifier": "RunMat:grouping:InvalidInput",
+          "when": "Inputs are malformed, have incompatible lengths, or request unsupported grouped output.",
+          "message": "grouping builtin: invalid input"
+        },
+        {
+          "code": "RM.GROUPING.CALLBACK",
+          "identifier": "RunMat:grouping:CallbackFailed",
+          "when": "A grouped callback fails or returns incompatible outputs.",
+          "message": "grouping builtin: callback failed"
+        },
+        {
+          "code": "RM.GROUPING.TOO_LARGE",
+          "identifier": "RunMat:grouping:TooLarge",
+          "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
+          "message": "grouping builtin: output is too large"
         }
       ]
     },

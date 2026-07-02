@@ -5,6 +5,7 @@ pub mod intersect;
 pub mod ismember;
 pub mod ismembertol;
 pub mod issorted;
+pub mod issortedrows;
 pub mod setdiff;
 pub mod setxor;
 pub mod sort;

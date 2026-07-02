@@ -36,7 +36,8 @@ pub use metadata::*;
 pub use registry::ensure_table_class_registered;
 
 use containers::*;
-use display::{categorical_label_at, format_key_number};
+pub(crate) use display::categorical_label_at;
+use display::format_key_number;
 pub use display::{table_display_text, table_summary_text};
 use import::*;
 use names::*;
