@@ -76,9 +76,10 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicArra
                 .checked_mul(cols)
                 .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
             if array.data.len() != expected_len {
-                return Err(concat_error(
-                    "Cannot concatenate symbolic array with non-2-D shape",
-                ));
+                return Err(concat_error(format!(
+                    "Symbolic array data length {} does not match expected dimensions {}x{} (expected {} elements)",
+                    array.data.len(), rows, cols, expected_len
+                )));
             }
             if shape != array.shape || array.rows() != rows || array.cols() != cols {
                 SymbolicArray::new_2d(array.data.clone(), rows, cols)
