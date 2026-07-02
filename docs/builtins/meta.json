@@ -58751,6 +58751,129 @@
       ]
     },
     {
+      "name": "pol2cart",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[x, y] = pol2cart(theta, rho)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Polar or cylindrical angular coordinate in radians."
+            },
+            {
+              "name": "rho",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Polar or cylindrical radial coordinate."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Cartesian x coordinate."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Cartesian y coordinate."
+            }
+          ]
+        },
+        {
+          "label": "[x, y, z] = pol2cart(theta, rho, z)",
+          "inputs": [
+            {
+              "name": "theta",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Polar or cylindrical angular coordinate in radians."
+            },
+            {
+              "name": "rho",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Polar or cylindrical radial coordinate."
+            },
+            {
+              "name": "z",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cylindrical elevation coordinate."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Cartesian x coordinate."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Cartesian y coordinate."
+            },
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Cartesian z coordinate."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.POL2CART.INVALID_INPUT",
+          "identifier": "RunMat:pol2cart:InvalidInput",
+          "when": "An input is not a supported real floating-point scalar or array.",
+          "message": "pol2cart: invalid input"
+        },
+        {
+          "code": "RM.POL2CART.COMPLEX_UNSUPPORTED",
+          "identifier": "RunMat:pol2cart:ComplexUnsupported",
+          "when": "At least one input is complex.",
+          "message": "pol2cart: complex inputs are not supported"
+        },
+        {
+          "code": "RM.POL2CART.SIZE_MISMATCH",
+          "identifier": "RunMat:pol2cart:SizeMismatch",
+          "when": "Input arrays do not have compatible sizes for implicit expansion.",
+          "message": "pol2cart: size mismatch"
+        },
+        {
+          "code": "RM.POL2CART.OUTPUT_COUNT",
+          "identifier": "RunMat:pol2cart:OutputCount",
+          "when": "More outputs are requested than the selected syntax supports.",
+          "message": "pol2cart: too many output arguments"
+        },
+        {
+          "code": "RM.POL2CART.INTERNAL",
+          "identifier": "RunMat:pol2cart:Internal",
+          "when": "Internal gather/conversion/allocation flow failed.",
+          "message": "pol2cart: internal error"
+        }
+      ]
+    },
+    {
       "name": "polarplot",
       "output_mode": "Fixed",
       "completion_policy": "Public",
