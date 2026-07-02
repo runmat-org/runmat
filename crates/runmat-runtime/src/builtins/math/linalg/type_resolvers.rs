@@ -21,6 +21,40 @@ pub fn numeric_scalar_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn vecnorm_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            let mut out = shape.clone();
+            let dim = if args.len() >= 3 {
+                match ctx.numeric_dims_from(2).first().and_then(|value| *value) {
+                    Some(0) => return Type::Unknown,
+                    Some(value) => Some(value - 1),
+                    None => {
+                        return Type::Tensor {
+                            shape: Some(unknown_shape(shape.len())),
+                        };
+                    }
+                }
+            } else {
+                first_nonsingleton_dim(shape)
+            };
+            if let Some(dim) = dim {
+                if dim < out.len() {
+                    out[dim] = Some(1);
+                }
+            }
+            Type::Tensor { shape: Some(out) }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+        Type::Num | Type::Int | Type::Bool => Type::Num,
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 pub fn logical_scalar_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -334,6 +368,19 @@ fn is_vector_shape(shape: &[Option<usize>]) -> bool {
         1 => true,
         _ => shape.iter().take(2).any(|dim| matches!(dim, Some(1))),
     }
+}
+
+fn first_nonsingleton_dim(shape: &[Option<usize>]) -> Option<usize> {
+    if shape.is_empty() {
+        return Some(0);
+    }
+    for (index, dim) in shape.iter().enumerate() {
+        match dim {
+            Some(1) => {}
+            Some(_) | None => return Some(index),
+        }
+    }
+    Some(0)
 }
 
 fn min_dim(lhs: Option<usize>, rhs: Option<usize>) -> Option<usize> {

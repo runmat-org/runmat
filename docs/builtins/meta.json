@@ -82820,6 +82820,117 @@
       ]
     },
     {
+      "name": "vecnorm",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "N = vecnorm(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector-wise norm values."
+            }
+          ]
+        },
+        {
+          "label": "N = vecnorm(A, p)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "2",
+              "description": "Positive norm order or Inf."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector-wise norm values."
+            }
+          ]
+        },
+        {
+          "label": "N = vecnorm(A, p, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "2",
+              "description": "Positive norm order or Inf."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Vector-wise norm values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.VECNORM.INVALID_ARGUMENT",
+          "identifier": "RunMat:vecnorm:InvalidArgument",
+          "when": "The norm order or dimension argument is malformed or unsupported.",
+          "message": "vecnorm: invalid argument"
+        },
+        {
+          "code": "RM.VECNORM.INVALID_INPUT",
+          "identifier": "RunMat:vecnorm:InvalidInput",
+          "when": "Input values cannot be converted to a supported numeric array domain.",
+          "message": "vecnorm: invalid input"
+        },
+        {
+          "code": "RM.VECNORM.INTERNAL",
+          "identifier": "RunMat:vecnorm:Internal",
+          "when": "Runtime fails while reducing, allocating, gathering, or uploading values.",
+          "message": "vecnorm: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "verLessThan",
       "output_mode": "Fixed",
       "completion_policy": "Public",
