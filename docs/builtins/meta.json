@@ -17732,6 +17732,587 @@
       "errors": []
     },
     {
+      "name": "decomposition",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dA = decomposition(A)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Coefficient matrix, optional type, triangular flag, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        },
+        {
+          "label": "dA = decomposition(A, type)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Coefficient matrix, optional type, triangular flag, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        },
+        {
+          "label": "dA = decomposition(A, type, triangularFlag)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Coefficient matrix, optional type, triangular flag, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        },
+        {
+          "label": "dA = decomposition(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Coefficient matrix, optional type, triangular flag, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.ctranspose",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(dA)",
+          "inputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.ldivide",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = decomposition.solve(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric solution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.mldivide",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = decomposition.solve(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric solution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.mrdivide",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = decomposition.solve(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric solution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.mtimes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.rdivide",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.subsref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.subsref(obj, kind, payload)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.times",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(lhs, rhs)",
+          "inputs": [
+            {
+              "name": "lhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left operand."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right operand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.uminus",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(dA)",
+          "inputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "decomposition.uplus",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = decomposition.method(dA)",
+          "inputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dA",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix decomposition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DECOMPOSITION.INVALID_INPUT",
+          "identifier": "RunMat:decomposition:InvalidInput",
+          "when": "The matrix, type, option, or object operation is invalid.",
+          "message": "decomposition: invalid input"
+        },
+        {
+          "code": "RM.DECOMPOSITION.INTERNAL",
+          "identifier": "RunMat:decomposition:Internal",
+          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
+          "message": "decomposition: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "deconv",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
