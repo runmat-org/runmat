@@ -129,6 +129,13 @@ pub fn buttord_type(args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
+pub fn cheb2ord_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.len() < 4 {
+        return Type::Unknown;
+    }
+    Type::Num
+}
+
 pub fn pulse_train_type(args: &[Type], context: &ResolveContext) -> Type {
     numeric_unary_shape_type(args, context)
 }

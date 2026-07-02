@@ -10,14 +10,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::signal::common::{
-    parse_scalar_f64, real_vector_to_row_value, value_to_complex_vector,
+use crate::builtins::math::signal::common::real_vector_to_row_value;
+use crate::builtins::math::signal::order_selection::{
+    checked_order, classify_kind, db_excess, db_excess_log_ratio, find_natural_frequency,
+    option_text, parse_positive_db, real_edges, transform_edges, unwarp_frequency,
+    validate_critical_frequencies, FilterKind, OrderFamily,
 };
 use crate::builtins::math::signal::type_resolvers::buttord_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "buttord";
-const EPS: f64 = 1.0e-12;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::buttord")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -173,6 +175,13 @@ const BUTTORD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "buttord: optional selector must be 's'",
 };
 
+const BUTTORD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BUTTORD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:buttord:TooManyOutputs"),
+    when: "More than two output arguments are requested.",
+    message: "buttord: too many output arguments",
+};
+
 const BUTTORD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BUTTORD.INTERNAL",
     identifier: Some("RunMat:buttord:Internal"),
@@ -180,11 +189,12 @@ const BUTTORD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "buttord: internal error",
 };
 
-const BUTTORD_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const BUTTORD_ERRORS: [BuiltinErrorDescriptor; 6] = [
     BUTTORD_ERROR_ARG_COUNT,
     BUTTORD_ERROR_INVALID_FREQUENCY,
     BUTTORD_ERROR_INVALID_ATTENUATION,
     BUTTORD_ERROR_INVALID_OPTION,
+    BUTTORD_ERROR_TOO_MANY_OUTPUTS,
     BUTTORD_ERROR_INTERNAL,
 ];
 
@@ -194,14 +204,6 @@ pub const BUTTORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &BUTTORD_ERRORS,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FilterKind {
-    Lowpass,
-    Highpass,
-    Bandpass,
-    Bandstop,
-}
 
 #[derive(Clone, Debug)]
 struct ButtordResult {
@@ -269,10 +271,16 @@ pub async fn evaluate(
     } else {
         false
     };
-    let wp = real_edges("Wp", wp).await?;
-    let ws = real_edges("Ws", ws).await?;
-    let rp = parse_positive_db("Rp", &rp)?;
-    let rs = parse_positive_db("Rs", &rs)?;
+    let wp = real_edges(BUILTIN_NAME, "Wp", wp)
+        .await
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+    let ws = real_edges(BUILTIN_NAME, "Ws", ws)
+        .await
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+    let rp = parse_positive_db(BUILTIN_NAME, "Rp", &rp)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, detail))?;
+    let rs = parse_positive_db(BUILTIN_NAME, "Rs", &rs)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, detail))?;
     if rs <= rp {
         return Err(buttord_error(&BUTTORD_ERROR_INVALID_ATTENUATION));
     }
@@ -296,71 +304,12 @@ fn output_result(result: ButtordResult) -> BuiltinResult<Value> {
         if out_count == 1 {
             return Ok(Value::OutputList(vec![order]));
         }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![order, wn],
-        ));
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![order, wn]));
+        }
+        return Err(buttord_error(&BUTTORD_ERROR_TOO_MANY_OUTPUTS));
     }
     Ok(order)
-}
-
-async fn real_edges(label: &'static str, value: Value) -> BuiltinResult<Vec<f64>> {
-    let input = value_to_complex_vector(BUILTIN_NAME, label, value)
-        .await
-        .map_err(|err| {
-            buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, err.message())
-        })?;
-    if input.data.len() != 1 && input.data.len() != 2 {
-        return Err(buttord_error_with_detail(
-            &BUTTORD_ERROR_INVALID_FREQUENCY,
-            format!("{label} must be a scalar or two-element vector"),
-        ));
-    }
-    let mut out = Vec::with_capacity(input.data.len());
-    for value in input.data {
-        if value.im.abs() > EPS || !value.re.is_finite() || value.re <= 0.0 {
-            return Err(buttord_error_with_detail(
-                &BUTTORD_ERROR_INVALID_FREQUENCY,
-                format!("{label} entries must be positive finite real values"),
-            ));
-        }
-        out.push(value.re);
-    }
-    if out.len() == 2 && out[0] >= out[1] {
-        return Err(buttord_error_with_detail(
-            &BUTTORD_ERROR_INVALID_FREQUENCY,
-            format!("{label} edge vector must be strictly increasing"),
-        ));
-    }
-    Ok(out)
-}
-
-fn parse_positive_db(label: &'static str, value: &Value) -> BuiltinResult<f64> {
-    let parsed = parse_scalar_f64(BUILTIN_NAME, label, value).map_err(|err| {
-        buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, err.message())
-    })?;
-    if parsed <= 0.0 {
-        return Err(buttord_error(&BUTTORD_ERROR_INVALID_ATTENUATION));
-    }
-    Ok(parsed)
-}
-
-fn option_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
-        }
-        Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data
-                .iter()
-                .collect::<String>()
-                .trim()
-                .to_ascii_lowercase(),
-        ),
-        _ => None,
-    }
 }
 
 fn compute_buttord(
@@ -376,108 +325,57 @@ fn compute_buttord(
             "Wp and Ws must have the same length",
         ));
     }
-    let kind = classify_kind(wp, ws)?;
-    validate_domain(wp, analog, "Wp")?;
-    validate_domain(ws, analog, "Ws")?;
+    let kind = classify_kind(wp, ws)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+    crate::builtins::math::signal::order_selection::validate_domain(wp, analog, "Wp")
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+    crate::builtins::math::signal::order_selection::validate_domain(ws, analog, "Ws")
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
 
     let wp_work = transform_edges(wp, analog);
     let ws_work = transform_edges(ws, analog);
-    let epsilon = (10.0f64.powf(rp / 10.0) - 1.0).sqrt();
-    let stop = 10.0f64.powf(rs / 10.0) - 1.0;
-    let nat = stopband_ratio(kind, &wp_work, &ws_work)?;
-    if nat <= 1.0 || !nat.is_finite() {
-        return Err(buttord_error_with_detail(
-            &BUTTORD_ERROR_INVALID_FREQUENCY,
-            "stopband must be separated from passband",
-        ));
-    }
-    let order = ((stop / (epsilon * epsilon)).log10() / (2.0 * nat.log10())).ceil() as usize;
-    let order = order.max(1);
-    let natural = natural_frequency(kind, &wp_work, &ws_work, epsilon, order)?;
-    let wn = if analog {
+    let epsilon = db_excess(rp)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, detail))?
+        .sqrt();
+    let log_ratio = db_excess_log_ratio(rp, rs)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, detail))?;
+    let (nat, passband) =
+        find_natural_frequency(kind, &wp_work, &ws_work, rp, rs, OrderFamily::Butterworth)
+            .map_err(|detail| {
+                buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail)
+            })?;
+    let order = checked_order(log_ratio / (2.0 * nat.ln()))
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+    let natural = natural_frequency(kind, &passband, epsilon, order)?;
+    let wn: Vec<f64> = if analog {
         natural
     } else {
         natural.into_iter().map(unwarp_frequency).collect()
     };
+    validate_critical_frequencies(&wn, analog)
+        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
     Ok(ButtordResult { order, wn })
-}
-
-fn classify_kind(wp: &[f64], ws: &[f64]) -> BuiltinResult<FilterKind> {
-    match (wp.len(), ws.len()) {
-        (1, 1) if wp[0] < ws[0] => Ok(FilterKind::Lowpass),
-        (1, 1) if wp[0] > ws[0] => Ok(FilterKind::Highpass),
-        (2, 2) if ws[0] < wp[0] && wp[1] < ws[1] => Ok(FilterKind::Bandpass),
-        (2, 2) if wp[0] < ws[0] && ws[1] < wp[1] => Ok(FilterKind::Bandstop),
-        _ => Err(buttord_error_with_detail(
-            &BUTTORD_ERROR_INVALID_FREQUENCY,
-            "passband and stopband edges do not define a supported Butterworth response",
-        )),
-    }
-}
-
-fn validate_domain(edges: &[f64], analog: bool, label: &'static str) -> BuiltinResult<()> {
-    if !analog && edges.iter().any(|&edge| edge >= 1.0) {
-        return Err(buttord_error_with_detail(
-            &BUTTORD_ERROR_INVALID_FREQUENCY,
-            format!("{label} digital frequencies must be between 0 and 1"),
-        ));
-    }
-    Ok(())
-}
-
-fn transform_edges(edges: &[f64], analog: bool) -> Vec<f64> {
-    if analog {
-        edges.to_vec()
-    } else {
-        edges.iter().map(|&edge| prewarp_frequency(edge)).collect()
-    }
-}
-
-fn prewarp_frequency(edge: f64) -> f64 {
-    (std::f64::consts::PI * edge / 2.0).tan()
-}
-
-fn unwarp_frequency(edge: f64) -> f64 {
-    2.0 * edge.atan() / std::f64::consts::PI
-}
-
-fn stopband_ratio(kind: FilterKind, wp: &[f64], ws: &[f64]) -> BuiltinResult<f64> {
-    match kind {
-        FilterKind::Lowpass => Ok(ws[0] / wp[0]),
-        FilterKind::Highpass => Ok(wp[0] / ws[0]),
-        FilterKind::Bandpass => {
-            let bandwidth = wp[1] - wp[0];
-            let center_sq = wp[0] * wp[1];
-            Ok(ws
-                .iter()
-                .map(|&edge| ((edge * edge - center_sq) / (bandwidth * edge)).abs())
-                .fold(f64::INFINITY, f64::min))
-        }
-        FilterKind::Bandstop => {
-            let bandwidth = wp[1] - wp[0];
-            let center_sq = wp[0] * wp[1];
-            Ok(ws
-                .iter()
-                .map(|&edge| (bandwidth * edge / (edge * edge - center_sq)).abs())
-                .fold(f64::INFINITY, f64::min))
-        }
-    }
 }
 
 fn natural_frequency(
     kind: FilterKind,
-    wp: &[f64],
-    _ws: &[f64],
+    passband: &[f64],
     epsilon: f64,
     order: usize,
 ) -> BuiltinResult<Vec<f64>> {
     let cutoff_scale = epsilon.powf(-1.0 / order as f64);
+    if !cutoff_scale.is_finite() || cutoff_scale <= 0.0 {
+        return Err(buttord_error_with_detail(
+            &BUTTORD_ERROR_INVALID_FREQUENCY,
+            "computed cutoff scale is not finite and positive",
+        ));
+    }
     match kind {
-        FilterKind::Lowpass => Ok(vec![wp[0] * cutoff_scale]),
-        FilterKind::Highpass => Ok(vec![wp[0] / cutoff_scale]),
+        FilterKind::Lowpass => Ok(vec![passband[0] * cutoff_scale]),
+        FilterKind::Highpass => Ok(vec![passband[0] / cutoff_scale]),
         FilterKind::Bandpass => {
-            let bandwidth = wp[1] - wp[0];
-            let center_sq = wp[0] * wp[1];
+            let bandwidth = passband[1] - passband[0];
+            let center_sq = passband[0] * passband[1];
             let disc = (cutoff_scale * bandwidth).powi(2) + 4.0 * center_sq;
             let root = disc.sqrt();
             Ok(vec![
@@ -486,8 +384,8 @@ fn natural_frequency(
             ])
         }
         FilterKind::Bandstop => {
-            let bandwidth = wp[1] - wp[0];
-            let center_sq = wp[0] * wp[1];
+            let bandwidth = passband[1] - passband[0];
+            let center_sq = passband[0] * passband[1];
             let disc = bandwidth * bandwidth + 4.0 * cutoff_scale * cutoff_scale * center_sq;
             let root = disc.sqrt();
             Ok(vec![
@@ -640,6 +538,17 @@ mod tests {
         let err = call(
             Value::Num(0.2),
             Value::Num(0.3),
+            Value::Num(1.0),
+            Value::Num(40.0),
+            &[],
+            Some(3),
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:buttord:TooManyOutputs"));
+
+        let err = call(
+            Value::Num(0.2),
+            Value::Num(0.3),
             Value::Num(40.0),
             Value::Num(1.0),
             &[],
@@ -653,6 +562,17 @@ mod tests {
             Value::Num(1.4),
             Value::Num(1.0),
             Value::Num(20.0),
+            &[],
+            Some(2),
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:buttord:InvalidFrequency"));
+
+        let err = call(
+            Value::Num(0.2),
+            Value::Num(0.2000001),
+            Value::Num(1.0),
+            Value::Num(1.0e6),
             &[],
             Some(2),
         )

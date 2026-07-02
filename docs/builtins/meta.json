@@ -6721,6 +6721,12 @@
           "message": "buttord: optional selector must be 's'"
         },
         {
+          "code": "RM.BUTTORD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:buttord:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "buttord: too many output arguments"
+        },
+        {
           "code": "RM.BUTTORD.INTERNAL",
           "identifier": "RunMat:buttord:Internal",
           "when": "Output tensor construction fails internally.",
@@ -8032,6 +8038,156 @@
           "identifier": "RunMat:char:InternalError",
           "when": "Internal character array construction failed.",
           "message": "char: internal error"
+        }
+      ]
+    },
+    {
+      "name": "cheb2ord",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)",
+          "inputs": [
+            {
+              "name": "Wp",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Passband edge or two-element passband edge vector."
+            },
+            {
+              "name": "Ws",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Stopband edge or two-element stopband edge vector."
+            },
+            {
+              "name": "Rp",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum passband ripple in dB."
+            },
+            {
+              "name": "Rs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum stopband attenuation in dB."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum Chebyshev Type II filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Natural cutoff frequency or frequency pair for Chebyshev Type II design."
+            }
+          ]
+        },
+        {
+          "label": "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs, 's')",
+          "inputs": [
+            {
+              "name": "Wp",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog passband edge or edge pair in rad/s."
+            },
+            {
+              "name": "Ws",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog stopband edge or edge pair in rad/s."
+            },
+            {
+              "name": "Rp",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum passband ripple in dB."
+            },
+            {
+              "name": "Rs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum stopband attenuation in dB."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog-design selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum Chebyshev Type II filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Natural cutoff frequency or frequency pair for Chebyshev Type II design."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CHEB2ORD.ARG_COUNT",
+          "identifier": "RunMat:cheb2ord:ArgCount",
+          "when": "The argument count is outside supported forms.",
+          "message": "cheb2ord: expected cheb2ord(Wp, Ws, Rp, Rs [, 's'])"
+        },
+        {
+          "code": "RM.CHEB2ORD.INVALID_FREQUENCY",
+          "identifier": "RunMat:cheb2ord:InvalidFrequency",
+          "when": "Passband or stopband edges are invalid.",
+          "message": "cheb2ord: invalid passband or stopband frequency"
+        },
+        {
+          "code": "RM.CHEB2ORD.INVALID_ATTENUATION",
+          "identifier": "RunMat:cheb2ord:InvalidAttenuation",
+          "when": "Ripple or attenuation values are invalid.",
+          "message": "cheb2ord: Rp and Rs must be positive finite scalars with Rs > Rp"
+        },
+        {
+          "code": "RM.CHEB2ORD.INVALID_OPTION",
+          "identifier": "RunMat:cheb2ord:InvalidOption",
+          "when": "The optional selector is not supported.",
+          "message": "cheb2ord: optional selector must be 's'"
+        },
+        {
+          "code": "RM.CHEB2ORD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:cheb2ord:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "cheb2ord: too many output arguments"
+        },
+        {
+          "code": "RM.CHEB2ORD.INTERNAL",
+          "identifier": "RunMat:cheb2ord:Internal",
+          "when": "Output tensor construction fails internally.",
+          "message": "cheb2ord: internal error"
         }
       ]
     },
