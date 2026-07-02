@@ -126,6 +126,14 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builder.build()
 }
 
+fn eq_error_with_message(message: impl Into<String>, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
@@ -166,14 +174,23 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
     if matches!(
         (&lhs, &rhs),
-        (Value::Symbolic(_), _) | (_, Value::Symbolic(_))
+        (Value::Symbolic(_), _) | (_, Value::Symbolic(_)) | (Value::SymbolicArray(_), _) | (_, Value::SymbolicArray(_))
     ) {
-        let lhs =
-            value_to_symbolic_scalar(&lhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
-        let rhs =
-            value_to_symbolic_scalar(&rhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
-        return Ok(symbolic_expr_to_value(
-            runmat_builtins::SymbolicExpr::equation(lhs, rhs),
+        // Handle symbolic scalar comparisons
+        if matches!(lhs, Value::Symbolic(_)) && matches!(rhs, Value::Symbolic(_)) {
+            let lhs_expr =
+                value_to_symbolic_scalar(&lhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
+            let rhs_expr =
+                value_to_symbolic_scalar(&rhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
+            return Ok(symbolic_expr_to_value(
+                runmat_builtins::SymbolicExpr::equation(lhs_expr, rhs_expr),
+            ));
+        }
+        // For now, reject SymbolicArray comparisons with a proper error
+        // TODO: Implement element-wise symbolic array comparison
+        return Err(eq_error_with_message(
+            "Symbolic array comparison is not yet supported. Convert to numeric arrays first.",
+            &EQ_ERROR_INVALID_INPUT,
         ));
     }
 

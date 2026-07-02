@@ -2,7 +2,7 @@
 //!
 //! Implements language-style tensor indexing and access patterns.
 
-use crate::builtins::common::shape::normalize_scalar_shape;
+use crate::builtins::common::shape::{is_scalar_shape, normalize_scalar_shape};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{Tensor, Value};
 
@@ -272,7 +272,14 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
-                let shape = normalize_scalar_shape(&array.shape);
+                // Use the same 1-D normalization as value_dimensions to ensure consistency
+                let shape = if array.shape.len() == 1 && array.shape[0] != 1 {
+                    vec![1, array.shape[0]]
+                } else if is_scalar_shape(&array.shape) {
+                    vec![1, 1]
+                } else {
+                    array.shape.clone()
+                };
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
 

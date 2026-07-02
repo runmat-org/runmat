@@ -76,7 +76,14 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicArra
                 .map_err(concat_error)
         }
         Value::LogicalArray(array) => {
-            let shape = crate::builtins::common::shape::normalize_scalar_shape(&array.shape);
+            // Use the same 1-D normalization as value_dimensions to ensure consistency
+            let shape = if array.shape.len() == 1 && array.shape[0] != 1 {
+                vec![1, array.shape[0]]
+            } else if crate::builtins::common::shape::is_scalar_shape(&array.shape) {
+                vec![1, 1]
+            } else {
+                array.shape.clone()
+            };
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(0);
             if rows == 0 && cols == 0 {

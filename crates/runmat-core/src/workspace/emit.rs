@@ -86,12 +86,15 @@ pub(crate) fn format_type_info(value: &Value) -> String {
         }
         Value::Symbolic(_) => "sym scalar".to_string(),
         Value::SymbolicArray(array) => {
-            if array.rows() == 1 && array.cols() == 1 {
+            // Use shape directly to avoid mislabeling N-D arrays with leading 1x1 dimensions
+            let rows = array.shape.first().copied().unwrap_or(1);
+            let cols = array.shape.get(1).copied().unwrap_or(1);
+            if rows == 1 && cols == 1 {
                 "sym scalar".to_string()
-            } else if array.rows() == 1 || array.cols() == 1 {
-                format!("{}x{} sym vector", array.rows(), array.cols())
+            } else if rows == 1 || cols == 1 {
+                format!("{}x{} sym vector", rows, cols)
             } else {
-                format!("{}x{} sym matrix", array.rows(), array.cols())
+                format!("{}x{} sym matrix", rows, cols)
             }
         }
         Value::Cell(cells) => {

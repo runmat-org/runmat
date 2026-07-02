@@ -7,7 +7,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, ObjectInstance, StringArray,
-    StructValue, Tensor, Value,
+    StructValue, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -437,13 +437,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),
         Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string())),
-        Value::SymbolicArray(array) => Ok(JsonValue::Array(
-            array
-                .data
-                .iter()
-                .map(|expr| JsonValue::String(expr.to_string()))
-                .collect(),
-        )),
+        Value::SymbolicArray(array) => symbolic_array_to_json(array, options),
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
@@ -560,6 +554,22 @@ fn string_array_to_json(
     }
     build_strided_array(&sa.shape, &keep_dims, |offset| {
         Ok(JsonValue::String(sa.data[offset].clone()))
+    })
+}
+
+fn symbolic_array_to_json(
+    array: &SymbolicArray,
+    _options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
+    if array.data.is_empty() {
+        return Ok(JsonValue::Array(Vec::new()));
+    }
+    let keep_dims = compute_keep_dims(&array.shape, true);
+    if keep_dims.is_empty() {
+        return Ok(JsonValue::String(array.data[0].to_string()));
+    }
+    build_strided_array(&array.shape, &keep_dims, |offset| {
+        Ok(JsonValue::String(array.data[offset].to_string()))
     })
 }
 
