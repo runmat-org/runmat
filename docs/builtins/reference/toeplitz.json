@@ -1,0 +1,55 @@
+{
+  "title": "toeplitz",
+  "category": "array/shape",
+  "keywords": ["toeplitz", "matrix", "constant diagonals", "linear algebra"],
+  "summary": "Construct a Toeplitz matrix from first-column and first-row vectors.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host construction path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::toeplitz::tests",
+    "integration": null
+  },
+  "description": "`toeplitz(r)` constructs a square Toeplitz matrix from first row `r`. `toeplitz(c,r)` uses `c` as the first column and `r` as the first row.",
+  "behaviors": [
+    "Accepts real or complex scalar and vector inputs.",
+    "One-input real calls produce a symmetric Toeplitz matrix from the supplied first row.",
+    "One-input complex calls use the supplied vector as the first row, conjugate the off-diagonal first column, and keep the main diagonal at `r(1)`.",
+    "Two-input calls use the first column value for the main diagonal when `c(1)` and `r(1)` differ.",
+    "Matching dense real tensor classes `single`, `double`, `uint8`, `uint16`, and `uint32` are preserved.",
+    "Matrix and nonnumeric inputs raise errors."
+  ],
+  "examples": [
+    {
+      "description": "Symmetric Toeplitz matrix",
+      "input": "T = toeplitz([1 2 3])",
+      "output": "T = [1 2 3; 2 1 2; 3 2 1]"
+    },
+    {
+      "description": "Separate first column and first row",
+      "input": "T = toeplitz([1 2 3], [9 4])",
+      "output": "T = [1 4; 2 1; 3 2]"
+    }
+  ],
+  "links": [
+    {
+      "label": "blkdiag",
+      "url": "./blkdiag"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/shape/toeplitz.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/toeplitz.rs"
+  }
+}

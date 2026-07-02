@@ -2,80 +2,6 @@
   "version": 1,
   "builtins": [
     {
-      "name": "bsxfun",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "C = bsxfun(fun, A, B)",
-          "inputs": [
-            {
-              "name": "fun",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Binary function handle or callable text."
-            },
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Left scalar or array input."
-            },
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Right scalar or array input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "C",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Element-wise callback result after singleton expansion."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.BSXFUN.INVALID_FUNCTION",
-          "identifier": "RunMat:bsxfun:InvalidFunction",
-          "when": "The first input cannot be used as a binary function.",
-          "message": "bsxfun: first input must be a function handle or callable name"
-        },
-        {
-          "code": "RM.BSXFUN.INVALID_INPUT",
-          "identifier": "RunMat:bsxfun:InvalidInput",
-          "when": "Input arrays use unsupported types for bsxfun scalar expansion.",
-          "message": "bsxfun: inputs must be numeric, logical, complex, or character arrays"
-        },
-        {
-          "code": "RM.BSXFUN.SIZE_MISMATCH",
-          "identifier": "RunMat:bsxfun:SizeMismatch",
-          "when": "Input arrays are not compatible for singleton expansion.",
-          "message": "bsxfun: input sizes are not compatible for singleton expansion"
-        },
-        {
-          "code": "RM.BSXFUN.FUNCTION_ERROR",
-          "identifier": "RunMat:bsxfun:FunctionError",
-          "when": "The binary function errors or does not return scalar-uniform values.",
-          "message": "bsxfun: callback execution error"
-        },
-        {
-          "code": "RM.BSXFUN.INTERNAL",
-          "identifier": "RunMat:bsxfun:Internal",
-          "when": "Internal output allocation or GPU gather fails.",
-          "message": "bsxfun: internal error"
-        }
-      ]
-    },
-    {
       "name": "DataArray.chunk_shape",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -1970,74 +1896,6 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
-        }
-      ]
-    },
-    {
-      "name": "MemoizedFunction.subsref",
-      "output_mode": "ByRequestedOutputCount",
-      "completion_policy": "HiddenInternal",
-      "signatures": [
-        {
-          "label": "varargout = subsref(obj, kind, payload)",
-          "inputs": [
-            {
-              "name": "obj",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "MemoizedFunction receiver."
-            },
-            {
-              "name": "kind",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Indexing kind token."
-            },
-            {
-              "name": "payload",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Indexing payload."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "varargout",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Result of function invocation or property access."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.MEMOIZE.INVALID_OBJECT",
-          "identifier": "RunMat:memoize:InvalidObject",
-          "when": "A memoized-function method receives a non-MemoizedFunction object.",
-          "message": "memoize: expected MemoizedFunction object"
-        },
-        {
-          "code": "RM.MEMOIZE.INVALID_CACHE_SIZE",
-          "identifier": "RunMat:memoize:InvalidCacheSize",
-          "when": "CacheSize is not a positive finite integer scalar.",
-          "message": "memoize: CacheSize must be a positive integer scalar"
-        },
-        {
-          "code": "RM.MEMOIZE.INVALID_INDEX",
-          "identifier": "RunMat:memoize:InvalidIndex",
-          "when": "The MemoizedFunction object is indexed with an unsupported indexing form.",
-          "message": "memoize: unsupported MemoizedFunction indexing"
-        },
-        {
-          "code": "RM.MEMOIZE.GC",
-          "identifier": "RunMat:memoize:GcFailure",
-          "when": "The memoized object target cannot be allocated or accessed.",
-          "message": "memoize: internal object storage failed"
         }
       ]
     },
@@ -5200,6 +5058,18 @@
           "identifier": "RunMat:bitwise:SizeMismatch",
           "when": "Input shapes are not compatible for implicit expansion.",
           "message": "bitwise operation: array sizes are not compatible"
+        },
+        {
+          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
+          "identifier": "RunMat:idivide:DivideByZero",
+          "when": "The divisor contains zero.",
+          "message": "idivide: division by zero"
+        },
+        {
+          "code": "RM.IDIVIDE.OVERFLOW",
+          "identifier": "RunMat:idivide:Overflow",
+          "when": "A rounded quotient cannot be represented in the dividend integer class.",
+          "message": "idivide: quotient overflows output class"
         }
       ]
     },
@@ -5249,6 +5119,18 @@
           "identifier": "RunMat:bitwise:SizeMismatch",
           "when": "Input shapes are not compatible for implicit expansion.",
           "message": "bitwise operation: array sizes are not compatible"
+        },
+        {
+          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
+          "identifier": "RunMat:idivide:DivideByZero",
+          "when": "The divisor contains zero.",
+          "message": "idivide: division by zero"
+        },
+        {
+          "code": "RM.IDIVIDE.OVERFLOW",
+          "identifier": "RunMat:idivide:Overflow",
+          "when": "A rounded quotient cannot be represented in the dividend integer class.",
+          "message": "idivide: quotient overflows output class"
         }
       ]
     },
@@ -5298,6 +5180,18 @@
           "identifier": "RunMat:bitwise:SizeMismatch",
           "when": "Input shapes are not compatible for implicit expansion.",
           "message": "bitwise operation: array sizes are not compatible"
+        },
+        {
+          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
+          "identifier": "RunMat:idivide:DivideByZero",
+          "when": "The divisor contains zero.",
+          "message": "idivide: division by zero"
+        },
+        {
+          "code": "RM.IDIVIDE.OVERFLOW",
+          "identifier": "RunMat:idivide:Overflow",
+          "when": "A rounded quotient cannot be represented in the dividend integer class.",
+          "message": "idivide: quotient overflows output class"
         }
       ]
     },
@@ -5443,6 +5337,74 @@
           "identifier": "RunMat:blackman:InternalError",
           "when": "Window materialization fails internally.",
           "message": "blackman: internal error"
+        }
+      ]
+    },
+    {
+      "name": "blkdiag",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = blkdiag()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Block diagonal matrix containing each input along the diagonal."
+            }
+          ]
+        },
+        {
+          "label": "B = blkdiag(A1, An...)",
+          "inputs": [
+            {
+              "name": "A1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First scalar, vector, matrix, sparse matrix, or gpuArray block."
+            },
+            {
+              "name": "An",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional blocks placed down and right from the previous block."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Block diagonal matrix containing each input along the diagonal."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BLKDIAG.INVALID_INPUT",
+          "identifier": "RunMat:blkdiag:InvalidInput",
+          "when": "An input class, dimensionality, or block conversion is unsupported.",
+          "message": "blkdiag: invalid input"
+        },
+        {
+          "code": "RM.BLKDIAG.SIZE_OVERFLOW",
+          "identifier": "RunMat:blkdiag:SizeOverflow",
+          "when": "The block diagonal output dimensions or allocation size exceed addressable memory.",
+          "message": "blkdiag: output size exceeds maximum supported size"
+        },
+        {
+          "code": "RM.BLKDIAG.GPU",
+          "identifier": "RunMat:blkdiag:GpuError",
+          "when": "A required gpuArray gather or upload operation fails.",
+          "message": "blkdiag: gpuArray operation failed"
         }
       ]
     },
@@ -5688,6 +5650,80 @@
           "identifier": "RunMat:box:InvalidArgument",
           "when": "Box mode argument is unsupported.",
           "message": "box: invalid argument"
+        }
+      ]
+    },
+    {
+      "name": "bsxfun",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = bsxfun(fun, A, B)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Binary function handle or callable text."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Left scalar or array input."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Right scalar or array input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise callback result after singleton expansion."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BSXFUN.INVALID_FUNCTION",
+          "identifier": "RunMat:bsxfun:InvalidFunction",
+          "when": "The first input cannot be used as a binary function.",
+          "message": "bsxfun: first input must be a function handle or callable name"
+        },
+        {
+          "code": "RM.BSXFUN.INVALID_INPUT",
+          "identifier": "RunMat:bsxfun:InvalidInput",
+          "when": "Input arrays use unsupported types for bsxfun scalar expansion.",
+          "message": "bsxfun: inputs must be numeric, logical, complex, or character arrays"
+        },
+        {
+          "code": "RM.BSXFUN.SIZE_MISMATCH",
+          "identifier": "RunMat:bsxfun:SizeMismatch",
+          "when": "Input arrays are not compatible for singleton expansion.",
+          "message": "bsxfun: input sizes are not compatible for singleton expansion"
+        },
+        {
+          "code": "RM.BSXFUN.FUNCTION_ERROR",
+          "identifier": "RunMat:bsxfun:FunctionError",
+          "when": "The binary function errors or does not return scalar-uniform values.",
+          "message": "bsxfun: callback execution error"
+        },
+        {
+          "code": "RM.BSXFUN.INTERNAL",
+          "identifier": "RunMat:bsxfun:Internal",
+          "when": "Internal output allocation or GPU gather fails.",
+          "message": "bsxfun: internal error"
         }
       ]
     },
@@ -11507,48 +11543,6 @@
       ]
     },
     {
-      "name": "cospi",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = cospi(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, array, logical array, complex value, or gpuArray."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Element-wise cos(X*pi) result with exact integer and half-integer handling."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.COSPI.INVALID_INPUT",
-          "identifier": "RunMat:cospi:InvalidInput",
-          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
-          "message": "cospi: invalid input"
-        },
-        {
-          "code": "RM.COSPI.INTERNAL",
-          "identifier": "RunMat:cospi:Internal",
-          "when": "Internal gather/conversion/allocation flow failed.",
-          "message": "cospi: internal error"
-        }
-      ]
-    },
-    {
       "name": "cosh",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -11587,6 +11581,48 @@
           "identifier": "RunMat:cosh:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "cosh: internal error"
+        }
+      ]
+    },
+    {
+      "name": "cospi",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = cospi(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar, array, logical array, complex value, or gpuArray."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise cos(X*pi) result with exact integer and half-integer handling."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COSPI.INVALID_INPUT",
+          "identifier": "RunMat:cospi:InvalidInput",
+          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
+          "message": "cospi: invalid input"
+        },
+        {
+          "code": "RM.COSPI.INTERNAL",
+          "identifier": "RunMat:cospi:Internal",
+          "when": "Internal gather/conversion/allocation flow failed.",
+          "message": "cospi: internal error"
         }
       ]
     },
@@ -20902,6 +20938,90 @@
       ]
     },
     {
+      "name": "erf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = erf(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise error-function result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ERF.INVALID_INPUT",
+          "identifier": "RunMat:erf:InvalidInput",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
+          "message": "erf: invalid input"
+        },
+        {
+          "code": "RM.ERF.INTERNAL",
+          "identifier": "RunMat:erf:Internal",
+          "when": "Internal tensor construction or provider interaction failed.",
+          "message": "erf: internal error"
+        }
+      ]
+    },
+    {
+      "name": "erfcinv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = erfcinv(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real single or double input in the interval [0, 2]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise inverse complementary error-function result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ERFCINV.INVALID_INPUT",
+          "identifier": "RunMat:erfcinv:InvalidInput",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
+          "message": "erfcinv: invalid input"
+        },
+        {
+          "code": "RM.ERFCINV.INTERNAL",
+          "identifier": "RunMat:erfcinv:Internal",
+          "when": "Internal tensor construction, gathering, or upload failed.",
+          "message": "erfcinv: internal error"
+        }
+      ]
+    },
+    {
       "name": "error",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -21475,90 +21595,6 @@
           "identifier": null,
           "when": "Type input is not one of the supported exist query types.",
           "message": "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'"
-        }
-      ]
-    },
-    {
-      "name": "erf",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = erf(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Real numeric input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise error-function result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.ERF.INVALID_INPUT",
-          "identifier": "RunMat:erf:InvalidInput",
-          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
-          "message": "erf: invalid input"
-        },
-        {
-          "code": "RM.ERF.INTERNAL",
-          "identifier": "RunMat:erf:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
-          "message": "erf: internal error"
-        }
-      ]
-    },
-    {
-      "name": "erfcinv",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = erfcinv(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Real single or double input in the interval [0, 2]."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise inverse complementary error-function result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.ERFCINV.INVALID_INPUT",
-          "identifier": "RunMat:erfcinv:InvalidInput",
-          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
-          "message": "erfcinv: invalid input"
-        },
-        {
-          "code": "RM.ERFCINV.INTERNAL",
-          "identifier": "RunMat:erfcinv:Internal",
-          "when": "Internal tensor construction, gathering, or upload failed.",
-          "message": "erfcinv: internal error"
         }
       ]
     },
@@ -31950,6 +31986,172 @@
       ]
     },
     {
+      "name": "griddedInterpolant",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "F = griddedInterpolant",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(x, v)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(gridVecs, V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(X1, X2, ..., Xn, V)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(___, Method)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        },
+        {
+          "label": "F = griddedInterpolant(___, Method, ExtrapolationMethod)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Gridded interpolant object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
+          "identifier": "RunMat:griddedInterpolant:InvalidInput",
+          "when": "Grid, value, method, or query inputs are invalid.",
+          "message": "griddedInterpolant: invalid input"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
+          "identifier": "RunMat:griddedInterpolant:UnsupportedMethod",
+          "when": "The requested interpolation or extrapolation method is not implemented by RunMat.",
+          "message": "griddedInterpolant: unsupported interpolation method"
+        },
+        {
+          "code": "RM.GRIDDEDINTERPOLANT.INTERNAL",
+          "identifier": "RunMat:griddedInterpolant:Internal",
+          "when": "Object construction, property access, or interpolation output construction fails.",
+          "message": "griddedInterpolant: internal error"
+        }
+      ]
+    },
+    {
       "name": "groupsummary",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -34224,6 +34426,102 @@
           "identifier": "RunMat:hypot:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "hypot: internal error"
+        }
+      ]
+    },
+    {
+      "name": "idivide",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = idivide(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer dividend."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer divisor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bitwise numeric result."
+            }
+          ]
+        },
+        {
+          "label": "C = idivide(A, B, rounding)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer dividend."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer divisor."
+            },
+            {
+              "name": "rounding",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"fix\"",
+              "description": "Rounding mode: \"fix\", \"floor\", \"ceil\", or \"round\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bitwise numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BITWISE.INVALID_INPUT",
+          "identifier": "RunMat:bitwise:InvalidInput",
+          "when": "Inputs are not finite integer-valued numeric, logical, or gatherable gpuArray values.",
+          "message": "bitwise operation: invalid input"
+        },
+        {
+          "code": "RM.BITWISE.SIZE_MISMATCH",
+          "identifier": "RunMat:bitwise:SizeMismatch",
+          "when": "Input shapes are not compatible for implicit expansion.",
+          "message": "bitwise operation: array sizes are not compatible"
+        },
+        {
+          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
+          "identifier": "RunMat:idivide:DivideByZero",
+          "when": "The divisor contains zero.",
+          "message": "idivide: division by zero"
+        },
+        {
+          "code": "RM.IDIVIDE.OVERFLOW",
+          "identifier": "RunMat:idivide:Overflow",
+          "when": "A rounded quotient cannot be represented in the dividend integer class.",
+          "message": "idivide: quotient overflows output class"
         }
       ]
     },
@@ -37556,234 +37854,6 @@
       ]
     },
     {
-      "name": "griddedInterpolant",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "F = griddedInterpolant",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Indexed value or property."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(V)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(x, v)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(gridVecs, V)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(X1, X2, ..., Xn, V)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(___, Method)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        },
-        {
-          "label": "F = griddedInterpolant(___, Method, ExtrapolationMethod)",
-          "inputs": [
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Grid vectors or full grids, values, interpolation method, and extrapolation method."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
-          "identifier": "RunMat:griddedInterpolant:InvalidInput",
-          "when": "Grid, value, method, or query inputs are invalid.",
-          "message": "griddedInterpolant: invalid input"
-        },
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
-          "identifier": "RunMat:griddedInterpolant:UnsupportedMethod",
-          "when": "The requested interpolation or extrapolation method is not implemented by RunMat.",
-          "message": "griddedInterpolant: unsupported interpolation method"
-        },
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.INTERNAL",
-          "identifier": "RunMat:griddedInterpolant:Internal",
-          "when": "Object construction, property access, or interpolation output construction fails.",
-          "message": "griddedInterpolant: internal error"
-        }
-      ]
-    },
-    {
-      "name": "griddedInterpolant.subsref",
-      "output_mode": "Fixed",
-      "completion_policy": "MethodOnly",
-      "signatures": [
-        {
-          "label": "out = griddedInterpolant.subsref(obj, kind, payload)",
-          "inputs": [
-            {
-              "name": "obj",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "griddedInterpolant object."
-            },
-            {
-              "name": "kind",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Indexing kind."
-            },
-            {
-              "name": "payload",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Indexing payload."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "F",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Gridded interpolant object."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
-          "identifier": "RunMat:griddedInterpolant:InvalidInput",
-          "when": "Grid, value, method, or query inputs are invalid.",
-          "message": "griddedInterpolant: invalid input"
-        },
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
-          "identifier": "RunMat:griddedInterpolant:UnsupportedMethod",
-          "when": "The requested interpolation or extrapolation method is not implemented by RunMat.",
-          "message": "griddedInterpolant: unsupported interpolation method"
-        },
-        {
-          "code": "RM.GRIDDEDINTERPOLANT.INTERNAL",
-          "identifier": "RunMat:griddedInterpolant:Internal",
-          "when": "Object construction, property access, or interpolation output construction fails.",
-          "message": "griddedInterpolant: internal error"
-        }
-      ]
-    },
-    {
       "name": "interp1",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -38115,6 +38185,62 @@
           "identifier": "RunMat:interp1:Internal",
           "when": "Interpolation evaluation fails due to internal tensor construction or solver paths.",
           "message": "interp1: internal interpolation failure"
+        }
+      ]
+    },
+    {
+      "name": "interp1q",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Vq = interp1q(X, V, Xq)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Strictly increasing sample locations."
+            },
+            {
+              "name": "V",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample values."
+            },
+            {
+              "name": "Xq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Query locations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Vq",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linearly interpolated query values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INTERP1Q.INVALID_INPUT",
+          "identifier": "RunMat:interp1q:InvalidInput",
+          "when": "Arguments cannot be converted to the legacy one-dimensional linear interpolation domain.",
+          "message": "interp1q: invalid input"
+        },
+        {
+          "code": "RM.INTERP1Q.INTERNAL",
+          "identifier": "RunMat:interp1q:Internal",
+          "when": "Interpolation evaluation or output construction fails unexpectedly.",
+          "message": "interp1q: internal interpolation failure"
         }
       ]
     },
@@ -39270,6 +39396,48 @@
       ]
     },
     {
+      "name": "isdiag",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isdiag(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, sparse, or gpuArray matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when the input matrix satisfies the requested structure predicate."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISDIAG.INVALID_INPUT",
+          "identifier": "RunMat:isdiag:InvalidInput",
+          "when": "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
+          "message": "isdiag: invalid input"
+        },
+        {
+          "code": "RM.ISDIAG.INTERNAL",
+          "identifier": "RunMat:isdiag:Internal",
+          "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
+          "message": "isdiag: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "isempty",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -39379,48 +39547,6 @@
           "identifier": "RunMat:isequal:Internal",
           "when": "Internal gather/host normalization fails.",
           "message": "isequal: internal error"
-        }
-      ]
-    },
-    {
-      "name": "isdiag",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "tf = isdiag(A)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input numeric, logical, complex, sparse, or gpuArray matrix."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "tf",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True when the input matrix satisfies the requested structure predicate."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.ISDIAG.INVALID_INPUT",
-          "identifier": "RunMat:isdiag:InvalidInput",
-          "when": "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-          "message": "isdiag: invalid input"
-        },
-        {
-          "code": "RM.ISDIAG.INTERNAL",
-          "identifier": "RunMat:isdiag:Internal",
-          "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-          "message": "isdiag: internal runtime failure"
         }
       ]
     },
@@ -46990,6 +47116,48 @@
       ]
     },
     {
+      "name": "memoize",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "memoizedFcn = memoize(fh)",
+          "inputs": [
+            {
+              "name": "fh",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle to memoize."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "memoizedFcn",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "MemoizedFunction handle object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MEMOIZE.INVALID_FUNCTION",
+          "identifier": "RunMat:memoize:InvalidFunction",
+          "when": "The input is not a function handle or closure.",
+          "message": "memoize: input must be a function handle"
+        },
+        {
+          "code": "RM.MEMOIZE.GC",
+          "identifier": "RunMat:memoize:GcFailure",
+          "when": "The memoized object target cannot be allocated or accessed.",
+          "message": "memoize: internal object storage failed"
+        }
+      ]
+    },
+    {
       "name": "mesh",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -47621,48 +47789,6 @@
           "identifier": null,
           "when": "Complex axis values cannot be represented in requested real output class.",
           "message": "meshgrid: cannot represent complex values in a real output"
-        }
-      ]
-    },
-    {
-      "name": "memoize",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "memoizedFcn = memoize(fh)",
-          "inputs": [
-            {
-              "name": "fh",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Function handle to memoize."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "memoizedFcn",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "MemoizedFunction handle object."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.MEMOIZE.INVALID_FUNCTION",
-          "identifier": "RunMat:memoize:InvalidFunction",
-          "when": "The input is not a function handle or closure.",
-          "message": "memoize: input must be a function handle"
-        },
-        {
-          "code": "RM.MEMOIZE.GC",
-          "identifier": "RunMat:memoize:GcFailure",
-          "when": "The memoized object target cannot be allocated or accessed.",
-          "message": "memoize: internal object storage failed"
         }
       ]
     },
@@ -56863,6 +56989,54 @@
       ]
     },
     {
+      "name": "pagetranspose",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = pagetranspose(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input value with the first two dimensions swapped on every page."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PAGETRANSPOSE.INVALID_ARGUMENT",
+          "identifier": "RunMat:pagetranspose:InvalidArgument",
+          "when": "Call does not provide exactly one input argument.",
+          "message": "pagetranspose: expected exactly one input argument"
+        },
+        {
+          "code": "RM.PAGETRANSPOSE.INVALID_INPUT",
+          "identifier": "RunMat:pagetranspose:InvalidInput",
+          "when": "Input type is unsupported for page-wise transpose.",
+          "message": "pagetranspose: unsupported input type"
+        },
+        {
+          "code": "RM.PAGETRANSPOSE.INTERNAL",
+          "identifier": "RunMat:pagetranspose:Internal",
+          "when": "Runtime cannot materialize the page-wise transpose output.",
+          "message": "pagetranspose: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "parquetDatastore",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57212,54 +57386,6 @@
           "identifier": null,
           "when": "More than two positional arguments are provided.",
           "message": "path: too many input arguments"
-        }
-      ]
-    },
-    {
-      "name": "pagetranspose",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = pagetranspose(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar or array value."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input value with the first two dimensions swapped on every page."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.PAGETRANSPOSE.INVALID_ARGUMENT",
-          "identifier": "RunMat:pagetranspose:InvalidArgument",
-          "when": "Call does not provide exactly one input argument.",
-          "message": "pagetranspose: expected exactly one input argument"
-        },
-        {
-          "code": "RM.PAGETRANSPOSE.INVALID_INPUT",
-          "identifier": "RunMat:pagetranspose:InvalidInput",
-          "when": "Input type is unsupported for page-wise transpose.",
-          "message": "pagetranspose: unsupported input type"
-        },
-        {
-          "code": "RM.PAGETRANSPOSE.INTERNAL",
-          "identifier": "RunMat:pagetranspose:Internal",
-          "when": "Runtime cannot materialize the page-wise transpose output.",
-          "message": "pagetranspose: internal runtime failure"
         }
       ]
     },
@@ -57713,54 +57839,6 @@
       ]
     },
     {
-      "name": "perms",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "P = perms(v)",
-          "inputs": [
-            {
-              "name": "v",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input vector to permute."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "P",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Matrix whose rows contain every permutation of the input vector."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.PERMS.INVALID_INPUT",
-          "identifier": "RunMat:perms:InvalidInput",
-          "when": "The input is missing, not a vector, or has an unsupported type.",
-          "message": "perms: input must be a vector"
-        },
-        {
-          "code": "RM.PERMS.TOO_LARGE",
-          "identifier": "RunMat:perms:TooLarge",
-          "when": "The factorial-size output would exceed RunMat's supported materialisation limit.",
-          "message": "perms: output is too large"
-        },
-        {
-          "code": "RM.PERMS.INTERNAL",
-          "identifier": "RunMat:perms:Internal",
-          "when": "Output allocation, GPU gather, or container construction failed.",
-          "message": "perms: internal error"
-        }
-      ]
-    },
-    {
       "name": "periodogram",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -57913,6 +57991,54 @@
           "identifier": "RunMat:periodogram:Internal",
           "when": "Output tensor construction fails internally.",
           "message": "periodogram: internal error"
+        }
+      ]
+    },
+    {
+      "name": "perms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "P = perms(v)",
+          "inputs": [
+            {
+              "name": "v",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input vector to permute."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "P",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose rows contain every permutation of the input vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PERMS.INVALID_INPUT",
+          "identifier": "RunMat:perms:InvalidInput",
+          "when": "The input is missing, not a vector, or has an unsupported type.",
+          "message": "perms: input must be a vector"
+        },
+        {
+          "code": "RM.PERMS.TOO_LARGE",
+          "identifier": "RunMat:perms:TooLarge",
+          "when": "The factorial-size output would exceed RunMat's supported materialisation limit.",
+          "message": "perms: output is too large"
+        },
+        {
+          "code": "RM.PERMS.INTERNAL",
+          "identifier": "RunMat:perms:Internal",
+          "when": "Output allocation, GPU gather, or container construction failed.",
+          "message": "perms: internal error"
         }
       ]
     },
@@ -60408,6 +60534,54 @@
           "identifier": "RunMat:ppval:Internal",
           "when": "Piecewise-polynomial output assembly fails due to internal tensor construction paths.",
           "message": "ppval: internal interpolation failure"
+        }
+      ]
+    },
+    {
+      "name": "primes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = primes(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar real integer upper bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of prime numbers less than or equal to n."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PRIMES.INVALID_INPUT",
+          "identifier": "RunMat:primes:InvalidInput",
+          "when": "Input is not a scalar real integer value.",
+          "message": "primes: invalid input"
+        },
+        {
+          "code": "RM.PRIMES.LIMIT",
+          "identifier": "RunMat:primes:Limit",
+          "when": "Requested sieve would exceed RunMat's safety limit.",
+          "message": "primes: requested limit is too large"
+        },
+        {
+          "code": "RM.PRIMES.INTERNAL",
+          "identifier": "RunMat:primes:Internal",
+          "when": "Internal tensor construction or GPU gather failed.",
+          "message": "primes: internal error"
         }
       ]
     },
@@ -64461,6 +64635,54 @@
       ]
     },
     {
+      "name": "realsqrt",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = realsqrt(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric, logical, char, sparse, or gpuArray input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real elementwise square-root result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.REALSQRT.INVALID_INPUT",
+          "identifier": "RunMat:realsqrt:InvalidInput",
+          "when": "Input cannot be interpreted as real numeric, logical, char, sparse, or gpuArray data.",
+          "message": "realsqrt: invalid input"
+        },
+        {
+          "code": "RM.REALSQRT.DOMAIN",
+          "identifier": "RunMat:realsqrt:ComplexResult",
+          "when": "At least one real input value is negative and would require a complex result.",
+          "message": "realsqrt: input must be nonnegative"
+        },
+        {
+          "code": "RM.REALSQRT.INTERNAL",
+          "identifier": "RunMat:realsqrt:Internal",
+          "when": "Internal tensor construction or provider interaction failed.",
+          "message": "realsqrt: internal error"
+        }
+      ]
+    },
+    {
       "name": "rectpuls",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -65323,54 +65545,6 @@
           "identifier": "RunMat:repmat:Internal",
           "when": "Internal allocation/indexing/provider path fails.",
           "message": "repmat: internal operation failed"
-        }
-      ]
-    },
-    {
-      "name": "realsqrt",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = realsqrt(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Real numeric, logical, char, sparse, or gpuArray input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Real elementwise square-root result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.REALSQRT.INVALID_INPUT",
-          "identifier": "RunMat:realsqrt:InvalidInput",
-          "when": "Input cannot be interpreted as real numeric, logical, char, sparse, or gpuArray data.",
-          "message": "realsqrt: invalid input"
-        },
-        {
-          "code": "RM.REALSQRT.DOMAIN",
-          "identifier": "RunMat:realsqrt:ComplexResult",
-          "when": "At least one real input value is negative and would require a complex result.",
-          "message": "realsqrt: input must be nonnegative"
-        },
-        {
-          "code": "RM.REALSQRT.INTERNAL",
-          "identifier": "RunMat:realsqrt:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
-          "message": "realsqrt: internal error"
         }
       ]
     },
@@ -70062,48 +70236,6 @@
       ]
     },
     {
-      "name": "sinpi",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = sinpi(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, array, logical array, complex value, or gpuArray."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Element-wise sin(X*pi) result with exact integer and half-integer handling."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.SINPI.INVALID_INPUT",
-          "identifier": "RunMat:sinpi:InvalidInput",
-          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
-          "message": "sinpi: invalid input"
-        },
-        {
-          "code": "RM.SINPI.INTERNAL",
-          "identifier": "RunMat:sinpi:Internal",
-          "when": "Internal gather/conversion/allocation flow failed.",
-          "message": "sinpi: internal error"
-        }
-      ]
-    },
-    {
       "name": "single",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -70231,6 +70363,48 @@
           "identifier": "RunMat:sinh:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "sinh: internal error"
+        }
+      ]
+    },
+    {
+      "name": "sinpi",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = sinpi(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar, array, logical array, complex value, or gpuArray."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Element-wise sin(X*pi) result with exact integer and half-integer handling."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SINPI.INVALID_INPUT",
+          "identifier": "RunMat:sinpi:InvalidInput",
+          "when": "Input cannot be interpreted as supported numeric/logical/complex data.",
+          "message": "sinpi: invalid input"
+        },
+        {
+          "code": "RM.SINPI.INTERNAL",
+          "identifier": "RunMat:sinpi:Internal",
+          "when": "Internal gather/conversion/allocation flow failed.",
+          "message": "sinpi: internal error"
         }
       ]
     },
@@ -75794,88 +75968,6 @@
       ]
     },
     {
-      "name": "unicode2native",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "bytes = unicode2native(unicodestr)",
-          "inputs": [
-            {
-              "name": "unicodestr",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Unicode text, provided as a string scalar or character vector."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "bytes",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "uint8 row vector containing encoded bytes."
-            }
-          ]
-        },
-        {
-          "label": "bytes = unicode2native(unicodestr, encoding)",
-          "inputs": [
-            {
-              "name": "unicodestr",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Unicode text, provided as a string scalar or character vector."
-            },
-            {
-              "name": "encoding",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": "\"UTF-8\"",
-              "description": "Character encoding name."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "bytes",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "uint8 row vector containing encoded bytes."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.UNICODE2NATIVE.INVALID_INPUT",
-          "identifier": "RunMat:unicode2native:InvalidInput",
-          "when": "Input text is not a string scalar or character vector.",
-          "message": "unicode2native: input must be a string scalar or character vector"
-        },
-        {
-          "code": "RM.UNICODE2NATIVE.INVALID_ENCODING",
-          "identifier": "RunMat:unicode2native:InvalidEncoding",
-          "when": "Encoding name is unsupported or malformed.",
-          "message": "unicode2native: unsupported character encoding"
-        },
-        {
-          "code": "RM.UNICODE2NATIVE.INVALID_ARGUMENT",
-          "identifier": "RunMat:unicode2native:InvalidArgument",
-          "when": "Too many arguments were supplied.",
-          "message": "unicode2native: invalid argument"
-        },
-        {
-          "code": "RM.UNICODE2NATIVE.INTERNAL",
-          "identifier": "RunMat:unicode2native:InternalError",
-          "when": "Internal byte-vector tensor construction failed.",
-          "message": "unicode2native: internal error"
-        }
-      ]
-    },
-    {
       "name": "strrep",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -77958,6 +78050,60 @@
           "identifier": "RunMat:svd:Internal",
           "when": "Runtime cannot materialize SVD outputs.",
           "message": "svd: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "swapbytes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = swapbytes(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric scalar or array whose element byte order is reversed."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bitwise numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BITWISE.INVALID_INPUT",
+          "identifier": "RunMat:bitwise:InvalidInput",
+          "when": "Inputs are not finite integer-valued numeric, logical, or gatherable gpuArray values.",
+          "message": "bitwise operation: invalid input"
+        },
+        {
+          "code": "RM.BITWISE.SIZE_MISMATCH",
+          "identifier": "RunMat:bitwise:SizeMismatch",
+          "when": "Input shapes are not compatible for implicit expansion.",
+          "message": "bitwise operation: array sizes are not compatible"
+        },
+        {
+          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
+          "identifier": "RunMat:idivide:DivideByZero",
+          "when": "The divisor contains zero.",
+          "message": "idivide: division by zero"
+        },
+        {
+          "code": "RM.IDIVIDE.OVERFLOW",
+          "identifier": "RunMat:idivide:Overflow",
+          "when": "A rounded quotient cannot be represented in the dividend integer class.",
+          "message": "idivide: quotient overflows output class"
         }
       ]
     },
@@ -80208,6 +80354,76 @@
       ]
     },
     {
+      "name": "toeplitz",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = toeplitz(c)",
+          "inputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First row for the symmetric or Hermitian Toeplitz matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Toeplitz matrix with constant diagonals."
+            }
+          ]
+        },
+        {
+          "label": "T = toeplitz(c, r)",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First column."
+            },
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First row."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Toeplitz matrix with constant diagonals."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TOEPLITZ.INVALID_INPUT",
+          "identifier": "RunMat:toeplitz:InvalidInput",
+          "when": "Inputs are not vector-valued real or complex numeric arrays.",
+          "message": "toeplitz: invalid input"
+        },
+        {
+          "code": "RM.TOEPLITZ.INTERNAL",
+          "identifier": "RunMat:toeplitz:Internal",
+          "when": "Output allocation or gpuArray gather fails.",
+          "message": "toeplitz: internal error"
+        }
+      ]
+    },
+    {
       "name": "trace",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -81482,6 +81698,88 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "unicode2native",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bytes = unicode2native(unicodestr)",
+          "inputs": [
+            {
+              "name": "unicodestr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Unicode text, provided as a string scalar or character vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytes",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "uint8 row vector containing encoded bytes."
+            }
+          ]
+        },
+        {
+          "label": "bytes = unicode2native(unicodestr, encoding)",
+          "inputs": [
+            {
+              "name": "unicodestr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Unicode text, provided as a string scalar or character vector."
+            },
+            {
+              "name": "encoding",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"UTF-8\"",
+              "description": "Character encoding name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytes",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "uint8 row vector containing encoded bytes."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_INPUT",
+          "identifier": "RunMat:unicode2native:InvalidInput",
+          "when": "Input text is not a string scalar or character vector.",
+          "message": "unicode2native: input must be a string scalar or character vector"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_ENCODING",
+          "identifier": "RunMat:unicode2native:InvalidEncoding",
+          "when": "Encoding name is unsupported or malformed.",
+          "message": "unicode2native: unsupported character encoding"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INVALID_ARGUMENT",
+          "identifier": "RunMat:unicode2native:InvalidArgument",
+          "when": "Too many arguments were supplied.",
+          "message": "unicode2native: invalid argument"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.INTERNAL",
+          "identifier": "RunMat:unicode2native:InternalError",
+          "when": "Internal byte-vector tensor construction failed.",
+          "message": "unicode2native: internal error"
         }
       ]
     },
@@ -87677,74 +87975,6 @@
           "identifier": "RunMat:zplane:Internal",
           "when": "Internal plotting state or tensor construction fails.",
           "message": "zplane: internal operation failed"
-        }
-      ]
-    },
-    {
-      "name": "blkdiag",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "B = blkdiag()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Block diagonal matrix containing each input along the diagonal."
-            }
-          ]
-        },
-        {
-          "label": "B = blkdiag(A1, An...)",
-          "inputs": [
-            {
-              "name": "A1",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "First scalar, vector, matrix, sparse matrix, or gpuArray block."
-            },
-            {
-              "name": "An",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Additional blocks placed down and right from the previous block."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Block diagonal matrix containing each input along the diagonal."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.BLKDIAG.INVALID_INPUT",
-          "identifier": "RunMat:blkdiag:InvalidInput",
-          "when": "An input class, dimensionality, or block conversion is unsupported.",
-          "message": "blkdiag: invalid input"
-        },
-        {
-          "code": "RM.BLKDIAG.SIZE_OVERFLOW",
-          "identifier": "RunMat:blkdiag:SizeOverflow",
-          "when": "The block diagonal output dimensions or allocation size exceed addressable memory.",
-          "message": "blkdiag: output size exceeds maximum supported size"
-        },
-        {
-          "code": "RM.BLKDIAG.GPU",
-          "identifier": "RunMat:blkdiag:GpuError",
-          "when": "A required gpuArray gather or upload operation fails.",
-          "message": "blkdiag: gpuArray operation failed"
         }
       ]
     }

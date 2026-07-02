@@ -1,6 +1,7 @@
 //! Interpolation builtins and shared piecewise-polynomial helpers.
 
 pub mod interp1;
+pub mod interp1q;
 pub mod interp2;
 pub mod pchip;
 pub mod ppval;
