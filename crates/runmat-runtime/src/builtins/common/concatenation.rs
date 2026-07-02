@@ -72,6 +72,14 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicArra
             if rows == 0 && cols == 0 {
                 return Ok(None);
             }
+            let expected_len = rows
+                .checked_mul(cols)
+                .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
+            if array.data.len() != expected_len {
+                return Err(concat_error(
+                    "Cannot concatenate symbolic array with non-2-D shape",
+                ));
+            }
             if shape != array.shape || array.rows() != rows || array.cols() != cols {
                 SymbolicArray::new_2d(array.data.clone(), rows, cols)
                     .map(Some)
