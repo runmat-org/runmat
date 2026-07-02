@@ -25,11 +25,10 @@
   "behaviors": [
     "Accepts exactly three inputs: sample locations `X`, sample values `V`, and query locations `Xq`.",
     "`X` must be a finite strictly increasing vector with at least two points.",
-    "`V` must be real numeric data compatible with `X` using the same sample-dimension rules as `interp1`.",
+    "`V` must be real or complex numeric data compatible with `X` using the same sample-dimension rules as `interp1`; complex values interpolate real and imaginary parts independently.",
+    "Complex `X` and `Xq` inputs are accepted when their imaginary parts are zero; interpolation coordinates must be real-valued and strictly increasing.",
     "Vector-valued queries preserve scalar versus array shape for vector `V`; matrix `V` returns `numel(Xq)` by trailing-series dimensions.",
     "Only linear interpolation is supported, matching the legacy quick-interpolation API."
-    ,
-    "Complex interpolation inputs are not yet supported by RunMat's shared interpolation engine."
   ],
   "examples": [
     {
@@ -41,6 +40,11 @@
       "description": "Out-of-range query",
       "input": "vq = interp1q([1 2], [10 20], 3)",
       "output": "vq = NaN"
+    },
+    {
+      "description": "Complex sample values",
+      "input": "vq = interp1q([1 2 3], [10+1i 20+3i 40+7i], [1.5 2.5])",
+      "output": "vq = [15+2i 30+5i]"
     }
   ],
   "links": [
