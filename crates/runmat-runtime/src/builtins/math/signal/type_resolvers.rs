@@ -148,6 +148,40 @@ pub fn downsample_type(args: &[Type], context: &ResolveContext) -> Type {
     sample_rate_type(args, context, SampleRateOp::Down)
 }
 
+pub fn resample_type(args: &[Type], context: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    let Some(shape) = numeric_array_shape(input) else {
+        return match input {
+            Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+            Type::Unknown => Type::Unknown,
+            _ => Type::Unknown,
+        };
+    };
+    let mut output_shape = canonical_sample_shape(shape);
+    let dim = literal_dimension_name_value(context)
+        .unwrap_or_else(|| first_non_singleton_shape_dim(&output_shape));
+    if dim >= output_shape.len() {
+        output_shape.resize(dim + 1, Some(1));
+    }
+    let p = literal_positive_integer_at(context, 1);
+    let q = literal_positive_integer_at(context, 2);
+    output_shape[dim] = match (output_shape[dim], p, q) {
+        (Some(len), Some(p), Some(q)) => len
+            .checked_mul(p)
+            .and_then(|scaled| scaled.checked_add(q.saturating_sub(1)))
+            .map(|scaled| scaled / q),
+        _ => None,
+    };
+    if element_count_if_known(&output_shape) == Some(1) {
+        return Type::Num;
+    }
+    Type::Tensor {
+        shape: Some(output_shape),
+    }
+}
+
 pub fn numeric_unary_shape_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(arg) = args.first() else {
         return Type::Unknown;
@@ -291,6 +325,21 @@ fn first_non_singleton_shape_dim(shape: &[Option<usize>]) -> usize {
 
 fn literal_positive_integer_at(ctx: &ResolveContext, index: usize) -> Option<usize> {
     literal_nonnegative_integer_at(ctx, index).filter(|value| *value > 0)
+}
+
+fn literal_dimension_name_value(ctx: &ResolveContext) -> Option<usize> {
+    let mut idx = 3usize;
+    while idx + 1 < ctx.literal_args.len() {
+        if ctx
+            .literal_string_at(idx)
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("dimension"))
+        {
+            return literal_positive_integer_at(ctx, idx + 1).map(|dim| dim.saturating_sub(1));
+        }
+        idx += 1;
+    }
+    None
 }
 
 fn literal_nonnegative_integer_at(ctx: &ResolveContext, index: usize) -> Option<usize> {
@@ -644,6 +693,34 @@ mod tests {
             ),
             Type::Tensor {
                 shape: Some(vec![Some(2), Some(1)])
+            }
+        );
+    }
+
+    #[test]
+    fn resample_type_honors_literal_dimension_name_value() {
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(1.0),
+            LiteralValue::String("Dimension".to_string()),
+            LiteralValue::Number(2.0),
+        ]);
+        assert_eq!(
+            resample_type(
+                &[
+                    Type::Tensor {
+                        shape: Some(vec![Some(2), Some(2)])
+                    },
+                    Type::Num,
+                    Type::Num,
+                    Type::String,
+                    Type::Num,
+                ],
+                &ctx
+            ),
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)])
             }
         );
     }

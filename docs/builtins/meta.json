@@ -70891,6 +70891,342 @@
       ]
     },
     {
+      "name": "resample",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = resample(X, P, Q)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            }
+          ]
+        },
+        {
+          "label": "Y = resample(X, P, Q, N)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "10",
+              "description": "Half-length filter order factor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            }
+          ]
+        },
+        {
+          "label": "Y = resample(X, P, Q, N, BETA)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "10",
+              "description": "Half-length filter order factor."
+            },
+            {
+              "name": "BETA",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "5",
+              "description": "Kaiser window shape parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            }
+          ]
+        },
+        {
+          "label": "Y = resample(X, P, Q, B)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "FIR antialiasing filter coefficients."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            }
+          ]
+        },
+        {
+          "label": "[Y, B] = resample(X, P, Q, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "10",
+              "description": "Half-length filter order factor."
+            },
+            {
+              "name": "BETA",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "5",
+              "description": "Kaiser window shape parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "FIR antialiasing filter coefficients used for resampling."
+            }
+          ]
+        },
+        {
+          "label": "[Y, B] = resample(X, P, Q, B, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal array."
+            },
+            {
+              "name": "P",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer upsampling factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer downsampling factor."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Variadic",
+              "default": null,
+              "description": "FIR antialiasing filter coefficients."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Resampled signal."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "FIR antialiasing filter coefficients used for resampling."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SAMPLE_RATE.ARG_COUNT",
+          "identifier": "RunMat:sampleRate:ArgCount",
+          "when": "Required arguments are missing or more than three inputs are provided.",
+          "message": "sample-rate builtin: expected X, N, and optional PHASE"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.INVALID_INPUT",
+          "identifier": "RunMat:sampleRate:InvalidInput",
+          "when": "X is not numeric, logical, complex, or a gpuArray containing numeric values.",
+          "message": "sample-rate builtin: X must be numeric or logical"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.INVALID_FACTOR",
+          "identifier": "RunMat:sampleRate:InvalidFactor",
+          "when": "N is not a finite positive integer scalar.",
+          "message": "sample-rate builtin: N must be a positive integer scalar"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.INVALID_PHASE",
+          "identifier": "RunMat:sampleRate:InvalidPhase",
+          "when": "PHASE is not an integer scalar in the range 0 <= PHASE < N.",
+          "message": "sample-rate builtin: PHASE must be an integer scalar with 0 <= PHASE < N"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.GATHER_FAILED",
+          "identifier": "RunMat:sampleRate:GatherFailed",
+          "when": "A gpuArray input cannot be gathered for host sample-rate conversion.",
+          "message": "sample-rate builtin: failed to gather GPU input"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.SIZE_OVERFLOW",
+          "identifier": "RunMat:sampleRate:SizeOverflow",
+          "when": "The requested output shape overflows host allocation limits.",
+          "message": "sample-rate builtin: requested output is too large"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.BUILD_OUTPUT",
+          "identifier": "RunMat:sampleRate:BuildOutput",
+          "when": "Output tensor construction fails.",
+          "message": "sample-rate builtin: failed to build output"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.INVALID_OPTION",
+          "identifier": "RunMat:sampleRate:InvalidOption",
+          "when": "A sample-rate conversion option, filter vector, or dimension selector is invalid.",
+          "message": "sample-rate builtin: invalid option"
+        },
+        {
+          "code": "RM.SAMPLE_RATE.OUTPUT_COUNT",
+          "identifier": "RunMat:sampleRate:OutputCount",
+          "when": "More outputs are requested than the builtin supports.",
+          "message": "sample-rate builtin: too many output arguments"
+        }
+      ]
+    },
+    {
       "name": "rescale",
       "output_mode": "Fixed",
       "completion_policy": "Public",
