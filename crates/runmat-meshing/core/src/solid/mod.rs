@@ -8,15 +8,15 @@ use crate::{
         AnalysisVolumeElement, MeshBackendSummary, ANALYSIS_MESH_SCHEMA_VERSION,
     },
     cad::eval::{
-        build_cad_evaluation_model_with_provider, summarize_cad_evaluation, CadEvaluationError,
-        CadEvaluationModel, CadEvaluationReport, CadEvaluationSource, CadFaceEvaluatorProvider,
+        build_cad_evaluation_model_with_provider, summarize_cad_evaluation, CadEvaluationModel,
+        CadEvaluationReport, CadEvaluationSource, CadFaceEvaluatorProvider,
         NoopCadFaceEvaluatorProvider,
     },
-    cad::topology::{build_cad_topology, CadTopologyError, CadTopologyModel, CadTopologySource},
+    cad::topology::{build_cad_topology, CadTopologyModel, CadTopologySource},
     contracts::TopologyEntityId,
-    curve::{discretize_topology_curves, CurveDiscretization, CurveDiscretizationError},
+    curve::{discretize_topology_curves, CurveDiscretization},
     options::{MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions},
-    plc::build::{build_protected_boundary_complex, PlcBuildError, ProtectedBoundaryComplex},
+    plc::build::{build_protected_boundary_complex, ProtectedBoundaryComplex},
     predicate::{
         distance_squared, dot, point_in_closed_triangle_surface, point_triangle_distance,
         tetrahedron_centroid, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
@@ -28,33 +28,24 @@ use crate::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
-    source_topology::{extract_source_topology, SourceTopologyError, SourceTopologyModel},
-    surface::recovery::{
-        validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions,
-        SurfaceRecoveryReport,
-    },
+    source_topology::{extract_source_topology, SourceTopologyModel},
+    surface::recovery::{validate_surface_recovery, SurfaceRecoveryOptions, SurfaceRecoveryReport},
     surface::validate::{
-        validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
-        SurfaceValidationReport,
+        validate_surface_discretization, SurfaceValidationOptions, SurfaceValidationReport,
     },
-    surface::{
-        discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
-    },
+    surface::{discretize_cad_surfaces_with_curves, SurfaceDiscretization},
     tetrahedron::generate::{
         generate_initial_tetrahedron_mesh_from_plc,
-        generate_structured_box_tetrahedron_mesh_from_plc, TetrahedronGenerationError,
-        TetrahedronMesh,
+        generate_structured_box_tetrahedron_mesh_from_plc, TetrahedronMesh,
     },
-    tetrahedron::recover::{
-        build_recovery_queue_from_plc, TetrahedronRecoveryError, TetrahedronRecoveryQueue,
-    },
+    tetrahedron::recover::{build_recovery_queue_from_plc, TetrahedronRecoveryQueue},
     tolerance::MeshingTolerance,
     topology::{BoundaryElementKind, VolumeElementKind},
-    validation::{
-        validate_analysis_mesh_with_options, AnalysisMeshValidationError,
-        AnalysisMeshValidationOptions,
-    },
+    validation::{validate_analysis_mesh_with_options, AnalysisMeshValidationOptions},
 };
+
+#[cfg(test)]
+use crate::tetrahedron::generate::TetrahedronGenerationError;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolidMeshPreparation {
@@ -74,58 +65,8 @@ pub struct SolidMeshPreparation {
     pub effective_sizing: Option<MeshSizingField>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SolidMeshError {
-    Topology(SourceTopologyError),
-    CadTopology(CadTopologyError),
-    CadEvaluation(CadEvaluationError),
-    Curve(CurveDiscretizationError),
-    Surface(SurfaceDiscretizationError),
-    SurfaceValidation(SurfaceValidationError),
-    SurfaceRecovery(SurfaceRecoveryError),
-    ProtectedBoundaryComplex(PlcBuildError),
-    TetrahedronGeneration(TetrahedronGenerationError),
-    TetrahedronRecovery(TetrahedronRecoveryError),
-    Validation(AnalysisMeshValidationError),
-    MissingTetrahedronNode { node_id: String },
-}
-
-impl std::fmt::Display for SolidMeshError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Topology(err) => write!(formatter, "source topology extraction failed: {err}"),
-            Self::CadTopology(err) => write!(formatter, "CAD topology normalization failed: {err}"),
-            Self::CadEvaluation(err) => write!(formatter, "CAD evaluation setup failed: {err}"),
-            Self::Curve(err) => write!(formatter, "curve discretization failed: {err}"),
-            Self::Surface(err) => write!(formatter, "surface discretization failed: {err}"),
-            Self::SurfaceValidation(err) => write!(formatter, "surface validation failed: {err}"),
-            Self::SurfaceRecovery(err) => write!(formatter, "surface recovery failed: {err}"),
-            Self::ProtectedBoundaryComplex(err) => {
-                write!(
-                    formatter,
-                    "protected boundary complex validation failed: {err}"
-                )
-            }
-            Self::TetrahedronGeneration(err) => {
-                write!(formatter, "initial Tetrahedron generation failed: {err}")
-            }
-            Self::TetrahedronRecovery(err) => {
-                write!(formatter, "Tetrahedron recovery failed: {err}")
-            }
-            Self::Validation(err) => {
-                write!(formatter, "solid mesh validation failed: {err:?}")
-            }
-            Self::MissingTetrahedronNode { node_id } => {
-                write!(
-                    formatter,
-                    "solid Tetrahedron mesh references missing node {node_id}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for SolidMeshError {}
+mod error;
+pub use error::SolidMeshError;
 
 mod artifact;
 use artifact::analysis_mesh_from_preparation;
