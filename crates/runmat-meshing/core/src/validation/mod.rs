@@ -21,6 +21,9 @@ use coverage::{
 mod elements;
 use elements::validate_volume_elements;
 
+mod faces;
+use faces::validate_boundary_faces;
+
 mod geometry;
 pub use geometry::mesh_contains_point;
 
@@ -85,53 +88,7 @@ pub fn validate_analysis_mesh_with_options(
 
     let element_ids = validate_volume_elements(mesh, &node_ids)?;
 
-    let mut face_ids = BTreeSet::<String>::new();
-    for face in &mesh.boundary_faces {
-        if !face_ids.insert(face.face_id.clone()) {
-            return Err(AnalysisMeshValidationError::DuplicateBoundaryFaceId {
-                face_id: face.face_id.clone(),
-            });
-        }
-        if !face.kind.is_supported_for_boundary_mapping() {
-            return Err(
-                AnalysisMeshValidationError::UnsupportedBoundaryElementKind {
-                    face_id: face.face_id.clone(),
-                },
-            );
-        }
-        let expected = face.kind.node_count();
-        if face.node_ids.len() != expected {
-            return Err(AnalysisMeshValidationError::WrongBoundaryFaceNodeCount {
-                face_id: face.face_id.clone(),
-                expected,
-                actual: face.node_ids.len(),
-            });
-        }
-        let mut local_nodes = BTreeSet::<u32>::new();
-        for node_id in &face.node_ids {
-            if !node_ids.contains(node_id) {
-                return Err(AnalysisMeshValidationError::UnknownBoundaryFaceNode {
-                    face_id: face.face_id.clone(),
-                    node_id: *node_id,
-                });
-            }
-            if !local_nodes.insert(*node_id) {
-                return Err(AnalysisMeshValidationError::RepeatedBoundaryFaceNode {
-                    face_id: face.face_id.clone(),
-                });
-            }
-        }
-        for element_id in &face.adjacent_volume_element_ids {
-            if !element_ids.contains(element_id) {
-                return Err(
-                    AnalysisMeshValidationError::UnknownBoundaryAdjacentElement {
-                        face_id: face.face_id.clone(),
-                        element_id: element_id.clone(),
-                    },
-                );
-            }
-        }
-    }
+    let face_ids = validate_boundary_faces(mesh, &node_ids, &element_ids)?;
 
     let mut boundary_edge_ids = BTreeSet::<String>::new();
     let mut recovered_boundary_edges = BTreeSet::<[u32; 2]>::new();
