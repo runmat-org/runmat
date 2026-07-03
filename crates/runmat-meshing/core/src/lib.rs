@@ -20,6 +20,7 @@ pub mod fixtures;
 pub use runmat_meshing_opt as opt;
 #[path = "contracts/options.rs"]
 pub mod options;
+#[path = "../../plc/src/lib.rs"]
 pub mod plc;
 #[path = "quality/predicate.rs"]
 pub mod predicate;

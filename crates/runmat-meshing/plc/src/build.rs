@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use crate::contracts::{PlcFacet, PlcNode, PlcProtectedEdge, ProtectedBoundaryComplex};
-use crate::{
+pub use runmat_meshing_core::contracts::{
+    PlcFacet, PlcNode, PlcProtectedEdge, ProtectedBoundaryComplex,
+};
+use runmat_meshing_core::{
     contracts::{MeshingStage, StageEvidence, TopologyEntityId},
     surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID},
 };
@@ -211,7 +213,7 @@ pub fn build_protected_boundary_complex(
             .collect(),
         facets,
         protected_edges: protected_edges.into_values().collect(),
-        validation: crate::contracts::PlcValidationSummary {
+        validation: runmat_meshing_core::contracts::PlcValidationSummary {
             watertight: true,
             manifold: true,
             shell_nesting_classified: true,
@@ -239,7 +241,7 @@ fn topology_entity_id(stage: MeshingStage, id: impl ToString) -> TopologyEntityI
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::surface::{SurfaceElement, SurfaceNode};
+    use runmat_meshing_core::surface::{SurfaceElement, SurfaceNode};
 
     #[test]
     fn builds_valid_plc_from_closed_tetra_surface() {
