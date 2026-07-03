@@ -1,6 +1,7 @@
 extern crate self as runmat_meshing_core;
 
 pub mod adaptive;
+pub mod analysis_prep;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub use runmat_meshing_curve as curve;
@@ -8,7 +9,6 @@ pub use runmat_meshing_curve as curve;
 pub mod field_mapping;
 pub mod fixtures;
 pub use runmat_meshing_opt as opt;
-pub mod prep;
 pub mod quality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size as size;
@@ -29,6 +29,11 @@ pub use adaptive::{
     RefinementIndicatorKey, RefinementIndicatorSample, RefinementIndicatorStatus,
     RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
     SizingFieldUpdate,
+};
+pub use analysis_prep::{
+    prepare_geometry_for_analysis, ElementFamilyHint, MeshConnectivityClass, MeshingOptions,
+    MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
+    PreparedMeshDescriptor, RegionMeshMapping,
 };
 pub use cad::eval::{
     build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
@@ -83,11 +88,6 @@ pub use predicate::{
     tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point,
     tetrahedron_edge_aspect_ratio, tetrahedron_signed_volume, tetrahedron_volume, triangle_area,
     triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3, Triangle3,
-};
-pub use prep::{
-    prepare_geometry_for_analysis, ElementFamilyHint, MeshConnectivityClass, MeshingOptions,
-    MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
-    PreparedMeshDescriptor, RegionMeshMapping,
 };
 pub use quality::boundary::{
     evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
