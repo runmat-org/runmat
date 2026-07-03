@@ -38,6 +38,7 @@ pub mod source_topology {
 #[path = "quality/spatial_index.rs"]
 pub mod spatial_index;
 pub use runmat_meshing_surface as surface;
+#[path = "../../tetrahedron/src/lib.rs"]
 pub mod tetrahedron;
 #[path = "quality/tolerance.rs"]
 pub mod tolerance;

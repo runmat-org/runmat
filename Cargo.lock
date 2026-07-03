@@ -5707,8 +5707,10 @@ dependencies = [
 name = "runmat-meshing-tetrahedron"
 version = "0.5.0"
 dependencies = [
+ "runmat-geometry-core",
  "runmat-meshing-core",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

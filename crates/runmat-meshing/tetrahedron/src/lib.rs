@@ -2,3 +2,9 @@
 
 pub const CRATE_PURPOSE: &str =
     "Tetrahedron4 generation from validated PLCs and constraint recovery";
+
+pub mod cavity;
+pub mod generate;
+pub mod reconnect;
+pub mod recover;
+pub mod structured_grid;
