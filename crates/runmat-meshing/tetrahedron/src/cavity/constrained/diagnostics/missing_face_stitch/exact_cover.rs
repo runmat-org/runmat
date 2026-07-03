@@ -1,15 +1,15 @@
 use super::*;
 
-const SHARED_CAP_CANDIDATE_LIMIT: usize = 4_096;
-const SHARED_CAP_SEARCH_ATTEMPT_LIMIT: usize = 25_000;
+const CAP_STITCH_CANDIDATE_LIMIT: usize = 4_096;
+const CAP_STITCH_SEARCH_ATTEMPT_LIMIT: usize = 25_000;
 
-pub(super) fn finish_shared_cap_exact_cover_diagnostic(
+pub(super) fn finish_cap_stitch_exact_cover_diagnostic(
     cavity: &ConstrainedCavity,
     candidate_tetrahedra: &[ConstrainedCavityRefillTetrahedron],
     options: ConstrainedCavityRefillOptions,
     mut diagnostic: MissingFaceLocalCapStitchDiagnostic,
 ) -> MissingFaceLocalCapStitchDiagnostic {
-    if candidate_tetrahedra.len() > SHARED_CAP_CANDIDATE_LIMIT {
+    if candidate_tetrahedra.len() > CAP_STITCH_CANDIDATE_LIMIT {
         diagnostic.reason = "over_candidate_limit";
         return diagnostic;
     }
@@ -17,7 +17,7 @@ pub(super) fn finish_shared_cap_exact_cover_diagnostic(
         cavity,
         candidate_tetrahedra,
         options.volume_relative_tolerance,
-        SHARED_CAP_SEARCH_ATTEMPT_LIMIT,
+        CAP_STITCH_SEARCH_ATTEMPT_LIMIT,
     );
     let root_availability = search.root_boundary_availability();
     diagnostic.root_boundary_zero_raw_candidate_face_count =
@@ -37,7 +37,7 @@ pub(super) fn finish_shared_cap_exact_cover_diagnostic(
         diagnostic.cover_dead_end_depth = dead_end.depth;
     }
     let Some(selected) = selected else {
-        diagnostic.reason = if diagnostic.search_attempt_count > SHARED_CAP_SEARCH_ATTEMPT_LIMIT {
+        diagnostic.reason = if diagnostic.search_attempt_count > CAP_STITCH_SEARCH_ATTEMPT_LIMIT {
             "search_exhausted"
         } else {
             "cover_not_found"

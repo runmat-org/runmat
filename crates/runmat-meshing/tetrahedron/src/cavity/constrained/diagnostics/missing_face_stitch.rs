@@ -1,6 +1,8 @@
 use super::*;
 
 #[cfg(test)]
+mod exact_cover;
+#[cfg(test)]
 mod local_cap;
 #[cfg(test)]
 mod shared_cap;

@@ -1,8 +1,6 @@
 use super::*;
 
-mod exact_cover;
-
-use exact_cover::finish_shared_cap_exact_cover_diagnostic;
+use super::exact_cover::finish_cap_stitch_exact_cover_diagnostic;
 
 pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
     cavity: &ConstrainedCavity,
@@ -283,7 +281,7 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
         diagnostic.reason = "no_candidate_tetrahedra";
         return Ok(diagnostic);
     }
-    Ok(finish_shared_cap_exact_cover_diagnostic(
+    Ok(finish_cap_stitch_exact_cover_diagnostic(
         cavity,
         &candidate_tetrahedra,
         options,
