@@ -75,7 +75,7 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
-    artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
+    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
     AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
     BoundaryElementKind, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
     VolumeElementKind,

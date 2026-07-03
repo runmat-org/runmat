@@ -1518,7 +1518,7 @@ mod tests {
         fixtures::{fixture_model, FixtureId},
     };
     use runmat_meshing_core::{
-        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
+        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
         AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
         VolumeElementKind,
     };

@@ -3,7 +3,6 @@ extern crate self as runmat_meshing_core;
 pub mod adaptive;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
-pub use contracts::{artifact, backend, boundary, options, provenance, topology};
 pub use runmat_meshing_curve as curve;
 #[path = "visualization/field_mapping.rs"]
 pub mod field_mapping;
@@ -31,12 +30,6 @@ pub use adaptive::{
     RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
     SizingFieldUpdate,
 };
-pub use artifact::{
-    AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-    AnalysisVolumeElement, MeshBackendSummary,
-};
-pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
-pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
 pub use cad::eval::{
     build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
     summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,
@@ -47,6 +40,20 @@ pub use cad::topology::{
     build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
 };
+pub use contracts::artifact::{
+    AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+    AnalysisVolumeElement, MeshBackendSummary,
+};
+pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
+pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use contracts::options::{
+    AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
+    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
+    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
+    RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
+};
+pub use contracts::provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
+pub use contracts::topology::{BoundaryElementKind, VolumeElementKind};
 pub use contracts::{
     validate_meshing_stage_order, CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract,
     CadModel, CadShellContract, CadVertexContract, CadVolumeContract, CurveMesh, CurveMeshElement,
@@ -70,12 +77,6 @@ pub use opt::sliver::recovery::{
     SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
     SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetrahedronQuality,
 };
-pub use options::{
-    AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
-    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
-    RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
-};
 pub use predicate::{
     closest_point_on_triangle, distance, distance_squared, point_in_closed_triangle_surface,
     point_triangle_distance, ray_triangle_intersection, tetrahedron_centroid,
@@ -88,7 +89,6 @@ pub use prep::{
     MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
     PreparedMeshDescriptor, RegionMeshMapping,
 };
-pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::boundary::{
     evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
     BoundaryQualityCandidateError, BoundaryQualityCandidateEvaluation,
@@ -117,7 +117,6 @@ pub use surface::{
     SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
 pub use tolerance::MeshingTolerance;
-pub use topology::{BoundaryElementKind, VolumeElementKind};
 pub use validation::{
     analysis_mesh_validation_error_code, validate_analysis_mesh,
     validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,

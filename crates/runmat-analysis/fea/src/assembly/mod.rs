@@ -3119,9 +3119,9 @@ mod tests {
     use super::*;
     use crate::fixtures::{fixture_model, FixtureId};
     use runmat_meshing_core::{
-        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
-        AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
-        BoundaryElementKind, MeshSizingField, VolumeElementKind,
+        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
+        AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport,
+        AnalysisVolumeElement, BoundaryElementKind, MeshSizingField, VolumeElementKind,
     };
 
     #[test]
