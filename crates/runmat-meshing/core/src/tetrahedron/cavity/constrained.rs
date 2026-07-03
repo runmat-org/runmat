@@ -77,7 +77,7 @@ use refill_candidates::{
 };
 use refill_faces::*;
 use refill_tetrahedra::{
-    boundary_faces_from_refill_tetrahedra, improve_refill_with_local_flips, raw_refill_tetrahedron,
+    boundary_faces_from_refill_tetrahedra, raw_refill_tetrahedron,
     raw_refill_tetrahedron_with_rejection_reason, record_refill_rejection, refill_from_tetrahedra,
     refill_is_better, refill_validation_reason, star_refill_candidate_with_rejection_reason,
 };
