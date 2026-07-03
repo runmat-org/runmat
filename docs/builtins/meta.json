@@ -57461,6 +57461,641 @@
       ]
     },
     {
+      "name": "nanmax",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "M = nanmax(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second operand for element-wise maximum."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second operand for element-wise maximum."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, [], dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Reduction dimension selector (scalar or dimension vector)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, [], dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Reduction dimension selector (scalar or dimension vector)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, [], vecdim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Reduction dimension selector (scalar or dimension vector)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, [], vecdim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Reduction dimension selector (scalar or dimension vector)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, [], \"all\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "flag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"all\"",
+              "description": "Reduction mode flag: \"all\" or \"linear\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, [], \"all\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "flag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"all\"",
+              "description": "Reduction mode flag: \"all\" or \"linear\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, [], \"linear\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "flag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"all\"",
+              "description": "Reduction mode flag: \"all\" or \"linear\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, [], \"linear\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "flag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"all\"",
+              "description": "Reduction mode flag: \"all\" or \"linear\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, [], \"ComparisonMethod\", method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"ComparisonMethod\"",
+              "description": "Option name (currently \"ComparisonMethod\")."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"auto\"",
+              "description": "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, [], \"ComparisonMethod\", method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "placeholder",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Empty placeholder selecting reduction-argument grammar."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"ComparisonMethod\"",
+              "description": "Option name (currently \"ComparisonMethod\")."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"auto\"",
+              "description": "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        },
+        {
+          "label": "M = nanmax(A, B, \"ComparisonMethod\", method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second operand for element-wise maximum."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"ComparisonMethod\"",
+              "description": "Option name (currently \"ComparisonMethod\")."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"auto\"",
+              "description": "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            }
+          ]
+        },
+        {
+          "label": "[M, I] = nanmax(A, B, \"ComparisonMethod\", method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second operand for element-wise maximum."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"ComparisonMethod\"",
+              "description": "Option name (currently \"ComparisonMethod\")."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"auto\"",
+              "description": "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum values."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based maximum indices/origins."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MAX.INVALID_ARGUMENT",
+          "identifier": "RunMat:max:InvalidArgument",
+          "when": "Argument grammar, dimensions, or option names/values are invalid.",
+          "message": "max: invalid argument"
+        },
+        {
+          "code": "RM.MAX.INVALID_INPUT",
+          "identifier": "RunMat:max:InvalidInput",
+          "when": "Input values cannot be converted to supported max domains.",
+          "message": "max: invalid input"
+        },
+        {
+          "code": "RM.MAX.SIZE_MISMATCH",
+          "identifier": "RunMat:max:SizeMismatch",
+          "when": "Element-wise operands are not broadcast-compatible.",
+          "message": "max: size mismatch"
+        },
+        {
+          "code": "RM.MAX.INTERNAL",
+          "identifier": "RunMat:max:Internal",
+          "when": "Execution fails due to gather, provider, allocation, or conversion internals.",
+          "message": "max: internal failure"
+        }
+      ]
+    },
+    {
       "name": "nanmean",
       "output_mode": "Fixed",
       "completion_policy": "Public",

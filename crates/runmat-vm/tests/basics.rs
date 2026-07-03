@@ -253,6 +253,26 @@ fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
 }
 
 #[test]
+fn nanmax_builtin_executes_for_reduction_and_pairwise_workflows() {
+    let input = r#"
+        A = [NaN 4 2; 3 NaN NaN];
+        M = nanmax(A);
+        D = nanmax(A, [], 2);
+        P = nanmax([NaN 2 NaN], [3 NaN NaN]);
+        out = [M(1), M(2), M(3), D(1), D(2), P(1), P(2), isnan(P(3))];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 8] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected nanmax summary tensor");
+    assert_eq!(out.data, vec![3.0, 4.0, 2.0, 4.0, 3.0, 3.0, 2.0, 1.0]);
+}
+
+#[test]
 fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
     let bytecode = compile_source("s = struct{version = 1, version = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
