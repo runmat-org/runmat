@@ -1,5 +1,6 @@
 use super::*;
 
+mod solution;
 mod traced;
 mod types;
 
@@ -85,17 +86,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         };
         let current_volume_m3 = current_volume_m3 + forced_volume_m3;
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
-            let boundary_ok = self
-                .boundary_faces
-                .iter()
-                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
-            let interior_ok = face_counts
-                .iter()
-                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
-            if boundary_ok
-                && interior_ok
-                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
-            {
+            if self.cover_is_complete(face_counts, current_volume_m3) {
                 return Some(selected.clone());
             }
             self.rollback_selected_candidates(&forced_indices, face_counts, selected);
@@ -161,17 +152,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             return;
         }
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
-            let boundary_ok = self
-                .boundary_faces
-                .iter()
-                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
-            let interior_ok = face_counts
-                .iter()
-                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
-            if boundary_ok
-                && interior_ok
-                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
-            {
+            if self.cover_is_complete(face_counts, current_volume_m3) {
                 *best = Some(BoundaryExactCoverSolution {
                     selected_indices: selected.clone(),
                     min_scaled_jacobian: current_min_scaled_jacobian,

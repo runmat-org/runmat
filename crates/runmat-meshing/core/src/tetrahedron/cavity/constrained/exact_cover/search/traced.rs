@@ -41,27 +41,15 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         };
         let current_volume_m3 = current_volume_m3 + forced_volume_m3;
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
-            let boundary_ok = self
-                .boundary_faces
-                .iter()
-                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
-            let interior_ok = face_counts
-                .iter()
-                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
-            if boundary_ok
-                && interior_ok
-                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
-            {
+            if self.cover_is_complete(face_counts, current_volume_m3) {
                 return Some(selected.clone());
             }
-            let reason = if !boundary_ok {
-                "boundary_incomplete"
-            } else if !interior_ok {
-                "interior_incomplete"
-            } else {
-                "volume_mismatch"
-            };
-            self.record_dead_end(trace, selected, selected_roles, reason);
+            self.record_dead_end(
+                trace,
+                selected,
+                selected_roles,
+                self.incomplete_cover_reason(face_counts, current_volume_m3),
+            );
             self.rollback_selected_candidates_with_roles(
                 &forced_indices,
                 face_counts,
@@ -122,27 +110,15 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             return None;
         }
         let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
-            let boundary_ok = self
-                .boundary_faces
-                .iter()
-                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
-            let interior_ok = face_counts
-                .iter()
-                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
-            if boundary_ok
-                && interior_ok
-                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
-            {
+            if self.cover_is_complete(face_counts, current_volume_m3) {
                 return Some(selected.clone());
             }
-            let reason = if !boundary_ok {
-                "boundary_incomplete"
-            } else if !interior_ok {
-                "interior_incomplete"
-            } else {
-                "volume_mismatch"
-            };
-            self.record_dead_end(trace, selected, selected_roles, reason);
+            self.record_dead_end(
+                trace,
+                selected,
+                selected_roles,
+                self.incomplete_cover_reason(face_counts, current_volume_m3),
+            );
             return None;
         };
         for candidate_index in candidate_indices {
