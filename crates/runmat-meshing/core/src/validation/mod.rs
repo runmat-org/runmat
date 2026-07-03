@@ -18,6 +18,9 @@ use coverage::{
     validate_volume_coverage,
 };
 
+mod elements;
+use elements::validate_volume_elements;
+
 mod geometry;
 pub use geometry::mesh_contains_point;
 
@@ -80,46 +83,7 @@ pub fn validate_analysis_mesh_with_options(
 
     let node_ids = validate_nodes(mesh)?;
 
-    let mut element_ids = BTreeSet::<String>::new();
-    for element in &mesh.volume_elements {
-        if !element_ids.insert(element.element_id.clone()) {
-            return Err(AnalysisMeshValidationError::DuplicateElementId {
-                element_id: element.element_id.clone(),
-            });
-        }
-        if !element.kind.is_supported_for_solid_solve() {
-            return Err(AnalysisMeshValidationError::UnsupportedVolumeElementKind {
-                element_id: element.element_id.clone(),
-            });
-        }
-        let expected = element.kind.node_count();
-        if element.node_ids.len() != expected {
-            return Err(AnalysisMeshValidationError::WrongVolumeElementNodeCount {
-                element_id: element.element_id.clone(),
-                expected,
-                actual: element.node_ids.len(),
-            });
-        }
-        let mut local_nodes = BTreeSet::<u32>::new();
-        for node_id in &element.node_ids {
-            if !node_ids.contains(node_id) {
-                return Err(AnalysisMeshValidationError::UnknownVolumeElementNode {
-                    element_id: element.element_id.clone(),
-                    node_id: *node_id,
-                });
-            }
-            if !local_nodes.insert(*node_id) {
-                return Err(AnalysisMeshValidationError::RepeatedVolumeElementNode {
-                    element_id: element.element_id.clone(),
-                });
-            }
-        }
-        if element.material_region_id.trim().is_empty() {
-            return Err(AnalysisMeshValidationError::MissingMaterialRegion {
-                element_id: element.element_id.clone(),
-            });
-        }
-    }
+    let element_ids = validate_volume_elements(mesh, &node_ids)?;
 
     let mut face_ids = BTreeSet::<String>::new();
     for face in &mesh.boundary_faces {
