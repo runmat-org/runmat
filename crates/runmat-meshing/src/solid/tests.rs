@@ -3,7 +3,10 @@ use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
-use runmat_meshing_core::{validate_analysis_mesh, QualityThresholds};
+use runmat_meshing_core::{
+    validate_analysis_mesh, MeshBackendKind, MeshTargetSize, QualityThresholds,
+    VolumeMeshingOptions,
+};
 
 #[test]
 fn auto_backend_runs_topology_first_solid_pipeline() {
