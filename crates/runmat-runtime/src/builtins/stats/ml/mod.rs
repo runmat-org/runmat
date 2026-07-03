@@ -2,3 +2,4 @@
 
 pub mod distance;
 pub mod lasso;
+pub mod ridge;

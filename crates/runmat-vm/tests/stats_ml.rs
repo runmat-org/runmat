@@ -61,6 +61,18 @@ fn lasso_surface_executes_from_scripts() {
 }
 
 #[test]
+fn ridge_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0; 1; 2; 3]; y = [1; 3; 5; 7]; B = ridge(y, X, [0 1], 0); b0 = B(1,1); b1 = B(2,1); shrink = B(2,2);",
+    )
+    .expect("ridge script");
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 1.5));
+}
+
+#[test]
 fn student_t_distribution_surface_executes_from_scripts() {
     let vars = execute_source(
         "p = tcdf(0, 10); q = tcdf(10, 99, 'upper'); d = tpdf(0, 1); x = tinv(0.95, 50); r = trnd(5, 2, 3);",

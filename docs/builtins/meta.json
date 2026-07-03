@@ -73929,6 +73929,110 @@
       ]
     },
     {
+      "name": "ridge",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = ridge(y, X, k)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per observation."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Nonnegative ridge parameters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient estimates, one column per ridge parameter."
+            }
+          ]
+        },
+        {
+          "label": "B = ridge(y, X, k, scaled)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per observation."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Nonnegative ridge parameters."
+            },
+            {
+              "name": "scaled",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Scaling flag: 1 returns standardized coefficients, 0 restores original scale and intercept."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient estimates, one column per ridge parameter."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RIDGE.INVALID_ARGUMENT",
+          "identifier": "RunMat:ridge:InvalidArgument",
+          "when": "Inputs, dimensions, ridge parameters, or scaling flag are malformed.",
+          "message": "ridge: invalid argument"
+        },
+        {
+          "code": "RM.RIDGE.NUMERICAL",
+          "identifier": "RunMat:ridge:Numerical",
+          "when": "The regularized normal equations cannot be solved numerically.",
+          "message": "ridge: numerical solve failed"
+        },
+        {
+          "code": "RM.RIDGE.INTERNAL",
+          "identifier": "RunMat:ridge:Internal",
+          "when": "RunMat cannot allocate or construct ridge outputs.",
+          "message": "ridge: internal error"
+        }
+      ]
+    },
+    {
       "name": "rlocus",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
