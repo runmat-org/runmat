@@ -6,11 +6,13 @@ use runmat_meshing_core::{
         AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement, BoundaryElementKind,
         VolumeElementKind,
     },
+    contracts::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::{AnalysisMeshQualityReport, ElementQuality},
     size::field::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
+    validation::AnalysisMeshValidationOptions,
 };
 use runmat_meshing_size::adaptive::{
     AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,

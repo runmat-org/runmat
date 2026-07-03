@@ -4,7 +4,7 @@ use runmat_meshing_core::{
     contracts::AnalysisMeshArtifact, validation::AnalysisMeshValidationOptions,
 };
 
-use super::{build_mesh_evidence_artifact, MeshEvidenceArtifact};
+use crate::{build_mesh_evidence_artifact, MeshEvidenceArtifact};
 
 pub const MODULE_PURPOSE: &str = "feature-gated development traces only";
 
