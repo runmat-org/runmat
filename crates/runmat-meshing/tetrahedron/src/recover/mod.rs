@@ -1,12 +1,14 @@
 pub mod boundary_queue;
+mod topology;
 mod types;
 
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, StageEvidence, TetrahedronMesh, TopologyEntityId,
+    MeshingStage, ProtectedBoundaryComplex, StageEvidence, TetrahedronMesh,
 };
 
+use topology::{sorted_topology_ids, topology_face_edges};
 pub use types::{
     TetrahedronRecoveryError, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
     TetrahedronRecoveryQueueItem, TetrahedronRecoveryStatus,
@@ -131,45 +133,12 @@ pub fn build_recovery_queue_from_plc(
     Ok(TetrahedronRecoveryQueue { items, evidence })
 }
 
-fn topology_face_edges(node_ids: [TopologyEntityId; 3]) -> [[TopologyEntityId; 2]; 3] {
-    [
-        sorted_topology_ids([node_ids[0].clone(), node_ids[1].clone()]),
-        sorted_topology_ids([node_ids[1].clone(), node_ids[2].clone()]),
-        sorted_topology_ids([node_ids[2].clone(), node_ids[0].clone()]),
-    ]
-}
-
-fn sorted_topology_ids<const N: usize>(
-    mut node_ids: [TopologyEntityId; N],
-) -> [TopologyEntityId; N] {
-    node_ids.sort_by(|left, right| {
-        topology_stage_rank(left.stage)
-            .cmp(&topology_stage_rank(right.stage))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    node_ids
-}
-
-fn topology_stage_rank(stage: MeshingStage) -> u8 {
-    match stage {
-        MeshingStage::CadTopology => 0,
-        MeshingStage::Sizing => 1,
-        MeshingStage::CurveMesh => 2,
-        MeshingStage::SurfaceMesh => 3,
-        MeshingStage::ProtectedBoundaryComplex => 4,
-        MeshingStage::TetrahedronMesh => 5,
-        MeshingStage::ConstraintRecovery => 6,
-        MeshingStage::Optimization => 7,
-        MeshingStage::SolveReadiness => 8,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_meshing_core::contracts::{
         PlcFacet, PlcNode, PlcProtectedEdge, PlcValidationSummary, Tetrahedron4Element,
-        TetrahedronBoundaryFace, TetrahedronMeshNode,
+        TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
     };
 
     #[test]
