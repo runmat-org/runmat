@@ -29,3 +29,17 @@ fn lasso_surface_executes_from_scripts() {
     assert!(has_num(&vars, 2.0));
     assert!(has_num(&vars, 1.0));
 }
+
+#[test]
+fn student_t_distribution_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "p = tcdf(0, 10); q = tcdf(10, 99, 'upper'); d = tpdf(0, 1); x = tinv(0.95, 50); r = trnd(5, 2, 3);",
+    )
+    .expect("student t distribution script");
+    assert!(has_num(&vars, 0.5));
+    assert!(has_num(&vars, std::f64::consts::FRAC_1_PI));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (*value - 1.675905).abs() < 1.0e-5)));
+    assert!(has_tensor_shape(&vars, &[2, 3]));
+}

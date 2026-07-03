@@ -11,7 +11,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::gammaln::gammaln_nonnegative_scalar;
+use crate::builtins::stats::summary::distribution_math::{standard_normal_cdf, student_t_cdf};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corr";
@@ -544,103 +544,6 @@ fn tail_pvalue(cdf: f64, tail: Tail) -> f64 {
         Tail::Right => (1.0 - cdf).clamp(0.0, 1.0),
         Tail::Left => cdf.clamp(0.0, 1.0),
     }
-}
-
-fn standard_normal_cdf(z: f64) -> f64 {
-    if z == f64::INFINITY {
-        1.0
-    } else if z == f64::NEG_INFINITY {
-        0.0
-    } else {
-        0.5 * libm::erfc(-z / std::f64::consts::SQRT_2)
-    }
-}
-
-fn student_t_cdf(t: f64, df: f64) -> f64 {
-    if t == f64::INFINITY {
-        return 1.0;
-    }
-    if t == f64::NEG_INFINITY {
-        return 0.0;
-    }
-    if df <= 0.0 || t.is_nan() {
-        return f64::NAN;
-    }
-    let x = df / (df + t * t);
-    let ib = regularized_beta(x, df / 2.0, 0.5);
-    if t >= 0.0 {
-        1.0 - 0.5 * ib
-    } else {
-        0.5 * ib
-    }
-}
-
-fn regularized_beta(x: f64, a: f64, b: f64) -> f64 {
-    if x <= 0.0 {
-        return 0.0;
-    }
-    if x >= 1.0 {
-        return 1.0;
-    }
-    let log_bt = gammaln_nonnegative_scalar(a + b)
-        - gammaln_nonnegative_scalar(a)
-        - gammaln_nonnegative_scalar(b)
-        + a * x.ln()
-        + b * (1.0 - x).ln();
-    let bt = log_bt.exp();
-    if x < (a + 1.0) / (a + b + 2.0) {
-        bt * beta_continued_fraction(a, b, x) / a
-    } else {
-        1.0 - bt * beta_continued_fraction(b, a, 1.0 - x) / b
-    }
-}
-
-fn beta_continued_fraction(a: f64, b: f64, x: f64) -> f64 {
-    const MAX_ITER: usize = 200;
-    const EPS: f64 = 3.0e-14;
-    const FP_MIN: f64 = 1.0e-300;
-
-    let qab = a + b;
-    let qap = a + 1.0;
-    let qam = a - 1.0;
-    let mut c = 1.0;
-    let mut d = 1.0 - qab * x / qap;
-    if d.abs() < FP_MIN {
-        d = FP_MIN;
-    }
-    d = 1.0 / d;
-    let mut h = d;
-    for m in 1..=MAX_ITER {
-        let m_f = m as f64;
-        let m2 = 2.0 * m_f;
-        let mut aa = m_f * (b - m_f) * x / ((qam + m2) * (a + m2));
-        d = 1.0 + aa * d;
-        if d.abs() < FP_MIN {
-            d = FP_MIN;
-        }
-        c = 1.0 + aa / c;
-        if c.abs() < FP_MIN {
-            c = FP_MIN;
-        }
-        d = 1.0 / d;
-        h *= d * c;
-        aa = -(a + m_f) * (qab + m_f) * x / ((a + m2) * (qap + m2));
-        d = 1.0 + aa * d;
-        if d.abs() < FP_MIN {
-            d = FP_MIN;
-        }
-        c = 1.0 + aa / c;
-        if c.abs() < FP_MIN {
-            c = FP_MIN;
-        }
-        d = 1.0 / d;
-        let del = d * c;
-        h *= del;
-        if (del - 1.0).abs() < EPS {
-            break;
-        }
-    }
-    h
 }
 
 #[cfg(test)]

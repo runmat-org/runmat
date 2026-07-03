@@ -86278,6 +86278,83 @@
       ]
     },
     {
+      "name": "tcdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = tcdf(x, nu)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "p = tcdf(x, nu, \"upper\")",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.tcdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:tcdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.tcdf.INTERNAL",
+          "identifier": "RunMat:tcdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
       "name": "tcpclient",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -87742,6 +87819,55 @@
       ]
     },
     {
+      "name": "tinv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = tinv(p, nu)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.tinv.INVALID_ARGUMENT",
+          "identifier": "RunMat:tinv:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.tinv.INTERNAL",
+          "identifier": "RunMat:tinv:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
       "name": "title",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -88002,6 +88128,55 @@
           "identifier": "RunMat:toeplitz:Internal",
           "when": "Output allocation or gpuArray gather fails.",
           "message": "toeplitz: internal error"
+        }
+      ]
+    },
+    {
+      "name": "tpdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = tpdf(x, nu)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.tpdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:tpdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.tpdf.INTERNAL",
+          "identifier": "RunMat:tpdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
         }
       ]
     },
@@ -88518,6 +88693,104 @@
           "identifier": "RunMat:triu:Internal",
           "when": "Internal masking/upload path fails.",
           "message": "triu: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "trnd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = trnd(nu)",
+          "inputs": [
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from the Student's t distribution."
+            }
+          ]
+        },
+        {
+          "label": "r = trnd(nu, sz)",
+          "inputs": [
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from the Student's t distribution."
+            }
+          ]
+        },
+        {
+          "label": "r = trnd(nu, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from the Student's t distribution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TRND.INVALID_ARGUMENT",
+          "identifier": "RunMat:trnd:InvalidArgument",
+          "when": "Input parameters or size arguments are missing, malformed, or incompatible.",
+          "message": "trnd: invalid argument"
+        },
+        {
+          "code": "RM.TRND.INTERNAL",
+          "identifier": "RunMat:trnd:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "trnd: internal operation failed"
         }
       ]
     },

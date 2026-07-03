@@ -1,0 +1,30 @@
+{
+  "title": "tpdf",
+  "category": "stats/summary",
+  "keywords": ["tpdf", "student t", "pdf", "statistics", "distribution"],
+  "summary": "Evaluate the Student's t probability density function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`tpdf(x,nu)` evaluates the probability density of the Student's t distribution with `nu` degrees of freedom at `x`.",
+  "behaviors": [
+    "`x` and `nu` may be scalars or matching-size numeric arrays.",
+    "Scalar inputs broadcast over matching-size array inputs.",
+    "Nonpositive or `NaN` degrees of freedom produce `NaN` elementwise.",
+    "`nu = Inf` uses the standard normal density."
+  ],
+  "examples": [{ "description": "Cauchy density at zero", "input": "y = tpdf(0, 1)" }],
+  "faqs": [{ "question": "What is `nu`?", "answer": "`nu` is the degrees-of-freedom parameter for the Student's t distribution." }],
+  "links": [{ "label": "tcdf", "url": "./tcdf" }, { "label": "tinv", "url": "./tinv" }, { "label": "trnd", "url": "./trnd" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

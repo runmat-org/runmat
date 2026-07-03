@@ -1,0 +1,33 @@
+{
+  "title": "trnd",
+  "category": "stats/random",
+  "keywords": ["trnd", "student t", "random", "statistics", "distribution"],
+  "summary": "Generate Student's t random numbers.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "Sampling currently runs on the host RNG; GPU inputs are gathered to host."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::random::trnd::tests", "integration": null },
+  "description": "`trnd(nu)` generates Student's t random numbers with `nu` degrees of freedom. Size arguments can be supplied as separate dimensions or as a size vector.",
+  "behaviors": [
+    "`nu` must be a positive scalar or a positive array of degrees of freedom.",
+    "Scalar `nu` broadcasts over the requested output size.",
+    "Array `nu` requires the requested size to match the shape of `nu`.",
+    "`nu = Inf` generates standard normal random numbers."
+  ],
+  "examples": [
+    { "description": "Scalar sample", "input": "r = trnd(10)" },
+    { "description": "Matrix sample", "input": "r = trnd(1, 5, 5)" }
+  ],
+  "faqs": [{ "question": "How does RunMat generate trnd samples?", "answer": "RunMat draws a standard normal variate and scales it by an independent chi-square variate generated through a gamma sampler." }],
+  "links": [{ "label": "tcdf", "url": "./tcdf" }, { "label": "tpdf", "url": "./tpdf" }, { "label": "tinv", "url": "./tinv" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/trnd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/trnd.rs"
+  }
+}

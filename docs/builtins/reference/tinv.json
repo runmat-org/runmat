@@ -1,0 +1,30 @@
+{
+  "title": "tinv",
+  "category": "stats/summary",
+  "keywords": ["tinv", "student t", "inverse", "cdf", "statistics", "distribution"],
+  "summary": "Evaluate the inverse Student's t cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`tinv(p,nu)` returns the Student's t quantile for probability `p` and degrees of freedom `nu`.",
+  "behaviors": [
+    "`p` and `nu` may be scalars or matching-size numeric arrays.",
+    "Scalar inputs broadcast over matching-size array inputs.",
+    "`p` outside `[0,1]` or nonpositive `nu` produces `NaN` elementwise.",
+    "`p = 0` and `p = 1` return infinite tails."
+  ],
+  "examples": [{ "description": "95th percentile", "input": "x = tinv(0.95, 50)" }],
+  "faqs": [{ "question": "How is tinv computed?", "answer": "RunMat solves against the Student's t CDF with a bounded bisection path, using symmetry around zero." }],
+  "links": [{ "label": "tcdf", "url": "./tcdf" }, { "label": "tpdf", "url": "./tpdf" }, { "label": "trnd", "url": "./trnd" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

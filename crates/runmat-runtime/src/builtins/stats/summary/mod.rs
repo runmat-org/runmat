@@ -4,6 +4,7 @@ pub(crate) mod corr;
 pub(crate) mod corrcoef;
 pub(crate) mod cov;
 pub(crate) mod descriptive;
+pub(crate) mod distribution_math;
 pub(crate) mod distributions;
 pub(crate) mod mode;
 pub(crate) mod normalize;

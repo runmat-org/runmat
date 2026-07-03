@@ -1,4 +1,4 @@
-//! Normal distribution compatibility helpers.
+//! Probability distribution compatibility helpers.
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -9,6 +9,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
 use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
+use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const SQRT_2: f64 = std::f64::consts::SQRT_2;
@@ -54,12 +55,22 @@ const INPUT_SIGMA: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Standard deviation parameter.",
 };
 
+const INPUT_NU: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nu",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Degrees of freedom parameter.",
+};
+
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [INPUT_X];
 const INPUTS_X_MU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_MU];
 const INPUTS_X_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_MU, INPUT_SIGMA];
 const INPUTS_P: [BuiltinParamDescriptor; 1] = [INPUT_P];
 const INPUTS_P_MU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_MU];
 const INPUTS_P_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_MU, INPUT_SIGMA];
+const INPUTS_X_NU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_NU];
+const INPUTS_P_NU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_NU];
 
 const NORMAL_SIGNATURES_X: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -120,6 +131,31 @@ const NORMAL_INV_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     },
 ];
 
+const T_PDF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "y = tpdf(x, nu)",
+    inputs: &INPUTS_X_NU,
+    outputs: &OUTPUT_Y,
+}];
+
+const T_CDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "p = tcdf(x, nu)",
+        inputs: &INPUTS_X_NU,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = tcdf(x, nu, \"upper\")",
+        inputs: &INPUTS_X_NU,
+        outputs: &OUTPUT_Y,
+    },
+];
+
+const T_INV_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "x = tinv(p, nu)",
+    inputs: &INPUTS_P_NU,
+    outputs: &OUTPUT_Y,
+}];
+
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NORMAL.INVALID_ARGUMENT",
     identifier: None,
@@ -172,7 +208,11 @@ fn normal_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 fn normal_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if name != "normal" {
+        builder = builder.with_identifier(format!("RunMat:{name}:InvalidArgument"));
+    }
+    builder.build()
 }
 
 async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
@@ -250,12 +290,55 @@ struct NormalArgs {
     upper: bool,
 }
 
+struct TArgs {
+    x: Vec<f64>,
+    nu: Vec<f64>,
+    shape: Vec<usize>,
+    upper: bool,
+}
+
 fn broadcast_pair(
     name: &str,
     lhs: &Tensor,
     rhs: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
     tensor::binary_numeric_tensors(lhs, rhs, name, name)
+        .map_err(|err| normal_error(name, err.message().to_string()))
+}
+
+async fn t_args(
+    name: &str,
+    first: Value,
+    rest: Vec<Value>,
+    allow_upper: bool,
+) -> BuiltinResult<TArgs> {
+    let mut rest = rest;
+    let mut upper = false;
+    if allow_upper {
+        if let Some(last) = rest.last() {
+            if let Some(keyword) = crate::builtins::common::random_args::keyword_of(last) {
+                if keyword.eq_ignore_ascii_case("upper") {
+                    upper = true;
+                    rest.pop();
+                }
+            }
+        }
+    }
+    if rest.len() != 1 {
+        return Err(normal_error(
+            name,
+            format!("{name}: expected x and nu arguments"),
+        ));
+    }
+    let x = value_to_tensor(name, first).await?;
+    let nu = value_to_tensor(name, rest[0].clone()).await?;
+    let (x, nu, shape) = broadcast_pair(name, &x, &nu)?;
+    Ok(TArgs {
+        x,
+        nu,
+        shape,
+        upper,
+    })
 }
 
 fn finish(shape: Vec<usize>, data: Vec<f64>) -> BuiltinResult<Value> {
@@ -395,6 +478,87 @@ pub mod norminv {
     }
 }
 
+pub mod tpdf {
+    use super::*;
+    normal_descriptor!("tpdf", T_PDF_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "tpdf",
+        category = "stats/summary",
+        summary = "Evaluate the Student's t probability density function.",
+        keywords = "tpdf,student t,pdf,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::tpdf"
+    )]
+    pub(crate) async fn tpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("tpdf", value, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(x, nu)| distribution_math::student_t_pdf(*x, *nu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
+pub mod tcdf {
+    use super::*;
+    normal_descriptor!("tcdf", T_CDF_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "tcdf",
+        category = "stats/summary",
+        summary = "Evaluate the Student's t cumulative distribution function.",
+        keywords = "tcdf,student t,cdf,upper tail,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::tcdf"
+    )]
+    pub(crate) async fn tcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("tcdf", value, rest, true).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(x, nu)| {
+                if args.upper {
+                    distribution_math::student_t_cdf_upper(*x, *nu)
+                } else {
+                    distribution_math::student_t_cdf(*x, *nu)
+                }
+            })
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
+pub mod tinv {
+    use super::*;
+    normal_descriptor!("tinv", T_INV_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "tinv",
+        category = "stats/summary",
+        summary = "Evaluate the inverse Student's t cumulative distribution function.",
+        keywords = "tinv,student t,inverse,cdf,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::tinv"
+    )]
+    pub(crate) async fn tinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("tinv", value, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(p, nu)| distribution_math::student_t_inv(*p, *nu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,5 +673,127 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(cdf, Value::Num(0.0));
+    }
+
+    #[test]
+    fn student_t_distribution_scalar_values() {
+        let pdf = block_on(tpdf::tpdf_builtin(Value::Num(0.0), vec![Value::Num(1.0)])).unwrap();
+        match pdf {
+            Value::Num(value) => assert_close(value, std::f64::consts::FRAC_1_PI, 1e-12),
+            other => panic!("expected scalar pdf, got {other:?}"),
+        }
+
+        let cdf = block_on(tcdf::tcdf_builtin(Value::Num(0.0), vec![Value::Num(10.0)])).unwrap();
+        match cdf {
+            Value::Num(value) => assert_close(value, 0.5, 1e-12),
+            other => panic!("expected scalar cdf, got {other:?}"),
+        }
+
+        let inv = block_on(tinv::tinv_builtin(Value::Num(0.95), vec![Value::Num(50.0)])).unwrap();
+        match inv {
+            Value::Num(value) => assert_close(value, 1.675_905, 1e-6),
+            other => panic!("expected scalar inv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn student_t_distribution_broadcasts_and_upper_tail() {
+        let x = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap());
+        let nu = Value::Tensor(Tensor::new(vec![1.0, 5.0, f64::INFINITY], vec![1, 3]).unwrap());
+        let out = block_on(tcdf::tcdf_builtin(x, vec![nu])).unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_close(tensor.data[0], 0.5, 1e-12);
+                assert_close(tensor.data[1], 0.818_391_266, 1e-9);
+                assert_close(tensor.data[2], 0.977_249_868, 1e-9);
+            }
+            other => panic!("expected tensor cdf, got {other:?}"),
+        }
+
+        let upper = block_on(tcdf::tcdf_builtin(
+            Value::Num(10.0),
+            vec![Value::Num(99.0), Value::from("upper")],
+        ))
+        .unwrap();
+        match upper {
+            Value::Num(value) => assert_close(value, 5.469_9e-17, 1e-20),
+            other => panic!("expected scalar upper cdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn student_t_distribution_rejects_bad_shapes_and_returns_nan_for_bad_parameters() {
+        let err = block_on(tpdf::tpdf_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+            )],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("tpdf"));
+        assert_eq!(err.identifier(), Some("RunMat:tpdf:InvalidArgument"));
+
+        let out = block_on(tcdf::tcdf_builtin(Value::Num(0.0), vec![Value::Num(-1.0)])).unwrap();
+        assert!(matches!(out, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn student_t_distribution_extreme_tails_remain_representable() {
+        let lower = block_on(tinv::tinv_builtin(
+            Value::Num(1.0e-20),
+            vec![Value::Num(1.0)],
+        ))
+        .unwrap();
+        match lower {
+            Value::Num(value) => {
+                assert!(value.is_finite());
+                assert_close(value / 1.0e19, -3.183_098_861_837_907, 1e-10);
+            }
+            other => panic!("expected scalar inv, got {other:?}"),
+        }
+
+        let upper = block_on(tcdf::tcdf_builtin(
+            Value::Num(1.0e200),
+            vec![Value::Num(1.0), Value::from("upper")],
+        ))
+        .unwrap();
+        match upper {
+            Value::Num(value) => assert_close(value / 1.0e-201, 3.183_098_861_837_907, 1e-12),
+            other => panic!("expected scalar upper cdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn student_t_distribution_large_nu_uses_normal_limit() {
+        let pdf = block_on(tpdf::tpdf_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(1.0e12)],
+        ))
+        .unwrap();
+        match pdf {
+            Value::Num(value) => assert_close(value, INV_SQRT_2PI * (-0.5f64).exp(), 1e-12),
+            other => panic!("expected scalar pdf, got {other:?}"),
+        }
+
+        let cdf = block_on(tcdf::tcdf_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(1.0e12)],
+        ))
+        .unwrap();
+        match cdf {
+            Value::Num(value) => assert_close(value, 0.841_344_746_068_543, 1e-12),
+            other => panic!("expected scalar cdf, got {other:?}"),
+        }
+
+        let inv = block_on(tinv::tinv_builtin(
+            Value::Num(0.975),
+            vec![Value::Num(1.0e12)],
+        ))
+        .unwrap();
+        match inv {
+            Value::Num(value) => assert_close(value, 1.959_963_984_540_053_8, 1e-12),
+            other => panic!("expected scalar inv, got {other:?}"),
+        }
     }
 }

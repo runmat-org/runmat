@@ -253,6 +253,54 @@ pub(crate) fn generate_normal_scaled(
     Ok(out)
 }
 
+pub(crate) fn generate_student_t(nu: &[f64], len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    let mut spare_normal = None;
+    for idx in 0..len {
+        let df = if nu.len() == 1 { nu[0] } else { nu[idx] };
+        let z = if let Some(value) = spare_normal.take() {
+            value
+        } else {
+            let (z0, z1) = next_normal_pair(&mut guard.state);
+            spare_normal = Some(z1);
+            z0
+        };
+        if df == f64::INFINITY {
+            out.push(z);
+        } else {
+            let chi_square = sample_gamma_shape_scale(&mut guard.state, df / 2.0, 2.0);
+            out.push(z / (chi_square / df).sqrt());
+        }
+    }
+    Ok(out)
+}
+
+fn sample_gamma_shape_scale(state: &mut u64, shape: f64, scale: f64) -> f64 {
+    if shape < 1.0 {
+        let u = next_uniform_state(state).max(MIN_UNIFORM);
+        return sample_gamma_shape_scale(state, shape + 1.0, scale) * u.powf(1.0 / shape);
+    }
+
+    let d = shape - 1.0 / 3.0;
+    let c = (1.0 / (9.0 * d)).sqrt();
+    loop {
+        let (x, _) = next_normal_pair(state);
+        let v_base = 1.0 + c * x;
+        if v_base <= 0.0 {
+            continue;
+        }
+        let v = v_base * v_base * v_base;
+        let u = next_uniform_state(state);
+        let x2 = x * x;
+        if u < 1.0 - 0.0331 * x2 * x2 || u.ln() < 0.5 * x2 + d * (1.0 - v + v.ln()) {
+            return scale * d * v;
+        }
+    }
+}
+
 pub(crate) fn generate_uniform_scaled(
     a: f64,
     b: f64,
