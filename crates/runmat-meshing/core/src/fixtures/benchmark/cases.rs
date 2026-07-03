@@ -8,10 +8,12 @@ use runmat_geometry_core::GeometryAsset;
 
 #[path = "cases/geometry.rs"]
 mod geometry;
+#[cfg(test)]
+use geometry::annular_bore_block_surface;
 use geometry::{
-    annular_bore_block_surface, box_geometry, box_surface, closed_surface_area_m2,
-    closed_surface_volume_m3, faceted_cylinder_surface, geometry_from_surface,
-    tapered_rectangular_prism_surface, through_hole_block_surface,
+    box_geometry, box_surface, closed_surface_area_m2, closed_surface_volume_m3,
+    faceted_cylinder_surface, geometry_from_surface, tapered_rectangular_prism_surface,
+    through_hole_block_surface,
 };
 
 pub fn generic_mesh_benchmark_cases() -> Vec<MeshBenchmarkCase> {

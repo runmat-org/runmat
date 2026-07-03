@@ -256,6 +256,7 @@ pub(super) fn through_hole_block_surface(
     (vertices, triangles)
 }
 
+#[cfg(test)]
 pub(super) fn annular_bore_block_surface(
     dimensions_m: [f64; 3],
     bore_radius_m: f64,
