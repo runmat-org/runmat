@@ -1,6 +1,7 @@
 use super::*;
 
 mod boundary_edge_recovery;
+mod boundary_edge_refinement;
 mod boundary_face_completion;
 mod boundary_node_flips;
 mod boundary_refinement;
