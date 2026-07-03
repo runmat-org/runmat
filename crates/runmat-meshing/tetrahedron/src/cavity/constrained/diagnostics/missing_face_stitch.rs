@@ -3,6 +3,8 @@ use super::*;
 #[cfg(test)]
 mod exact_cover;
 #[cfg(test)]
+mod finish;
+#[cfg(test)]
 mod local_cap;
 #[cfg(test)]
 mod setup;
