@@ -4,8 +4,6 @@ pub mod analysis_prep;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub use runmat_meshing_curve as curve;
-#[path = "visualization/field_mapping.rs"]
-pub mod field_mapping;
 pub mod fixtures;
 pub use runmat_meshing_opt as opt;
 pub mod quality;
@@ -61,11 +59,6 @@ pub use contracts::{
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
     CurveDiscretizationOptions, CurveElement, CurveNode,
-};
-pub use field_mapping::{
-    map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
-    map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,
-    BoundaryNodeVectorValue, FieldMappingError,
 };
 pub use opt::sliver::recovery::{
     classify_sliver_tetrahedra, evaluate_sliver_removal, SliverClassification,

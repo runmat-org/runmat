@@ -9780,12 +9780,12 @@ fn render_topology_gap_detail(mesh: &AnalysisMeshArtifact) -> Option<String> {
 
 fn validate_analysis_mesh_solver_field_mapping(mesh: &AnalysisMeshArtifact) -> Result<(), String> {
     let element_values = vec![0.0_f64; mesh.volume_elements.len()];
-    runmat_meshing_core::map_volume_scalar_field_to_boundary_faces(mesh, &element_values)
+    runmat_meshing::map_volume_scalar_field_to_boundary_faces(mesh, &element_values)
         .map_err(|err| err.to_string())?;
     let node_values = vec![[0.0_f64; 3]; mesh.nodes.len()];
-    runmat_meshing_core::map_nodal_vector_field_to_boundary_nodes(mesh, &node_values)
+    runmat_meshing::map_nodal_vector_field_to_boundary_nodes(mesh, &node_values)
         .map_err(|err| err.to_string())?;
-    runmat_meshing_core::map_nodal_vector_field_to_boundary_faces(mesh, &node_values)
+    runmat_meshing::map_nodal_vector_field_to_boundary_faces(mesh, &node_values)
         .map_err(|err| err.to_string())?;
     Ok(())
 }

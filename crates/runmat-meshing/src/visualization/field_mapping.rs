@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::contracts::AnalysisMeshArtifact;
+use runmat_meshing_core::contracts::AnalysisMeshArtifact;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoundaryFaceScalarValue {
@@ -275,7 +275,7 @@ fn validate_nodal_vector_field<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use runmat_meshing_core::{
         contracts::{
             AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
             AnalysisMeshProvenance, AnalysisVolumeElement, BoundaryElementKind, MeshBackendSummary,
