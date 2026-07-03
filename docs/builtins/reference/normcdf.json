@@ -1,0 +1,33 @@
+{
+  "title": "normcdf",
+  "category": "stats/summary",
+  "keywords": ["normcdf", "normal", "gaussian", "cdf", "statistics"],
+  "summary": "Evaluate the normal cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`normcdf(x)` evaluates the standard normal CDF. `normcdf(x,mu)` and `normcdf(x,mu,sigma)` evaluate a normal distribution with mean `mu` and standard deviation `sigma`. `normcdf(...,\"upper\")` returns the upper-tail probability.",
+  "behaviors": [
+    "`x`, `mu`, and `sigma` may be scalars or matching-size numeric arrays.",
+    "Negative `sigma` values produce `NaN` elementwise.",
+    "`sigma = 0` returns a step at `mu`.",
+    "`\"upper\"` uses the complementary error-function path for better extreme-tail stability."
+  ],
+  "examples": [
+    { "description": "Standard normal midpoint", "input": "p = normcdf(0)" },
+    { "description": "Upper tail", "input": "p = normcdf(8, 0, 1, \"upper\")" }
+  ],
+  "faqs": [{ "question": "Does normcdf support array inputs?", "answer": "Yes. Scalar parameters broadcast over matching-size numeric arrays." }],
+  "links": [{ "label": "normpdf", "url": "./normpdf" }, { "label": "norminv", "url": "./norminv" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

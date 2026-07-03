@@ -11504,6 +11504,279 @@
       ]
     },
     {
+      "name": "corr",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = corr(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            }
+          ]
+        },
+        {
+          "label": "R = corr(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Second observations-by-variables input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            }
+          ]
+        },
+        {
+          "label": "R = corr(X, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Type and Rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            }
+          ]
+        },
+        {
+          "label": "R = corr(X, Y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Second observations-by-variables input."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Type and Rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            }
+          ]
+        },
+        {
+          "label": "[R, PValue] = corr(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            },
+            {
+              "name": "PValue",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing the hypothesis of no correlation."
+            }
+          ]
+        },
+        {
+          "label": "[R, PValue] = corr(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Second observations-by-variables input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            },
+            {
+              "name": "PValue",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing the hypothesis of no correlation."
+            }
+          ]
+        },
+        {
+          "label": "[R, PValue] = corr(X, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Type and Rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            },
+            {
+              "name": "PValue",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing the hypothesis of no correlation."
+            }
+          ]
+        },
+        {
+          "label": "[R, PValue] = corr(X, Y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations by variables."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Second observations-by-variables input."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Type and Rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise correlation coefficients."
+            },
+            {
+              "name": "PValue",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing the hypothesis of no correlation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.corr.INVALID_ARGUMENT",
+          "identifier": "RunMat:corr:InvalidArgument",
+          "when": "Inputs, row counts, Type, or Rows options are malformed or unsupported.",
+          "message": "corr: invalid argument"
+        },
+        {
+          "code": "RM.corr.INTERNAL",
+          "identifier": "RunMat:corr:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "corr: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "corrcoef",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -56545,6 +56818,356 @@
       ]
     },
     {
+      "name": "normcdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = normcdf(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "p = normcdf(x, mu)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "p = normcdf(x, mu, sigma)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "p = normcdf(x, mu, sigma, \"upper\")",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.normcdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:normcdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.normcdf.INTERNAL",
+          "identifier": "RunMat:normcdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
+      "name": "norminv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = norminv(p)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = norminv(p, mu)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = norminv(p, mu, sigma)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.norminv.INVALID_ARGUMENT",
+          "identifier": "RunMat:norminv:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.norminv.INTERNAL",
+          "identifier": "RunMat:norminv:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
+      "name": "normpdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = normpdf(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "y = normpdf(x, mu)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "y = normpdf(x, mu, sigma)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.normpdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:normpdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.normpdf.INTERNAL",
+          "identifier": "RunMat:normpdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
       "name": "normrnd",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -62779,6 +63402,132 @@
       ]
     },
     {
+      "name": "prctile",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = prctile(X, p)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        },
+        {
+          "label": "Y = prctile(X, p, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        },
+        {
+          "label": "Y = prctile(X, p, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional nanflag or method arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.prctile.INVALID_ARGUMENT",
+          "identifier": "RunMat:prctile:InvalidArgument",
+          "when": "Inputs, dimensions, probabilities, or options are malformed.",
+          "message": "order statistics: invalid argument"
+        },
+        {
+          "code": "RM.prctile.INTERNAL",
+          "identifier": "RunMat:prctile:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "order statistics: internal error"
+        }
+      ]
+    },
+    {
       "name": "primes",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -64228,6 +64977,132 @@
           "identifier": "RunMat:quad:TooManyOutputs",
           "when": "`quad` is called with more than two requested output arguments.",
           "message": "quad: too many output arguments"
+        }
+      ]
+    },
+    {
+      "name": "quantile",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Q = quantile(X, p)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        },
+        {
+          "label": "Q = quantile(X, p, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        },
+        {
+          "label": "Q = quantile(X, p, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Requested quantile probabilities or percentiles."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional nanflag or method arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Quantile or percentile values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.quantile.INVALID_ARGUMENT",
+          "identifier": "RunMat:quantile:InvalidArgument",
+          "when": "Inputs, dimensions, probabilities, or options are malformed.",
+          "message": "order statistics: invalid argument"
+        },
+        {
+          "code": "RM.quantile.INTERNAL",
+          "identifier": "RunMat:quantile:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "order statistics: internal error"
         }
       ]
     },
@@ -82515,6 +83390,76 @@
           "identifier": "RunMat:tic:StateLockFailed",
           "when": "Internal stopwatch state cannot be acquired.",
           "message": "tic: failed to acquire stopwatch state"
+        }
+      ]
+    },
+    {
+      "name": "tiedrank",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = tiedrank(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Average ranks for tied observations."
+            }
+          ]
+        },
+        {
+          "label": "[R, tieadj] = tiedrank(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Average ranks for tied observations."
+            },
+            {
+              "name": "tieadj",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Tie adjustment terms for rank-based statistics."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.tiedrank.INVALID_ARGUMENT",
+          "identifier": "RunMat:tiedrank:InvalidArgument",
+          "when": "Inputs, dimensions, probabilities, or options are malformed.",
+          "message": "order statistics: invalid argument"
+        },
+        {
+          "code": "RM.tiedrank.INTERNAL",
+          "identifier": "RunMat:tiedrank:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "order statistics: internal error"
         }
       ]
     },

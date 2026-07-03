@@ -1,8 +1,11 @@
 //! Summary statistics builtins.
 
+pub(crate) mod corr;
 pub(crate) mod corrcoef;
 pub(crate) mod cov;
+pub(crate) mod distributions;
 pub(crate) mod mode;
+pub(crate) mod order_stats;
 
 pub use corrcoef::corrcoef_from_tensors;
 pub use cov::{cov_from_tensors, CovWeightSpec};
