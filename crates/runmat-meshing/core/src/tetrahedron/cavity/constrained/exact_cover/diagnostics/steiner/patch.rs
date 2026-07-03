@@ -1,17 +1,11 @@
 use super::*;
 
 #[cfg(test)]
-mod patch;
-
-#[cfg(test)]
-pub(crate) use patch::diagnostic_boundary_patch_steiner_exact_cover;
-
-#[cfg(test)]
-pub(crate) fn diagnostic_boundary_steiner_exact_cover(
+pub(crate) fn diagnostic_boundary_patch_steiner_exact_cover(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
     options: ConstrainedCavityRefillOptions,
-) -> Result<BoundarySteinerExactCoverDiagnostic, ConstrainedCavityRefillError> {
+) -> Result<BoundaryPatchSteinerExactCoverDiagnostic, ConstrainedCavityRefillError> {
     validate_refill_options(options)?;
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
     let boundary_node_map = boundary_node_coordinates(cavity, boundary_nodes)?;
@@ -19,9 +13,17 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
     let boundary_node_ids = cavity_boundary_node_ids(cavity)
         .into_iter()
         .collect::<Vec<_>>();
-    let mut diagnostic = BoundarySteinerExactCoverDiagnostic {
+    let boundary_faces = cavity
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_face(face.node_ids))
+        .collect::<BTreeSet<_>>();
+    let mut diagnostic = BoundaryPatchSteinerExactCoverDiagnostic {
         boundary_node_count: boundary_node_ids.len(),
         boundary_face_count: cavity.boundary_faces.len(),
+        missing_face_count: 0,
+        patch_count: 0,
+        steiner_node_count: 0,
         candidate_count: 0,
         zero_candidate_boundary_face_count: 0,
         min_boundary_face_candidate_count: 0,
@@ -36,29 +38,81 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
         diagnostic.reason = "too_few_boundary_nodes";
         return Ok(diagnostic);
     }
-    let Some(centroid) = cavity_boundary_node_centroid(cavity, &boundary_node_map) else {
+
+    let points = boundary_node_ids
+        .iter()
+        .map(|node_id| ConnectivityPoint {
+            node_id: *node_id,
+            coordinates_m: boundary_node_map[node_id],
+            is_super: false,
+        })
+        .collect::<Vec<_>>();
+    let mut boundary_refill_tetrahedra = Vec::<ConstrainedCavityRefillTetrahedron>::new();
+    for tetrahedron in tetrahedralize_points(&points) {
+        let node_ids = tetrahedron.vertices.map(|index| points[index].node_id);
+        let tetrahedron_points = tetrahedron
+            .vertices
+            .map(|index| points[index].coordinates_m);
+        if point_in_closed_triangle_surface(
+            tetrahedron_centroid(tetrahedron_points),
+            &boundary_triangles,
+            MeshingTolerance::default(),
+        ) != PointInClosedSurface::Inside
+        {
+            continue;
+        }
+        if let Ok(tetrahedron) =
+            raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options)
+        {
+            boundary_refill_tetrahedra.push(tetrahedron);
+        }
+    }
+    let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tetrahedra)
+        .map_err(ConstrainedCavityRefillError::Validation)?;
+    diagnostic.missing_face_count = missing_faces.len();
+    if missing_faces.is_empty() {
+        diagnostic.reason = "no_missing_faces";
+        return Ok(diagnostic);
+    }
+    let Some(cavity_centroid) = cavity_boundary_node_centroid(cavity, &boundary_node_map) else {
         diagnostic.reason = "empty_boundary";
         return Ok(diagnostic);
     };
-    if point_in_closed_triangle_surface(centroid, &boundary_triangles, MeshingTolerance::default())
-        != PointInClosedSurface::Inside
-    {
-        diagnostic.reason = "steiner_point_outside_cavity";
-        return Ok(diagnostic);
-    }
-    let steiner_node_id = next_cavity_node_id(cavity);
-    let boundary_faces = cavity
-        .boundary_faces
-        .iter()
-        .map(|face| sorted_face(face.node_ids))
-        .collect::<BTreeSet<_>>();
+
+    let components = missing_face_components(&missing_faces, MissingFaceLink::Node);
+    diagnostic.patch_count = components.len();
     let mut node_points = boundary_node_ids
         .iter()
         .map(|node_id| (*node_id, boundary_node_map[node_id]))
         .collect::<BTreeMap<_, _>>();
-    node_points.insert(steiner_node_id, centroid);
     let mut node_ids = boundary_node_ids.clone();
-    node_ids.push(steiner_node_id);
+    let mut next_node_id = next_cavity_node_id(cavity);
+    for component in components {
+        let mut patch_node_ids = BTreeSet::<u32>::new();
+        for face_index in component {
+            patch_node_ids.extend(missing_faces[face_index]);
+        }
+        let Some(surface_point) = centroid_of_node_set(&patch_node_ids, &boundary_node_map) else {
+            continue;
+        };
+        let Some(point) =
+            patch_steiner_point_inside_cavity(surface_point, cavity_centroid, &boundary_triangles)
+        else {
+            continue;
+        };
+        while node_points.contains_key(&next_node_id) {
+            next_node_id = next_node_id.saturating_add(1);
+        }
+        node_points.insert(next_node_id, point);
+        node_ids.push(next_node_id);
+        diagnostic.steiner_node_count += 1;
+        next_node_id = next_node_id.saturating_add(1);
+    }
+    if diagnostic.steiner_node_count == 0 {
+        diagnostic.reason = "no_valid_patch_steiner_points";
+        return Ok(diagnostic);
+    }
+
     let mut candidates = Vec::<ConstrainedCavityRefillTetrahedron>::new();
     for first in 0..node_ids.len() {
         for second in (first + 1)..node_ids.len() {
@@ -70,13 +124,6 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
                         node_ids[third],
                         node_ids[fourth],
                     ];
-                    if !tetrahedron_faces(tetrahedron_node_ids)
-                        .map(sorted_face)
-                        .iter()
-                        .any(|face| boundary_faces.contains(face))
-                    {
-                        continue;
-                    }
                     let points = tetrahedron_node_ids.map(|node_id| node_points[&node_id]);
                     if point_in_closed_triangle_surface(
                         tetrahedron_centroid(points),
@@ -123,7 +170,7 @@ pub(crate) fn diagnostic_boundary_steiner_exact_cover(
         diagnostic.reason = "no_candidate_tetrahedra";
         return Ok(diagnostic);
     }
-    if candidates.len() > 512 {
+    if candidates.len() > 1_024 {
         diagnostic.reason = "over_candidate_limit";
         return Ok(diagnostic);
     }
