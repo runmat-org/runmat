@@ -347,7 +347,7 @@ fn structural_legacy_surrogate_diagnostic(
         code: "FEA_STRUCTURAL_LEGACY_SURROGATE".to_string(),
         severity: FeaDiagnosticSeverity::Warning,
         message: format!(
-            "basis=legacy_surrogate_topology dof_count={} surrogate_element_count={} prep_context_present={} production_eligible=false recommendation=provide_analysis_mesh",
+            "basis=legacy_surrogate_topology dof_count={} surrogate_element_count={} prep_context_present={} solver_ready=false recommendation=provide_analysis_mesh",
             summary.dof_count,
             summary.structural_solid_element_count,
             prep_context_present

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     options::{MeshRefinementOptions, RefinementIndicatorMode, RefinementStrategy},
-    sizing::{MeshSizingField, SizingSample},
+    size::field::{MeshSizingField, SizingSample},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

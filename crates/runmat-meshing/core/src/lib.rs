@@ -1,34 +1,45 @@
 pub mod adaptive;
+#[path = "contracts/artifact.rs"]
 pub mod artifact;
+#[path = "contracts/backend.rs"]
 pub mod backend;
+#[path = "fixtures/benchmark.rs"]
 pub mod benchmark;
+#[path = "contracts/boundary.rs"]
 pub mod boundary;
-pub mod boundary_recovery_queue;
-pub mod cad_eval;
-pub mod cad_topology;
-pub mod constrained_cavity;
-pub mod curve;
+pub use runmat_meshing_cad as cad;
+pub mod contracts;
+pub use runmat_meshing_curve as curve;
 pub mod evidence;
+#[path = "visualization/field_mapping.rs"]
 pub mod field_mapping;
-pub mod local_tet_flip;
+pub mod fixtures;
+pub use runmat_meshing_opt as opt;
+#[path = "contracts/options.rs"]
 pub mod options;
+pub mod plc;
+#[path = "quality/predicate.rs"]
 pub mod predicate;
-pub mod production;
+#[path = "contracts/provenance.rs"]
 pub mod provenance;
 pub mod quality;
-pub mod sizing;
-pub mod sliver_recovery;
-pub mod source_topology;
+pub use runmat_meshing_size as size;
+pub mod solid;
+pub mod source_topology {
+    pub use runmat_meshing_cad::topology::{
+        extract_source_topology, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
+        SourceTopologyModel, SourceTopologyVertex,
+    };
+}
+#[path = "quality/spatial_index.rs"]
 pub mod spatial_index;
-pub mod surface;
-pub mod surface_recovery;
-pub mod surface_validate;
-pub mod tet_candidate;
+pub use runmat_meshing_surface as surface;
+pub mod tet;
+#[path = "quality/tolerance.rs"]
 pub mod tolerance;
+#[path = "contracts/topology.rs"]
 pub mod topology;
 pub mod validation;
-pub mod volume;
-pub mod volume_candidate;
 
 pub use adaptive::{
     build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
@@ -61,30 +72,24 @@ pub use benchmark::{
     MESH_BENCHMARK_SCHEMA_VERSION, MESH_BENCHMARK_SUITE_SCHEMA_VERSION,
 };
 pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
-pub use boundary_recovery_queue::{
-    build_boundary_recovery_queue, BoundaryRecoveryPriority, BoundaryRecoveryQueue,
-    BoundaryRecoveryQueueError, BoundaryRecoveryQueueItem, BoundaryRecoveryReason,
-};
-pub use cad_eval::{
+pub use cad::eval::{
     build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
     summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,
     CadEvaluationSource, CadFaceEvaluationFrame, CadFaceEvaluationRequest,
     CadFaceEvaluatorProvider, CadFaceProjection, NoopCadFaceEvaluatorProvider,
 };
-pub use cad_topology::{
+pub use cad::topology::{
     build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError,
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
 };
-pub use constrained_cavity::{
-    constrained_cavity_from_selected_tets, evaluate_constrained_cavity_refill_candidates,
-    generate_constrained_cavity_refill_candidates, split_constrained_cavity_boundary_face,
-    split_constrained_cavity_boundary_faces, validate_constrained_cavity,
-    validate_constrained_cavity_boundary_preserved, validate_constrained_cavity_refill_volume,
-    ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityBoundarySplitError,
-    ConstrainedCavityExtractionError, ConstrainedCavityNode, ConstrainedCavityRefill,
-    ConstrainedCavityRefillError, ConstrainedCavityRefillEvaluation,
-    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTet, ConstrainedCavityValidationError,
-    ConstrainedCavityValidationReport,
+pub use contracts::{
+    validate_meshing_stage_order, CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract,
+    CadModel, CadShellContract, CadVertexContract, CadVolumeContract, CurveMesh, CurveMeshElement,
+    CurveMeshNode, MeshingStage, MeshingStageArtifacts, MeshingStageContractError, PlcFacet,
+    PlcNode, PlcProtectedEdge, PlcValidationSummary, ProtectedBoundaryComplex, SizingFieldContract,
+    SolveReadinessReport, StageEvidence, StageEvidenceStatus, SurfaceMesh, SurfaceMeshNode,
+    SurfaceMeshTriangle, Tet4Element, TetBoundaryFace, TetMesh, TetMeshNode, TopologyEntityId,
+    MESHING_CONTRACT_SCHEMA_VERSION,
 };
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
@@ -102,10 +107,10 @@ pub use field_mapping::{
     map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,
     BoundaryNodeVectorValue, FieldMappingError,
 };
-pub use local_tet_flip::{
-    evaluate_local_tet_flip_quality, local_tet_boundary_faces, three_to_two_edge_flip_candidate,
-    two_to_three_face_flip_candidate, LocalTet, LocalTetFlipCandidate, LocalTetFlipError,
-    LocalTetFlipKind, LocalTetFlipQualityReport, LocalTetFlipQualityThresholds,
+pub use opt::sliver::recovery::{
+    classify_sliver_tets, evaluate_sliver_removal, SliverClassification,
+    SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
+    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetQuality,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
@@ -120,43 +125,69 @@ pub use predicate::{
     triangle_area, triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3,
     Triangle3,
 };
-pub use production::{
-    generate_production_analysis_mesh, generate_production_analysis_mesh_with_cad_evaluator,
-    generate_production_analysis_mesh_with_sizing,
-    generate_production_analysis_mesh_with_sizing_and_cad_evaluator, prepare_production_mesh,
-    prepare_production_mesh_with_cad_evaluator, ProductionMeshError, ProductionMeshPreparation,
-};
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
+pub use quality::boundary::{
+    evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
+    BoundaryQualityCandidateError, BoundaryQualityCandidateEvaluation,
+    BoundaryQualityCandidateOptions, BoundaryQualityCandidateRejectionReason,
+};
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
-pub use sizing::{
+pub use size::field::{
     AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
     SizingSampleRejection,
 };
-pub use sliver_recovery::{
-    classify_sliver_tets, evaluate_sliver_removal, SliverClassification,
-    SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
-    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetQuality,
+pub use solid::{
+    generate_solid_analysis_mesh, generate_solid_analysis_mesh_with_cad_evaluator,
+    generate_solid_analysis_mesh_with_sizing,
+    generate_solid_analysis_mesh_with_sizing_and_cad_evaluator, prepare_solid_mesh,
+    prepare_solid_mesh_with_cad_evaluator, SolidMeshError, SolidMeshPreparation,
 };
 pub use source_topology::{
-    extract_source_topology, source_topology_from_boundary_input, SourceTopologyEdge,
-    SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
+    extract_source_topology, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
+    SourceTopologyModel, SourceTopologyVertex,
 };
 pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex};
+pub use surface::recovery::{
+    validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
+};
+pub use surface::validate::{
+    validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
+    SurfaceValidationReport,
+};
 pub use surface::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves, discretize_topology_surfaces,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
     SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
-pub use surface_recovery::{
-    validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
+pub use tet::cavity::{
+    constrained_cavity_from_refill_tet_component, constrained_cavity_from_selected_tets,
+    evaluate_constrained_cavity_refill_candidates, flip_refill_tets_across_shared_face,
+    flip_refill_tets_around_shared_edge, generate_constrained_cavity_component_steiner_nodes,
+    generate_constrained_cavity_refill_candidates, retriangulate_constrained_cavity_from_nodes,
+    split_constrained_cavity_boundary_face, split_constrained_cavity_boundary_face_at_barycentric,
+    split_constrained_cavity_boundary_face_at_centroid, split_constrained_cavity_boundary_faces,
+    split_constrained_cavity_boundary_faces_at_centroids,
+    split_refill_tets_across_shared_face_at_barycentric, validate_constrained_cavity,
+    validate_constrained_cavity_boundary_preserved, validate_constrained_cavity_refill_volume,
+    ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityBoundaryFaceSplitError,
+    ConstrainedCavityBoundarySplitError, ConstrainedCavityExtractionError, ConstrainedCavityNode,
+    ConstrainedCavityRefill, ConstrainedCavityRefillError, ConstrainedCavityRefillEvaluation,
+    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTet,
+    ConstrainedCavityRefillTetFlipError, ConstrainedCavityRefillTetSplitError,
+    ConstrainedCavityValidationError, ConstrainedCavityValidationReport,
 };
-pub use surface_validate::{
-    validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
-    SurfaceValidationReport,
+pub use tet::reconnect::{
+    evaluate_local_tet_flip_quality, local_tet_boundary_faces, three_to_two_edge_flip_candidate,
+    two_to_three_face_flip_candidate, LocalTet, LocalTetFlipCandidate, LocalTetFlipError,
+    LocalTetFlipKind, LocalTetFlipQualityReport, LocalTetFlipQualityThresholds,
 };
-pub use tet_candidate::{
-    form_tet_candidates, TetCandidate, TetCandidateError, TetCandidateNode, TetCandidateNodeSource,
-    TetCandidateOptions, TetCandidateSet, TetRecoveryReport,
+pub use tet::recover::boundary_queue::{
+    build_boundary_recovery_queue, BoundaryRecoveryPriority, BoundaryRecoveryQueue,
+    BoundaryRecoveryQueueError, BoundaryRecoveryQueueItem, BoundaryRecoveryReason,
+};
+pub use tet::structured_grid::{
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
+    VolumeMesher,
 };
 pub use tolerance::MeshingTolerance;
 pub use topology::{BoundaryElementKind, VolumeElementKind};
@@ -164,14 +195,6 @@ pub use validation::{
     analysis_mesh_validation_error_code, validate_analysis_mesh,
     validate_analysis_mesh_with_options, volume_component_count, AnalysisMeshValidationError,
     AnalysisMeshValidationOptions,
-};
-pub use volume::{
-    generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
-    VolumeMesher,
-};
-pub use volume_candidate::{
-    prepare_volume_candidates, VolumeCandidateComponent, VolumeCandidateError,
-    VolumeCandidateOptions, VolumeCandidateSet,
 };
 
 use runmat_geometry_core::{GeometryAsset, MeshKind};

@@ -2058,7 +2058,7 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
             AnalysisNonlinearRunOptions {
                 quality_policy: policy,
                 max_newton_iters: 3,
-                ..AnalysisNonlinearRunOptions::production_recommended()
+                ..AnalysisNonlinearRunOptions::solid_recommended()
             },
             OperationContext::new(
                 Some(format!("trace-contract-nonlinear-hard-policy-{policy:?}")),
@@ -2088,7 +2088,7 @@ fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(Some("trace-contract-prep-ref-1".to_string()), None),
     )
@@ -2144,7 +2144,7 @@ fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(Some("trace-contract-prep-stale-5".to_string()), None),
     )

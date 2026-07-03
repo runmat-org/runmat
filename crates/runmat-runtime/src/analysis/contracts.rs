@@ -715,7 +715,7 @@ impl AnalysisTransientRunOptions {
         Self::default()
     }
 
-    pub fn production_recommended() -> Self {
+    pub fn solid_recommended() -> Self {
         Self {
             quality_policy: QualityPolicy::Balanced,
             deterministic_mode: true,
@@ -856,7 +856,7 @@ impl AnalysisNonlinearRunOptions {
         }
     }
 
-    pub fn production_recommended() -> Self {
+    pub fn solid_recommended() -> Self {
         Self {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,

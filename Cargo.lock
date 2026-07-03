@@ -5632,12 +5632,82 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-meshing-core"
+name = "runmat-meshing-cad"
 version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
  "serde",
+]
+
+[[package]]
+name = "runmat-meshing-core"
+version = "0.5.0"
+dependencies = [
+ "runmat-geometry-core",
+ "runmat-meshing-cad",
+ "runmat-meshing-curve",
+ "runmat-meshing-opt",
+ "runmat-meshing-size",
+ "runmat-meshing-surface",
+ "serde",
  "serde_json",
+]
+
+[[package]]
+name = "runmat-meshing-curve"
+version = "0.5.0"
+dependencies = [
+ "runmat-meshing-cad",
+ "serde",
+]
+
+[[package]]
+name = "runmat-meshing-evidence"
+version = "0.5.0"
+dependencies = [
+ "runmat-meshing-core",
+ "serde",
+]
+
+[[package]]
+name = "runmat-meshing-opt"
+version = "0.5.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "runmat-meshing-plc"
+version = "0.5.0"
+dependencies = [
+ "runmat-meshing-core",
+ "serde",
+]
+
+[[package]]
+name = "runmat-meshing-size"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "runmat-meshing-surface"
+version = "0.5.0"
+dependencies = [
+ "runmat-geometry-core",
+ "runmat-meshing-cad",
+ "runmat-meshing-curve",
+ "serde",
+]
+
+[[package]]
+name = "runmat-meshing-tet"
+version = "0.5.0"
+dependencies = [
+ "runmat-meshing-core",
+ "serde",
 ]
 
 [[package]]

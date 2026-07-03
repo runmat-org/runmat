@@ -1,0 +1,12 @@
+[package]
+name = "runmat-meshing-opt"
+version = "0.5.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Mesh optimization stages for RunMat meshing"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }

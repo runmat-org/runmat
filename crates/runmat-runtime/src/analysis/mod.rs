@@ -9326,7 +9326,8 @@ pub fn analysis_run_linear_static_with_options(
             ),
             analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
             analysis_mesh: analysis_mesh.clone(),
-            require_analysis_mesh_for_solid: options.analysis_mesh_artifact_path.is_some(),
+            require_analysis_mesh_for_solid: options.analysis_mesh_artifact_path.is_some()
+                || prep_context.is_none(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -9806,7 +9807,7 @@ fn legacy_surrogate_mesh_basis_reasons(
     }
     vec![QualityReason {
         code: QualityReasonCode::LegacySurrogateMeshBasis,
-        detail: "linear static structural result used the legacy prep/surrogate mesh basis; provide a solid analysis mesh for production-eligible solid FEA".to_string(),
+        detail: "linear static structural result used the legacy prep/surrogate mesh basis; provide a solver-ready solid analysis mesh".to_string(),
     }]
 }
 
@@ -10462,7 +10463,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     if result_quality != QualityGate::Pass {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticSolveQualityLow,
-            detail: "electromagnetic static solve quality below production target".to_string(),
+            detail: "electromagnetic static solve quality below target".to_string(),
         });
     }
     if em_spread_breach {
@@ -13810,17 +13811,17 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     mesh: &AnalysisMeshArtifact,
 ) -> AnalysisMeshValidationOptions {
     let mut validation = analysis_mesh_validation_options_for_study(spec, options);
-    if mesh.backend.backend != "production" {
+    if !is_solid_mesh_backend(mesh) {
         validation.min_boundary_edge_recovery_ratio = 0.0;
     } else if validation.max_volume_component_count.is_none()
-        && mesh.backend.volume_candidate_count > 0
+        && mesh.backend.volume_component_count > 0
     {
-        validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
+        validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
     }
-    if mesh.backend.backend == "production" {
+    if is_solid_mesh_backend(mesh) {
         validation.require_no_fan_fallback = true;
         validation.require_no_unrepaired_exact_quality = true;
-        validation.coverage_sample_points_m = production_body_coverage_sample_points(mesh);
+        validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
     }
     validation
@@ -13848,23 +13849,27 @@ fn analysis_mesh_validation_options_for_loaded_artifact(
         min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
         ..AnalysisMeshValidationOptions::default()
     };
-    if mesh.backend.backend != "production" {
+    if !is_solid_mesh_backend(mesh) {
         validation.min_boundary_edge_recovery_ratio = 0.0;
     } else if validation.max_volume_component_count.is_none()
-        && mesh.backend.volume_candidate_count > 0
+        && mesh.backend.volume_component_count > 0
     {
-        validation.max_volume_component_count = Some(mesh.backend.volume_candidate_count);
+        validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
     }
-    if mesh.backend.backend == "production" {
+    if is_solid_mesh_backend(mesh) {
         validation.require_no_fan_fallback = true;
         validation.require_no_unrepaired_exact_quality = true;
-        validation.coverage_sample_points_m = production_body_coverage_sample_points(mesh);
+        validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
     }
     Ok(validation)
 }
 
-fn production_body_coverage_sample_points(mesh: &AnalysisMeshArtifact) -> Vec<[f64; 3]> {
+fn is_solid_mesh_backend(mesh: &AnalysisMeshArtifact) -> bool {
+    mesh.backend.backend == "solid"
+}
+
+fn solid_body_coverage_sample_points(mesh: &AnalysisMeshArtifact) -> Vec<[f64; 3]> {
     mesh.nodes
         .iter()
         .filter(|node| {
@@ -14585,7 +14590,7 @@ fn initial_boundary_focus_sizing_field(
         return None;
     }
     if runmat_meshing_core::select_volume_backend(options).selected
-        != runmat_meshing_core::MeshBackendKind::Production
+        != runmat_meshing_core::MeshBackendKind::Solid
     {
         return None;
     }
@@ -15471,9 +15476,9 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
         inserted_breakpoint_count += application.inserted_breakpoint_count;
     }
     let accepted_requested = mesh.backend.tet_accepted_requested_refinement_point_count;
-    let accepted_candidate = mesh
+    let accepted_location = mesh
         .backend
-        .tet_accepted_requested_refinement_candidate_count;
+        .tet_accepted_requested_refinement_location_count;
     let accepted_surrogate = mesh
         .backend
         .tet_accepted_requested_refinement_surrogate_point_count;
@@ -15507,7 +15512,7 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
         },
         "requested_tet_refinement": {
             "requested_count": mesh.backend.tet_requested_refinement_point_count,
-            "accepted_candidate_count": accepted_candidate,
+            "accepted_location_count": accepted_location,
             "accepted_count": accepted_requested,
             "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
             "accepted_surrogate_count": accepted_surrogate,

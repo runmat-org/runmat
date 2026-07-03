@@ -1248,7 +1248,7 @@ fn analysis_create_model_returns_v1_envelope() {
 fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let coarse = AnalysisTransientRunOptions::coarse();
     let balanced = AnalysisTransientRunOptions::balanced();
-    let production = AnalysisTransientRunOptions::production_recommended();
+    let solid = AnalysisTransientRunOptions::solid_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
     assert!(coarse.step_count < balanced.step_count);
@@ -1260,10 +1260,10 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     assert!(coarse.time_step_s > balanced.time_step_s);
     assert!(balanced.time_step_s > high_accuracy.time_step_s);
 
-    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
-    assert!(production.deterministic_mode);
-    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
-    assert_eq!(production.dt_bucket_rel_tolerance, 0.01);
+    assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
+    assert!(solid.deterministic_mode);
+    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
+    assert_eq!(solid.dt_bucket_rel_tolerance, 0.01);
 }
 
 #[test]
@@ -1282,26 +1282,26 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
 fn nonlinear_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let coarse = AnalysisNonlinearRunOptions::coarse();
     let balanced = AnalysisNonlinearRunOptions::balanced();
-    let production = AnalysisNonlinearRunOptions::production_recommended();
+    let solid = AnalysisNonlinearRunOptions::solid_recommended();
     let high_accuracy = AnalysisNonlinearRunOptions::high_accuracy();
 
     assert!(coarse.increment_count < balanced.increment_count);
-    assert!(balanced.increment_count <= production.increment_count);
-    assert!(production.increment_count <= high_accuracy.increment_count);
+    assert!(balanced.increment_count <= solid.increment_count);
+    assert!(solid.increment_count <= high_accuracy.increment_count);
 
     assert!(coarse.max_newton_iters < balanced.max_newton_iters);
-    assert!(balanced.max_newton_iters <= production.max_newton_iters);
-    assert!(production.max_newton_iters <= high_accuracy.max_newton_iters);
+    assert!(balanced.max_newton_iters <= solid.max_newton_iters);
+    assert!(solid.max_newton_iters <= high_accuracy.max_newton_iters);
 
     assert!(coarse.tolerance > balanced.tolerance);
-    assert!(balanced.tolerance >= production.tolerance);
-    assert!(production.tolerance >= high_accuracy.tolerance);
+    assert!(balanced.tolerance >= solid.tolerance);
+    assert!(solid.tolerance >= high_accuracy.tolerance);
 
-    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
-    assert!(production.deterministic_mode);
-    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
-    assert!(production.line_search);
-    assert!(production.max_line_search_backtracks >= balanced.max_line_search_backtracks);
+    assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
+    assert!(solid.deterministic_mode);
+    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
+    assert!(solid.line_search);
+    assert!(solid.max_line_search_backtracks >= balanced.max_line_search_backtracks);
 }
 
 #[test]
@@ -2213,8 +2213,8 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .as_array()
         .expect("initial volume elements")
         .len();
-    let production_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("production");
-    if production_mesh {
+    let solid_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("solid");
+    if solid_mesh {
         assert!(refined_volume_element_count >= initial_volume_element_count);
         assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
             .as_array()
@@ -2255,7 +2255,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
         Some(refined_evidence_path.as_str())
     );
-    if production_mesh {
+    if solid_mesh {
         assert_eq!(
             run_payload["refinement_effect"]["topology_changed"].as_bool(),
             Some(false)
@@ -2313,33 +2313,33 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
 }
 
 #[test]
-fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
+fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("run-study-production-analysis-mesh");
+    let root = temp_artifact_root("run-study-solid-analysis-mesh");
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Production;
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
     mesh_options.refinement.max_iterations = 0;
     spec.mesh_options = Some(mesh_options);
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("study run should succeed with production mesh backend");
+        .expect("study run should succeed with solid mesh backend");
 
     let artifact_path = envelope
         .data
         .analysis_mesh_artifact_path
         .as_ref()
-        .expect("study run should persist production analysis mesh artifact path");
+        .expect("study run should persist solid analysis mesh artifact path");
     let evidence_path = envelope
         .data
         .analysis_mesh_evidence_artifact_path
         .as_ref()
-        .expect("study run should persist production mesh evidence artifact path");
+        .expect("study run should persist solid mesh evidence artifact path");
     let payload: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
             .expect("parse analysis mesh artifact");
@@ -2349,7 +2349,7 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
     let von_mises = persisted
         .run
         .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("production run should persist von Mises field");
+        .expect("solid mesh run should persist von Mises field");
     assert_eq!(
         von_mises.shape,
         vec![payload["mesh"]["volume_elements"]
@@ -2359,14 +2359,16 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
     );
     assert_eq!(
         payload["mesh"]["provenance"]["algorithm"].as_str(),
-        Some("production_topology_tet_candidate/v1")
+        Some("plc_tet/v1")
     );
-    assert!(
-        payload["mesh"]["volume_elements"]
-            .as_array()
-            .expect("volume elements")
-            .len()
-            > 12
+    let volume_element_count = payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .len();
+    assert!(volume_element_count > 0);
+    assert_eq!(
+        payload["mesh"]["backend"]["tet_element_count"].as_u64(),
+        Some(volume_element_count as u64)
     );
     assert_eq!(
         payload["mesh"]["backend"]["tet_fan_fallback_component_count"].as_u64(),
@@ -2377,7 +2379,7 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
         Some(1.0)
     );
     assert_eq!(
-        payload["mesh"]["backend"]["volume_candidate_count"].as_u64(),
+        payload["mesh"]["backend"]["volume_component_count"].as_u64(),
         Some(1)
     );
     let evidence_payload: serde_json::Value =
@@ -2385,7 +2387,7 @@ fn analysis_run_study_persists_production_backend_analysis_mesh_artifact() {
             .expect("parse mesh evidence artifact");
     assert_eq!(
         evidence_payload["mesh_evidence"]["backend"]["backend"].as_str(),
-        Some("production")
+        Some("solid")
     );
     assert_eq!(
         evidence_payload["mesh_evidence"]["validation"]["volume_component_count"].as_u64(),
@@ -2493,12 +2495,12 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
 }
 
 #[test]
-fn generated_production_mesh_validation_requires_strict_recovery() {
+fn generated_solid_mesh_validation_requires_strict_recovery() {
     let spec = sample_linear_static_study_spec();
     let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     let mut mesh = minimal_analysis_mesh();
-    mesh.backend.backend = "production".to_string();
-    mesh.backend.volume_candidate_count = 2;
+    mesh.backend.backend = "solid".to_string();
+    mesh.backend.volume_component_count = 2;
     mesh.nodes[0].provenance.push(MeshEntityProvenance {
         source_geometry_id: "geo:test".to_string(),
         source_geometry_revision: 1,
@@ -2517,11 +2519,11 @@ fn generated_production_mesh_validation_requires_strict_recovery() {
 }
 
 #[test]
-fn generated_production_mesh_validation_caps_body_coverage_samples() {
+fn generated_solid_mesh_validation_caps_body_coverage_samples() {
     let spec = sample_linear_static_study_spec();
     let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
     let mut mesh = minimal_analysis_mesh();
-    mesh.backend.backend = "production".to_string();
+    mesh.backend.backend = "solid".to_string();
     mesh.nodes = (0..70)
         .map(|index| {
             let mut node = analysis_mesh_node(index + 1, [index as f64 * 1.0e-3, 0.0, 0.0]);
@@ -3953,7 +3955,7 @@ fn analysis_results_compare_reports_typed_deltas() {
     let candidate = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect("candidate nonlinear run should succeed");
@@ -4555,7 +4557,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -5637,6 +5639,36 @@ fn analysis_mesh_missing_evidence_rejects_direct_run() {
     assert!(reason.detail.contains("mesh_evidence_artifact_path"));
 
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn direct_solid_run_without_analysis_mesh_fails_closed() {
+    let _guard = analysis_test_guard();
+    let err = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-direct-solid-run-requires-analysis-mesh".to_string()),
+            None,
+        ),
+    )
+    .expect_err("direct solid solve must require an analysis mesh");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
+    assert!(err.message.contains("require an analysis mesh"));
 }
 
 #[test]
@@ -7357,7 +7389,7 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
     ];
     mesh.backend.tet_requested_refinement_point_count = 4;
     mesh.backend
-        .tet_accepted_requested_refinement_candidate_count = 4;
+        .tet_accepted_requested_refinement_location_count = 4;
     mesh.backend.tet_accepted_requested_refinement_point_count = 3;
     mesh.backend
         .tet_accepted_requested_refinement_surrogate_point_count = 2;
@@ -7410,7 +7442,7 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(3)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["accepted_candidate_count"].as_u64(),
+        summary["requested_tet_refinement"]["accepted_location_count"].as_u64(),
         Some(4)
     );
     assert_eq!(
@@ -9279,7 +9311,7 @@ fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -9310,7 +9342,7 @@ fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -9363,7 +9395,7 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -9458,7 +9490,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -9591,7 +9623,7 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -10806,7 +10838,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
