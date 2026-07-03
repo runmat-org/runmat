@@ -1,8 +1,8 @@
-use runmat_meshing_cad::CadFaceEvaluationFrame;
+use runmat_meshing_cad::{project_to_face, CadFaceEvaluationFrame};
 
 use crate::math::{dot, sub};
 
-use super::{boundary_triangulation_points, FaceCurveSegment, FaceTriangulationPoint, SurfaceNode};
+use super::{boundary::FaceCurveSegment, FaceTriangulationPoint, SurfaceNode};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct TriangulationPoint {
@@ -110,6 +110,26 @@ pub(super) fn boundary_loop_polygons(
         })
         .filter(|polygon| polygon.len() >= 3 && polygon_area_2d(polygon).abs() > f64::EPSILON)
         .collect()
+}
+
+pub(super) fn boundary_triangulation_points(
+    frame: &CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &[SurfaceNode],
+) -> Vec<FaceTriangulationPoint> {
+    let mut points = Vec::<FaceTriangulationPoint>::new();
+    for segment in segments {
+        for node_id in segment.node_ids {
+            if points.iter().any(|point| point.node_id == node_id) {
+                continue;
+            }
+            points.push(FaceTriangulationPoint {
+                node_id,
+                uv: project_to_face(frame, nodes[node_id as usize].coordinates_m).uv,
+            });
+        }
+    }
+    points
 }
 
 fn boundary_loop_polygon(points: &[FaceTriangulationPoint]) -> Vec<[f64; 2]> {

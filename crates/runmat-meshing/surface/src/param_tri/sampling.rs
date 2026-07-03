@@ -6,11 +6,12 @@ use runmat_meshing_cad::{project_to_face, CadFaceEvaluationFrame, SourceTopology
 use crate::math::{dot, sub};
 
 use super::{
+    boundary::FaceCurveSegment,
     geometry::{
         distance2_2d, finite_point2, finite_point3, point_in_triangle_3d,
         point_in_trimmed_domain_2d, sorted_node_pair,
     },
-    FaceCurveSegment, FaceTriangulationPoint, SurfaceElement, SurfaceNode,
+    FaceTriangulationPoint, SurfaceElement, SurfaceNode,
 };
 
 const FACE_AREA_RECOVERY_TOLERANCE: f64 = 1.0e-8;
