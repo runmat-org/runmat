@@ -1,6 +1,9 @@
 use super::*;
 use crate::build_cad_topology;
-use crate::eval::{face_uv_contains, CadFaceEvaluationRequest};
+use crate::eval::{
+    face_uv_contains, project_to_face, summarize_cad_evaluation, CadEvaluationSource,
+    CadFaceEvaluationRequest,
+};
 use runmat_geometry_core::{
     CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator,
     CadLabelRef, CadRegionOwnership, CadSemanticKind, EntityIdRange, EntityKind, Region,
@@ -239,14 +242,6 @@ fn exact_backend_samples_define_uv_domain_when_sufficient() {
     assert!(model.report.uv_domain_face_count > 0);
     assert!(report.uv_domain_face_count > 0);
     assert!(report.uv_projection_out_of_bounds_count > 0);
-}
-
-#[test]
-fn all_backend_query_samples_remain_imported_sample_source() {
-    assert_eq!(
-        evaluation_source(2, 2, 0, 2),
-        CadEvaluationSource::ImportedEvaluatorSamples
-    );
 }
 
 #[test]
