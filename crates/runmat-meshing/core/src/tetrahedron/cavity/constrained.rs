@@ -35,6 +35,7 @@ mod topology;
 mod types;
 mod validation;
 
+#[cfg(test)]
 use boundary_completion::*;
 use boundary_nodes::{
     boundary_node_coordinates, candidate_respects_protected_boundary_distance,

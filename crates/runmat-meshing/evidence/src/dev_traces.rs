@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{artifact::AnalysisMeshArtifact, validation::AnalysisMeshValidationOptions};
+use runmat_meshing_core::{
+    artifact::AnalysisMeshArtifact, validation::AnalysisMeshValidationOptions,
+};
 
 use super::{build_mesh_evidence_artifact, MeshEvidenceArtifact};
 

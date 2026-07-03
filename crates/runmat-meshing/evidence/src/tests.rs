@@ -1,5 +1,5 @@
 use super::*;
-use crate::{
+use runmat_meshing_core::{
     adaptive::{
         AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
         RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
@@ -17,6 +17,7 @@ use crate::{
     },
     topology::{BoundaryElementKind, VolumeElementKind},
 };
+use std::collections::BTreeMap;
 
 #[test]
 fn evidence_summarizes_mesh_without_raw_sizing_samples() {

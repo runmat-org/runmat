@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::BTreeSet;
@@ -19,7 +20,9 @@ use super::{
 };
 
 mod apex_candidates;
-pub(super) use apex_candidates::{local_cap_apex_candidates, LocalCapApexCandidate};
+pub(super) use apex_candidates::local_cap_apex_candidates;
+#[cfg(test)]
+pub(super) use apex_candidates::LocalCapApexCandidate;
 
 #[cfg(test)]
 pub(super) fn best_local_cap_for_face(

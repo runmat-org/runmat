@@ -1,3 +1,5 @@
+extern crate self as runmat_meshing_core;
+
 pub mod adaptive;
 #[path = "contracts/artifact.rs"]
 pub mod artifact;
@@ -10,6 +12,7 @@ pub mod boundary;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub use runmat_meshing_curve as curve;
+#[path = "../../evidence/src/lib.rs"]
 pub mod evidence;
 #[path = "visualization/field_mapping.rs"]
 pub mod field_mapping;

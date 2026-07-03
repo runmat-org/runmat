@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::{
+use runmat_meshing_core::{
     adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus},
     artifact::{AnalysisMeshArtifact, AnalysisVolumeElement},
     topology::VolumeElementKind,
@@ -9,7 +9,7 @@ use crate::{
 
 pub const MODULE_PURPOSE: &str = "compact solid evidence summaries";
 
-pub use crate::contracts::StageEvidence;
+pub use runmat_meshing_core::contracts::StageEvidence;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshQualityEvidence {

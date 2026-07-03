@@ -5667,6 +5667,7 @@ version = "0.5.0"
 dependencies = [
  "runmat-meshing-core",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
