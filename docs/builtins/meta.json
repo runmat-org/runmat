@@ -44692,6 +44692,173 @@
       ]
     },
     {
+      "name": "lasso",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = lasso(X, y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per row of X."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            }
+          ]
+        },
+        {
+          "label": "B = lasso(X, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per row of X."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Lambda, Alpha, Standardize, Intercept, Weights, CV, NumLambda, LambdaRatio, MaxIter, and RelTol."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            }
+          ]
+        },
+        {
+          "label": "[B, FitInfo] = lasso(X, y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per row of X."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            },
+            {
+              "name": "FitInfo",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit information structure containing Lambda, Alpha, Intercept, DF, MSE, and related fields."
+            }
+          ]
+        },
+        {
+          "label": "[B, FitInfo] = lasso(X, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector with one value per row of X."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Lambda, Alpha, Standardize, Intercept, Weights, CV, NumLambda, LambdaRatio, MaxIter, and RelTol."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            },
+            {
+              "name": "FitInfo",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit information structure containing Lambda, Alpha, Intercept, DF, MSE, and related fields."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LASSO.INVALID_ARGUMENT",
+          "identifier": "RunMat:lasso:InvalidArgument",
+          "when": "Inputs, option names, option values, dimensions, or tolerances are malformed.",
+          "message": "lasso: invalid argument"
+        },
+        {
+          "code": "RM.LASSO.CONVERGENCE",
+          "identifier": "RunMat:lasso:Convergence",
+          "when": "Coordinate descent cannot make numerical progress for the supplied data.",
+          "message": "lasso: convergence failure"
+        },
+        {
+          "code": "RM.LASSO.INTERNAL",
+          "identifier": "RunMat:lasso:Internal",
+          "when": "RunMat cannot construct lasso outputs.",
+          "message": "lasso: internal error"
+        }
+      ]
+    },
+    {
       "name": "lcm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
