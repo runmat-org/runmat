@@ -9373,7 +9373,15 @@ pub fn analysis_run_linear_static_with_options(
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
 
     match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi | PreconditionerMode::Ilu => {}
+        PreconditionerMode::Auto | PreconditionerMode::Jacobi => {}
+        PreconditionerMode::Ilu => {
+            if run.preconditioner != "ilu0" {
+                fallback_events.push(format!(
+                    "SOLVER_PRECONDITIONER_FALLBACK:requested=ilu0:using={}",
+                    run.preconditioner
+                ));
+            }
+        }
         PreconditionerMode::Amg => {
             fallback_events
                 .push("SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string());

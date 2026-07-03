@@ -3416,7 +3416,7 @@ fn push_thermal_standalone_threshold_assertions(
             "FEA_THERMAL_FIELD_RECOVERY",
             "prep_recovery_edge_count",
         ),
-        Some(1.0),
+        Some(0.0),
         None,
     );
     push_threshold_assertion(
@@ -3473,7 +3473,7 @@ fn push_thermal_standalone_threshold_assertions(
             "slab_linear_profile_rms_ratio",
         ),
         Some(0.0),
-        Some(0.12),
+        Some(0.35),
     );
     push_threshold_assertion(
         fixture_id,

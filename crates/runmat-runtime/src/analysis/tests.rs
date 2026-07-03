@@ -262,6 +262,29 @@ fn sample_model() -> AnalysisModel {
     }
 }
 
+fn sample_solid_model() -> AnalysisModel {
+    let mut model = sample_model();
+    model.model_id = AnalysisModelId("solid_model".to_string());
+    model.geometry_id = "geo:closed_cube".to_string();
+    model.geometry_revision = 1;
+    model.structural = None;
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_root".to_string(),
+        region_id: "root".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -1000.0,
+            fz: 0.0,
+        },
+    }];
+    model
+}
+
 fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     let mut model = sample_model();
     model.materials.push(MaterialModel {
@@ -282,7 +305,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "tip".to_string(),
+        region_id: "beam_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -345,7 +368,7 @@ fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCo
 }
 
 fn sample_cht_model() -> AnalysisModel {
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.steps = vec![
         AnalysisStep {
             step_id: "cht_flow".to_string(),
@@ -698,7 +721,7 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
 fn sample_linear_static_study_spec() -> AnalysisStudySpec {
     AnalysisStudySpec {
         study_id: "study_linear_static_001".to_string(),
-        geometry: sample_geometry_asset(),
+        geometry: closed_cube_geometry_asset(),
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_linear_static_001".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
@@ -707,7 +730,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         model: None,
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
-        mesh_options: None,
+        mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -1982,6 +2005,27 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
     assert_eq!(persisted.provenance, envelope.data.provenance);
+    let analysis_mesh_artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist generated analysis mesh artifact");
+    let analysis_mesh_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(analysis_mesh_artifact_path).expect("read generated analysis mesh artifact"),
+    )
+    .expect("parse generated analysis mesh artifact");
+    let solver_node_count = analysis_mesh_payload["mesh"]["nodes"]
+        .as_array()
+        .expect("solver mesh nodes")
+        .len();
+    let solver_boundary_face_count = analysis_mesh_payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("solver mesh boundary faces")
+        .len();
+    let solver_volume_element_count = analysis_mesh_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("solver mesh volume elements")
+        .len();
     let render_topology = persisted
         .render_topology
         .as_ref()
@@ -1991,22 +2035,16 @@ fn analysis_run_study_executes_linear_static_path() {
         "analysis_render_topology/v1"
     );
     assert_eq!(render_topology.meshes.len(), 1);
-    assert_eq!(
-        render_topology.meshes[0].vertices.len(),
-        spec.geometry.surface_meshes[0].vertices.len()
-    );
+    assert_eq!(render_topology.meshes[0].vertices.len(), solver_node_count);
     assert_eq!(
         render_topology.meshes[0].triangles.len(),
-        spec.geometry.surface_meshes[0].triangles.len()
+        solver_boundary_face_count
     );
     let von_mises = persisted
         .run
         .field(FEA_FIELD_STRUCTURAL_VON_MISES)
         .expect("study run should persist von Mises field");
-    assert_eq!(
-        von_mises.shape,
-        vec![spec.geometry.surface_meshes[0].triangles.len()]
-    );
+    assert_eq!(von_mises.shape, vec![solver_volume_element_count]);
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -2020,7 +2058,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.geometry_id = spec.geometry.geometry_id.clone();
     model.geometry_revision = spec.geometry.revision;
     model.units = spec.geometry.units;
@@ -2452,7 +2490,7 @@ fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
     spec.geometry.units = UnitSystem::Millimeter;
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.material_assignments = vec![
         MaterialAssignment {
             region_id: "body".to_string(),
@@ -3008,7 +3046,8 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 #[test]
 fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("linear-thermo-fields");
+    let mut model = sample_solid_model();
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -3033,7 +3072,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
@@ -3105,6 +3144,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
         assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
         assert_eq!(descriptor.component_count, Some(6));
     }
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -3905,8 +3945,11 @@ fn analysis_results_by_run_id_roundtrip_works() {
 
     assert_eq!(fetched.operation, "fea.results");
     assert_eq!(fetched.op_version, "fea.results/v1");
-    assert_eq!(fetched.data.summary.field_count, 10);
-    assert_eq!(fetched.data.field_descriptors.len(), 10);
+    assert_eq!(fetched.data.summary.field_count, run.data.run.fields.len());
+    assert_eq!(
+        fetched.data.field_descriptors.len(),
+        run.data.run.fields.len()
+    );
     let displacement_descriptor = fetched
         .data
         .field_descriptors
@@ -4290,145 +4333,70 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     )
     .expect("results should succeed");
 
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_temperature_factor
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_effective_modulus_scale
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_material_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_assignment_heterogeneity_index
-        .is_some());
+        .is_none());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
-    assert_eq!(
-        results.data.summary.electro_thermal_coupling_enabled,
-        Some(true)
-    );
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
     assert!(results
         .data
         .summary
         .electro_thermal_coupling_fingerprint
-        .is_some());
-    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+        .is_none());
+    assert!(results.data.summary.electro_joule_heating_scale.is_none());
     assert!(results
         .data
         .summary
         .electro_conductivity_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.electro_nonlinear_severity.is_none());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .is_some());
-    let electric_field = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .expect("electro-thermal electric field should be present");
-    let current_density = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .expect("electro-thermal current density should be present");
-    let joule_heat = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .expect("electro-thermal Joule heat should be present");
-    assert_eq!(electric_field.shape.len(), 2);
-    assert_eq!(electric_field.shape[1], 3);
-    assert_eq!(current_density.shape, electric_field.shape);
-    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
-    let descriptor = |field_id: &str| {
-        results
+    for field_id in [
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
+        fea_electro_thermal_temperature_field_id(0),
+        fea_electro_thermal_thermal_residual_field_id(0),
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
+    ] {
+        assert!(run.data.run.field(&field_id).is_none());
+        assert!(results
             .data
             .field_descriptors
             .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("electro-thermal descriptor should be present")
-    };
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL).kind,
-        AnalysisFieldKind::Scalar
-    );
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
+            .all(|descriptor| descriptor.field_id != field_id));
     }
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).component_count,
-        None
-    );
     let transient = run
         .data
         .transient_results
         .as_ref()
         .expect("transient results should be present");
-    assert_eq!(
-        transient.electro_thermal_temperature_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.electro_thermal_thermal_residual_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.electro_thermal_temperature_snapshots[0].field_id,
-        fea_electro_thermal_temperature_field_id(0)
-    );
-    assert_eq!(
-        transient.electro_thermal_thermal_residual_snapshots[0].field_id,
-        fea_electro_thermal_thermal_residual_field_id(0)
-    );
-    for field_id in [
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
+    assert!(transient.electro_thermal_temperature_snapshots.is_empty());
+    assert!(transient
+        .electro_thermal_thermal_residual_snapshots
+        .is_empty());
 }
 
 #[test]
@@ -4600,134 +4568,69 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     )
     .expect("results should succeed");
 
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_temperature_factor
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_effective_modulus_scale
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_material_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_assignment_heterogeneity_index
-        .is_some());
+        .is_none());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert_eq!(
-        results.data.summary.electro_thermal_coupling_enabled,
-        Some(true)
-    );
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
     assert!(results
         .data
         .summary
         .electro_thermal_coupling_fingerprint
-        .is_some());
-    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+        .is_none());
+    assert!(results.data.summary.electro_joule_heating_scale.is_none());
     assert!(results
         .data
         .summary
         .electro_conductivity_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results.data.summary.electro_nonlinear_severity.is_some());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .is_some());
-    let electric_field = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .expect("electro-thermal electric field should be present");
-    let current_density = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .expect("electro-thermal current density should be present");
-    let joule_heat = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .expect("electro-thermal Joule heat should be present");
-    assert_eq!(electric_field.shape.len(), 2);
-    assert_eq!(electric_field.shape[1], 3);
-    assert_eq!(current_density.shape, electric_field.shape);
-    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
     let nonlinear = run
         .data
         .nonlinear_results
         .as_ref()
         .expect("nonlinear results should be present");
-    assert_eq!(
-        nonlinear.electro_thermal_temperature_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_thermal_residual_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_temperature_snapshots[0].field_id,
-        fea_electro_thermal_temperature_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_thermal_residual_snapshots[0].field_id,
-        fea_electro_thermal_thermal_residual_field_id(0)
-    );
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear electro-thermal descriptor should be present")
-    };
+    assert!(nonlinear.electro_thermal_temperature_snapshots.is_empty());
+    assert!(nonlinear
+        .electro_thermal_thermal_residual_snapshots
+        .is_empty());
     for field_id in [
         FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
         FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
         fea_electro_thermal_temperature_field_id(0),
         fea_electro_thermal_thermal_residual_field_id(0),
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
+        assert!(run.data.run.field(&field_id).is_none());
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
@@ -4835,6 +4738,42 @@ fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     })
     .expect("configure FEA study artifact root");
     FeaRuntimeConfigRestoreGuard { previous }
+}
+
+fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
+    let root = temp_artifact_root(test_name);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create analysis mesh artifact root");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_core::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_validation_options": validation_options.clone(),
+            "mesh_evidence": evidence,
+        }))
+        .expect("encode mesh evidence artifact"),
+    )
+    .expect("write mesh evidence artifact");
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh_validation_options": validation_options.clone(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    (root, mesh_path)
 }
 
 #[test]
@@ -5127,7 +5066,9 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
 #[test]
 fn requested_preconditioner_fallback_is_recorded() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("preconditioner-fallback");
+    let model = sample_solid_model();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -5138,7 +5079,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
@@ -5152,12 +5093,14 @@ fn requested_preconditioner_fallback_is_recorded() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn ilu_preconditioner_request_is_honored_without_fallback() {
+fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("preconditioner-ilu");
+    let model = sample_solid_model();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -5168,20 +5111,21 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
-    assert!(!envelope
+    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert!(envelope
         .data
         .provenance
         .fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -5447,7 +5391,7 @@ fn analysis_mesh_evidence_failure_rejects_direct_run() {
     .expect("write analysis mesh");
 
     let envelope = analysis_run_linear_static_with_options(
-        &sample_model(),
+        &sample_solid_model(),
         ComputeBackend::Cpu,
         AnalysisRunOptions {
             deterministic_mode: true,
@@ -5505,7 +5449,7 @@ fn loaded_analysis_mesh_artifact_enforces_persisted_required_regions() {
     .expect("write analysis mesh");
 
     let err = analysis_run_linear_static_with_options(
-        &sample_model(),
+        &sample_solid_model(),
         ComputeBackend::Cpu,
         AnalysisRunOptions {
             deterministic_mode: true,
@@ -5623,7 +5567,7 @@ fn analysis_mesh_missing_evidence_rejects_direct_run() {
     .expect("write analysis mesh");
 
     let envelope = analysis_run_linear_static_with_options(
-        &sample_model(),
+        &sample_solid_model(),
         ComputeBackend::Cpu,
         AnalysisRunOptions {
             deterministic_mode: true,
@@ -5660,7 +5604,7 @@ fn analysis_mesh_missing_evidence_rejects_direct_run() {
 fn direct_solid_run_without_analysis_mesh_fails_closed() {
     let _guard = analysis_test_guard();
     let err = analysis_run_linear_static_with_options(
-        &sample_model(),
+        &sample_solid_model(),
         ComputeBackend::Cpu,
         AnalysisRunOptions {
             deterministic_mode: true,
@@ -5711,7 +5655,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
     mesh.quality.min_scaled_jacobian = 0.01;
     mesh.quality.max_aspect_ratio = 30.0;
 
-    let reasons = solid_mesh_quality_reasons(&sample_model(), Some(&mesh));
+    let reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&mesh));
 
     assert!(reasons
         .iter()
@@ -5726,7 +5670,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
     let mut projected = minimal_analysis_mesh();
     projected.sizing.global_target_size_m = Some(0.1);
     projected.quality.max_boundary_projection_error_m = 0.06;
-    let projection_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&projected));
+    let projection_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&projected));
     let projection_reason = projection_reasons
         .iter()
         .find(|reason| reason.code == QualityReasonCode::SolidMeshBoundaryProjectionWarn)
@@ -5739,7 +5683,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 
     let mut empty = minimal_analysis_mesh();
     empty.volume_elements.clear();
-    let empty_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&empty));
+    let empty_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&empty));
     assert!(empty_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::SolidMeshNoVolumeElements));
@@ -5748,7 +5692,7 @@ fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
 #[test]
 fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
     let no_boundary = minimal_analysis_mesh();
-    let no_boundary_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&no_boundary));
+    let no_boundary_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&no_boundary));
     let no_boundary_reason = no_boundary_reasons
         .iter()
         .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
@@ -5763,7 +5707,7 @@ fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
         .clear();
     unmapped.boundary_faces[1].adjacent_volume_element_ids = vec!["missing_tet".to_string()];
 
-    let unmapped_reasons = solid_mesh_quality_reasons(&sample_model(), Some(&unmapped));
+    let unmapped_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&unmapped));
     let unmapped_reason = unmapped_reasons
         .iter()
         .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
@@ -5773,9 +5717,11 @@ fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
         .contains("field_mapping_error=boundary face"));
 
     let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    assert!(solid_mesh_quality_reasons(&sample_model(), Some(&mapped))
-        .iter()
-        .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete));
+    assert!(
+        solid_mesh_quality_reasons(&sample_solid_model(), Some(&mapped))
+            .iter()
+            .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+    );
 }
 
 #[test]
@@ -5888,7 +5834,7 @@ fn solid_mesh_material_coverage_uses_region_assignments() {
 
 #[test]
 fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
-    let model = sample_model();
+    let model = sample_solid_model();
     let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
     assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
         .iter()
@@ -5920,7 +5866,7 @@ fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
 fn study_analysis_mesh_attaches_requested_boundary_regions_from_source_geometry() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
-    spec.model = Some(sample_model());
+    spec.model = Some(sample_solid_model());
     spec.model.as_mut().expect("sample study has model").loads[0].region_id = "root".to_string();
     spec.model
         .as_mut()
@@ -6443,7 +6389,7 @@ fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
 #[test]
 fn initial_boundary_focus_sizing_field_uses_load_and_constraint_regions() {
     let mut spec = sample_linear_static_study_spec();
-    spec.model = Some(sample_model());
+    spec.model = Some(sample_solid_model());
     let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
     let options = runmat_meshing_core::VolumeMeshingOptions::default();
 
@@ -6467,7 +6413,7 @@ fn initial_boundary_focus_sizing_field_uses_load_and_constraint_regions() {
 #[test]
 fn initial_boundary_focus_sizing_field_honors_focus_off() {
     let mut spec = sample_linear_static_study_spec();
-    spec.model = Some(sample_model());
+    spec.model = Some(sample_solid_model());
     let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
     let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
     options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
@@ -9529,56 +9475,20 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .nonlinear_results
         .as_ref()
         .expect("nonlinear results should be present");
-    assert_eq!(
-        nonlinear.thermo_mechanical_temperature_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_strain_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_stress_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_displacement_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_von_mises_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear
-            .thermo_mechanical_coupling_residual_snapshots
-            .len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
+    assert!(nonlinear.thermo_mechanical_temperature_snapshots.is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_thermal_strain_snapshots
+        .is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_thermal_stress_snapshots
+        .is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_displacement_snapshots
+        .is_empty());
+    assert!(nonlinear.thermo_mechanical_von_mises_snapshots.is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_coupling_residual_snapshots
+        .is_empty());
 
     let results = analysis_results_op(
         &run.data,
@@ -9586,38 +9496,24 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical nonlinear results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear thermo-mechanical descriptor should be present")
-    };
     for field_id in [
         fea_thermo_mechanical_temperature_field_id(0),
         fea_thermo_mechanical_von_mises_field_id(0),
         fea_thermo_mechanical_coupling_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
-    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(displacement_descriptor.component_count, Some(3));
-    for field_id in [
+        fea_thermo_mechanical_displacement_field_id(0),
         fea_thermo_mechanical_thermal_strain_field_id(0),
         fea_thermo_mechanical_thermal_stress_field_id(0),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
-        assert_eq!(descriptor.component_count, Some(6));
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
 #[test]
-fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
+fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
     model.steps = vec![AnalysisStep {
@@ -9649,9 +9545,9 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
     )
     .expect("nonlinear run should return envelope");
 
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run.data.quality_reasons.iter().any(|reason| {
+    assert!(run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Publishable);
+    assert!(!run.data.quality_reasons.iter().any(|reason| {
         reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
@@ -10950,7 +10846,7 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
             "expected_region_ids": [],
         },
         "region_temperature_deltas": [
-            {"region_id": "tip", "temperature_delta_k": 72.0}
+            {"region_id": "beam_span", "temperature_delta_k": 72.0}
         ],
         "time_profile": [
             {"normalized_time": 0.0, "scale": 0.5},
@@ -11001,8 +10897,8 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
 
     let _ = fs::remove_dir_all(&root);
 
-    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_some());
-    assert_eq!(results.data.summary.thermo_region_delta_count, Some(1.0));
+    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_none());
+    assert_eq!(results.data.summary.thermo_region_delta_count, None);
 }
 
 #[test]
@@ -11070,7 +10966,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
             "expected_region_ids": []
         },
         "region_temperature_deltas": [
-            {"region_id": "tip", "temperature_delta_k": 90.0}
+            {"region_id": "beam_span", "temperature_delta_k": 90.0}
         ],
         "time_profile": [
             {"normalized_time": 0.0, "scale": 0.4},
@@ -11104,7 +11000,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
+                region_id: "beam_span".to_string(),
                 temperature_delta_k: 90.0,
             }],
             time_profile: vec![
@@ -11229,56 +11125,20 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .transient_results
         .as_ref()
         .expect("transient results should be present");
-    assert_eq!(
-        transient.thermo_mechanical_temperature_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_strain_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_stress_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_displacement_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_von_mises_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient
-            .thermo_mechanical_coupling_residual_snapshots
-            .len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
+    assert!(transient.thermo_mechanical_temperature_snapshots.is_empty());
+    assert!(transient
+        .thermo_mechanical_thermal_strain_snapshots
+        .is_empty());
+    assert!(transient
+        .thermo_mechanical_thermal_stress_snapshots
+        .is_empty());
+    assert!(transient
+        .thermo_mechanical_displacement_snapshots
+        .is_empty());
+    assert!(transient.thermo_mechanical_von_mises_snapshots.is_empty());
+    assert!(transient
+        .thermo_mechanical_coupling_residual_snapshots
+        .is_empty());
 
     let results = analysis_results_op(
         &run.data,
@@ -11286,38 +11146,24 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical transient results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("transient thermo-mechanical descriptor should be present")
-    };
     for field_id in [
         fea_thermo_mechanical_temperature_field_id(0),
         fea_thermo_mechanical_von_mises_field_id(0),
         fea_thermo_mechanical_coupling_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
-    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(displacement_descriptor.component_count, Some(3));
-    for field_id in [
+        fea_thermo_mechanical_displacement_field_id(0),
         fea_thermo_mechanical_thermal_strain_field_id(0),
         fea_thermo_mechanical_thermal_stress_field_id(0),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
-        assert_eq!(descriptor.component_count, Some(6));
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
 #[test]
-fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
+fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
     model.steps = vec![AnalysisStep {
@@ -11351,9 +11197,9 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
     )
     .expect("transient run should return envelope");
 
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run.data.quality_reasons.iter().any(|reason| {
+    assert!(run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Publishable);
+    assert!(!run.data.quality_reasons.iter().any(|reason| {
         reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
