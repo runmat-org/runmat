@@ -59,17 +59,17 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
 }
 
 #[test]
-fn structured_fallback_still_uses_structured_stage_explicitly() {
+fn explicit_structured_grid_tetrahedron_backend_runs_structured_stage() {
     let mesh = generate_analysis_mesh(
         &cube_geometry(),
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             ..VolumeMeshingOptions::default()
         },
     )
-    .expect("explicit structured fallback should still be available");
+    .expect("explicit structured-grid Tetrahedron backend should run explicitly");
 
-    assert_eq!(mesh.backend.backend, "structured_tetrahedron_fallback");
+    assert_eq!(mesh.backend.backend, "structured_grid_tetrahedron");
 }
 
 fn cube_geometry() -> GeometryAsset {

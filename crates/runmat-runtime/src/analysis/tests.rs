@@ -2070,7 +2070,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     }];
     spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetrahedronFallback;
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron;
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
         min_scaled_jacobian: 0.0,
         max_aspect_ratio: 1.0e9,

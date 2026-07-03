@@ -10,7 +10,7 @@ fn invalid_open_shell_returns_meshing_error() {
     let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             ..VolumeMeshingOptions::default()
         },
     )
@@ -25,7 +25,7 @@ fn unsupported_element_kind_is_rejected() {
     let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             element: VolumeElementKind::Hex8,
             ..VolumeMeshingOptions::default()
         },
@@ -43,7 +43,7 @@ fn unsupported_mesh_kind_is_rejected() {
     let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             kind: MeshKindRequest::Surrogate,
             ..VolumeMeshingOptions::default()
         },
@@ -62,7 +62,7 @@ fn invalid_sizing_envelope_options_are_rejected() {
     let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             min_size_m: Some(0.2),
             max_size_m: Some(0.1),
             ..VolumeMeshingOptions::default()
@@ -75,7 +75,7 @@ fn invalid_sizing_envelope_options_are_rejected() {
     let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             growth_rate: Some(0.99),
             ..VolumeMeshingOptions::default()
         },

@@ -200,7 +200,7 @@ pub fn generate_analysis_mesh_with_sizing(
 }
 
 fn validate_structured_backend(backend: MeshBackendKind) -> Result<(), MeshingError> {
-    if backend == MeshBackendKind::StructuredTetrahedronFallback {
+    if backend == MeshBackendKind::StructuredGridTetrahedron {
         Ok(())
     } else {
         Err(MeshingError::UnsupportedBackend(backend))

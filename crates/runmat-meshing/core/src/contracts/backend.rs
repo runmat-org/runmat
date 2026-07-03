@@ -7,7 +7,7 @@ use super::options::VolumeMeshingOptions;
 pub enum MeshBackendKind {
     Auto,
     Solid,
-    StructuredTetrahedronFallback,
+    StructuredGridTetrahedron,
 }
 
 impl Default for MeshBackendKind {
@@ -38,11 +38,11 @@ pub fn select_volume_backend(options: &VolumeMeshingOptions) -> MeshBackendSelec
             solid_ready: true,
             reason: "explicit_solid_backend",
         },
-        MeshBackendKind::StructuredTetrahedronFallback => MeshBackendSelection {
-            requested: MeshBackendKind::StructuredTetrahedronFallback,
-            selected: MeshBackendKind::StructuredTetrahedronFallback,
+        MeshBackendKind::StructuredGridTetrahedron => MeshBackendSelection {
+            requested: MeshBackendKind::StructuredGridTetrahedron,
+            selected: MeshBackendKind::StructuredGridTetrahedron,
             solid_ready: false,
-            reason: "explicit_structured_tetrahedron_fallback",
+            reason: "explicit_structured_grid_tetrahedron",
         },
     }
 }
@@ -62,21 +62,21 @@ mod tests {
     }
 
     #[test]
-    fn explicit_fallback_remains_available() {
+    fn explicit_structured_grid_tetrahedron_selects_structured_backend() {
         let selection = select_volume_backend(&VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             ..VolumeMeshingOptions::default()
         });
 
         assert_eq!(
             selection.requested,
-            MeshBackendKind::StructuredTetrahedronFallback
+            MeshBackendKind::StructuredGridTetrahedron
         );
         assert_eq!(
             selection.selected,
-            MeshBackendKind::StructuredTetrahedronFallback
+            MeshBackendKind::StructuredGridTetrahedron
         );
         assert!(!selection.solid_ready);
-        assert_eq!(selection.reason, "explicit_structured_tetrahedron_fallback");
+        assert_eq!(selection.reason, "explicit_structured_grid_tetrahedron");
     }
 }

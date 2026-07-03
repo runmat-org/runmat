@@ -33,9 +33,9 @@ pub fn generate_analysis_mesh(
                 ..options
             },
         ),
-        MeshBackendKind::StructuredTetrahedronFallback => {
+        MeshBackendKind::StructuredGridTetrahedron => {
             structured_grid::generate_analysis_mesh(geometry, options)
-                .map_err(SolidMeshingError::StructuredFallback)
+                .map_err(SolidMeshingError::StructuredGrid)
         }
     }
 }
@@ -54,9 +54,9 @@ pub fn generate_analysis_mesh_with_sizing(
             },
             sizing,
         ),
-        MeshBackendKind::StructuredTetrahedronFallback => {
+        MeshBackendKind::StructuredGridTetrahedron => {
             structured_grid::generate_analysis_mesh_with_sizing(geometry, options, sizing)
-                .map_err(SolidMeshingError::StructuredFallback)
+                .map_err(SolidMeshingError::StructuredGrid)
         }
     }
 }

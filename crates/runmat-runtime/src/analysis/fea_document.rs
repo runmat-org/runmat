@@ -2315,7 +2315,7 @@ growth_rate: 0.95
     fn fea_document_mesh_options_accept_backend_selection() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
-backend: structured_tetrahedron_fallback
+backend: structured_grid_tetrahedron
 "#,
         )
         .expect("mesh document should parse backend");
@@ -2324,10 +2324,7 @@ backend: structured_tetrahedron_fallback
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
-        assert_eq!(
-            options.backend,
-            MeshBackendKind::StructuredTetrahedronFallback
-        );
+        assert_eq!(options.backend, MeshBackendKind::StructuredGridTetrahedron);
     }
 
     #[test]

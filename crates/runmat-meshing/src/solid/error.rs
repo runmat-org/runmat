@@ -19,7 +19,7 @@ pub enum SolidMeshingError {
     Surface(SurfaceDiscretizationError),
     ProtectedBoundaryComplex(PlcBuildError),
     Tetrahedron(TetrahedronGenerationError),
-    StructuredFallback(structured_grid::MeshingError),
+    StructuredGrid(structured_grid::MeshingError),
 }
 
 impl std::fmt::Display for SolidMeshingError {
@@ -48,8 +48,11 @@ impl std::fmt::Display for SolidMeshingError {
             Self::Surface(err) => write!(formatter, "surface meshing failed: {err}"),
             Self::ProtectedBoundaryComplex(err) => write!(formatter, "PLC build failed: {err}"),
             Self::Tetrahedron(err) => write!(formatter, "Tetrahedron generation failed: {err}"),
-            Self::StructuredFallback(err) => {
-                write!(formatter, "structured fallback meshing failed: {err}")
+            Self::StructuredGrid(err) => {
+                write!(
+                    formatter,
+                    "structured-grid Tetrahedron meshing failed: {err}"
+                )
             }
         }
     }

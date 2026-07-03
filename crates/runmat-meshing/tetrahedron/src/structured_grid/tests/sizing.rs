@@ -5,7 +5,7 @@ use super::*;
 fn sizing_field_controls_structured_tetrahedron_density() {
     let geometry = cube_geometry();
     let base_options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -38,7 +38,7 @@ fn sizing_field_controls_structured_tetrahedron_density() {
 fn sizing_field_creates_local_structured_breakpoints() {
     let geometry = cube_geometry();
     let mut options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -78,10 +78,10 @@ fn sizing_field_creates_local_structured_breakpoints() {
     assert!(min_spacing <= 0.5 + 1.0e-12);
 }
 #[test]
-fn structured_fallback_consumes_valid_anisotropic_sizing_samples() {
+fn structured_grid_consumes_valid_anisotropic_sizing_samples() {
     let geometry = cube_geometry();
     let mut options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -107,7 +107,7 @@ fn structured_fallback_consumes_valid_anisotropic_sizing_samples() {
     };
 
     let mesh = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
-        .expect("anisotropic sizing-driven fallback mesh should generate");
+        .expect("anisotropic sizing-driven structured-grid mesh should generate");
 
     assert_eq!(mesh.sizing.applied_samples.len(), 1);
     assert_eq!(
@@ -126,7 +126,7 @@ fn structured_fallback_consumes_valid_anisotropic_sizing_samples() {
 fn sizing_field_reports_duplicate_and_invalid_samples() {
     let geometry = cube_geometry();
     let mut options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -184,7 +184,7 @@ fn sizing_field_reports_duplicate_and_invalid_samples() {
 fn sizing_field_skips_breakpoints_that_would_violate_quality() {
     let geometry = cube_geometry();
     let mut options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -231,7 +231,7 @@ fn sizing_field_refinement_respects_element_budget() {
     let mesh = generate_analysis_mesh_with_sizing(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             target_size: MeshTargetSize::LengthM(1.0),
             max_elements: 48,
             ..VolumeMeshingOptions::default()
@@ -252,7 +252,7 @@ fn sizing_field_refinement_respects_element_budget() {
 fn curvature_focus_adds_geometry_sizing_samples() {
     let geometry = cube_geometry();
     let mut coarse_options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()
@@ -277,7 +277,7 @@ fn curvature_focus_adds_geometry_sizing_samples() {
 fn small_feature_focus_adds_geometry_sizing_samples() {
     let geometry = thin_box_geometry();
     let mut coarse_options = VolumeMeshingOptions {
-        backend: MeshBackendKind::StructuredTetrahedronFallback,
+        backend: MeshBackendKind::StructuredGridTetrahedron,
         target_size: MeshTargetSize::LengthM(1.0),
         max_elements: 10_000,
         ..VolumeMeshingOptions::default()

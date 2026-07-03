@@ -37,7 +37,7 @@ pub(super) fn build_analysis_mesh_artifact(
         quality,
         sizing,
         backend: MeshBackendSummary {
-            backend: "structured_tetrahedron_fallback".to_string(),
+            backend: "structured_grid_tetrahedron".to_string(),
             algorithm: "structured_bbox_tetrahedron/v1".to_string(),
             tetrahedron_element_count,
             boundary_face_recovery_ratio: 1.0,

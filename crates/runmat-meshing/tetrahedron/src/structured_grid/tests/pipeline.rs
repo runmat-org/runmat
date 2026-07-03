@@ -7,7 +7,7 @@ fn structured_tetrahedron_mesher_generates_valid_analysis_mesh() {
     let mesh = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             ..VolumeMeshingOptions::default()
         },
     )
@@ -63,7 +63,7 @@ fn target_size_controls_structured_tetrahedron_density() {
     let coarse = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             kind: MeshKindRequest::Solid,
             target_size: MeshTargetSize::LengthM(1.0),
             ..VolumeMeshingOptions::default()
@@ -73,7 +73,7 @@ fn target_size_controls_structured_tetrahedron_density() {
     let fine = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             kind: MeshKindRequest::Solid,
             target_size: MeshTargetSize::LengthM(0.25),
             max_elements: 10_000,
@@ -91,7 +91,7 @@ fn structured_tetrahedron_mesher_carves_cells_outside_closed_surface() {
     let mesh = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetrahedronFallback,
+            backend: MeshBackendKind::StructuredGridTetrahedron,
             kind: MeshKindRequest::Solid,
             target_size: MeshTargetSize::LengthM(0.25),
             max_elements: 10_000,
