@@ -3,6 +3,7 @@ use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
+use runmat_meshing_core::{validate_analysis_mesh, QualityThresholds};
 
 #[test]
 fn auto_backend_runs_topology_first_solid_pipeline() {
@@ -14,6 +15,8 @@ fn auto_backend_runs_topology_first_solid_pipeline() {
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("root solid pipeline should produce a solve-ready mesh for a generic cube");
 }
 
 #[test]
