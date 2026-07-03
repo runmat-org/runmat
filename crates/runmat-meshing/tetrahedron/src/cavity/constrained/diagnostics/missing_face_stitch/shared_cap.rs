@@ -1,5 +1,9 @@
 use super::*;
 
+mod exact_cover;
+
+use exact_cover::finish_shared_cap_exact_cover_diagnostic;
+
 pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
@@ -279,47 +283,10 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
         diagnostic.reason = "no_candidate_tetrahedra";
         return Ok(diagnostic);
     }
-    if candidate_tetrahedra.len() > 4_096 {
-        diagnostic.reason = "over_candidate_limit";
-        return Ok(diagnostic);
-    }
-    let mut search = BoundaryExactCoverSearch::with_attempt_limit(
+    Ok(finish_shared_cap_exact_cover_diagnostic(
         cavity,
         &candidate_tetrahedra,
-        options.volume_relative_tolerance,
-        25_000,
-    );
-    let root_availability = search.root_boundary_availability();
-    diagnostic.root_boundary_zero_raw_candidate_face_count =
-        root_availability.zero_raw_candidate_face_count;
-    diagnostic.root_boundary_zero_addable_candidate_face_count =
-        root_availability.zero_addable_candidate_face_count;
-    diagnostic.root_boundary_min_raw_candidate_count = root_availability.min_raw_candidate_count;
-    diagnostic.root_boundary_min_addable_candidate_count =
-        root_availability.min_addable_candidate_count;
-    diagnostic.root_boundary_max_addable_candidate_count =
-        root_availability.max_addable_candidate_count;
-    let (selected, trace) = search.search_with_trace();
-    diagnostic.search_attempt_count = search.attempts;
-    diagnostic.cover_dead_end_reason_histogram = trace.dead_end_reason_counts;
-    if let Some(dead_end) = trace.dead_end {
-        diagnostic.cover_dead_end_reason = dead_end.reason;
-        diagnostic.cover_dead_end_depth = dead_end.depth;
-    }
-    let Some(selected) = selected else {
-        diagnostic.reason = if diagnostic.search_attempt_count > 25_000 {
-            "search_exhausted"
-        } else {
-            "cover_not_found"
-        };
-        return Ok(diagnostic);
-    };
-    diagnostic.max_min_scaled_jacobian = selected
-        .iter()
-        .map(|index| candidate_tetrahedra[*index].exact_scaled_jacobian)
-        .fold(f64::INFINITY, f64::min);
-    diagnostic.selected_tetrahedron_count = selected.len();
-    diagnostic.found_cover = true;
-    diagnostic.reason = "cover_found";
-    Ok(diagnostic)
+        options,
+        diagnostic,
+    ))
 }
