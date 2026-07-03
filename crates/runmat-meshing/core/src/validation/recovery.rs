@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+
 use crate::artifact::AnalysisMeshArtifact;
 
-use super::AnalysisMeshValidationError;
+use super::{connectivity::boundary_face_edges, AnalysisMeshValidationError};
 
 pub(super) fn validate_no_fan_fallback(
     mesh: &AnalysisMeshArtifact,
@@ -58,6 +60,60 @@ pub(super) fn validate_no_unrepaired_exact_quality(
             node_adjacent_count,
             interior_seed_count,
             edge_star_count,
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_boundary_face_recovery(
+    mesh: &AnalysisMeshArtifact,
+    min_boundary_face_recovery_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    if mesh.boundary_faces.is_empty()
+        || !min_boundary_face_recovery_ratio.is_finite()
+        || min_boundary_face_recovery_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let recovered_count = mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| !face.adjacent_volume_element_ids.is_empty())
+        .count();
+    let recovery_ratio = recovered_count as f64 / mesh.boundary_faces.len() as f64;
+    if recovery_ratio + 1.0e-9 < min_boundary_face_recovery_ratio {
+        return Err(AnalysisMeshValidationError::BoundaryFaceRecoveryFailed {
+            recovery_ratio: format!("{recovery_ratio:.6}"),
+            required_ratio: format!("{min_boundary_face_recovery_ratio:.6}"),
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_boundary_edge_recovery(
+    mesh: &AnalysisMeshArtifact,
+    recovered_boundary_edges: &BTreeSet<[u32; 2]>,
+    min_boundary_edge_recovery_ratio: f64,
+) -> Result<(), AnalysisMeshValidationError> {
+    if mesh.boundary_faces.is_empty()
+        || !min_boundary_edge_recovery_ratio.is_finite()
+        || min_boundary_edge_recovery_ratio <= 0.0
+    {
+        return Ok(());
+    }
+    let expected_edges = boundary_face_edges(mesh);
+    if expected_edges.is_empty() {
+        return Ok(());
+    }
+    let recovered_count = expected_edges
+        .iter()
+        .filter(|edge| recovered_boundary_edges.contains(*edge))
+        .count();
+    let recovery_ratio = recovered_count as f64 / expected_edges.len() as f64;
+    if recovery_ratio + 1.0e-9 < min_boundary_edge_recovery_ratio {
+        return Err(AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed {
+            recovery_ratio: format!("{recovery_ratio:.6}"),
+            required_ratio: format!("{min_boundary_edge_recovery_ratio:.6}"),
         });
     }
     Ok(())
