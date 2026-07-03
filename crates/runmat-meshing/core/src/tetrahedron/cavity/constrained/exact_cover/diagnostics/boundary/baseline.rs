@@ -1,5 +1,7 @@
 use super::*;
 
+mod candidates;
+
 #[cfg(test)]
 pub(crate) fn diagnostic_boundary_exact_cover(
     cavity: &ConstrainedCavity,
@@ -49,89 +51,21 @@ pub(crate) fn diagnostic_boundary_exact_cover(
         diagnostic.reason = "too_few_boundary_nodes";
         return Ok(diagnostic);
     }
-    let relaxed_options = ConstrainedCavityRefillOptions {
-        min_scaled_jacobian: 0.0,
-        ..options
-    };
-    let boundary_faces = cavity
-        .boundary_faces
-        .iter()
-        .map(|face| sorted_face(face.node_ids))
-        .collect::<BTreeSet<_>>();
-    let mut candidates = Vec::<ConstrainedCavityRefillTetrahedron>::new();
-    let mut solid_candidates = Vec::<ConstrainedCavityRefillTetrahedron>::new();
-    for first in 0..node_ids.len() {
-        for second in (first + 1)..node_ids.len() {
-            for third in (second + 1)..node_ids.len() {
-                for fourth in (third + 1)..node_ids.len() {
-                    let tetrahedron_node_ids = [
-                        node_ids[first],
-                        node_ids[second],
-                        node_ids[third],
-                        node_ids[fourth],
-                    ];
-                    if !tetrahedron_faces(tetrahedron_node_ids)
-                        .map(sorted_face)
-                        .iter()
-                        .any(|face| boundary_faces.contains(face))
-                    {
-                        continue;
-                    }
-                    let points = tetrahedron_node_ids.map(|node_id| boundary_node_map[&node_id]);
-                    if point_in_closed_triangle_surface(
-                        tetrahedron_centroid(points),
-                        &boundary_triangles,
-                        MeshingTolerance::default(),
-                    ) != PointInClosedSurface::Inside
-                    {
-                        continue;
-                    }
-                    if let Ok(tetrahedron) = raw_refill_tetrahedron_with_rejection_reason(
-                        tetrahedron_node_ids,
-                        points,
-                        relaxed_options,
-                    ) {
-                        candidates.push(tetrahedron);
-                    }
-                    if let Ok(tetrahedron) = raw_refill_tetrahedron_with_rejection_reason(
-                        tetrahedron_node_ids,
-                        points,
-                        options,
-                    ) {
-                        solid_candidates.push(tetrahedron);
-                    }
-                }
-            }
-        }
-    }
+    let candidates::BoundaryExactCoverCandidateSummary {
+        boundary_faces,
+        candidates,
+        solid_candidates,
+        face_candidate_counts,
+        solid_face_candidate_counts,
+    } = candidates::boundary_exact_cover_candidate_summary(
+        cavity,
+        &node_ids,
+        &boundary_node_map,
+        &boundary_triangles,
+        options,
+    );
     diagnostic.candidate_count = candidates.len();
     diagnostic.solid_candidate_count = solid_candidates.len();
-    let face_candidate_counts = boundary_faces
-        .iter()
-        .map(|face| {
-            candidates
-                .iter()
-                .filter(|candidate| {
-                    tetrahedron_faces(candidate.node_ids)
-                        .map(sorted_face)
-                        .contains(face)
-                })
-                .count()
-        })
-        .collect::<Vec<_>>();
-    let solid_face_candidate_counts = boundary_faces
-        .iter()
-        .map(|face| {
-            solid_candidates
-                .iter()
-                .filter(|candidate| {
-                    tetrahedron_faces(candidate.node_ids)
-                        .map(sorted_face)
-                        .contains(face)
-                })
-                .count()
-        })
-        .collect::<Vec<_>>();
     diagnostic.zero_candidate_boundary_faces = boundary_faces
         .iter()
         .zip(face_candidate_counts.iter())
