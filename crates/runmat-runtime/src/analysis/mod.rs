@@ -3187,7 +3187,7 @@ fn acoustic_domain_topology(
     let volume_hint = prep_context
         .map(|prep| {
             prep.topology_volume_core_ratio
-                + prep.topology_tet_family_ratio
+                + prep.topology_tetrahedron_family_ratio
                 + prep.topology_hex_family_ratio
         })
         .unwrap_or(0.0);
@@ -16153,7 +16153,7 @@ fn to_fea_prep_context(
         topology_region_mesh_variance: prep.topology_region_mesh_variance,
         topology_triangle_family_ratio: prep.topology_triangle_family_ratio,
         topology_quad_family_ratio: prep.topology_quad_family_ratio,
-        topology_tet_family_ratio: prep.topology_tet_family_ratio,
+        topology_tetrahedron_family_ratio: prep.topology_tetrahedron_family_ratio,
         topology_hex_family_ratio: prep.topology_hex_family_ratio,
         coordinate_span_x_m: prep.coordinate_span_x_m,
         coordinate_span_y_m: prep.coordinate_span_y_m,
@@ -17688,7 +17688,7 @@ fn resolve_run_prep_context(
         .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Quad)
         .count() as f64
         / mesh_count;
-    let topology_tet_family_ratio = artifact
+    let topology_tetrahedron_family_ratio = artifact
         .prep
         .prepared_meshes
         .iter()
@@ -18051,7 +18051,7 @@ fn resolve_run_prep_context(
         topology_region_mesh_variance,
         topology_triangle_family_ratio,
         topology_quad_family_ratio,
-        topology_tet_family_ratio,
+        topology_tetrahedron_family_ratio,
         topology_hex_family_ratio,
         coordinate_span_x_m,
         coordinate_span_y_m,

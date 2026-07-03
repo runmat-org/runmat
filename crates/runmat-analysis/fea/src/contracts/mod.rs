@@ -399,7 +399,7 @@ pub struct FeaPrepContext {
     pub topology_region_mesh_variance: f64,
     pub topology_triangle_family_ratio: f64,
     pub topology_quad_family_ratio: f64,
-    pub topology_tet_family_ratio: f64,
+    pub topology_tetrahedron_family_ratio: f64,
     pub topology_hex_family_ratio: f64,
     #[serde(default = "default_prep_coordinate_span_m")]
     pub coordinate_span_x_m: f64,

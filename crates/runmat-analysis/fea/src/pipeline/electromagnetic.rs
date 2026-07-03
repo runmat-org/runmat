@@ -3556,7 +3556,7 @@ mod tests {
                 topology_region_mesh_variance: 0.4,
                 topology_triangle_family_ratio: 0.2,
                 topology_quad_family_ratio: 0.3,
-                topology_tet_family_ratio: 0.3,
+                topology_tetrahedron_family_ratio: 0.3,
                 topology_hex_family_ratio: 0.2,
                 coordinate_span_x_m: 2.4,
                 coordinate_span_y_m: 0.6,

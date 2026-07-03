@@ -117,7 +117,7 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         topology_region_mesh_variance: 0.5,
         topology_triangle_family_ratio: 0.2,
         topology_quad_family_ratio: 0.3,
-        topology_tet_family_ratio: 0.25,
+        topology_tetrahedron_family_ratio: 0.25,
         topology_hex_family_ratio: 0.25,
         coordinate_span_x_m: 2.4,
         coordinate_span_y_m: 0.6,
@@ -5963,7 +5963,7 @@ fn solid_mesh_boundary_region_mapping_ignores_volumetric_loads() {
 }
 
 #[test]
-fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
+fn structural_stress_gradient_samples_use_adjacent_tetrahedron_differences() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {

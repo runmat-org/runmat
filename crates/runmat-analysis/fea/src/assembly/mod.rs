@@ -231,7 +231,7 @@ pub struct PrepElementAssemblySummary {
     pub assembled_element_count: usize,
     pub triangle_element_count: usize,
     pub quad_element_count: usize,
-    pub tet_element_count: usize,
+    pub tetrahedron_element_count: usize,
     pub hex_element_count: usize,
     pub mixed_element_count: usize,
     pub scatter_nnz_count: usize,
@@ -246,7 +246,7 @@ pub struct PrepElementConnectivitySummary {
     pub damping_offdiag_nnz_count: usize,
     pub triangle_contrib_share: f64,
     pub quad_contrib_share: f64,
-    pub tet_contrib_share: f64,
+    pub tetrahedron_contrib_share: f64,
     pub hex_contrib_share: f64,
     pub mixed_contrib_share: f64,
     pub mean_connectivity_hop: f64,
@@ -284,7 +284,7 @@ pub struct PrepCalibrationSummary {
     pub profile: String,
     pub triangle_weight: f64,
     pub quad_weight: f64,
-    pub tet_weight: f64,
+    pub tetrahedron_weight: f64,
     pub hex_weight: f64,
     pub mixed_weight: f64,
     pub stiffness_calibration_scale: f64,
@@ -2090,17 +2090,18 @@ fn apply_prep_native_element_assembly(
     .round() as usize;
     let quad_count =
         ((element_count as f64) * prep.topology_quad_family_ratio.clamp(0.0, 1.0)).round() as usize;
-    let tet_count =
-        ((element_count as f64) * prep.topology_tet_family_ratio.clamp(0.0, 1.0)).round() as usize;
+    let tetrahedron_count = ((element_count as f64)
+        * prep.topology_tetrahedron_family_ratio.clamp(0.0, 1.0))
+    .round() as usize;
     let mut hex_count =
         ((element_count as f64) * prep.topology_hex_family_ratio.clamp(0.0, 1.0)).round() as usize;
-    let assigned = triangle_count + quad_count + tet_count + hex_count;
+    let assigned = triangle_count + quad_count + tetrahedron_count + hex_count;
     if assigned > element_count {
         let overflow = assigned - element_count;
         hex_count = hex_count.saturating_sub(overflow);
     }
     let mixed_count =
-        element_count.saturating_sub(triangle_count + quad_count + tet_count + hex_count);
+        element_count.saturating_sub(triangle_count + quad_count + tetrahedron_count + hex_count);
 
     let mut touched_diag = vec![false; dof_count];
     let mut touched_rhs = vec![false; dof_count];
@@ -2141,7 +2142,7 @@ fn apply_prep_native_element_assembly(
 
     apply_family(triangle_count, 0.92, 0.95);
     apply_family(quad_count, 1.00, 1.00);
-    apply_family(tet_count, 1.07, 1.05);
+    apply_family(tetrahedron_count, 1.07, 1.05);
     apply_family(hex_count, 1.15, 1.12);
     apply_family(mixed_count, 0.98, 1.02);
 
@@ -2151,7 +2152,7 @@ fn apply_prep_native_element_assembly(
         assembled_element_count: element_count,
         triangle_element_count: triangle_count,
         quad_element_count: quad_count,
-        tet_element_count: tet_count,
+        tetrahedron_element_count: tetrahedron_count,
         hex_element_count: hex_count,
         mixed_element_count: mixed_count,
         scatter_nnz_count,
@@ -2161,7 +2162,7 @@ fn apply_prep_native_element_assembly(
                 element_count,
                 triangle_count,
                 quad_count,
-                tet_count,
+                tetrahedron_count,
                 hex_count,
                 mixed_count,
                 scatter_nnz_count,
@@ -2190,7 +2191,7 @@ fn apply_prep_element_connectivity_scatter(
             damping_offdiag_nnz_count: 0,
             triangle_contrib_share: 0.0,
             quad_contrib_share: 0.0,
-            tet_contrib_share: 0.0,
+            tetrahedron_contrib_share: 0.0,
             hex_contrib_share: 0.0,
             mixed_contrib_share: 0.0,
             mean_connectivity_hop: 0.0,
@@ -2349,7 +2350,7 @@ fn apply_prep_element_connectivity_scatter(
         damping_offdiag_nnz_count,
         triangle_contrib_share: shares[0],
         quad_contrib_share: shares[1],
-        tet_contrib_share: shares[2],
+        tetrahedron_contrib_share: shares[2],
         hex_contrib_share: shares[3],
         mixed_contrib_share: shares[4],
         mean_connectivity_hop,
@@ -2410,13 +2411,13 @@ fn apply_prep_calibration(
 
     let triangle_weight = (0.95 + 0.08 * prep.topology_triangle_family_ratio) * profile_gain;
     let quad_weight = (1.0 + 0.06 * prep.topology_quad_family_ratio) * profile_gain;
-    let tet_weight = (1.04 + 0.10 * prep.topology_tet_family_ratio) * profile_gain;
+    let tetrahedron_weight = (1.04 + 0.10 * prep.topology_tetrahedron_family_ratio) * profile_gain;
     let hex_weight = (1.08 + 0.12 * prep.topology_hex_family_ratio) * profile_gain;
     let mixed_weight = (0.9 + 0.05 * prep.topology_mixed_family_ratio) * profile_gain;
 
     let stiffness_calibration_scale = (triangle_weight * prep.topology_triangle_family_ratio
         + quad_weight * prep.topology_quad_family_ratio
-        + tet_weight * prep.topology_tet_family_ratio
+        + tetrahedron_weight * prep.topology_tetrahedron_family_ratio
         + hex_weight * prep.topology_hex_family_ratio
         + mixed_weight * prep.topology_mixed_family_ratio.max(0.01))
     .clamp(0.8, 1.3);
@@ -2448,7 +2449,7 @@ fn apply_prep_calibration(
         profile: profile_name.to_string(),
         triangle_weight,
         quad_weight,
-        tet_weight,
+        tetrahedron_weight,
         hex_weight,
         mixed_weight,
         stiffness_calibration_scale,
@@ -2563,7 +2564,7 @@ fn build_prep_graph_edges(
     let family_counts = [
         element_summary.triangle_element_count,
         element_summary.quad_element_count,
-        element_summary.tet_element_count,
+        element_summary.tetrahedron_element_count,
         element_summary.hex_element_count,
         element_summary.mixed_element_count,
     ];
@@ -2772,7 +2773,7 @@ struct ElementAssemblyFingerprintInputs {
     element_count: usize,
     triangle_count: usize,
     quad_count: usize,
-    tet_count: usize,
+    tetrahedron_count: usize,
     hex_count: usize,
     mixed_count: usize,
     scatter_nnz_count: usize,
@@ -2789,13 +2790,13 @@ fn element_assembly_fingerprint(
         inputs.element_count as u64,
         inputs.triangle_count as u64,
         inputs.quad_count as u64,
-        inputs.tet_count as u64,
+        inputs.tetrahedron_count as u64,
         inputs.hex_count as u64,
         inputs.mixed_count as u64,
         inputs.scatter_nnz_count as u64,
         prep.topology_triangle_family_ratio.to_bits(),
         prep.topology_quad_family_ratio.to_bits(),
-        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_tetrahedron_family_ratio.to_bits(),
         prep.topology_hex_family_ratio.to_bits(),
         prep.topology_mixed_family_ratio.to_bits(),
     ] {
@@ -2888,7 +2889,7 @@ fn calibration_fingerprint(
         damping_scale.to_bits(),
         prep.topology_triangle_family_ratio.to_bits(),
         prep.topology_quad_family_ratio.to_bits(),
-        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_tetrahedron_family_ratio.to_bits(),
         prep.topology_hex_family_ratio.to_bits(),
     ] {
         hash ^= value;
