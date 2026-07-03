@@ -6,6 +6,7 @@ pub(crate) mod cov;
 pub(crate) mod descriptive;
 pub(crate) mod distributions;
 pub(crate) mod mode;
+pub(crate) mod normalize;
 pub(crate) mod order_stats;
 
 pub use corrcoef::corrcoef_from_tensors;

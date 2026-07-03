@@ -58391,6 +58391,356 @@
       ]
     },
     {
+      "name": "normalize",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "N = normalize(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"zscore\"",
+              "description": "Normalization method: zscore, norm, scale, range, center, or medianiqr."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, dim, method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"zscore\"",
+              "description": "Normalization method: zscore, norm, scale, range, center, or medianiqr."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, method, methodtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"zscore\"",
+              "description": "Normalization method: zscore, norm, scale, range, center, or medianiqr."
+            },
+            {
+              "name": "methodtype",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Method subtype or explicit center/scale/range parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, dim, method, methodtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"zscore\"",
+              "description": "Normalization method: zscore, norm, scale, range, center, or medianiqr."
+            },
+            {
+              "name": "methodtype",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Method subtype or explicit center/scale/range parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, \"center\", centertype, \"scale\", scaletype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "center_keyword",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"center\"",
+              "description": "Literal center method selector."
+            },
+            {
+              "name": "centertype",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Centering mode or explicit center values."
+            },
+            {
+              "name": "scale_keyword",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"scale\"",
+              "description": "Literal scale method selector."
+            },
+            {
+              "name": "scaletype",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaling mode or explicit scale values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "N = normalize(A, dim, \"center\", centertype, \"scale\", scaletype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension to operate along."
+            },
+            {
+              "name": "center_keyword",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"center\"",
+              "description": "Literal center method selector."
+            },
+            {
+              "name": "centertype",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Centering mode or explicit center values."
+            },
+            {
+              "name": "scale_keyword",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"scale\"",
+              "description": "Literal scale method selector."
+            },
+            {
+              "name": "scaletype",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scaling mode or explicit scale values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            }
+          ]
+        },
+        {
+          "label": "[N, C, S] = normalize(___)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, complex, or gpuArray data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized data."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Centering values."
+            },
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scale values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.normalize.INVALID_ARGUMENT",
+          "identifier": "RunMat:normalize:InvalidArgument",
+          "when": "Inputs, dimension, method, method type, or name-value options are malformed.",
+          "message": "normalize: invalid argument"
+        },
+        {
+          "code": "RM.normalize.INTERNAL",
+          "identifier": "RunMat:normalize:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normalize: internal error"
+        }
+      ]
+    },
+    {
       "name": "normcdf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
