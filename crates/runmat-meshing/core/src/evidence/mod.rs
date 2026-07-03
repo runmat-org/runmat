@@ -15,6 +15,9 @@ use crate::{
 
 pub const MESH_EVIDENCE_SCHEMA_VERSION: &str = "mesh-evidence/v1";
 
+#[cfg(feature = "dev-evidence")]
+pub use dev_traces::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshEvidenceArtifact {
     pub schema_version: String,
@@ -34,39 +37,6 @@ pub struct MeshEvidenceArtifact {
     pub tetrahedron_recovery: MeshTetrahedronRecoveryEvidence,
     pub regions: MeshRegionEvidence,
     pub validation: MeshValidationEvidence,
-}
-
-#[cfg(feature = "dev-evidence")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MeshDebugEvidence {
-    pub event_cap: usize,
-    pub event_count: usize,
-    pub emitted_event_count: usize,
-    pub truncated_event_count: usize,
-    pub events: Vec<MeshDebugEvent>,
-}
-
-#[cfg(feature = "dev-evidence")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MeshDebugEvent {
-    pub stage: String,
-    pub severity: String,
-    pub message: String,
-}
-
-#[cfg(feature = "dev-evidence")]
-impl MeshDebugEvent {
-    pub fn new(
-        stage: impl Into<String>,
-        severity: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            stage: stage.into(),
-            severity: severity.into(),
-            message: message.into(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -427,18 +397,6 @@ pub fn build_mesh_evidence_artifact(
     )
 }
 
-#[cfg(feature = "dev-evidence")]
-pub fn build_mesh_evidence_artifact_with_debug(
-    mesh: &AnalysisMeshArtifact,
-    validation: &AnalysisMeshValidationOptions,
-    debug_events: Vec<MeshDebugEvent>,
-    event_cap: usize,
-) -> MeshEvidenceArtifact {
-    let mut artifact = build_mesh_evidence_artifact(mesh, validation);
-    artifact.debug = Some(debug_evidence(debug_events, event_cap));
-    artifact
-}
-
 pub fn build_mesh_evidence_artifact_with_validation_evidence(
     mesh: &AnalysisMeshArtifact,
     validation: MeshValidationEvidence,
@@ -458,20 +416,6 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         tetrahedron_recovery: tetrahedron_recovery_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
-    }
-}
-
-#[cfg(feature = "dev-evidence")]
-fn debug_evidence(mut events: Vec<MeshDebugEvent>, event_cap: usize) -> MeshDebugEvidence {
-    let event_count = events.len();
-    let cap = event_cap.min(event_count);
-    events.truncate(cap);
-    MeshDebugEvidence {
-        event_cap,
-        event_count,
-        emitted_event_count: events.len(),
-        truncated_event_count: event_count.saturating_sub(events.len()),
-        events,
     }
 }
 
@@ -1295,6 +1239,7 @@ fn volume_bin(value: f64) -> String {
     }
 }
 
+#[cfg(feature = "dev-evidence")]
 pub mod dev_traces;
 pub mod summaries;
 #[cfg(test)]
