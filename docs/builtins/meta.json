@@ -7320,6 +7320,109 @@
       ]
     },
     {
+      "name": "cdfplot",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "cdfplot(x)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "cdfplot(ax, x)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = cdfplot(___)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the empirical CDF plot line."
+            }
+          ]
+        },
+        {
+          "label": "[h, stats] = cdfplot(___)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the empirical CDF plot line."
+            },
+            {
+              "name": "stats",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Summary statistics structure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CDFPLOT.INVALID_ARGUMENT",
+          "identifier": "RunMat:cdfplot:InvalidArgument",
+          "when": "Inputs or axes arguments are malformed.",
+          "message": "cdfplot: invalid argument"
+        },
+        {
+          "code": "RM.CDFPLOT.INTERNAL",
+          "identifier": "RunMat:cdfplot:Internal",
+          "when": "RunMat cannot construct summary statistics or plots.",
+          "message": "cdfplot: internal error"
+        }
+      ]
+    },
+    {
       "name": "ceil",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -21373,6 +21476,225 @@
           "identifier": "RunMat:duration:Internal",
           "when": "Internal duration state or indexing/evaluation failed unexpectedly.",
           "message": "duration: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "ecdf",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[f, x] = ecdf(y)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Empirical function values."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Evaluation points."
+            }
+          ]
+        },
+        {
+          "label": "[f, x] = ecdf(y, Name, Value)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Function, Censoring, Frequency, Alpha, and Bounds options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Empirical function values."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Evaluation points."
+            }
+          ]
+        },
+        {
+          "label": "[f, x, flo, fup] = ecdf(___)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Function, Censoring, Frequency, Alpha, and Bounds options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Empirical function values."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Evaluation points."
+            },
+            {
+              "name": "flo",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower confidence bounds."
+            },
+            {
+              "name": "fup",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper confidence bounds."
+            }
+          ]
+        },
+        {
+          "label": "ecdf(y)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "ecdf(y, Name, Value)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Function, Censoring, Frequency, Alpha, and Bounds options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "ecdf(ax, y)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "ecdf(ax, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Function, Censoring, Frequency, Alpha, and Bounds options."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ECDF.INVALID_ARGUMENT",
+          "identifier": "RunMat:ecdf:InvalidArgument",
+          "when": "Inputs, name-value options, censoring, frequency, or alpha values are malformed.",
+          "message": "ecdf: invalid argument"
+        },
+        {
+          "code": "RM.ECDF.UNSUPPORTED",
+          "identifier": "RunMat:ecdf:Unsupported",
+          "when": "A documented but not yet implemented interval or double-censored form is requested.",
+          "message": "ecdf: unsupported form"
+        },
+        {
+          "code": "RM.ECDF.INTERNAL",
+          "identifier": "RunMat:ecdf:Internal",
+          "when": "RunMat cannot construct ECDF outputs or plots.",
+          "message": "ecdf: internal error"
         }
       ]
     },

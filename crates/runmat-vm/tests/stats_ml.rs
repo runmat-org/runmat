@@ -24,6 +24,12 @@ fn has_bool(vars: &[Value], expected: bool) -> bool {
         .any(|value| matches!(value, Value::Bool(value) if *value == expected))
 }
 
+fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
+    let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    guard
+}
+
 #[test]
 fn lasso_surface_executes_from_scripts() {
     let vars = execute_source(
@@ -90,4 +96,17 @@ fn bootstrp_surface_executes_from_scripts() {
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(value) if (1.0..=4.0).contains(value))));
+}
+
+#[test]
+fn ecdf_and_cdfplot_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "y = [3;1;2;2]; [f,x] = ecdf(y); f2 = f(2); x3 = x(3); [h,stats] = cdfplot([1;2;3]); mn = stats.mean; md = stats.median;",
+    )
+    .expect("ecdf and cdfplot script");
+    assert!(has_tensor_shape(&vars, &[4, 1]));
+    assert!(has_num(&vars, 0.25));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 2.0));
 }
