@@ -1,0 +1,64 @@
+{
+  "title": "ttest2",
+  "category": "stats/summary",
+  "keywords": ["ttest2", "t-test", "hypothesis test", "welch", "statistics", "student t"],
+  "summary": "Perform a two-sample Student's t-test.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for the sample reductions and distribution calculations."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::hypothesis::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`ttest2(x,y)` tests whether two independent samples have equal means. It supports the default equal-variance test and Welch's unequal-variance test through `\"Vartype\",\"unequal\"`.",
+  "behaviors": [
+    "`x` and `y` may be numeric or logical vectors, matrices, or N-D arrays.",
+    "Vector inputs are treated as single samples and may have different lengths.",
+    "Array inputs are tested along the first nonsingleton dimension by default, or along `Dim` when specified.",
+    "Array inputs must have the same size along all dimensions except the test dimension.",
+    "`NaN` values are omitted independently from each sample before each test.",
+    "`gpuArray` inputs are accepted through the host-gather compatibility path; outputs are host values.",
+    "`Tail` accepts `\"both\"`, `\"right\"`, or `\"left\"`; `\"larger\"` and `\"smaller\"` are accepted as compatibility aliases.",
+    "`Alpha` must be a scalar in the open interval `(0,1)`.",
+    "The fourth output is a struct with `tstat`, `df`, and `sd` fields."
+  ],
+  "examples": [
+    {
+      "description": "Default equal-variance two-sample t-test",
+      "input": "[h,p,ci,stats] = ttest2([1;2;3;4], [2;4;6;8])"
+    },
+    {
+      "description": "Welch one-sided test",
+      "input": "[h,p] = ttest2(x, y, \"Vartype\", \"unequal\", \"Tail\", \"left\")"
+    },
+    {
+      "description": "Test rows independently",
+      "input": "h = ttest2(A, B, \"Dim\", 2)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does ttest2 implement Welch's test?",
+      "answer": "Yes. Pass `\"Vartype\",\"unequal\"` to compute the unequal-variance test with Satterthwaite degrees of freedom."
+    },
+    {
+      "question": "What happens when a sample has fewer than two finite observations?",
+      "answer": "The corresponding test returns `h = false` and `NaN` numeric outputs."
+    }
+  ],
+  "links": [
+    { "label": "tcdf", "url": "./tcdf" },
+    { "label": "tinv", "url": "./tinv" },
+    { "label": "tpdf", "url": "./tpdf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/hypothesis.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/hypothesis.rs"
+  }
+}

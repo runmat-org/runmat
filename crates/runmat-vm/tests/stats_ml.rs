@@ -19,6 +19,11 @@ fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
     })
 }
 
+fn has_bool(vars: &[Value], expected: bool) -> bool {
+    vars.iter()
+        .any(|value| matches!(value, Value::Bool(value) if *value == expected))
+}
+
 #[test]
 fn lasso_surface_executes_from_scripts() {
     let vars = execute_source(
@@ -53,4 +58,24 @@ fn grpstats_surface_executes_from_scripts() {
     assert!(has_tensor_shape(&vars, &[2, 2]));
     assert!(has_num(&vars, 3.5));
     assert!(has_num(&vars, 15.0));
+}
+
+#[test]
+fn ttest2_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "x = [1;2;3;4]; y = [2;4;6;8]; [h,p,ci,stats] = ttest2(x, y); tval = stats.tstat; df = stats.df; sd = stats.sd; lo = ci(1); hi = ci(2);",
+    )
+    .expect("ttest2 script");
+    assert!(has_bool(&vars, false));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_num(&vars, 0.133_974_596));
+    assert!(has_num(&vars, -1.732_050_808));
+    assert!(has_num(&vars, 6.0));
+    assert!(has_num(&vars, 2.041_241_452));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (*value + 6.031_813).abs() < 1.0e-6)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (*value - 1.031_813).abs() < 1.0e-6)));
 }

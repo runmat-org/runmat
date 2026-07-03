@@ -6,6 +6,7 @@ pub(crate) mod cov;
 pub(crate) mod descriptive;
 pub(crate) mod distribution_math;
 pub(crate) mod distributions;
+pub(crate) mod hypothesis;
 pub(crate) mod mode;
 pub(crate) mod normalize;
 pub(crate) mod order_stats;

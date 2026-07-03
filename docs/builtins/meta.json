@@ -89153,6 +89153,188 @@
       ]
     },
     {
+      "name": "ttest2",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = ttest2(x, y)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First sample data."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second sample data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            }
+          ]
+        },
+        {
+          "label": "h = ttest2(x, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First sample data."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, Dim, Tail, and Vartype options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            }
+          ]
+        },
+        {
+          "label": "[h, p] = ttest2(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First sample data."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, Dim, Tail, and Vartype options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-value."
+            }
+          ]
+        },
+        {
+          "label": "[h, p, ci, stats] = ttest2(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First sample data."
+            },
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, Dim, Tail, and Vartype options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-value."
+            },
+            {
+              "name": "ci",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Confidence interval for the difference in means."
+            },
+            {
+              "name": "stats",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Structure containing tstat, df, and sd fields."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TTEST2.INVALID_ARGUMENT",
+          "identifier": "RunMat:ttest2:InvalidArgument",
+          "when": "Inputs, dimensions, tails, variance type, or significance level are malformed.",
+          "message": "ttest2: invalid argument"
+        },
+        {
+          "code": "RM.TTEST2.INTERNAL",
+          "identifier": "RunMat:ttest2:Internal",
+          "when": "RunMat cannot construct ttest2 outputs.",
+          "message": "ttest2: internal error"
+        }
+      ]
+    },
+    {
       "name": "uigetfile",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
