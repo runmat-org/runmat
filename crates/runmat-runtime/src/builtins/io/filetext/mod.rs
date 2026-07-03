@@ -12,4 +12,5 @@ pub mod fread;
 pub mod frewind;
 pub mod fwrite;
 pub(crate) mod helpers;
+pub mod lines;
 pub(crate) mod registry;

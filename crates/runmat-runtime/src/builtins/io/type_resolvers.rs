@@ -225,6 +225,32 @@ pub fn fullfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
+pub fn fileparts_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::OutputList(vec![Type::String, Type::String, Type::String])
+}
+
+pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Union(vec![
+        Type::Num,
+        Type::OutputList(vec![Type::Num, Type::Struct { known_fields: None }]),
+    ])
+}
+
+pub fn system_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Union(vec![
+        Type::Num,
+        Type::OutputList(vec![Type::Num, Type::String]),
+    ])
+}
+
+pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+pub fn readlines_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::String
+}
+
 pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])

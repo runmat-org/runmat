@@ -1,0 +1,36 @@
+{
+  "title": "sendmail",
+  "category": "io/http",
+  "keywords": [
+    "sendmail"
+  ],
+  "summary": "Create an email message using MATLAB sendmail-compatible arguments.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::http::compat::tests",
+    "integration": null
+  },
+  "description": "Creates and sends a plain-text email message through a configured local transport or outbox capture path.",
+  "behaviors": [
+    "Accepts scalar, string-array, or cell-array recipients plus subject and body text.",
+    "Writes RFC822-style messages to RUNMAT_SENDMAIL_OUTBOX when configured.",
+    "On native hosts, uses RUNMAT_SENDMAIL_COMMAND or /usr/sbin/sendmail when available.",
+    "Reports a clear error when only SMTP preferences are configured because direct TLS SMTP transport is not available in this build."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

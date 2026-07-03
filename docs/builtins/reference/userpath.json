@@ -1,0 +1,35 @@
+{
+  "title": "userpath",
+  "category": "io/repl_fs",
+  "keywords": [
+    "userpath"
+  ],
+  "summary": "Query or set the MATLAB-compatible user path.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": null
+  },
+  "description": "Query or set the MATLAB-compatible user path.",
+  "behaviors": [
+    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
+    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
+    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+  ],
+  "examples": [],
+  "faqs": [],
+  "links": []
+}

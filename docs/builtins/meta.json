@@ -25801,6 +25801,85 @@
       ]
     },
     {
+      "name": "fileattrib",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[status, attributes] = fileattrib(path)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "1 when attributes were read, otherwise 0."
+            },
+            {
+              "name": "attributes",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Attribute struct or diagnostic struct."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "fileparts",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[folder, name, extension] = fileparts(filename)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "folder",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Folder component."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Base filename component."
+            },
+            {
+              "name": "extension",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Extension component including the leading dot."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "fileread",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -32671,6 +32750,49 @@
       ]
     },
     {
+      "name": "getpref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = getpref(group, preference, default)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            },
+            {
+              "name": "input3",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional third input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "gpuArray",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -33629,6 +33751,78 @@
           "message": "gt: complex numbers are not supported"
         }
       ]
+    },
+    {
+      "name": "gunzip",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "files = gunzip(filename, outputfolder)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Input file."
+            },
+            {
+              "name": "outputfolder",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Destination folder."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "files",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of output file paths."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "gzip",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "files = gzip(filename, outputfolder)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Input file."
+            },
+            {
+              "name": "outputfolder",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Destination folder."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "files",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of output file paths."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "hamming",
@@ -37162,6 +37356,42 @@
           "message": "imfilter: internal operation failed"
         }
       ]
+    },
+    {
+      "name": "imfinfo",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = imfinfo(filename, fmt)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Image file to inspect."
+            },
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional image format hint."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Image metadata struct."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "imhist",
@@ -40911,6 +41141,35 @@
       "errors": []
     },
     {
+      "name": "isenv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isenv(name)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "isequal",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -41084,6 +41343,35 @@
       ]
     },
     {
+      "name": "isfile",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isfile(path)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "isfinite",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -41124,6 +41412,35 @@
           "message": "isfinite: internal error"
         }
       ]
+    },
+    {
+      "name": "isfolder",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isfolder(path)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "isgpuarray",
@@ -42011,6 +42328,42 @@
           "message": "isnumeric: internal error"
         }
       ]
+    },
+    {
+      "name": "ispref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = ispref(group, preference)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "isreal",
@@ -46990,6 +47343,27 @@
       "errors": []
     },
     {
+      "name": "matlabroot",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "root = matlabroot()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "max",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -48831,6 +49205,49 @@
           "message": "median: internal reduction failure"
         }
       ]
+    },
+    {
+      "name": "memmapfile",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "m = memmapfile(filename, Name, Value)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            },
+            {
+              "name": "input3",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional third input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "memoize",
@@ -59164,6 +59581,27 @@
       ]
     },
     {
+      "name": "pathsep",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "sep = pathsep()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "pattern",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -65914,6 +66352,35 @@
       ]
     },
     {
+      "name": "readlines",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "lines = readlines(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text file to read."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "readmatrix",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -67021,6 +67488,27 @@
       ]
     },
     {
+      "name": "rehash",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "rehash()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "rem",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -67720,6 +68208,27 @@
           "message": "reshape: unsupported input type"
         }
       ]
+    },
+    {
+      "name": "restoredefaultpath",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "path = restoredefaultpath()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "rethrow",
@@ -70961,6 +71470,49 @@
       ]
     },
     {
+      "name": "sendmail",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = sendmail(to, subject, body)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            },
+            {
+              "name": "input3",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Third input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "set",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -71500,6 +72052,49 @@
           "message": "setfield: internal error"
         }
       ]
+    },
+    {
+      "name": "setpref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "setpref(group, preference, value)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            },
+            {
+              "name": "input3",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional third input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "setxor",
@@ -80407,6 +81002,42 @@
       ]
     },
     {
+      "name": "system",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[status, output] = system(command)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "0 on success, nonzero on failure."
+            },
+            {
+              "name": "message",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Command output or diagnostic text."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "table",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -84591,6 +85222,35 @@
       ]
     },
     {
+      "name": "unsetenv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = unsetenv(name)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "unwrap",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -85014,6 +85674,93 @@
           "message": "sample-rate builtin: failed to build output"
         }
       ]
+    },
+    {
+      "name": "urldecode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "decoded = urldecode(text)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "urlencode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "encoded = urlencode(text)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "userpath",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "path = userpath(option)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "validateFunctionSignaturesJSON",
@@ -86869,6 +87616,42 @@
       ]
     },
     {
+      "name": "websave",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "filename = websave(filename, url)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "webwrite",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -87083,6 +87866,35 @@
           "message": "webwrite: flow failure"
         }
       ]
+    },
+    {
+      "name": "what",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = what(folder)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "which",
@@ -87649,6 +88461,49 @@
       "errors": []
     },
     {
+      "name": "winqueryreg",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = winqueryreg(root, key, valuename)",
+          "inputs": [
+            {
+              "name": "input1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First input argument."
+            },
+            {
+              "name": "input2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input argument."
+            },
+            {
+              "name": "input3",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional third input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "write",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -87917,6 +88772,42 @@
           "message": "writecell: file write failed"
         }
       ]
+    },
+    {
+      "name": "writelines",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "status = writelines(lines, filename)",
+          "inputs": [
+            {
+              "name": "lines",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Text lines to write."
+            },
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Destination text file."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "writematrix",
@@ -89163,6 +90054,35 @@
           "message": "xlswrite: unsupported output count"
         }
       ]
+    },
+    {
+      "name": "xmlread",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "document = xmlread(filename)",
+          "inputs": [
+            {
+              "name": "input",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input argument."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "xor",

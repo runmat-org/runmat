@@ -2,6 +2,7 @@
 
 pub mod addpath;
 pub mod cd;
+pub mod compat;
 pub mod copyfile;
 pub mod delete;
 pub mod dir;
