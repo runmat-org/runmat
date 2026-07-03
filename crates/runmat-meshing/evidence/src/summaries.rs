@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::{
-    adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus},
-    contracts::{AnalysisMeshArtifact, AnalysisVolumeElement, VolumeElementKind},
+use runmat_meshing_core::contracts::{
+    AnalysisMeshArtifact, AnalysisVolumeElement, VolumeElementKind,
 };
+use runmat_meshing_size::adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus};
 
 pub const MODULE_PURPOSE: &str = "compact solid evidence summaries";
 

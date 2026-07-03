@@ -1,9 +1,5 @@
 use super::*;
 use runmat_meshing_core::{
-    adaptive::{
-        AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
-        RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
-    },
     contracts::RefinementIndicatorMode,
     contracts::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
@@ -15,6 +11,10 @@ use runmat_meshing_core::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
+};
+use runmat_meshing_size::adaptive::{
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
+    RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
 };
 use std::collections::BTreeMap;
 

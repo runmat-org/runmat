@@ -5680,6 +5680,7 @@ name = "runmat-meshing-evidence"
 version = "0.5.0"
 dependencies = [
  "runmat-meshing-core",
+ "runmat-meshing-size",
  "serde",
  "serde_json",
 ]

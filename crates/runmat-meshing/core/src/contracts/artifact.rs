@@ -2,10 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    adaptive::AdaptiveIterationSummary, quality::AnalysisMeshQualityReport,
-    size::field::MeshSizingField,
-};
+use crate::{quality::AnalysisMeshQualityReport, size::field::MeshSizingField};
+use runmat_meshing_size::adaptive::AdaptiveIterationSummary;
 
 use super::{
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance},

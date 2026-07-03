@@ -1,5 +1,5 @@
 use super::*;
-use crate::contracts::{MeshRefinementOptions, RefinementIndicatorOverrides};
+use crate::refinement::{MeshRefinementOptions, RefinementIndicatorOverrides};
 
 fn key(namespace: &str, name: &str) -> RefinementIndicatorKey {
     RefinementIndicatorKey::new(namespace, name)

@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    contracts::{MeshRefinementOptions, RefinementIndicatorMode, RefinementStrategy},
-    size::field::{MeshSizingField, SizingSample},
+    field::{MeshSizingField, SizingSample},
+    refinement::{MeshRefinementOptions, RefinementIndicatorMode, RefinementStrategy},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,6 +1,5 @@
 extern crate self as runmat_meshing_core;
 
-pub mod adaptive;
 pub mod analysis_prep;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
@@ -21,15 +20,6 @@ pub mod source_topology {
 pub use runmat_meshing_surface as surface;
 pub mod validation;
 
-pub use adaptive::{
-    build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
-    evaluate_adaptive_convergence, plan_refinement_indicators,
-    structural_static_default_refinement_indicators, AdaptiveConvergenceMetrics,
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorAvailability,
-    RefinementIndicatorKey, RefinementIndicatorSample, RefinementIndicatorStatus,
-    RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
-    SizingFieldUpdate,
-};
 pub use analysis_prep::{
     prepare_geometry_for_analysis, ElementFamilyHint, MeshConnectivityClass, MeshingOptions,
     MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
@@ -95,6 +85,15 @@ pub use quality::boundary::{
     BoundaryQualityCandidateOptions, BoundaryQualityCandidateRejectionReason,
 };
 pub use quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds};
+pub use runmat_meshing_size::adaptive::{
+    build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
+    evaluate_adaptive_convergence, plan_refinement_indicators,
+    structural_static_default_refinement_indicators, AdaptiveConvergenceMetrics,
+    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorAvailability,
+    RefinementIndicatorKey, RefinementIndicatorSample, RefinementIndicatorStatus,
+    RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
+    SizingFieldUpdate,
+};
 pub use size::field::{
     AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
     SizingSampleRejection,
