@@ -1,13 +1,16 @@
 mod artifact;
+mod cad;
 #[cfg(feature = "dev-evidence")]
 pub mod dev_traces;
 pub mod summaries;
+mod tetrahedron_recovery;
+mod validation;
 
 pub use artifact::{
     build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,
-    MeshBoundaryRecoveryEvidence, MeshCadEvidence, MeshEvidenceArtifact,
-    MeshTetrahedronRecoveryEvidence, MeshValidationEvidence, MESH_EVIDENCE_SCHEMA_VERSION,
+    MeshEvidenceArtifact, MESH_EVIDENCE_SCHEMA_VERSION,
 };
+pub use cad::MeshCadEvidence;
 
 #[cfg(feature = "dev-evidence")]
 pub use dev_traces::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
@@ -16,6 +19,8 @@ pub use summaries::{
     MeshAdaptiveEvidence, MeshQualityEvidence, MeshRegionEvidence, MeshSizingEvidence,
     MeshTopologyEvidence,
 };
+pub use tetrahedron_recovery::MeshTetrahedronRecoveryEvidence;
+pub use validation::{MeshBoundaryRecoveryEvidence, MeshValidationEvidence};
 
 #[cfg(test)]
 mod tests;
