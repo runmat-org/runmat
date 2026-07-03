@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
@@ -28,6 +28,7 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
     let tolerance = MeshingTolerance::from_bounds(bounds[0], bounds[1]);
     let interior = plc_node_average(plc)?;
     validate_convex_boundary_facets(plc, &coordinates_by_id, interior, tolerance)?;
+    validate_boundary_nodes_are_hull_nodes(plc, &coordinates_by_id, bounds, tolerance)?;
 
     let interior_id = TopologyEntityId {
         stage: MeshingStage::TetrahedronMesh,
@@ -223,6 +224,82 @@ fn validate_convex_boundary_facets(
         }
     }
     Ok(())
+}
+
+fn validate_boundary_nodes_are_hull_nodes(
+    plc: &ProtectedBoundaryComplex,
+    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    bounds: [[f64; 3]; 2],
+    tolerance: MeshingTolerance,
+) -> Result<(), TetrahedronGenerationError> {
+    if plc.nodes.len() < 5 {
+        return Ok(());
+    }
+    let referenced_node_ids = plc
+        .facets
+        .iter()
+        .flat_map(|facet| facet.node_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if plc
+        .nodes
+        .iter()
+        .any(|node| !referenced_node_ids.contains(&node.node_id))
+    {
+        return Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc);
+    }
+
+    let span = bounds_span(bounds).max(1.0);
+    let volume_epsilon = tolerance.volume_epsilon(span);
+    for node in &plc.nodes {
+        let boundary_node = coordinates_by_id[&node.node_id];
+        let other_nodes = plc
+            .nodes
+            .iter()
+            .filter(|other| other.node_id != node.node_id)
+            .map(|other| other.coordinates_m)
+            .collect::<Vec<_>>();
+        for first in 0..other_nodes.len() {
+            for second in (first + 1)..other_nodes.len() {
+                for third in (second + 1)..other_nodes.len() {
+                    for fourth in (third + 1)..other_nodes.len() {
+                        let tetrahedron = [
+                            other_nodes[first],
+                            other_nodes[second],
+                            other_nodes[third],
+                            other_nodes[fourth],
+                        ];
+                        if point_strictly_inside_tetrahedron(
+                            boundary_node,
+                            tetrahedron,
+                            volume_epsilon,
+                        ) {
+                            return Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn point_strictly_inside_tetrahedron(
+    point: [f64; 3],
+    tetrahedron: [[f64; 3]; 4],
+    volume_epsilon: f64,
+) -> bool {
+    let total_volume = tetrahedron_signed_volume(tetrahedron).abs();
+    if total_volume <= volume_epsilon {
+        return false;
+    }
+    let sub_volumes = [
+        tetrahedron_signed_volume([point, tetrahedron[1], tetrahedron[2], tetrahedron[3]]).abs(),
+        tetrahedron_signed_volume([tetrahedron[0], point, tetrahedron[2], tetrahedron[3]]).abs(),
+        tetrahedron_signed_volume([tetrahedron[0], tetrahedron[1], point, tetrahedron[3]]).abs(),
+        tetrahedron_signed_volume([tetrahedron[0], tetrahedron[1], tetrahedron[2], point]).abs(),
+    ];
+    sub_volumes.iter().all(|volume| *volume > volume_epsilon)
+        && (sub_volumes.iter().sum::<f64>() - total_volume).abs() <= volume_epsilon
 }
 
 fn signed_side(distance: f64, tolerance: MeshingTolerance) -> i8 {

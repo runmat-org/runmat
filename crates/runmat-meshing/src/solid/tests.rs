@@ -9,12 +9,12 @@ use runmat_meshing_core::{
 };
 
 #[test]
-fn auto_backend_runs_topology_first_solid_pipeline() {
+fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
     let mesh = generate_analysis_mesh(&cube_geometry(), VolumeMeshingOptions::default())
         .expect("auto backend should run the root solid pipeline");
 
     assert_eq!(mesh.backend.backend, "solid");
-    assert_eq!(mesh.backend.algorithm, "topology_first_plc_tetrahedron/v1");
+    assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);

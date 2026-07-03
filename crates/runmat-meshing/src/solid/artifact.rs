@@ -12,6 +12,8 @@ use runmat_meshing_core::{
 use runmat_meshing_surface::SurfaceDiscretization;
 use runmat_meshing_tetrahedron::generate::TetrahedronMesh;
 
+const SOLID_PLC_TETRAHEDRON_ALGORITHM: &str = "plc_tetrahedron/v1";
+
 pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     geometry: &GeometryAsset,
     sizing: &MeshSizingField,
@@ -95,7 +97,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         sizing: sizing.clone(),
         backend: MeshBackendSummary {
             backend: "solid".to_string(),
-            algorithm: "topology_first_plc_tetrahedron/v1".to_string(),
+            algorithm: SOLID_PLC_TETRAHEDRON_ALGORITHM.to_string(),
             surface_element_count: surface.elements.len(),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             boundary_face_recovery_ratio: 1.0,
@@ -107,7 +109,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         },
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
-            algorithm: "topology_first_plc_tetrahedron/v1".to_string(),
+            algorithm: SOLID_PLC_TETRAHEDRON_ALGORITHM.to_string(),
             source_geometry_id: geometry.geometry_id.clone(),
             source_geometry_revision: geometry.revision,
             source_geometry_sha256: Some(geometry.source.sha256.clone()),

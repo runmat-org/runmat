@@ -133,6 +133,14 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
 }
 
 #[test]
+fn solver_generation_rejects_extra_interior_plc_nodes() {
+    assert_eq!(
+        generate_solver_tetrahedron_mesh_from_plc(&octahedron_with_extra_interior_node_plc()),
+        Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
+    );
+}
+
+#[test]
 fn single_tetrahedron_generation_rejects_non_tetrahedron_plc() {
     assert_eq!(
         generate_single_tetrahedron_mesh_from_plc(&box_plc()),
@@ -232,6 +240,13 @@ fn octahedron_plc() -> ProtectedBoundaryComplex {
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
+}
+
+fn octahedron_with_extra_interior_node_plc() -> ProtectedBoundaryComplex {
+    let mut plc = octahedron_plc();
+    plc.complex_id = "octahedron_with_extra_interior_node".to_string();
+    plc.nodes.push(node("6", [0.0, 0.0, 0.0]));
+    plc
 }
 
 fn box_plc() -> ProtectedBoundaryComplex {
