@@ -16,9 +16,8 @@ pub const MESH_EVIDENCE_SCHEMA_VERSION: &str = "mesh-evidence/v1";
 
 #[cfg(feature = "dev-evidence")]
 pub use dev_traces::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
-use summaries::quality_evidence;
-use summaries::region_evidence;
-pub use summaries::{MeshQualityEvidence, MeshRegionEvidence};
+use summaries::{quality_evidence, region_evidence, topology_evidence};
+pub use summaries::{MeshQualityEvidence, MeshRegionEvidence, MeshTopologyEvidence};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshEvidenceArtifact {
@@ -101,17 +100,6 @@ pub struct MeshCadEvidence {
     #[serde(default)]
     pub surface_rejected_exact_cad_sample_count: usize,
     pub surface_max_projection_error_m: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MeshTopologyEvidence {
-    pub node_count: usize,
-    pub volume_element_count: usize,
-    pub boundary_face_count: usize,
-    pub boundary_edge_count: usize,
-    pub adaptive_iteration_count: usize,
-    pub bounds_min_m: Option<[f64; 3]>,
-    pub bounds_max_m: Option<[f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -451,19 +439,6 @@ fn cad_evidence(mesh: &AnalysisMeshArtifact) -> MeshCadEvidence {
             .backend
             .surface_rejected_exact_cad_sample_count,
         surface_max_projection_error_m: mesh.backend.surface_max_cad_projection_error_m,
-    }
-}
-
-fn topology_evidence(mesh: &AnalysisMeshArtifact) -> MeshTopologyEvidence {
-    let bounds = mesh_bounds_m(mesh);
-    MeshTopologyEvidence {
-        node_count: mesh.nodes.len(),
-        volume_element_count: mesh.volume_elements.len(),
-        boundary_face_count: mesh.boundary_faces.len(),
-        boundary_edge_count: mesh.boundary_edges.len(),
-        adaptive_iteration_count: mesh.adaptive_iterations.len(),
-        bounds_min_m: bounds.map(|bounds| bounds[0]),
-        bounds_max_m: bounds.map(|bounds| bounds[1]),
     }
 }
 
@@ -921,20 +896,6 @@ fn boundary_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshBoundaryRecove
             .count(),
         recovered_boundary_edge_count: recovered_boundary_edge_count(mesh),
     }
-}
-
-fn mesh_bounds_m(mesh: &AnalysisMeshArtifact) -> Option<[[f64; 3]; 2]> {
-    let mut iter = mesh.nodes.iter();
-    let first = iter.next()?.coordinates_m;
-    let mut min = first;
-    let mut max = first;
-    for node in iter {
-        for axis in 0..3 {
-            min[axis] = min[axis].min(node.coordinates_m[axis]);
-            max[axis] = max[axis].max(node.coordinates_m[axis]);
-        }
-    }
-    Some([min, max])
 }
 
 fn boundary_face_recovery_ratio(mesh: &AnalysisMeshArtifact) -> f64 {

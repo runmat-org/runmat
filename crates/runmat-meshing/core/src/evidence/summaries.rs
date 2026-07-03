@@ -55,6 +55,30 @@ pub struct MeshRegionEvidence {
     pub boundary_region_edge_counts: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshTopologyEvidence {
+    pub node_count: usize,
+    pub volume_element_count: usize,
+    pub boundary_face_count: usize,
+    pub boundary_edge_count: usize,
+    pub adaptive_iteration_count: usize,
+    pub bounds_min_m: Option<[f64; 3]>,
+    pub bounds_max_m: Option<[f64; 3]>,
+}
+
+pub(super) fn topology_evidence(mesh: &AnalysisMeshArtifact) -> MeshTopologyEvidence {
+    let bounds = mesh_bounds_m(mesh);
+    MeshTopologyEvidence {
+        node_count: mesh.nodes.len(),
+        volume_element_count: mesh.volume_elements.len(),
+        boundary_face_count: mesh.boundary_faces.len(),
+        boundary_edge_count: mesh.boundary_edges.len(),
+        adaptive_iteration_count: mesh.adaptive_iterations.len(),
+        bounds_min_m: bounds.map(|bounds| bounds[0]),
+        bounds_max_m: bounds.map(|bounds| bounds[1]),
+    }
+}
+
 pub(super) fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
     let mut scaled_jacobian_bins = BTreeMap::<String, usize>::new();
     let mut exact_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
@@ -189,6 +213,20 @@ fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
         .iter()
         .find(|node| node.node_id == node_id)
         .map(|node| node.coordinates_m)
+}
+
+fn mesh_bounds_m(mesh: &AnalysisMeshArtifact) -> Option<[[f64; 3]; 2]> {
+    let mut iter = mesh.nodes.iter();
+    let first = iter.next()?.coordinates_m;
+    let mut min = first;
+    let mut max = first;
+    for node in iter {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(node.coordinates_m[axis]);
+            max[axis] = max[axis].max(node.coordinates_m[axis]);
+        }
+    }
+    Some([min, max])
 }
 
 fn tetrahedron_volume_m3(points: [[f64; 3]; 4]) -> f64 {
