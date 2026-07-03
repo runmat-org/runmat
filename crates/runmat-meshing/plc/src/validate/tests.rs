@@ -58,6 +58,28 @@ fn rejects_facet_that_references_unknown_node() {
 }
 
 #[test]
+fn rejects_facet_with_empty_source_face_id() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[0].source_face_id = source_face("");
+
+    assert!(matches!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::FacetHasEmptySourceFaceId { .. })
+    ));
+}
+
+#[test]
+fn rejects_facet_with_non_surface_source_face_id() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[0].source_face_id = entity("source_face");
+
+    assert!(matches!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::FacetSourceFaceStageMismatch { .. })
+    ));
+}
+
+#[test]
 fn rejects_empty_material_interface_id() {
     let mut plc = tetrahedron_plc();
     plc.facets[0].material_interface_ids = vec!["".to_string()];
@@ -251,7 +273,7 @@ fn facet(id: &str, node_ids: [&str; 3]) -> PlcFacet {
             entity(node_ids[1]),
             entity(node_ids[2]),
         ],
-        source_face_id: entity(id),
+        source_face_id: source_face(id),
         material_interface_ids: Vec::new(),
     }
 }
@@ -266,6 +288,13 @@ fn entity(id: &str) -> TopologyEntityId {
 fn source_edge(id: &str) -> TopologyEntityId {
     TopologyEntityId {
         stage: MeshingStage::CurveMesh,
+        id: id.to_string(),
+    }
+}
+
+fn source_face(id: &str) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::SurfaceMesh,
         id: id.to_string(),
     }
 }

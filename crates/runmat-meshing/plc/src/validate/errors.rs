@@ -20,6 +20,13 @@ pub enum PlcValidationError {
     FacetHasRepeatedNode {
         facet_id: TopologyEntityId,
     },
+    FacetHasEmptySourceFaceId {
+        facet_id: TopologyEntityId,
+    },
+    FacetSourceFaceStageMismatch {
+        facet_id: TopologyEntityId,
+        source_face_id: TopologyEntityId,
+    },
     FacetHasEmptyMaterialInterfaceId {
         facet_id: TopologyEntityId,
     },
@@ -90,6 +97,19 @@ impl std::fmt::Display for PlcValidationError {
             Self::FacetHasRepeatedNode { facet_id } => {
                 write!(formatter, "PLC facet {} repeats a node", facet_id.id)
             }
+            Self::FacetHasEmptySourceFaceId { facet_id } => write!(
+                formatter,
+                "PLC facet {} has an empty source face id",
+                facet_id.id
+            ),
+            Self::FacetSourceFaceStageMismatch {
+                facet_id,
+                source_face_id,
+            } => write!(
+                formatter,
+                "PLC facet {} source face {} is not a SurfaceMesh entity",
+                facet_id.id, source_face_id.id
+            ),
             Self::FacetHasEmptyMaterialInterfaceId { facet_id } => write!(
                 formatter,
                 "PLC facet {} has an empty material interface id",

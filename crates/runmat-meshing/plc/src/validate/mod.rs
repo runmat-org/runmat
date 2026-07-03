@@ -48,6 +48,7 @@ pub fn validate_protected_boundary_complex(
     let mut edge_orientation_balance = BTreeMap::<[TopologyEntityId; 2], i32>::new();
     let mut referenced_node_ids = BTreeSet::<TopologyEntityId>::new();
     for facet in &plc.facets {
+        validate_facet_source_face(facet.facet_id.clone(), &facet.source_face_id)?;
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
         validate_facet_material_interfaces(facet.facet_id.clone(), &facet.material_interface_ids)?;
         referenced_node_ids.extend(facet.node_ids.iter().cloned());
@@ -157,6 +158,22 @@ fn validate_facet_nodes(
         if !unique_node_ids.insert(node_id.clone()) {
             return Err(PlcValidationError::FacetHasRepeatedNode { facet_id });
         }
+    }
+    Ok(())
+}
+
+fn validate_facet_source_face(
+    facet_id: TopologyEntityId,
+    source_face_id: &TopologyEntityId,
+) -> Result<(), PlcValidationError> {
+    if source_face_id.id.is_empty() {
+        return Err(PlcValidationError::FacetHasEmptySourceFaceId { facet_id });
+    }
+    if source_face_id.stage != MeshingStage::SurfaceMesh {
+        return Err(PlcValidationError::FacetSourceFaceStageMismatch {
+            facet_id,
+            source_face_id: source_face_id.clone(),
+        });
     }
     Ok(())
 }

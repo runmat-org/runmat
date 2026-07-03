@@ -73,7 +73,7 @@ mod tests {
                 entity(node_ids[1]),
                 entity(node_ids[2]),
             ],
-            source_face_id: entity(id),
+            source_face_id: source_face(id),
             material_interface_ids: Vec::new(),
         }
     }
@@ -81,6 +81,13 @@ mod tests {
     fn entity(id: &str) -> TopologyEntityId {
         TopologyEntityId {
             stage: MeshingStage::ProtectedBoundaryComplex,
+            id: id.to_string(),
+        }
+    }
+
+    fn source_face(id: &str) -> TopologyEntityId {
+        TopologyEntityId {
+            stage: MeshingStage::SurfaceMesh,
             id: id.to_string(),
         }
     }
