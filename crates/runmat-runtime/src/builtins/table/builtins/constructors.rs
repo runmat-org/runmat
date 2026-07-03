@@ -39,6 +39,21 @@ pub(crate) async fn categorical_builtin(args: Vec<Value>) -> BuiltinResult<Value
 }
 
 #[runtime_builtin(
+    name = "ordinal",
+    category = "table",
+    summary = "Create an ordinal categorical array.",
+    keywords = "ordinal,categorical,categories,statistics",
+    accel = "cpu",
+    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn ordinal_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_table_class_registered();
+    let args = gather_values(&args).await?;
+    ordinal_from_args(args)
+}
+
+#[runtime_builtin(
     name = "dictionary",
     category = "table",
     summary = "Create a key-value dictionary object.",

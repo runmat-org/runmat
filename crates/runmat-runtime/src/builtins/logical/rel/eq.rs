@@ -177,6 +177,14 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         ));
     }
 
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Eq,
+    ) {
+        return result;
+    }
+
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = scalar_eq_value(&lhs, &rhs) {

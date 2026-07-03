@@ -170,6 +170,14 @@ async fn try_le_gpu(
 }
 
 async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Le,
+    ) {
+        return result;
+    }
+
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = scalar_le_value(&lhs, &rhs) {

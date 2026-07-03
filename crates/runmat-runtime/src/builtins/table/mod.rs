@@ -36,6 +36,10 @@ pub use metadata::*;
 pub use registry::ensure_table_class_registered;
 
 use containers::*;
+pub(crate) use containers::{
+    categorical_compare, categorical_extrema_to_value, categorical_max_evaluate,
+    categorical_min_evaluate, CategoricalComparison,
+};
 pub(crate) use display::categorical_label_at;
 use display::format_key_number;
 pub use display::{table_display_text, table_summary_text};

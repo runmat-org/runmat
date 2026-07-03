@@ -98,3 +98,23 @@ pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> 
         Value::Object(ref object) if object.is_class(CATEGORICAL_CLASS)
     )))
 }
+
+#[runtime_builtin(
+    name = "isordinal",
+    category = "table",
+    summary = "Return true for ordinal categorical arrays.",
+    keywords = "isordinal,ordinal,categorical,predicate",
+    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn isordinal_builtin(value: Value) -> BuiltinResult<Value> {
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    Ok(Value::Bool(matches!(
+        host,
+        Value::Object(ref object)
+            if object.is_class(CATEGORICAL_CLASS)
+                && matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
+    )))
+}

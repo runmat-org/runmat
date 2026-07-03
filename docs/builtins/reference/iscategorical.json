@@ -10,6 +10,6 @@
   "description": "`iscategorical(A)` returns true when `A` is a RunMat categorical object.",
   "behaviors": ["Non-categorical values return false."],
   "examples": [{"description": "Test categorical", "input": "tf = iscategorical(categorical({'a'}))", "output": "tf = true"}],
-  "links": [{"label": "categorical", "url": "./categorical"}],
+  "links": [{"label": "categorical", "url": "./categorical"}, {"label": "ordinal", "url": "./ordinal"}, {"label": "isordinal", "url": "./isordinal"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

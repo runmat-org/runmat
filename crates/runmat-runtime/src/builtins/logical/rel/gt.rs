@@ -170,6 +170,14 @@ async fn try_gt_gpu(
 }
 
 async fn gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Gt,
+    ) {
+        return result;
+    }
+
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = scalar_gt_value(&lhs, &rhs) {

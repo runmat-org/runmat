@@ -1184,7 +1184,7 @@ fn categorical_dictionary_and_selector_objects_materialize() {
         panic!("expected categorical object");
     };
     match cat.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["red", "blue"]),
+        Value::StringArray(array) => assert_eq!(array.data, vec!["blue", "red"]),
         other => panic!("expected categories, got {other:?}"),
     }
 
@@ -1202,6 +1202,315 @@ fn categorical_dictionary_and_selector_objects_materialize() {
         block_on(vartype_builtin(Value::from("numeric"))).unwrap(),
         Value::Object(obj) if obj.class_name == VARTYPE_CLASS
     ));
+}
+
+#[test]
+fn ordinal_constructor_sets_ordered_categorical_semantics() {
+    let default_ordered = block_on(ordinal_builtin(vec![Value::StringArray(
+        StringArray::new(
+            vec!["medium".into(), "low".into(), "high".into()],
+            vec![3, 1],
+        )
+        .unwrap(),
+    )]))
+    .unwrap();
+    let Value::Object(default_cat) = default_ordered else {
+        panic!("expected default ordinal categorical object");
+    };
+    match default_cat.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["high", "low", "medium"]),
+        other => panic!("expected sorted categories, got {other:?}"),
+    }
+
+    let ordinal = block_on(ordinal_builtin(vec![
+        Value::StringArray(
+            StringArray::new(
+                vec!["medium".into(), "low".into(), "high".into()],
+                vec![3, 1],
+            )
+            .unwrap(),
+        ),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
+    ]))
+    .unwrap();
+    assert!(matches!(
+        block_on(iscategorical_builtin(ordinal.clone())).unwrap(),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        block_on(isordinal_builtin(ordinal.clone())).unwrap(),
+        Value::Bool(true)
+    ));
+    let max_value = block_on(crate::call_builtin_async(
+        "max",
+        std::slice::from_ref(&ordinal),
+    ))
+    .unwrap();
+    let Value::Object(max_cat) = max_value else {
+        panic!("expected categorical max result");
+    };
+    match max_cat.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        other => panic!("expected categorical max code, got {other:?}"),
+    }
+    let min_value = block_on(crate::call_builtin_async(
+        "min",
+        std::slice::from_ref(&ordinal),
+    ))
+    .unwrap();
+    let Value::Object(min_cat) = min_value else {
+        panic!("expected categorical min result");
+    };
+    match min_cat.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        other => panic!("expected categorical min code, got {other:?}"),
+    }
+    let all_max = block_on(crate::call_builtin_async(
+        "max",
+        &[
+            ordinal.clone(),
+            Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap()),
+            Value::from("all"),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(all_max_cat) = all_max else {
+        panic!("expected categorical all max result");
+    };
+    match all_max_cat.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        other => panic!("expected categorical all max code, got {other:?}"),
+    }
+
+    let Value::Object(cat) = ordinal else {
+        panic!("expected ordinal categorical object");
+    };
+    assert_eq!(cat.properties.get("Ordinal"), Some(&Value::Bool(true)));
+    match cat.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => {
+            assert_eq!(array.data, vec!["low", "medium", "high"]);
+            assert_eq!(array.shape, vec![1, 3]);
+        }
+        other => panic!("expected categories, got {other:?}"),
+    }
+    match cat.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0, 3.0]),
+        other => panic!("expected categorical codes, got {other:?}"),
+    }
+
+    let renamed = block_on(categorical_builtin(vec![
+        Value::Tensor(Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        Value::StringArray(
+            StringArray::new(
+                vec!["child".into(), "adult".into(), "senior".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
+        Value::from("Ordinal"),
+        Value::Bool(true),
+    ]))
+    .unwrap();
+    assert!(matches!(
+        block_on(isordinal_builtin(renamed.clone())).unwrap(),
+        Value::Bool(true)
+    ));
+    let Value::Object(renamed_cat) = renamed else {
+        panic!("expected renamed categorical");
+    };
+    match renamed_cat.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["child", "adult", "senior"]),
+        other => panic!("expected renamed categories, got {other:?}"),
+    }
+    match renamed_cat.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 1.0, 2.0]),
+        other => panic!("expected renamed codes, got {other:?}"),
+    }
+
+    let nominal = block_on(categorical_builtin(vec![Value::StringArray(
+        StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
+    )]))
+    .unwrap();
+    assert!(matches!(
+        block_on(isordinal_builtin(nominal)).unwrap(),
+        Value::Bool(false)
+    ));
+    assert!(matches!(
+        block_on(isordinal_builtin(Value::Num(1.0))).unwrap(),
+        Value::Bool(false)
+    ));
+}
+
+#[test]
+fn categorical_compatibility_edges_match_matlab_surface() {
+    let option_word_category = block_on(categorical_builtin(vec![
+        Value::from("Ordinal"),
+        Value::from("Ordinal"),
+    ]))
+    .unwrap();
+    let Value::Object(option_word_category) = option_word_category else {
+        panic!("expected option-word categorical");
+    };
+    match option_word_category.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["Ordinal"]),
+        other => panic!("expected option-word categories, got {other:?}"),
+    }
+    match option_word_category.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        other => panic!("expected option-word codes, got {other:?}"),
+    }
+
+    let whitespace = block_on(categorical_builtin(vec![Value::StringArray(
+        StringArray::new(vec!["a".into(), " a".into(), "a ".into()], vec![3, 1]).unwrap(),
+    )]))
+    .unwrap();
+    let Value::Object(whitespace) = whitespace else {
+        panic!("expected whitespace categorical");
+    };
+    match whitespace.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec![" a", "a", "a "]),
+        other => panic!("expected whitespace categories, got {other:?}"),
+    }
+
+    let duplicate_valueset = block_on(categorical_builtin(vec![
+        Value::from("x"),
+        Value::StringArray(StringArray::new(vec!["x".into(), "x".into()], vec![1, 2]).unwrap()),
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+    ]));
+    assert!(duplicate_valueset.is_err());
+
+    let low_high = block_on(ordinal_builtin(vec![
+        Value::from("low"),
+        Value::StringArray(
+            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+        ),
+    ]))
+    .unwrap();
+    let high_low = block_on(ordinal_builtin(vec![
+        Value::from("low"),
+        Value::StringArray(
+            StringArray::new(vec!["high".into(), "low".into()], vec![1, 2]).unwrap(),
+        ),
+    ]))
+    .unwrap();
+    assert!(block_on(crate::call_builtin_async(
+        "lt",
+        &[low_high.clone(), high_low]
+    ))
+    .is_err());
+
+    let extra_category = block_on(categorical_builtin(vec![
+        Value::from("low"),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
+    ]))
+    .unwrap();
+    assert!(block_on(crate::call_builtin_async("eq", &[low_high, extra_category])).is_err());
+}
+
+#[test]
+fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
+    let ordinal_with_missing = block_on(ordinal_builtin(vec![
+        Value::StringArray(StringArray::new(vec!["x".into(), "z".into()], vec![2, 1]).unwrap()),
+        Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
+    ]))
+    .unwrap();
+    let default_max = block_on(crate::call_builtin_async(
+        "max",
+        std::slice::from_ref(&ordinal_with_missing),
+    ))
+    .unwrap();
+    let Value::Object(default_max) = default_max else {
+        panic!("expected categorical max with missing");
+    };
+    match default_max.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert!(tensor.data[0].is_nan()),
+        other => panic!("expected missing max code, got {other:?}"),
+    }
+
+    let omitnan_max = block_on(crate::call_builtin_async(
+        "max",
+        &[
+            ordinal_with_missing.clone(),
+            Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap()),
+            Value::from("omitnan"),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(omitnan_max) = omitnan_max else {
+        panic!("expected omitnan categorical max");
+    };
+    match omitnan_max.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        other => panic!("expected omitnan max code, got {other:?}"),
+    }
+
+    let two_outputs = block_on(crate::call_builtin_async_with_outputs(
+        "max",
+        std::slice::from_ref(&ordinal_with_missing),
+        2,
+    ))
+    .unwrap();
+    match two_outputs {
+        Value::OutputList(values) => {
+            assert_eq!(values.len(), 2);
+            assert!(matches!(values[0], Value::Object(_)));
+            match &values[1] {
+                Value::Num(index) => assert_eq!(*index, 2.0),
+                other => panic!("expected numeric index, got {other:?}"),
+            }
+        }
+        other => panic!("expected two-output list, got {other:?}"),
+    }
+
+    let matrix = block_on(ordinal_builtin(vec![
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "high".into(), "medium".into(), "low".into()],
+                vec![2, 2],
+            )
+            .unwrap(),
+        ),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
+    ]))
+    .unwrap();
+    let row_max = block_on(crate::call_builtin_async(
+        "max",
+        &[
+            matrix,
+            Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap()),
+            Value::Num(2.0),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(row_max) = row_max else {
+        panic!("expected categorical row max");
+    };
+    match row_max.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.data, vec![2.0, 3.0]);
+        }
+        other => panic!("expected row max codes, got {other:?}"),
+    }
 }
 
 #[test]

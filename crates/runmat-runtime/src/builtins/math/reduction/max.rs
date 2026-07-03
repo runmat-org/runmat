@@ -536,6 +536,9 @@ impl MaxEvaluation {
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if let Some(eval) = crate::builtins::table::categorical_max_evaluate(&value, &rest).await {
+        return crate::builtins::table::categorical_extrema_to_value(eval?);
+    }
     let eval = evaluate(value, &rest).await?;
     evaluation_to_value(eval)
 }

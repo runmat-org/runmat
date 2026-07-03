@@ -26,6 +26,13 @@ fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
     })
 }
 
+fn has_logical_array(vars: &[Value], expected: &[u8]) -> bool {
+    vars.iter().any(|value| match value {
+        Value::LogicalArray(array) => array.data == expected,
+        _ => false,
+    })
+}
+
 fn has_num(vars: &[Value], expected: f64) -> bool {
     vars.iter().any(
         |value| matches!(value, Value::Num(value) if (*value - expected).abs() <= f64::EPSILON),
@@ -67,10 +74,14 @@ fn timetable_conversion_surface_executes_from_scripts() {
 #[test]
 fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
     let vars = execute_source(
-        "C = categorical({'red'; 'blue'; 'red'}); tf = iscategorical(C); D = dictionary({'a','b'}, {1,2}); R = timerange(1, 3); V = vartype('numeric'); F = rowfilter({'A'}, '@gt0'); DS = arrayDatastore([1; 2]); UI = uitable('Data', [1 2]);",
+        "C = categorical({'red'; 'blue'; 'red'}); tf = iscategorical(C); O = ordinal({'medium'; 'low'}, {'low','medium','high'}); of = isordinal(O); nf = isordinal(C); gtmask = O > 'low'; eqmask = O == 'medium'; lemask = O <= 'medium'; out = [of + 0, nf + 0]; D = dictionary({'a','b'}, {1,2}); R = timerange(1, 3); V = vartype('numeric'); F = rowfilter({'A'}, '@gt0'); DS = arrayDatastore([1; 2]); UI = uitable('Data', [1 2]);",
     )
     .expect("categorical dictionary script");
     assert!(has_bool(&vars, true));
+    assert!(has_bool(&vars, false));
+    assert!(has_tensor(&vars, &[1.0, 0.0]));
+    assert!(has_logical_array(&vars, &[1, 0]));
+    assert!(has_logical_array(&vars, &[1, 1]));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Object(object) if object.class_name == "categorical")));

@@ -442,6 +442,9 @@ impl MinEvaluation {
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
+        return crate::builtins::table::categorical_extrema_to_value(eval?);
+    }
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
