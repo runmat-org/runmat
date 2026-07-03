@@ -141,3 +141,16 @@ fn outlier_cleanup_surface_executes_from_scripts() {
     assert!(has_num(&vars, 3.0));
     assert!(has_num(&vars, -1.0));
 }
+
+#[test]
+fn lhsdesign_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng('default'); X = lhsdesign(6, 3, 'Smooth', 'off', 'Criterion', 'correlation', 'Iterations', 3); s = size(X); first = X(1,1);",
+    )
+    .expect("lhsdesign script");
+    assert!(has_tensor_shape(&vars, &[6, 3]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
+    assert!(vars
+        .iter()
+        .any(|value| { matches!(value, Value::Num(value) if *value > 0.0 && *value < 1.0) }));
+}

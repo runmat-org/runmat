@@ -46317,6 +46317,90 @@
       "errors": []
     },
     {
+      "name": "lhsdesign",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = lhsdesign(n, p)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of sample points."
+            },
+            {
+              "name": "p",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of variables."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-P Latin hypercube design."
+            }
+          ]
+        },
+        {
+          "label": "X = lhsdesign(n, p, Name, Value)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of sample points."
+            },
+            {
+              "name": "p",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of variables."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Smooth, Criterion, and Iterations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-P Latin hypercube design."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LHSDESIGN.INVALID_ARGUMENT",
+          "identifier": "RunMat:lhsdesign:InvalidArgument",
+          "when": "Sample counts, dimensions, criteria, or name-value options are malformed.",
+          "message": "lhsdesign: invalid argument"
+        },
+        {
+          "code": "RM.LHSDESIGN.INTERNAL",
+          "identifier": "RunMat:lhsdesign:Internal",
+          "when": "Internal random generation or tensor allocation fails.",
+          "message": "lhsdesign: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "limit",
       "output_mode": "Fixed",
       "completion_policy": "Public",
