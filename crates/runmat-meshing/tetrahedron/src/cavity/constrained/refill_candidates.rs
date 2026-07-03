@@ -20,11 +20,13 @@ pub(super) use multi_interior::multi_interior_node_refill_candidate;
 
 use super::{
     cavity_boundary_node_centroid, cavity_boundary_node_ids,
-    exact_cover_refill_from_candidate_tetrahedra, next_cavity_node_id, raw_refill_tetrahedron,
-    raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra, refill_is_better,
-    star_refill_candidate_with_rejection_reason, tetrahedralize_points, ConnectivityPoint,
-    ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefill,
-    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
+    exact_cover_refill_from_candidate_tetrahedra, next_cavity_node_id,
+    refill_tetrahedra::{
+        raw_refill_tetrahedron, raw_refill_tetrahedron_with_rejection_reason,
+        refill_from_tetrahedra, refill_is_better, star_refill_candidate_with_rejection_reason,
+    },
+    tetrahedralize_points, ConnectivityPoint, ConstrainedCavity, ConstrainedCavityNode,
+    ConstrainedCavityRefill, ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
     ConstrainedCavityValidationError,
 };
 
