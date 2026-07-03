@@ -2,6 +2,7 @@ use super::*;
 
 mod candidates;
 mod forced_mates;
+mod rollback;
 
 impl<'a> BoundaryExactCoverSearch<'a> {
     pub(in super::super) fn add_candidate_faces(
