@@ -60,7 +60,6 @@ pub fn run_linear_static_with_options(
     check_cancelled("fea.run_linear_static")?;
 
     let analysis_mesh_present = options.analysis_mesh.is_some();
-    let prep_context_present = options.prep_context.is_some();
     if options.require_analysis_mesh_for_solid
         && !analysis_mesh_present
         && !model_has_explicit_structural_elements(model)
@@ -209,14 +208,6 @@ pub fn run_linear_static_with_options(
     if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
         diagnostics.push(diagnostic);
     }
-    if let Some(diagnostic) = structural_legacy_surrogate_diagnostic(
-        model,
-        &summary,
-        analysis_mesh_present,
-        prep_context_present,
-    ) {
-        diagnostics.push(diagnostic);
-    }
     if let (Some(residual_norm), Some(equation_scale)) = (
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
         scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),
@@ -330,28 +321,6 @@ pub fn run_linear_static_with_options(
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
         fields,
-    })
-}
-
-fn structural_legacy_surrogate_diagnostic(
-    model: &AnalysisModel,
-    summary: &AssemblySummary,
-    analysis_mesh_present: bool,
-    prep_context_present: bool,
-) -> Option<FeaDiagnostic> {
-    if analysis_mesh_present || model_has_explicit_structural_elements(model) {
-        return None;
-    }
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_LEGACY_SURROGATE".to_string(),
-        severity: FeaDiagnosticSeverity::Warning,
-        message: format!(
-            "basis=legacy_surrogate_topology dof_count={} surrogate_element_count={} prep_context_present={} solver_ready=false recommendation=provide_analysis_mesh",
-            summary.dof_count,
-            summary.structural_solid_element_count,
-            prep_context_present
-        ),
     })
 }
 

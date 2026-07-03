@@ -1,6 +1,5 @@
 pub mod dofs;
 pub mod elements;
-pub mod legacy_surrogate;
 pub mod solid;
 mod solid_boundary;
 
@@ -24,7 +23,6 @@ use self::{
         global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
-    legacy_surrogate::legacy_surrogate_topology,
     solid::{assemble_solid_stiffness_csr, solid_topology_from_analysis_mesh, SolidAssemblyError},
     solid_boundary::apply_analysis_mesh_structural_regions,
 };
@@ -385,7 +383,7 @@ pub fn assemble_linear_system(
         electro_thermal_context,
         false,
     )
-    .expect("non-strict assembly should preserve legacy fallback behavior")
+    .expect("non-strict assembly should build operator topology")
 }
 
 pub fn try_assemble_linear_system(
@@ -424,11 +422,10 @@ fn assemble_linear_system_impl(
     let solid_topology = analysis_mesh
         .as_ref()
         .and_then(|mesh| solid_topology_from_analysis_mesh(mesh, base_dof_count).ok());
-    let legacy_topology = legacy_surrogate_topology(base_dof_count, prep_context_ref);
     let dof_count = solid_topology
         .as_ref()
         .map(|topology| topology.dof_count)
-        .unwrap_or(legacy_topology.dof_count);
+        .unwrap_or(base_dof_count);
     let structural_solid_recovery = analysis_mesh
         .as_ref()
         .map(solid_recovery_from_analysis_mesh)
@@ -1112,7 +1109,7 @@ fn assemble_linear_system_impl(
         structural_solid_element_count: solid_topology
             .as_ref()
             .map(|topology| topology.volume_element_count)
-            .unwrap_or(legacy_topology.solid_element_count),
+            .unwrap_or(0),
         structural_solid_recovery,
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
@@ -3404,7 +3401,7 @@ mod tests {
             ],
             volume_elements: vec![AnalysisVolumeElement {
                 element_id: "tet_1".to_string(),
-                kind: VolumeElementKind::Tet4,
+                kind: VolumeElementKind::Tetrahedron4,
                 node_ids: vec![1, 2, 3, 4],
                 material_region_id: "solid".to_string(),
                 provenance: Vec::new(),

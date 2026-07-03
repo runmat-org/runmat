@@ -1625,7 +1625,7 @@ mod tests {
             ],
             volume_elements: vec![AnalysisVolumeElement {
                 element_id: "tet_1".to_string(),
-                kind: VolumeElementKind::Tet4,
+                kind: VolumeElementKind::Tetrahedron4,
                 node_ids: vec![1, 2, 3, 4],
                 material_region_id: "solid".to_string(),
                 provenance: Vec::new(),

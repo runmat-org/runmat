@@ -37,7 +37,7 @@ pub fn solid_topology_from_analysis_mesh(
         return Err(SolidAssemblyError::EmptyVolumeElements);
     }
     for element in &mesh.volume_elements {
-        if !matches!(element.kind, VolumeElementKind::Tet4) {
+        if !matches!(element.kind, VolumeElementKind::Tetrahedron4) {
             return Err(SolidAssemblyError::UnsupportedVolumeElementKind {
                 element_id: element.element_id.clone(),
             });
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn solid_topology_uses_analysis_mesh_nodes_and_tets() {
         let topology =
-            solid_topology_from_analysis_mesh(&mesh(VolumeElementKind::Tet4), 3).unwrap();
+            solid_topology_from_analysis_mesh(&mesh(VolumeElementKind::Tetrahedron4), 3).unwrap();
         assert_eq!(topology.dof_count, 12);
         assert_eq!(topology.node_count, 4);
         assert_eq!(topology.volume_element_count, 1);
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn solid_stiffness_scatter_assembles_tet4_dense_matrix() {
-        let mesh = mesh(VolumeElementKind::Tet4);
+        let mesh = mesh(VolumeElementKind::Tetrahedron4);
         let dense = assemble_solid_stiffness_dense(
             &mesh,
             SolidMaterial {
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn solid_stiffness_scatter_assembles_tet4_csr_matrix() {
-        let mesh = mesh(VolumeElementKind::Tet4);
+        let mesh = mesh(VolumeElementKind::Tetrahedron4);
         let csr = assemble_solid_stiffness_csr(
             &mesh,
             SolidMaterial {

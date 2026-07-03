@@ -206,7 +206,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
     assert_eq!(summary.structural_rotational_constraint_count, 0);
     assert_eq!(summary.structural_beam_element_count, 0);
     assert_eq!(summary.structural_shell_element_count, 0);
-    assert_eq!(summary.structural_solid_element_count, 1);
+    assert_eq!(summary.structural_solid_element_count, 0);
 }
 
 #[test]
@@ -569,14 +569,6 @@ fn convergence_diagnostics_are_emitted() {
             && diag.message.contains("basis=operator_connectivity")
             && diag.message.contains("active_stiffness_edge_count=")
     }));
-    assert!(result.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_STRUCTURAL_LEGACY_SURROGATE"
-            && diag.message.contains("basis=legacy_surrogate_topology")
-            && diag.message.contains("solver_ready=false")
-            && diag
-                .message
-                .contains("recommendation=provide_analysis_mesh")
-    }));
 }
 
 #[test]
@@ -643,15 +635,21 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
             && diag.message.contains("solver_mesh_node_count=4")
             && diag.message.contains("solver_mesh_element_count=1")
     }));
-    assert!(!result
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_STRUCTURAL_LEGACY_SURROGATE"));
 }
 
 #[test]
 fn prepared_structural_recovery_uses_prep_connectivity_edges() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let base_load = model
+        .loads
+        .first()
+        .cloned()
+        .expect("fixture should provide a structural load");
+    for load_index in 1..4 {
+        let mut load = base_load.clone();
+        load.load_id = format!("prep_connectivity_load_{load_index}");
+        model.loads.push(load);
+    }
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -779,7 +777,7 @@ fn single_tet_analysis_mesh() -> AnalysisMeshArtifact {
         ],
         volume_elements: vec![AnalysisVolumeElement {
             element_id: "tet_1".to_string(),
-            kind: VolumeElementKind::Tet4,
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids: vec![1, 2, 3, 4],
             material_region_id: "tip".to_string(),
             provenance: Vec::new(),

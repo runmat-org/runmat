@@ -3631,9 +3631,9 @@ mod tests {
             topology.basis,
             MaxwellEdgeTopologyBasis::PrepReferenceVectorElement
         );
-        assert_eq!(topology.edge_count(), 7);
-        assert_eq!(topology.oriented_edge_count(), 7);
-        assert_eq!(topology.vector_basis_dimension_count, 7);
+        assert_eq!(topology.edge_count(), 5);
+        assert_eq!(topology.oriented_edge_count(), 5);
+        assert_eq!(topology.vector_basis_dimension_count, 5);
         assert_eq!(topology.incidence_element_count(), 2);
         assert_eq!(topology.incidence_orientation_count(), 6);
         assert_eq!(topology.incidence_pair_count(), 6);
