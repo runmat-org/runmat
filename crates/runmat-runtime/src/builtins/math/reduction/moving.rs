@@ -59,6 +59,14 @@ const PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Dimension along which to move the window.",
 };
 
+const PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "w",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0"),
+    description: "Normalization flag: 0 for sample normalization, 1 for population normalization.",
+};
+
 const PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "nanflag",
     ty: BuiltinParamType::StringScalar,
@@ -83,6 +91,25 @@ const INPUTS_A_K_NANFLAG_NV: [BuiltinParamDescriptor; 4] =
     [PARAM_A, PARAM_K, PARAM_NANFLAG, PARAM_OPTIONS];
 const INPUTS_A_K_OPTIONS: [BuiltinParamDescriptor; 4] =
     [PARAM_A, PARAM_K, PARAM_DIM, PARAM_OPTIONS];
+const INPUTS_A_K_W: [BuiltinParamDescriptor; 3] = [PARAM_A, PARAM_K, PARAM_W];
+const INPUTS_A_K_W_DIM: [BuiltinParamDescriptor; 4] = [PARAM_A, PARAM_K, PARAM_W, PARAM_DIM];
+const INPUTS_A_K_W_NANFLAG: [BuiltinParamDescriptor; 4] =
+    [PARAM_A, PARAM_K, PARAM_W, PARAM_NANFLAG];
+const INPUTS_A_K_W_NANFLAG_NV: [BuiltinParamDescriptor; 5] =
+    [PARAM_A, PARAM_K, PARAM_W, PARAM_NANFLAG, PARAM_OPTIONS];
+const INPUTS_A_K_W_DIM_NANFLAG: [BuiltinParamDescriptor; 5] =
+    [PARAM_A, PARAM_K, PARAM_W, PARAM_DIM, PARAM_NANFLAG];
+const INPUTS_A_K_W_NV: [BuiltinParamDescriptor; 4] = [PARAM_A, PARAM_K, PARAM_W, PARAM_OPTIONS];
+const INPUTS_A_K_W_DIM_NV: [BuiltinParamDescriptor; 5] =
+    [PARAM_A, PARAM_K, PARAM_W, PARAM_DIM, PARAM_OPTIONS];
+const INPUTS_A_K_W_DIM_NANFLAG_NV: [BuiltinParamDescriptor; 6] = [
+    PARAM_A,
+    PARAM_K,
+    PARAM_W,
+    PARAM_DIM,
+    PARAM_NANFLAG,
+    PARAM_OPTIONS,
+];
 
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MOVING.INVALID_ARGUMENT",
@@ -136,6 +163,99 @@ macro_rules! moving_descriptor {
             BuiltinSignatureDescriptor {
                 label: concat!("M = ", $name, "(A, k, dim, Name, Value)"),
                 inputs: &super::INPUTS_A_K_OPTIONS,
+                outputs: &super::OUTPUT_Y,
+            },
+        ];
+
+        const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+            code: concat!("RM.", $name, ".INVALID_ARGUMENT"),
+            identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
+            when: super::ERROR_INVALID_ARGUMENT.when,
+            message: super::ERROR_INVALID_ARGUMENT.message,
+        };
+
+        const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+            code: concat!("RM.", $name, ".INVALID_INPUT"),
+            identifier: Some(concat!("RunMat:", $name, ":InvalidInput")),
+            when: super::ERROR_INVALID_INPUT.when,
+            message: super::ERROR_INVALID_INPUT.message,
+        };
+
+        const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+            code: concat!("RM.", $name, ".INTERNAL"),
+            identifier: Some(concat!("RunMat:", $name, ":Internal")),
+            when: super::ERROR_INTERNAL.when,
+            message: super::ERROR_INTERNAL.message,
+        };
+
+        const ERRORS: [BuiltinErrorDescriptor; 3] =
+            [ERROR_INVALID_ARGUMENT, ERROR_INVALID_INPUT, ERROR_INTERNAL];
+
+        pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &SIGNATURES,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
+    };
+}
+
+macro_rules! moving_stdvar_descriptor {
+    ($name:literal) => {
+        const SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k)"),
+                inputs: &super::INPUTS_A_K,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w)"),
+                inputs: &super::INPUTS_A_K_W,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, dim)"),
+                inputs: &super::INPUTS_A_K_W_DIM,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, nanflag)"),
+                inputs: &super::INPUTS_A_K_NANFLAG,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, nanflag)"),
+                inputs: &super::INPUTS_A_K_W_NANFLAG,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, dim, nanflag)"),
+                inputs: &super::INPUTS_A_K_W_DIM_NANFLAG,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, Name, Value)"),
+                inputs: &super::INPUTS_A_K_NV,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, Name, Value)"),
+                inputs: &super::INPUTS_A_K_W_NV,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, nanflag, Name, Value)"),
+                inputs: &super::INPUTS_A_K_W_NANFLAG_NV,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, dim, Name, Value)"),
+                inputs: &super::INPUTS_A_K_W_DIM_NV,
+                outputs: &super::OUTPUT_Y,
+            },
+            BuiltinSignatureDescriptor {
+                label: concat!("M = ", $name, "(A, k, w, dim, nanflag, Name, Value)"),
+                inputs: &super::INPUTS_A_K_W_DIM_NANFLAG_NV,
                 outputs: &super::OUTPUT_Y,
             },
         ];
@@ -317,6 +437,46 @@ pub mod movmedian {
     }
 }
 
+pub mod movstd {
+    use super::*;
+    moving_stdvar_descriptor!("movstd");
+    moving_fusion_spec!("movstd", "crate::builtins::math::reduction::moving::movstd");
+
+    #[runtime_builtin(
+        name = "movstd",
+        category = "math/reduction",
+        summary = "Moving standard deviation over numeric arrays.",
+        keywords = "movstd,moving window,standard deviation,std,omitnan,endpoints",
+        accel = "reduction",
+        type_resolver(super::moving_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::math::reduction::moving::movstd"
+    )]
+    pub(crate) async fn movstd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::moving_builtin("movstd", MovingOp::Std, args).await
+    }
+}
+
+pub mod movvar {
+    use super::*;
+    moving_stdvar_descriptor!("movvar");
+    moving_fusion_spec!("movvar", "crate::builtins::math::reduction::moving::movvar");
+
+    #[runtime_builtin(
+        name = "movvar",
+        category = "math/reduction",
+        summary = "Moving variance over numeric arrays.",
+        keywords = "movvar,moving window,variance,var,omitnan,endpoints",
+        accel = "reduction",
+        type_resolver(super::moving_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::math::reduction::moving::movvar"
+    )]
+    pub(crate) async fn movvar_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::moving_builtin("movvar", MovingOp::Var, args).await
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MovingOp {
     Sum,
@@ -325,6 +485,8 @@ enum MovingOp {
     Min,
     Max,
     Median,
+    Std,
+    Var,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,6 +510,13 @@ struct ParsedMoving {
     nan_mode: NanMode,
     endpoints: Endpoints,
     sample_points: Option<Vec<f64>>,
+    normalization: VarianceNormalization,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VarianceNormalization {
+    Sample,
+    Population,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -387,7 +556,12 @@ impl MovingOp {
     fn default_nan_mode(self) -> NanMode {
         match self {
             MovingOp::Min | MovingOp::Max => NanMode::Omit,
-            MovingOp::Sum | MovingOp::Mean | MovingOp::Prod | MovingOp::Median => NanMode::Include,
+            MovingOp::Sum
+            | MovingOp::Mean
+            | MovingOp::Prod
+            | MovingOp::Median
+            | MovingOp::Std
+            | MovingOp::Var => NanMode::Include,
         }
     }
 
@@ -395,8 +569,17 @@ impl MovingOp {
         match self {
             MovingOp::Min => f64::INFINITY,
             MovingOp::Max => f64::NEG_INFINITY,
-            MovingOp::Sum | MovingOp::Mean | MovingOp::Prod | MovingOp::Median => f64::NAN,
+            MovingOp::Sum
+            | MovingOp::Mean
+            | MovingOp::Prod
+            | MovingOp::Median
+            | MovingOp::Std
+            | MovingOp::Var => f64::NAN,
         }
+    }
+
+    fn uses_variance_normalization(self) -> bool {
+        matches!(self, MovingOp::Std | MovingOp::Var)
     }
 }
 
@@ -513,7 +696,8 @@ fn moving_real(
                         }
                         values.push(value);
                     }
-                    output[out_idx] = reduce_real_window(op, &values, saw_nan);
+                    output[out_idx] =
+                        reduce_real_window(op, &values, saw_nan, parsed.normalization);
                     continue;
                 }
 
@@ -536,6 +720,7 @@ fn moving_real(
                     saw_nan,
                     fill_value(op, parsed, window.fill_count),
                     parsed.nan_mode,
+                    parsed.normalization,
                 );
             }
         }
@@ -602,7 +787,8 @@ fn moving_complex(
                         }
                         values.push(value);
                     }
-                    output[out_idx] = reduce_complex_window(op, &values, saw_nan);
+                    output[out_idx] =
+                        reduce_complex_window(op, &values, saw_nan, parsed.normalization);
                     continue;
                 }
 
@@ -626,6 +812,7 @@ fn moving_complex(
                     fill_value(op, parsed, window.fill_count)
                         .map(|(fill, count)| ((fill, 0.0), count)),
                     parsed.nan_mode,
+                    parsed.normalization,
                 );
             }
         }
@@ -643,7 +830,12 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn reduce_real_window(op: MovingOp, values: &[f64], saw_nan: bool) -> f64 {
+fn reduce_real_window(
+    op: MovingOp,
+    values: &[f64],
+    saw_nan: bool,
+    normalization: VarianceNormalization,
+) -> f64 {
     if saw_nan {
         return f64::NAN;
     }
@@ -651,7 +843,12 @@ fn reduce_real_window(op: MovingOp, values: &[f64], saw_nan: bool) -> f64 {
         return match op {
             MovingOp::Sum => 0.0,
             MovingOp::Prod => 1.0,
-            MovingOp::Mean | MovingOp::Min | MovingOp::Max | MovingOp::Median => f64::NAN,
+            MovingOp::Mean
+            | MovingOp::Min
+            | MovingOp::Max
+            | MovingOp::Median
+            | MovingOp::Std
+            | MovingOp::Var => f64::NAN,
         };
     }
     match op {
@@ -661,6 +858,8 @@ fn reduce_real_window(op: MovingOp, values: &[f64], saw_nan: bool) -> f64 {
         MovingOp::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
         MovingOp::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         MovingOp::Median => median(values),
+        MovingOp::Var => variance_real(values, normalization),
+        MovingOp::Std => variance_real(values, normalization).sqrt(),
     }
 }
 
@@ -670,18 +869,19 @@ fn reduce_real_window_with_fill(
     saw_nan: bool,
     fill: Option<(f64, usize)>,
     nan_mode: NanMode,
+    normalization: VarianceNormalization,
 ) -> f64 {
     let Some((fill, fill_count)) = fill else {
-        return reduce_real_window(op, values, saw_nan);
+        return reduce_real_window(op, values, saw_nan, normalization);
     };
     if fill_count == 0 {
-        return reduce_real_window(op, values, saw_nan);
+        return reduce_real_window(op, values, saw_nan, normalization);
     }
     if saw_nan || (fill.is_nan() && nan_mode == NanMode::Include) {
         return f64::NAN;
     }
     if fill.is_nan() && nan_mode == NanMode::Omit {
-        return reduce_real_window(op, values, false);
+        return reduce_real_window(op, values, false, normalization);
     }
     match op {
         MovingOp::Sum => values.iter().sum::<f64>() + fill * fill_count as f64,
@@ -701,10 +901,17 @@ fn reduce_real_window_with_fill(
             .chain(std::iter::once(fill))
             .fold(f64::NEG_INFINITY, f64::max),
         MovingOp::Median => median_with_fill(values, fill, fill_count),
+        MovingOp::Var => variance_real_with_fill(values, fill, fill_count, normalization),
+        MovingOp::Std => variance_real_with_fill(values, fill, fill_count, normalization).sqrt(),
     }
 }
 
-fn reduce_complex_window(op: MovingOp, values: &[(f64, f64)], saw_nan: bool) -> (f64, f64) {
+fn reduce_complex_window(
+    op: MovingOp,
+    values: &[(f64, f64)],
+    saw_nan: bool,
+    normalization: VarianceNormalization,
+) -> (f64, f64) {
     if saw_nan {
         return (f64::NAN, f64::NAN);
     }
@@ -712,9 +919,12 @@ fn reduce_complex_window(op: MovingOp, values: &[(f64, f64)], saw_nan: bool) -> 
         return match op {
             MovingOp::Sum => (0.0, 0.0),
             MovingOp::Prod => (1.0, 0.0),
-            MovingOp::Mean | MovingOp::Min | MovingOp::Max | MovingOp::Median => {
-                (f64::NAN, f64::NAN)
-            }
+            MovingOp::Mean
+            | MovingOp::Min
+            | MovingOp::Max
+            | MovingOp::Median
+            | MovingOp::Std
+            | MovingOp::Var => (f64::NAN, f64::NAN),
         };
     }
     match op {
@@ -722,7 +932,7 @@ fn reduce_complex_window(op: MovingOp, values: &[(f64, f64)], saw_nan: bool) -> 
             .iter()
             .fold((0.0, 0.0), |acc, value| (acc.0 + value.0, acc.1 + value.1)),
         MovingOp::Mean => {
-            let sum = reduce_complex_window(MovingOp::Sum, values, false);
+            let sum = reduce_complex_window(MovingOp::Sum, values, false, normalization);
             (sum.0 / values.len() as f64, sum.1 / values.len() as f64)
         }
         MovingOp::Prod => values.iter().fold((1.0, 0.0), |acc, value| {
@@ -742,6 +952,8 @@ fn reduce_complex_window(op: MovingOp, values: &[(f64, f64)], saw_nan: bool) -> 
             .max_by(compare_complex_auto)
             .unwrap_or((f64::NAN, f64::NAN)),
         MovingOp::Median => complex_median(values),
+        MovingOp::Var => (variance_complex(values, normalization), 0.0),
+        MovingOp::Std => (variance_complex(values, normalization).sqrt(), 0.0),
     }
 }
 
@@ -751,23 +963,24 @@ fn reduce_complex_window_with_fill(
     saw_nan: bool,
     fill: Option<((f64, f64), usize)>,
     nan_mode: NanMode,
+    normalization: VarianceNormalization,
 ) -> (f64, f64) {
     let Some((fill, fill_count)) = fill else {
-        return reduce_complex_window(op, values, saw_nan);
+        return reduce_complex_window(op, values, saw_nan, normalization);
     };
     if fill_count == 0 {
-        return reduce_complex_window(op, values, saw_nan);
+        return reduce_complex_window(op, values, saw_nan, normalization);
     }
     let fill_is_nan = fill.0.is_nan() || fill.1.is_nan();
     if saw_nan || (fill_is_nan && nan_mode == NanMode::Include) {
         return (f64::NAN, f64::NAN);
     }
     if fill_is_nan && nan_mode == NanMode::Omit {
-        return reduce_complex_window(op, values, false);
+        return reduce_complex_window(op, values, false, normalization);
     }
     match op {
         MovingOp::Sum => {
-            let sum = reduce_complex_window(MovingOp::Sum, values, false);
+            let sum = reduce_complex_window(MovingOp::Sum, values, false, normalization);
             (
                 sum.0 + fill.0 * fill_count as f64,
                 sum.1 + fill.1 * fill_count as f64,
@@ -780,6 +993,7 @@ fn reduce_complex_window_with_fill(
                 false,
                 Some((fill, fill_count)),
                 nan_mode,
+                normalization,
             );
             (
                 sum.0 / (values.len() + fill_count) as f64,
@@ -787,7 +1001,7 @@ fn reduce_complex_window_with_fill(
             )
         }
         MovingOp::Prod => {
-            let product = reduce_complex_window(MovingOp::Prod, values, false);
+            let product = reduce_complex_window(MovingOp::Prod, values, false, normalization);
             let fill_product = complex_pow_usize(fill, fill_count);
             (
                 product.0 * fill_product.0 - product.1 * fill_product.1,
@@ -807,6 +1021,165 @@ fn reduce_complex_window_with_fill(
             .max_by(compare_complex_auto)
             .unwrap_or((f64::NAN, f64::NAN)),
         MovingOp::Median => complex_median_with_fill(values, fill, fill_count),
+        MovingOp::Var => (
+            variance_complex_with_fill(values, fill, fill_count, normalization),
+            0.0,
+        ),
+        MovingOp::Std => (
+            variance_complex_with_fill(values, fill, fill_count, normalization).sqrt(),
+            0.0,
+        ),
+    }
+}
+
+fn variance_denominator(n: usize, normalization: VarianceNormalization) -> f64 {
+    match normalization {
+        VarianceNormalization::Population => n as f64,
+        VarianceNormalization::Sample if n > 1 => (n - 1) as f64,
+        VarianceNormalization::Sample => n as f64,
+    }
+}
+
+fn variance_real(values: &[f64], normalization: VarianceNormalization) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    let mut acc = RealVarianceAccumulator::default();
+    for value in values {
+        acc.push(*value);
+    }
+    acc.finish(normalization)
+}
+
+fn variance_real_with_fill(
+    values: &[f64],
+    fill: f64,
+    fill_count: usize,
+    normalization: VarianceNormalization,
+) -> f64 {
+    let n = values.len() + fill_count;
+    if n == 0 {
+        return f64::NAN;
+    }
+    let mut acc = RealVarianceAccumulator::default();
+    for value in values {
+        acc.push(*value);
+    }
+    acc.merge_repeated(fill, fill_count);
+    acc.finish(normalization)
+}
+
+fn variance_complex(values: &[(f64, f64)], normalization: VarianceNormalization) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    let mut acc = ComplexVarianceAccumulator::default();
+    for value in values {
+        acc.push(*value);
+    }
+    acc.finish(normalization)
+}
+
+fn variance_complex_with_fill(
+    values: &[(f64, f64)],
+    fill: (f64, f64),
+    fill_count: usize,
+    normalization: VarianceNormalization,
+) -> f64 {
+    let n = values.len() + fill_count;
+    if n == 0 {
+        return f64::NAN;
+    }
+    let mut acc = ComplexVarianceAccumulator::default();
+    for value in values {
+        acc.push(*value);
+    }
+    acc.merge_repeated(fill, fill_count);
+    acc.finish(normalization)
+}
+
+#[derive(Default)]
+struct RealVarianceAccumulator {
+    n: usize,
+    mean: f64,
+    m2: f64,
+}
+
+impl RealVarianceAccumulator {
+    fn push(&mut self, value: f64) {
+        self.n += 1;
+        let delta = value - self.mean;
+        self.mean += delta / self.n as f64;
+        let delta2 = value - self.mean;
+        self.m2 += delta * delta2;
+    }
+
+    fn merge_repeated(&mut self, value: f64, count: usize) {
+        if count == 0 {
+            return;
+        }
+        if self.n == 0 {
+            self.n = count;
+            self.mean = value;
+            self.m2 = 0.0;
+            return;
+        }
+        let total = self.n + count;
+        let delta = value - self.mean;
+        self.mean += delta * (count as f64 / total as f64);
+        self.m2 += delta * delta * (self.n as f64 * count as f64 / total as f64);
+        self.n = total;
+    }
+
+    fn finish(self, normalization: VarianceNormalization) -> f64 {
+        if self.n == 0 {
+            return f64::NAN;
+        }
+        self.m2 / variance_denominator(self.n, normalization)
+    }
+}
+
+#[derive(Default)]
+struct ComplexVarianceAccumulator {
+    n: usize,
+    mean: (f64, f64),
+    m2: f64,
+}
+
+impl ComplexVarianceAccumulator {
+    fn push(&mut self, value: (f64, f64)) {
+        self.n += 1;
+        let delta = (value.0 - self.mean.0, value.1 - self.mean.1);
+        self.mean.0 += delta.0 / self.n as f64;
+        self.mean.1 += delta.1 / self.n as f64;
+        let delta2 = (value.0 - self.mean.0, value.1 - self.mean.1);
+        self.m2 += delta.0 * delta2.0 + delta.1 * delta2.1;
+    }
+
+    fn merge_repeated(&mut self, value: (f64, f64), count: usize) {
+        if count == 0 {
+            return;
+        }
+        if self.n == 0 {
+            self.n = count;
+            self.mean = value;
+            self.m2 = 0.0;
+            return;
+        }
+        let total = self.n + count;
+        let delta = (value.0 - self.mean.0, value.1 - self.mean.1);
+        let scale = self.n as f64 * count as f64 / total as f64;
+        self.mean.0 += delta.0 * (count as f64 / total as f64);
+        self.mean.1 += delta.1 * (count as f64 / total as f64);
+        self.m2 += (delta.0 * delta.0 + delta.1 * delta.1) * scale;
+        self.n = total;
+    }
+
+    fn finish(self, normalization: VarianceNormalization) -> f64 {
+        if self.n == 0 {
+            return f64::NAN;
+        }
+        self.m2 / variance_denominator(self.n, normalization)
     }
 }
 
@@ -1110,6 +1483,8 @@ async fn parse_moving_args(
     let mut nan_mode = op.default_nan_mode();
     let mut endpoints = Endpoints::Shrink;
     let mut sample_points: Option<Vec<f64>> = None;
+    let mut normalization = VarianceNormalization::Sample;
+    let mut normalization_seen = false;
     let mut idx = 0;
     while idx < rest.len() {
         if let Some(keyword) = value_as_keyword(&rest[idx]) {
@@ -1166,6 +1541,17 @@ async fn parse_moving_args(
             }
         }
 
+        if op.uses_variance_normalization() && !normalization_seen {
+            if let Some(parsed_normalization) =
+                parse_variance_normalization(name, &rest[idx]).await?
+            {
+                normalization = parsed_normalization;
+                normalization_seen = true;
+                idx += 1;
+                continue;
+            }
+        }
+
         if dim.is_none() {
             if let Some(parsed_dim) = tensor::dimension_from_value_async(&rest[idx], name, false)
                 .await
@@ -1199,7 +1585,69 @@ async fn parse_moving_args(
         nan_mode,
         endpoints,
         sample_points,
+        normalization,
     })
+}
+
+async fn parse_variance_normalization(
+    name: &'static str,
+    value: &Value,
+) -> BuiltinResult<Option<VarianceNormalization>> {
+    let values = match value {
+        Value::Tensor(tensor) if tensor.data.is_empty() => {
+            return Ok(Some(VarianceNormalization::Sample));
+        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => vec![tensor.data[0]],
+        Value::Tensor(_) => {
+            return Err(invalid_argument(
+                name,
+                format!("{name}: normalization flag must be 0 or 1"),
+            ));
+        }
+        Value::LogicalArray(logical) if logical.data.is_empty() => {
+            return Ok(Some(VarianceNormalization::Sample));
+        }
+        Value::LogicalArray(logical) if logical.data.len() == 1 => {
+            vec![if logical.data[0] != 0 { 1.0 } else { 0.0 }]
+        }
+        Value::LogicalArray(_) => {
+            return Err(invalid_argument(
+                name,
+                format!("{name}: normalization flag must be 0 or 1"),
+            ));
+        }
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
+            if tensor.data.is_empty() {
+                return Ok(Some(VarianceNormalization::Sample));
+            }
+            if tensor.data.len() == 1 {
+                vec![tensor.data[0]]
+            } else {
+                return Err(invalid_argument(
+                    name,
+                    format!("{name}: normalization flag must be 0 or 1"),
+                ));
+            }
+        }
+        Value::Num(n) => vec![*n],
+        Value::Int(i) => vec![i.to_f64()],
+        Value::Bool(b) => vec![if *b { 1.0 } else { 0.0 }],
+        _ => {
+            return Ok(None);
+        }
+    };
+    let raw = values[0];
+    if (raw - 0.0).abs() <= f64::EPSILON {
+        Ok(Some(VarianceNormalization::Sample))
+    } else if (raw - 1.0).abs() <= f64::EPSILON {
+        Ok(Some(VarianceNormalization::Population))
+    } else {
+        Err(invalid_argument(
+            name,
+            format!("{name}: normalization flag must be 0 or 1"),
+        ))
+    }
 }
 
 async fn looks_like_dimension(value: &Value) -> BuiltinResult<bool> {
@@ -1577,6 +2025,185 @@ mod tests {
         .expect("movmedian");
         let out = expect_tensor(result);
         assert_eq!(out.data, vec![1.0, 5.5, 6.5, 5.5]);
+    }
+
+    #[test]
+    fn movstd_defaults_to_sample_normalization_and_accepts_population_weight() {
+        let input = tensor(vec![4., 8., 6.], vec![1, 3]);
+        let sample = call(
+            "movstd",
+            MovingOp::Std,
+            vec![input.clone(), Value::Num(3.0)],
+        )
+        .expect("movstd sample");
+        let population = call(
+            "movstd",
+            MovingOp::Std,
+            vec![input, Value::Num(3.0), Value::Num(1.0)],
+        )
+        .expect("movstd population");
+        let sample = expect_tensor(sample);
+        let population = expect_tensor(population);
+        assert!((sample.data[0] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((sample.data[1] - 2.0).abs() < 1e-12);
+        assert!((sample.data[2] - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert!((population.data[0] - 2.0).abs() < 1e-12);
+        assert!((population.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+        assert!((population.data[2] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn movstd_uses_weight_then_dimension_grammar() {
+        let input = tensor(vec![4., -1., -1., 8., -2., 3., 6., -3., 4.], vec![3, 3]);
+        let result = call(
+            "movstd",
+            MovingOp::Std,
+            vec![input, Value::Num(3.0), Value::Num(0.0), Value::Num(2.0)],
+        )
+        .expect("movstd dim");
+        let out = expect_tensor(result);
+        assert_eq!(out.shape, vec![3, 3]);
+        assert!((out.data[0] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.data[1] - (0.5_f64).sqrt()).abs() < 1e-12);
+        assert!((out.data[2] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.data[3] - 2.0).abs() < 1e-12);
+        assert!((out.data[4] - 1.0).abs() < 1e-12);
+        assert!((out.data[5] - (7.0_f64).sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn movstd_combines_weight_dimension_and_nanflag() {
+        let input = tensor(
+            vec![4., -1., -1., f64::NAN, -2., 3., 6., -3., 4.],
+            vec![3, 3],
+        );
+        let result = call(
+            "movstd",
+            MovingOp::Std,
+            vec![
+                input,
+                Value::Num(3.0),
+                Value::Num(0.0),
+                Value::Num(2.0),
+                Value::from("omitnan"),
+            ],
+        )
+        .expect("movstd dim omitnan");
+        let out = expect_tensor(result);
+        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.data[0], 0.0);
+        assert!((out.data[1] - 0.5_f64.sqrt()).abs() < 1e-12);
+        assert!((out.data[2] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.data[3] - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert_eq!(out.data[6], 0.0);
+    }
+
+    #[test]
+    fn movstd_rejects_dimension_without_explicit_weight() {
+        let err = call(
+            "movstd",
+            MovingOp::Std,
+            vec![
+                tensor(vec![1., 2., 3.], vec![1, 3]),
+                Value::Num(3.0),
+                Value::Num(2.0),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:movstd:InvalidArgument"));
+    }
+
+    #[test]
+    fn movvar_supports_omitnan_endpoints_and_samplepoints() {
+        let omit = call(
+            "movvar",
+            MovingOp::Var,
+            vec![
+                tensor(vec![4., f64::NAN, -1.], vec![1, 3]),
+                Value::Num(3.0),
+                Value::from("omitnan"),
+            ],
+        )
+        .expect("movvar omitnan");
+        assert_eq!(expect_tensor(omit).data, vec![0.0, 12.5, 0.0]);
+
+        let fill = call(
+            "movvar",
+            MovingOp::Var,
+            vec![
+                tensor(vec![1., 2.], vec![1, 2]),
+                Value::Num(3.0),
+                Value::from("Endpoints"),
+                Value::Num(0.0),
+            ],
+        )
+        .expect("movvar fill");
+        assert_eq!(expect_tensor(fill).data, vec![1.0, 1.0]);
+
+        let sample_points = call(
+            "movvar",
+            MovingOp::Var,
+            vec![
+                tensor(vec![1., 2., 4.], vec![1, 3]),
+                Value::Num(2.1),
+                Value::from("SamplePoints"),
+                tensor(vec![0., 1., 3.], vec![1, 3]),
+            ],
+        )
+        .expect("movvar samplepoints");
+        assert_eq!(expect_tensor(sample_points).data, vec![0.5, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn movvar_large_repeated_fill_uses_stable_accumulation() {
+        let result = call(
+            "movvar",
+            MovingOp::Var,
+            vec![
+                tensor(vec![1.0e308], vec![1, 1]),
+                Value::Num(1_000_001.0),
+                Value::from("Endpoints"),
+                Value::Num(1.0e308),
+            ],
+        )
+        .expect("movvar stable fill");
+        let out = expect_tensor(result);
+        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.data, vec![0.0]);
+    }
+
+    #[test]
+    fn movstd_discard_endpoint_shortens_dimension() {
+        let result = call(
+            "movstd",
+            MovingOp::Std,
+            vec![
+                tensor(vec![1., 2., 3., 4.], vec![1, 4]),
+                Value::Num(3.0),
+                Value::from("Endpoints"),
+                Value::from("discard"),
+            ],
+        )
+        .expect("movstd discard");
+        let out = expect_tensor(result);
+        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.data, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn complex_movvar_uses_squared_complex_distance() {
+        let input = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1., 0.), (3., 0.), (3., 4.)], vec![1, 3]).unwrap(),
+        );
+        let result =
+            call("movvar", MovingOp::Var, vec![input, Value::Num(3.0)]).expect("complex movvar");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(out.shape, vec![1, 3]);
+        assert!((out.data[0].0 - 2.0).abs() < 1e-12);
+        assert_eq!(out.data[0].1, 0.0);
+        assert!((out.data[1].0 - 20.0 / 3.0).abs() < 1e-12);
     }
 
     #[test]

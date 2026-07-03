@@ -54422,6 +54422,495 @@
       ]
     },
     {
+      "name": "movstd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "M = movstd(A, k)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, dim, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movstd(A, k, w, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.movstd.INVALID_ARGUMENT",
+          "identifier": "RunMat:movstd:InvalidArgument",
+          "when": "Window length, dimension, nanflag, or name-value options are invalid.",
+          "message": "moving window: invalid argument"
+        },
+        {
+          "code": "RM.movstd.INVALID_INPUT",
+          "identifier": "RunMat:movstd:InvalidInput",
+          "when": "Input values cannot be converted to a supported moving-window domain.",
+          "message": "moving window: invalid input"
+        },
+        {
+          "code": "RM.movstd.INTERNAL",
+          "identifier": "RunMat:movstd:Internal",
+          "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
+          "message": "moving window: internal failure"
+        }
+      ]
+    },
+    {
       "name": "movsum",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54660,6 +55149,495 @@
         {
           "code": "RM.movsum.INTERNAL",
           "identifier": "RunMat:movsum:Internal",
+          "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
+          "message": "moving window: internal failure"
+        }
+      ]
+    },
+    {
+      "name": "movvar",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "M = movvar(A, k)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, dim, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        },
+        {
+          "label": "M = movvar(A, k, w, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric, logical, or gpuArray data."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length or two-element [kb kf] backward/forward window."
+            },
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Normalization flag: 0 for sample normalization, 1 for population normalization."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension along which to move the window."
+            },
+            {
+              "name": "nanflag",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"includenan\"",
+              "description": "NaN handling mode: \"includenan\" or \"omitnan\"."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options, including \"Endpoints\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "M",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Moving-window reduction result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.movvar.INVALID_ARGUMENT",
+          "identifier": "RunMat:movvar:InvalidArgument",
+          "when": "Window length, dimension, nanflag, or name-value options are invalid.",
+          "message": "moving window: invalid argument"
+        },
+        {
+          "code": "RM.movvar.INVALID_INPUT",
+          "identifier": "RunMat:movvar:InvalidInput",
+          "when": "Input values cannot be converted to a supported moving-window domain.",
+          "message": "moving window: invalid input"
+        },
+        {
+          "code": "RM.movvar.INTERNAL",
+          "identifier": "RunMat:movvar:Internal",
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
         }
