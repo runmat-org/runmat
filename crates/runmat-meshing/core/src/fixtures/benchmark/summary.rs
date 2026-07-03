@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 pub(super) fn mesh_benchmark_suite_summary(
     reports: &[MeshBenchmarkReport],

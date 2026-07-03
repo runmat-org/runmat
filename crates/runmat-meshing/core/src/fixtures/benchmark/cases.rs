@@ -1,7 +1,11 @@
 use super::*;
-use crate::{size::field::SizingSample, MeshTargetSize, RefinementFocusLevel};
+use crate::{
+    size::field::{MeshSizingField, SizingSample},
+    validation::AnalysisMeshValidationOptions,
+    MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions,
+};
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
     UnitSystem,
 };
