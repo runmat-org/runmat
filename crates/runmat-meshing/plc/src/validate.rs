@@ -48,6 +48,9 @@ pub enum PlcValidationError {
         node_ids: [TopologyEntityId; 2],
         incidence_count: usize,
     },
+    InconsistentBoundaryEdgeOrientation {
+        node_ids: [TopologyEntityId; 2],
+    },
 }
 
 impl std::fmt::Display for PlcValidationError {
@@ -116,6 +119,11 @@ impl std::fmt::Display for PlcValidationError {
                 "PLC edge {}-{} has non-manifold incidence {incidence_count}, expected 2",
                 node_ids[0].id, node_ids[1].id
             ),
+            Self::InconsistentBoundaryEdgeOrientation { node_ids } => write!(
+                formatter,
+                "PLC edge {}-{} is not oppositely oriented by its incident facets",
+                node_ids[0].id, node_ids[1].id
+            ),
         }
     }
 }
@@ -156,16 +164,18 @@ pub fn validate_protected_boundary_complex(
     }
 
     let mut edge_incidence = BTreeMap::<[TopologyEntityId; 2], usize>::new();
+    let mut edge_orientation_balance = BTreeMap::<[TopologyEntityId; 2], i32>::new();
     let mut referenced_node_ids = BTreeSet::<TopologyEntityId>::new();
     for facet in &plc.facets {
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
         referenced_node_ids.extend(facet.node_ids.iter().cloned());
         for edge_index in 0..3 {
-            let edge = sorted_edge(
-                facet.node_ids[edge_index].clone(),
-                facet.node_ids[(edge_index + 1) % 3].clone(),
-            );
-            *edge_incidence.entry(edge).or_insert(0) += 1;
+            let left = facet.node_ids[edge_index].clone();
+            let right = facet.node_ids[(edge_index + 1) % 3].clone();
+            let edge = sorted_edge(left.clone(), right.clone());
+            *edge_incidence.entry(edge.clone()).or_insert(0) += 1;
+            *edge_orientation_balance.entry(edge).or_insert(0) +=
+                directed_edge_orientation(left, right);
         }
     }
 
@@ -216,6 +226,14 @@ pub fn validate_protected_boundary_complex(
                 incidence_count,
             });
         }
+        if edge_orientation_balance
+            .get(&edge)
+            .copied()
+            .unwrap_or_default()
+            != 0
+        {
+            return Err(PlcValidationError::InconsistentBoundaryEdgeOrientation { node_ids: edge });
+        }
     }
 
     Ok(PlcValidationSummary {
@@ -251,6 +269,14 @@ fn sorted_edge(left: TopologyEntityId, right: TopologyEntityId) -> [TopologyEnti
         [left, right]
     } else {
         [right, left]
+    }
+}
+
+fn directed_edge_orientation(left: TopologyEntityId, right: TopologyEntityId) -> i32 {
+    if left <= right {
+        1
+    } else {
+        -1
     }
 }
 
@@ -290,6 +316,17 @@ mod tests {
         assert!(matches!(
             validate_protected_boundary_complex(&plc),
             Err(PlcValidationError::OpenBoundaryEdge { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_inconsistent_boundary_edge_orientation() {
+        let mut plc = tetrahedron_plc();
+        plc.facets[0].node_ids = [entity("0"), entity("1"), entity("2")];
+
+        assert!(matches!(
+            validate_protected_boundary_complex(&plc),
+            Err(PlcValidationError::InconsistentBoundaryEdgeOrientation { .. })
         ));
     }
 
