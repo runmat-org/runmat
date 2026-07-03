@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus},
-    artifact::{AnalysisMeshArtifact, AnalysisVolumeElement, MeshBackendSummary},
+    artifact::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
-    topology::VolumeElementKind,
     validation::{
         analysis_mesh_validation_error_code, mesh_contains_point,
         validate_analysis_mesh_with_options, volume_component_count,
@@ -18,7 +17,8 @@ pub const MESH_EVIDENCE_SCHEMA_VERSION: &str = "mesh-evidence/v1";
 #[cfg(feature = "dev-evidence")]
 pub use dev_traces::{build_mesh_evidence_artifact_with_debug, MeshDebugEvent, MeshDebugEvidence};
 use summaries::quality_evidence;
-pub use summaries::MeshQualityEvidence;
+use summaries::region_evidence;
+pub use summaries::{MeshQualityEvidence, MeshRegionEvidence};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshEvidenceArtifact {
@@ -274,17 +274,6 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub exact_quality_unrepaired_interior_seed_count: usize,
     #[serde(default)]
     pub exact_quality_unrepaired_edge_star_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MeshRegionEvidence {
-    pub material_region_element_counts: BTreeMap<String, usize>,
-    #[serde(default)]
-    pub material_region_volume_m3: BTreeMap<String, f64>,
-    pub boundary_region_face_counts: BTreeMap<String, usize>,
-    #[serde(default)]
-    pub boundary_region_recovered_face_counts: BTreeMap<String, usize>,
-    pub boundary_region_edge_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -821,107 +810,6 @@ fn tetrahedron_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetrahedron
             .backend
             .tetrahedron_exact_quality_unrepaired_edge_star_count,
     }
-}
-
-fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
-    let mut material_region_element_counts = BTreeMap::<String, usize>::new();
-    let mut material_region_volume_m3 = BTreeMap::<String, f64>::new();
-    for element in &mesh.volume_elements {
-        *material_region_element_counts
-            .entry(element.material_region_id.clone())
-            .or_default() += 1;
-        let volume_m3 = element_volume_m3(mesh, element);
-        if volume_m3.is_finite() && volume_m3 > 0.0 {
-            *material_region_volume_m3
-                .entry(element.material_region_id.clone())
-                .or_default() += volume_m3;
-        }
-    }
-
-    let mut boundary_region_face_counts = BTreeMap::<String, usize>::new();
-    let mut boundary_region_recovered_face_counts = BTreeMap::<String, usize>::new();
-    for face in &mesh.boundary_faces {
-        for region_id in &face.region_ids {
-            *boundary_region_face_counts
-                .entry(region_id.clone())
-                .or_default() += 1;
-            if !face.adjacent_volume_element_ids.is_empty() {
-                *boundary_region_recovered_face_counts
-                    .entry(region_id.clone())
-                    .or_default() += 1;
-            }
-        }
-    }
-
-    let mut boundary_region_edge_counts = BTreeMap::<String, usize>::new();
-    for edge in &mesh.boundary_edges {
-        for region_id in &edge.region_ids {
-            *boundary_region_edge_counts
-                .entry(region_id.clone())
-                .or_default() += 1;
-        }
-    }
-
-    MeshRegionEvidence {
-        material_region_element_counts,
-        material_region_volume_m3,
-        boundary_region_face_counts,
-        boundary_region_recovered_face_counts,
-        boundary_region_edge_counts,
-    }
-}
-
-fn element_volume_m3(mesh: &AnalysisMeshArtifact, element: &AnalysisVolumeElement) -> f64 {
-    if element.kind != VolumeElementKind::Tetrahedron4 || element.node_ids.len() != 4 {
-        return 0.0;
-    }
-    let Some(points) = element_tetrahedron_points(mesh, element.node_ids.as_slice()) else {
-        return 0.0;
-    };
-    tetrahedron_volume_m3(points)
-}
-
-fn element_tetrahedron_points(
-    mesh: &AnalysisMeshArtifact,
-    node_ids: &[u32],
-) -> Option<[[f64; 3]; 4]> {
-    Some([
-        mesh_node(mesh, node_ids[0])?,
-        mesh_node(mesh, node_ids[1])?,
-        mesh_node(mesh, node_ids[2])?,
-        mesh_node(mesh, node_ids[3])?,
-    ])
-}
-
-fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
-    mesh.nodes
-        .iter()
-        .find(|node| node.node_id == node_id)
-        .map(|node| node.coordinates_m)
-}
-
-fn tetrahedron_volume_m3(points: [[f64; 3]; 4]) -> f64 {
-    let ab = [
-        points[1][0] - points[0][0],
-        points[1][1] - points[0][1],
-        points[1][2] - points[0][2],
-    ];
-    let ac = [
-        points[2][0] - points[0][0],
-        points[2][1] - points[0][1],
-        points[2][2] - points[0][2],
-    ];
-    let ad = [
-        points[3][0] - points[0][0],
-        points[3][1] - points[0][1],
-        points[3][2] - points[0][2],
-    ];
-    let cross = [
-        ac[1] * ad[2] - ac[2] * ad[1],
-        ac[2] * ad[0] - ac[0] * ad[2],
-        ac[0] * ad[1] - ac[1] * ad[0],
-    ];
-    ((ab[0] * cross[0] + ab[1] * cross[1] + ab[2] * cross[2]) / 6.0).abs()
 }
 
 fn validation_evidence(
