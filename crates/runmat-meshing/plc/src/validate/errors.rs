@@ -37,6 +37,9 @@ pub enum PlcValidationError {
     UnreferencedNode {
         node_id: TopologyEntityId,
     },
+    DisconnectedBoundaryComponents {
+        component_count: usize,
+    },
     ProtectedEdgeNotOnBoundary {
         edge_id: TopologyEntityId,
         node_ids: [TopologyEntityId; 2],
@@ -112,6 +115,10 @@ impl std::fmt::Display for PlcValidationError {
                     node_id.id
                 )
             }
+            Self::DisconnectedBoundaryComponents { component_count } => write!(
+                formatter,
+                "PLC has {component_count} disconnected boundary components and no shell nesting classification"
+            ),
             Self::ProtectedEdgeNotOnBoundary { edge_id, node_ids } => write!(
                 formatter,
                 "PLC protected edge {} references non-boundary edge {}-{}",

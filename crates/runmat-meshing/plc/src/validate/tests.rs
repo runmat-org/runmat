@@ -120,6 +120,16 @@ fn rejects_protected_edge_that_is_not_a_boundary_edge() {
     ));
 }
 
+#[test]
+fn rejects_disconnected_boundary_components_until_shell_nesting_is_classified() {
+    let plc = disconnected_tetrahedra_plc();
+
+    assert!(matches!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DisconnectedBoundaryComponents { component_count: 2 })
+    ));
+}
+
 fn tetrahedron_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "tetrahedron_plc".to_string(),
@@ -144,6 +154,24 @@ fn tetrahedron_plc() -> ProtectedBoundaryComplex {
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
+}
+
+fn disconnected_tetrahedra_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetrahedron_plc();
+    plc.complex_id = "disconnected_tetrahedra_plc".to_string();
+    plc.nodes.extend([
+        node("10", [3.0, 0.0, 0.0]),
+        node("11", [4.0, 0.0, 0.0]),
+        node("12", [3.0, 1.0, 0.0]),
+        node("13", [3.0, 0.0, 1.0]),
+    ]);
+    plc.facets.extend([
+        facet("f10", ["10", "12", "11"]),
+        facet("f11", ["10", "11", "13"]),
+        facet("f12", ["11", "12", "13"]),
+        facet("f13", ["12", "10", "13"]),
+    ]);
+    plc
 }
 
 fn octahedron_plc() -> ProtectedBoundaryComplex {
