@@ -19,7 +19,7 @@ use runmat_geometry_io::{
     GeometryImportContext, GeometryImportOptions,
 };
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
-use runmat_meshing_core::{
+use runmat_meshing::{
     prepare_geometry_for_analysis, MeshingOptions, MeshingPrepResult, MeshingProfile,
 };
 use serde::{Deserialize, Serialize};

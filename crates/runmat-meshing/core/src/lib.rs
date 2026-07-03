@@ -1,6 +1,5 @@
 extern crate self as runmat_meshing_core;
 
-pub mod analysis_prep;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub use runmat_meshing_curve as curve;
@@ -18,11 +17,6 @@ pub mod source_topology {
 pub use runmat_meshing_surface as surface;
 pub mod validation;
 
-pub use analysis_prep::{
-    prepare_geometry_for_analysis, ElementFamilyHint, MeshConnectivityClass, MeshingOptions,
-    MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
-    PreparedMeshDescriptor, RegionMeshMapping,
-};
 pub use cad::eval::{
     build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
     summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,

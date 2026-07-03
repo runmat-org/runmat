@@ -38,13 +38,16 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
-use runmat_meshing::{generate_analysis_mesh, generate_analysis_mesh_with_sizing};
+use runmat_meshing::{
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing, ElementFamilyHint,
+    MeshConnectivityClass,
+};
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, plan_refinement_indicators, AdaptiveConvergenceStatus,
-    AdaptiveIterationSummary, AnalysisMeshArtifact, AnalysisMeshValidationOptions,
-    ElementFamilyHint, MeshConnectivityClass, MeshSizingField, MeshTargetSize,
-    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
-    RefinementStrategy, SizingFieldUpdate, SourceEntityKind, VolumeMeshingOptions,
+    AdaptiveIterationSummary, AnalysisMeshArtifact, AnalysisMeshValidationOptions, MeshSizingField,
+    MeshTargetSize, RefinementIndicatorAvailability, RefinementIndicatorSample,
+    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, SourceEntityKind,
+    VolumeMeshingOptions,
 };
 use runmat_meshing_evidence::{
     build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,

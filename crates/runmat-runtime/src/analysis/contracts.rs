@@ -2,7 +2,8 @@ use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
-use runmat_meshing_core::{RegionMeshMapping, VolumeMeshingOptions};
+use runmat_meshing::RegionMeshMapping;
+use runmat_meshing_core::VolumeMeshingOptions;
 use serde::{Deserialize, Serialize};
 
 fn default_prep_coordinate_span_m() -> f64 {
