@@ -12,10 +12,11 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep,
-    AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, CfdSolveFamily,
-    ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, ReferenceFrame, StructuralElementKind,
+    AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition, BoundaryConditionKind,
+    CfdSolveFamily, ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence,
+    LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialThermalModel, ReferenceFrame, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode,
 };
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
@@ -203,7 +204,38 @@ fn sample_model() -> AnalysisModel {
             plastic: None,
         }],
         material_assignments: Vec::new(),
-        structural: None,
+        structural: Some(StructuralModel {
+            nodes: vec![
+                StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+            ],
+            elements: vec![StructuralElement {
+                element_id: "beam_1".to_string(),
+                region_id: "beam_span".to_string(),
+                kind: StructuralElementKind::Beam(BeamElementModel {
+                    node_ids: [1, 2],
+                    section_id: "rect".to_string(),
+                    reference_axis: [0.0, 1.0, 0.0],
+                }),
+            }],
+            beam_sections: vec![BeamSectionModel {
+                section_id: "rect".to_string(),
+                area_m2: 2.0e-4,
+                iy_m4: 1.6e-9,
+                iz_m4: 6.4e-9,
+                torsion_j_m4: 2.4e-9,
+                outer_fiber_y_m: 0.01,
+                outer_fiber_z_m: 0.005,
+                torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            }],
+            shell_sections: Vec::new(),
+        }),
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -211,12 +243,12 @@ fn sample_model() -> AnalysisModel {
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
-            region_id: "root".to_string(),
+            region_id: "node:1".to_string(),
             kind: BoundaryConditionKind::Fixed,
         }],
         loads: vec![LoadCase {
             load_id: "load_tip".to_string(),
-            region_id: "tip".to_string(),
+            region_id: "node:2".to_string(),
             kind: LoadKind::Force {
                 fx: 0.0,
                 fy: -1000.0,
@@ -765,7 +797,7 @@ run:
     );
     assert_eq!(
         mesh_options.element,
-        runmat_meshing_core::VolumeElementKind::Tet4
+        runmat_meshing_core::VolumeElementKind::Tetrahedron4
     );
     assert_eq!(
         mesh_options.profile,
@@ -2000,7 +2032,7 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     }];
     spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetFallback;
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::StructuredTetrahedronFallback;
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
         min_scaled_jacobian: 0.0,
         max_aspect_ratio: 1.0e9,
@@ -2359,7 +2391,7 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     );
     assert_eq!(
         payload["mesh"]["provenance"]["algorithm"].as_str(),
-        Some("plc_tet/v1")
+        Some("plc_tetrahedron/v1")
     );
     let volume_element_count = payload["mesh"]["volume_elements"]
         .as_array()
@@ -2367,15 +2399,15 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
         .len();
     assert!(volume_element_count > 0);
     assert_eq!(
-        payload["mesh"]["backend"]["tet_element_count"].as_u64(),
+        payload["mesh"]["backend"]["tetrahedron_element_count"].as_u64(),
         Some(volume_element_count as u64)
     );
     assert_eq!(
-        payload["mesh"]["backend"]["tet_fan_fallback_component_count"].as_u64(),
+        payload["mesh"]["backend"]["tetrahedron_fan_fallback_component_count"].as_u64(),
         Some(0)
     );
     assert_eq!(
-        payload["mesh"]["backend"]["tet_recovered_component_ratio"].as_f64(),
+        payload["mesh"]["backend"]["tetrahedron_recovered_component_ratio"].as_f64(),
         Some(1.0)
     );
     assert_eq!(
@@ -2958,20 +2990,16 @@ fn analysis_run_linear_static_returns_typed_envelope() {
         .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
         .expect("structural displacement field should be present")
         .is_empty());
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
-    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert!(envelope.data.quality_reasons.is_empty());
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
-    assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
-    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
+    assert_eq!(envelope.data.provenance.solver_method, "dense_direct");
+    assert_eq!(envelope.data.provenance.preconditioner, "none");
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -3590,7 +3618,7 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         vec![0.0; 6],
     ));
     assert_eq!(solid_stress.topology_id.as_deref(), Some("analysis_mesh"));
-    assert_eq!(solid_stress.element_kind.as_deref(), Some("tet4"));
+    assert_eq!(solid_stress.element_kind.as_deref(), Some("tetrahedron4"));
     assert_eq!(solid_stress.location, AnalysisFieldLocation::Element);
     assert_eq!(solid_stress.entity_count, 1);
     assert_eq!(solid_stress.value_count, 6);
@@ -3605,7 +3633,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         strain_energy_density.topology_id.as_deref(),
         Some("analysis_mesh")
     );
-    assert_eq!(strain_energy_density.element_kind.as_deref(), Some("tet4"));
+    assert_eq!(
+        strain_energy_density.element_kind.as_deref(),
+        Some("tetrahedron4")
+    );
     assert_eq!(
         strain_energy_density.location,
         AnalysisFieldLocation::Element
@@ -5156,9 +5187,13 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
 #[test]
 fn quality_policy_exploratory_allows_publishable_warn_path() {
     let _guard = analysis_test_guard();
-    let model = runmat_analysis_fea::fixtures::fixture_model(
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::MultiMaterialAssembly,
     );
+    let beam_model = sample_model();
+    model.structural = beam_model.structural;
+    model.boundary_conditions = beam_model.boundary_conditions;
+    model.loads = beam_model.loads;
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -5238,19 +5273,9 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
     .expect("run should succeed");
 
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
-    assert!(!envelope.data.publishable);
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
 }
 
@@ -5306,19 +5331,9 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
     .expect("run should succeed");
 
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Warn);
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::LegacySurrogateMeshBasis));
     assert_eq!(envelope.data.provenance.quality_policy, "strict");
 }
 
@@ -5940,8 +5955,8 @@ fn study_analysis_mesh_stamps_single_material_assignment_region() {
     spec.model = Some(model);
     let mut mesh = minimal_analysis_mesh();
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 4],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6006,8 +6021,8 @@ fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6016,9 +6031,9 @@ fn structural_stress_gradient_samples_use_adjacent_tet_differences() {
     let samples = structural_stress_gradient_samples(&mesh, &[10.0, 25.0]);
 
     assert_eq!(samples.len(), 2);
-    assert_eq!(samples[0].entity_id, "tet_1");
+    assert_eq!(samples[0].entity_id, "tetrahedron_1");
     assert_eq!(samples[0].indicator_value, 15.0);
-    assert_eq!(samples[1].entity_id, "tet_2");
+    assert_eq!(samples[1].entity_id, "tetrahedron_2");
     assert_eq!(samples[1].indicator_value, 15.0);
     assert!(samples
         .iter()
@@ -6032,7 +6047,7 @@ fn structural_boundary_region_samples_use_adjacent_volume_elements() {
     let samples = structural_boundary_region_samples(&mesh, &["tip".to_string()]);
 
     assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].entity_id, "tet_1");
+    assert_eq!(samples[0].entity_id, "tetrahedron_1");
     assert_eq!(samples[0].indicator_value, 1.0);
     assert!(
         samples[0].current_size_m.is_finite() && samples[0].current_size_m > 0.0,
@@ -6049,8 +6064,8 @@ fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6125,8 +6140,8 @@ fn append_solved_adaptive_mesh_summary_refreshes_adaptive_evidence() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6491,8 +6506,8 @@ fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6556,8 +6571,8 @@ fn append_solved_adaptive_mesh_summary_uses_thermal_element_vector_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6647,8 +6662,8 @@ fn append_solved_adaptive_mesh_summary_converges_thermal_gradient_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6716,8 +6731,8 @@ fn append_solved_adaptive_mesh_summary_uses_electromagnetic_element_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6813,8 +6828,8 @@ fn append_solved_adaptive_mesh_summary_converges_electromagnetic_gradient_fields
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6891,8 +6906,8 @@ fn append_solved_adaptive_mesh_summary_uses_acoustic_pressure_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -6965,8 +6980,8 @@ fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "fluid".to_string(),
         provenance: Vec::new(),
@@ -7060,8 +7075,8 @@ fn append_solved_adaptive_mesh_summary_uses_cht_element_fields() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "coupled".to_string(),
         provenance: Vec::new(),
@@ -7244,8 +7259,8 @@ fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -7309,8 +7324,8 @@ fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_f
     let mut mesh = minimal_analysis_mesh();
     mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
     mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 2, 3, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -7387,19 +7402,22 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
             detail: None,
         },
     ];
-    mesh.backend.tet_requested_refinement_point_count = 4;
+    mesh.backend.tetrahedron_requested_refinement_point_count = 4;
     mesh.backend
-        .tet_accepted_requested_refinement_location_count = 4;
-    mesh.backend.tet_accepted_requested_refinement_point_count = 3;
+        .tetrahedron_accepted_requested_refinement_location_count = 4;
     mesh.backend
-        .tet_accepted_requested_refinement_surrogate_point_count = 2;
-    mesh.backend.tet_rejected_requested_refinement_point_count = 1;
+        .tetrahedron_accepted_requested_refinement_point_count = 3;
     mesh.backend
-        .tet_requested_refinement_rejected_by_reason
+        .tetrahedron_accepted_requested_refinement_surrogate_point_count = 2;
+    mesh.backend
+        .tetrahedron_rejected_requested_refinement_point_count = 1;
+    mesh.backend
+        .tetrahedron_requested_refinement_rejected_by_reason
         .insert("quality_or_recovery".to_string(), 1);
-    mesh.backend.tet_dropped_requested_refinement_point_count = 1;
     mesh.backend
-        .tet_requested_refinement_dropped_by_reason
+        .tetrahedron_dropped_requested_refinement_point_count = 1;
+    mesh.backend
+        .tetrahedron_requested_refinement_dropped_by_reason
         .insert("not_retained_after_repair".to_string(), 1);
     mesh.sizing.anisotropic_samples = vec![
         runmat_meshing_core::AnisotropicSizingSample {
@@ -7434,56 +7452,58 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(1)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["requested_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["requested_count"].as_u64(),
         Some(4)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["accepted_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["accepted_count"].as_u64(),
         Some(3)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["accepted_location_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["accepted_location_count"].as_u64(),
         Some(4)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["accepted_exact_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["accepted_exact_count"].as_u64(),
         Some(1)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["accepted_surrogate_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["accepted_surrogate_count"].as_u64(),
         Some(2)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["rejected_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["rejected_count"].as_u64(),
         Some(1)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["rejected_by_reason"]["quality_or_recovery"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tet_refinement"]["dropped_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tet_refinement"]["dropped_by_reason"]["not_retained_after_repair"]
+        summary["requested_tetrahedron_refinement"]["rejected_by_reason"]["quality_or_recovery"]
             .as_u64(),
         Some(1)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["acceptance_ratio"].as_f64(),
+        summary["requested_tetrahedron_refinement"]["dropped_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["dropped_by_reason"]
+            ["not_retained_after_repair"]
+            .as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["acceptance_ratio"].as_f64(),
         Some(0.75)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["rejection_ratio"].as_f64(),
+        summary["requested_tetrahedron_refinement"]["rejection_ratio"].as_f64(),
         Some(0.25)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["drop_ratio"].as_f64(),
+        summary["requested_tetrahedron_refinement"]["drop_ratio"].as_f64(),
         Some(0.25)
     );
     assert_eq!(
-        summary["requested_tet_refinement"]["surrogate_ratio"].as_f64(),
+        summary["requested_tetrahedron_refinement"]["surrogate_ratio"].as_f64(),
         Some(2.0 / 3.0)
     );
     assert_eq!(summary["anisotropic"]["total"].as_u64(), Some(2));
@@ -7546,8 +7566,8 @@ fn refinement_effect_summary_reports_topology_deltas() {
         .nodes
         .push(analysis_mesh_node(5, [0.25, 0.25, 0.25]));
     refined_mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tet_2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![2, 3, 4, 5],
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -7646,7 +7666,7 @@ fn analysis_boundary_face(
         face_id: face_id.to_string(),
         kind: BoundaryElementKind::Tri3,
         node_ids,
-        adjacent_volume_element_ids: vec!["tet_1".to_string()],
+        adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
         region_ids: region_ids
             .iter()
             .map(|region| (*region).to_string())
@@ -7666,8 +7686,8 @@ fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
             analysis_mesh_node(4, [0.0, 0.0, 1.0]),
         ],
         volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tet_1".to_string(),
-            kind: VolumeElementKind::Tet4,
+            element_id: "tetrahedron_1".to_string(),
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids: vec![1, 2, 3, 4],
             material_region_id: "solid".to_string(),
             provenance: Vec::new(),

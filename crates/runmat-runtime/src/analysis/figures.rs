@@ -2930,7 +2930,7 @@ mod tests {
 
         assert!(warning.contains("structural.von_mises"));
         assert!(warning.contains("topology_id=analysis_mesh"));
-        assert!(warning.contains("element_kind=tet4"));
+        assert!(warning.contains("element_kind=tetrahedron4"));
         assert!(warning.contains("value_count=1"));
         assert!(warning.contains("render_triangle_count=12"));
     }

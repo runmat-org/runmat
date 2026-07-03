@@ -9326,8 +9326,7 @@ pub fn analysis_run_linear_static_with_options(
             ),
             analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
             analysis_mesh: analysis_mesh.clone(),
-            require_analysis_mesh_for_solid: options.analysis_mesh_artifact_path.is_some()
-                || prep_context.is_none(),
+            require_analysis_mesh_for_solid: true,
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -9405,8 +9404,8 @@ pub fn analysis_run_linear_static_with_options(
     let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
     let mesh_validation_reasons =
         mesh_validation_evidence_quality_reasons(&analysis_mesh_validation_evidence);
-    let legacy_surrogate_reasons =
-        legacy_surrogate_mesh_basis_reasons(model, analysis_mesh.as_ref());
+    let missing_solid_mesh_reasons =
+        missing_solid_analysis_mesh_reasons(model, analysis_mesh.as_ref());
     let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
         matches!(
             reason.code,
@@ -9425,7 +9424,7 @@ pub fn analysis_run_linear_static_with_options(
         QualityGate::Fail
     } else if !field_topology_reasons.is_empty() {
         QualityGate::Fail
-    } else if !legacy_surrogate_reasons.is_empty() {
+    } else if !missing_solid_mesh_reasons.is_empty() {
         QualityGate::Warn
     } else if !solid_mesh_reasons.is_empty() {
         QualityGate::Warn
@@ -9445,7 +9444,7 @@ pub fn analysis_run_linear_static_with_options(
     quality_reasons.extend(solid_mesh_reasons);
     quality_reasons.extend(mesh_validation_reasons);
     quality_reasons.extend(field_topology_reasons);
-    quality_reasons.extend(legacy_surrogate_reasons);
+    quality_reasons.extend(missing_solid_mesh_reasons);
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
@@ -9798,7 +9797,7 @@ fn boundary_projection_warning_thresholds_m(
         })
 }
 
-fn legacy_surrogate_mesh_basis_reasons(
+fn missing_solid_analysis_mesh_reasons(
     model: &AnalysisModel,
     analysis_mesh: Option<&AnalysisMeshArtifact>,
 ) -> Vec<QualityReason> {
@@ -9806,8 +9805,9 @@ fn legacy_surrogate_mesh_basis_reasons(
         return Vec::new();
     }
     vec![QualityReason {
-        code: QualityReasonCode::LegacySurrogateMeshBasis,
-        detail: "linear static structural result used the legacy prep/surrogate mesh basis; provide a solver-ready solid analysis mesh".to_string(),
+        code: QualityReasonCode::MissingSolidAnalysisMesh,
+        detail: "linear static structural result requires a solver-ready solid analysis mesh"
+            .to_string(),
     }]
 }
 
@@ -15475,15 +15475,21 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
         }
         inserted_breakpoint_count += application.inserted_breakpoint_count;
     }
-    let accepted_requested = mesh.backend.tet_accepted_requested_refinement_point_count;
+    let accepted_requested = mesh
+        .backend
+        .tetrahedron_accepted_requested_refinement_point_count;
     let accepted_location = mesh
         .backend
-        .tet_accepted_requested_refinement_location_count;
+        .tetrahedron_accepted_requested_refinement_location_count;
     let accepted_surrogate = mesh
         .backend
-        .tet_accepted_requested_refinement_surrogate_point_count;
-    let rejected_requested = mesh.backend.tet_rejected_requested_refinement_point_count;
-    let dropped_requested = mesh.backend.tet_dropped_requested_refinement_point_count;
+        .tetrahedron_accepted_requested_refinement_surrogate_point_count;
+    let rejected_requested = mesh
+        .backend
+        .tetrahedron_rejected_requested_refinement_point_count;
+    let dropped_requested = mesh
+        .backend
+        .tetrahedron_dropped_requested_refinement_point_count;
     let mut anisotropic_by_reason = BTreeMap::<String, usize>::new();
     let mut invalid_anisotropic_by_reason = BTreeMap::<String, usize>::new();
     for sample in &mesh.sizing.anisotropic_samples {
@@ -15510,28 +15516,28 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
             "by_reason": anisotropic_by_reason,
             "invalid_by_reason": invalid_anisotropic_by_reason,
         },
-        "requested_tet_refinement": {
-            "requested_count": mesh.backend.tet_requested_refinement_point_count,
+        "requested_tetrahedron_refinement": {
+            "requested_count": mesh.backend.tetrahedron_requested_refinement_point_count,
             "accepted_location_count": accepted_location,
             "accepted_count": accepted_requested,
             "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
             "accepted_surrogate_count": accepted_surrogate,
             "rejected_count": rejected_requested,
-            "rejected_by_reason": mesh.backend.tet_requested_refinement_rejected_by_reason.clone(),
+            "rejected_by_reason": mesh.backend.tetrahedron_requested_refinement_rejected_by_reason.clone(),
             "dropped_count": dropped_requested,
-            "dropped_by_reason": mesh.backend.tet_requested_refinement_dropped_by_reason.clone(),
-            "acceptance_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
-                Some(accepted_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            "dropped_by_reason": mesh.backend.tetrahedron_requested_refinement_dropped_by_reason.clone(),
+            "acceptance_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(accepted_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
             } else {
                 None
             },
-            "rejection_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
-                Some(rejected_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            "rejection_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(rejected_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
             } else {
                 None
             },
-            "drop_ratio": if mesh.backend.tet_requested_refinement_point_count > 0 {
-                Some(dropped_requested as f64 / mesh.backend.tet_requested_refinement_point_count as f64)
+            "drop_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(dropped_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
             } else {
                 None
             },
@@ -17678,7 +17684,7 @@ fn resolve_run_prep_context(
         .prep
         .prepared_meshes
         .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tet)
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tetrahedron)
         .count() as f64
         / mesh_count;
     let topology_hex_family_ratio = artifact

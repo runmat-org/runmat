@@ -4021,7 +4021,7 @@ run:
         );
         assert_eq!(
             field_object.properties.get("element_kind"),
-            Some(&Value::String("tet4".to_string()))
+            Some(&Value::String("tetrahedron4".to_string()))
         );
         assert_eq!(
             field_object.properties.get("entity_count"),

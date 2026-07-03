@@ -667,7 +667,7 @@ fn resolve_mesh_options(
     }
     if !mesh.element.is_supported_for_solid_solve() {
         return Err(format!(
-            "mesh.element {:?} is not supported for mesh.kind solid; use mesh.element: tet4",
+            "mesh.element {:?} is not supported for mesh.kind solid; use mesh.element: tetrahedron4",
             mesh.element
         ));
     }
@@ -1750,7 +1750,7 @@ fn default_mesh_kind() -> MeshKindRequest {
 }
 
 fn default_mesh_element() -> VolumeElementKind {
-    VolumeElementKind::Tet4
+    VolumeElementKind::Tetrahedron4
 }
 
 fn default_mesh_element_order() -> MeshElementOrder {
@@ -2069,7 +2069,7 @@ units: n_m
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
 kind: solid
-element: tet4
+element: tetrahedron4
 element_order: linear
 profile: adaptive
 max_elements: 250000
@@ -2110,7 +2110,7 @@ refinement:
 
         assert_eq!(options.backend, MeshBackendKind::Auto);
         assert_eq!(options.kind, MeshKindRequest::Solid);
-        assert_eq!(options.element, VolumeElementKind::Tet4);
+        assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
         assert_eq!(options.element_order, MeshElementOrder::Linear);
         assert_eq!(options.profile, MeshProfile::Adaptive);
         assert_eq!(options.max_elements, 250_000);
@@ -2297,7 +2297,7 @@ growth_rate: 0.95
             .expect("linear static structural study should default a solid analysis mesh");
 
         assert_eq!(options.kind, MeshKindRequest::Solid);
-        assert_eq!(options.element, VolumeElementKind::Tet4);
+        assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
         assert_eq!(options.profile, MeshProfile::AnalysisReady);
         assert_eq!(options.backend, MeshBackendKind::Auto);
         assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
@@ -2315,7 +2315,7 @@ growth_rate: 0.95
     fn fea_document_mesh_options_accept_backend_selection() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
-backend: structured_tet_fallback
+backend: structured_tetrahedron_fallback
 "#,
         )
         .expect("mesh document should parse backend");
@@ -2324,7 +2324,10 @@ backend: structured_tet_fallback
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
-        assert_eq!(options.backend, MeshBackendKind::StructuredTetFallback);
+        assert_eq!(
+            options.backend,
+            MeshBackendKind::StructuredTetrahedronFallback
+        );
     }
 
     #[test]
@@ -2470,7 +2473,7 @@ kind: surrogate
         .expect("mesh document should parse");
 
         let err = resolve_linear_static_mesh_options(Some(&mesh))
-            .expect_err("surrogate mesh kind is unsupported");
+            .expect_err("unsupported mesh kind is unsupported");
 
         assert!(err.contains("mesh.kind"));
         assert!(err.contains("solid"));
@@ -2489,7 +2492,7 @@ element: hex8
             .expect_err("hex8 solid element is not supported yet");
 
         assert!(err.contains("mesh.element"));
-        assert!(err.contains("tet4"));
+        assert!(err.contains("tetrahedron4"));
     }
 
     #[test]

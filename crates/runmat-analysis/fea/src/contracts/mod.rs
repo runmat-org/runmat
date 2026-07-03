@@ -557,7 +557,7 @@ impl Default for LinearStaticSolveOptions {
             prep_context: None,
             analysis_mesh_artifact_path: None,
             analysis_mesh: None,
-            require_analysis_mesh_for_solid: false,
+            require_analysis_mesh_for_solid: true,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }

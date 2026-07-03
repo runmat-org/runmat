@@ -59,16 +59,6 @@ pub fn run_linear_static_with_options(
     );
     check_cancelled("fea.run_linear_static")?;
 
-    let analysis_mesh_present = options.analysis_mesh.is_some();
-    if options.require_analysis_mesh_for_solid
-        && !analysis_mesh_present
-        && !model_has_explicit_structural_elements(model)
-    {
-        return Err(FeaRunError::InvalidModel(
-            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
-                .to_string(),
-        ));
-    }
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -86,6 +76,16 @@ pub fn run_linear_static_with_options(
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;
+    let analysis_mesh_present = options.analysis_mesh.is_some();
+    if options.require_analysis_mesh_for_solid
+        && !analysis_mesh_present
+        && !model_has_explicit_structural_elements(model)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
+                .to_string(),
+        ));
+    }
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,

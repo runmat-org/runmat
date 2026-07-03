@@ -335,7 +335,7 @@ pub enum QualityReasonCode {
     SolidMeshQualityMinJacobianFailed,
     SolidMeshQualityAspectRatioWarn,
     SolidMeshBoundaryProjectionWarn,
-    LegacySurrogateMeshBasis,
+    MissingSolidAnalysisMesh,
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,
@@ -1471,7 +1471,7 @@ fn infer_field_element_kind(
             AnalysisFieldLocation::Element | AnalysisFieldLocation::BoundaryFace
         )
     {
-        return Some("tet4");
+        return Some("tetrahedron4");
     }
     None
 }
