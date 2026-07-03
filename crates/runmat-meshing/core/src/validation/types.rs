@@ -18,7 +18,7 @@ pub struct AnalysisMeshValidationOptions {
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
-    pub require_no_fan_fallback: bool,
+    pub require_no_unrecovered_tetrahedron_components: bool,
     pub require_no_unrepaired_exact_quality: bool,
     pub required_boundary_region_ids: Vec<String>,
     pub required_material_region_ids: Vec<String>,
@@ -40,7 +40,7 @@ impl Default for AnalysisMeshValidationOptions {
             min_boundary_area_ratio: 0.90,
             min_boundary_face_recovery_ratio: 0.0,
             min_boundary_edge_recovery_ratio: 0.0,
-            require_no_fan_fallback: false,
+            require_no_unrecovered_tetrahedron_components: false,
             require_no_unrepaired_exact_quality: false,
             required_boundary_region_ids: Vec::new(),
             required_material_region_ids: Vec::new(),
@@ -159,7 +159,7 @@ pub enum AnalysisMeshValidationError {
         recovery_ratio: String,
         required_ratio: String,
     },
-    FanFallbackRecoveryPresent {
+    UnrecoveredTetrahedronComponentsPresent {
         component_count: usize,
     },
     UnrepairedExactQualityPresent {
@@ -247,8 +247,8 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
             "boundary_edge_recovery_failed"
         }
-        AnalysisMeshValidationError::FanFallbackRecoveryPresent { .. } => {
-            "fan_fallback_recovery_present"
+        AnalysisMeshValidationError::UnrecoveredTetrahedronComponentsPresent { .. } => {
+            "unrecovered_tetrahedron_components_present"
         }
         AnalysisMeshValidationError::UnrepairedExactQualityPresent { .. } => {
             "unrepaired_exact_quality_present"

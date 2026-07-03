@@ -9623,10 +9623,10 @@ fn mesh_validation_evidence_quality_reasons(
 
 fn mesh_validation_recovery_detail(validation: &MeshValidationEvidence) -> String {
     let mut details = Vec::<String>::new();
-    if validation.fan_fallback_component_count > 0 {
+    if validation.unrecovered_tetrahedron_component_count > 0 {
         details.push(format!(
-            "fan_fallback_component_count={}",
-            validation.fan_fallback_component_count
+            "unrecovered_tetrahedron_component_count={}",
+            validation.unrecovered_tetrahedron_component_count
         ));
     }
     if validation.unrepaired_exact_quality_total_count > 0
@@ -13828,7 +13828,7 @@ fn analysis_mesh_validation_options_for_generated_mesh(
         validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
     }
     if is_solid_mesh_backend(mesh) {
-        validation.require_no_fan_fallback = true;
+        validation.require_no_unrecovered_tetrahedron_components = true;
         validation.require_no_unrepaired_exact_quality = true;
         validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
@@ -13866,7 +13866,7 @@ fn analysis_mesh_validation_options_for_loaded_artifact(
         validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
     }
     if is_solid_mesh_backend(mesh) {
-        validation.require_no_fan_fallback = true;
+        validation.require_no_unrecovered_tetrahedron_components = true;
         validation.require_no_unrepaired_exact_quality = true;
         validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;

@@ -168,7 +168,7 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_recovered_component_ratio: f64,
     #[serde(default)]
-    pub tetrahedron_fan_fallback_component_count: usize,
+    pub tetrahedron_unrecovered_component_count: usize,
     #[serde(default)]
     pub tetrahedron_volume_coverage_ratio: f64,
     #[serde(default)]
@@ -335,7 +335,7 @@ impl Default for MeshBackendSummary {
             interior_seed_point_count: 0,
             tetrahedron_element_count: 0,
             tetrahedron_recovered_component_ratio: 0.0,
-            tetrahedron_fan_fallback_component_count: 0,
+            tetrahedron_unrecovered_component_count: 0,
             tetrahedron_volume_coverage_ratio: 0.0,
             tetrahedron_refinement_pass_count: 0,
             tetrahedron_refinement_point_count: 0,

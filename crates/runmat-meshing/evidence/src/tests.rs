@@ -164,7 +164,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             surface_max_cad_projection_error_m: 3.0e-6,
             tetrahedron_element_count: 12,
             tetrahedron_recovered_component_ratio: 1.0,
-            tetrahedron_fan_fallback_component_count: 0,
+            tetrahedron_unrecovered_component_count: 0,
             tetrahedron_volume_coverage_ratio: 0.99,
             tetrahedron_refinement_pass_count: 2,
             tetrahedron_refinement_point_count: 5,
@@ -233,7 +233,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
         max_volume_component_count: Some(1),
         coverage_sample_points_m: vec![[0.1, 0.1, 0.1]],
         min_coverage_sample_ratio: 1.0,
-        require_no_fan_fallback: true,
+        require_no_unrecovered_tetrahedron_components: true,
         ..AnalysisMeshValidationOptions::default()
     };
     let evidence = build_mesh_evidence_artifact(&mesh, &validation);
@@ -289,9 +289,16 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
         evidence.validation.coverage_sample_points_m,
         vec![[0.1, 0.1, 0.1]]
     );
-    assert!(evidence.validation.require_no_fan_fallback);
+    assert!(
+        evidence
+            .validation
+            .require_no_unrecovered_tetrahedron_components
+    );
     assert!(!evidence.validation.require_no_unrepaired_exact_quality);
-    assert_eq!(evidence.validation.fan_fallback_component_count, 0);
+    assert_eq!(
+        evidence.validation.unrecovered_tetrahedron_component_count,
+        0
+    );
     assert_eq!(evidence.validation.unrepaired_exact_quality_total_count, 9);
     assert_eq!(
         evidence

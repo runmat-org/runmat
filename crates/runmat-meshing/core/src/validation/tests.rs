@@ -78,7 +78,7 @@ fn validation_options_round_trip_with_required_regions() {
         max_volume_element_count: Some(42),
         coverage_sample_points_m: vec![[0.25, 0.25, 0.25]],
         min_coverage_sample_ratio: 0.75,
-        require_no_fan_fallback: true,
+        require_no_unrecovered_tetrahedron_components: true,
         ..AnalysisMeshValidationOptions::default()
     };
 
@@ -119,26 +119,26 @@ fn rejects_mesh_that_exceeds_element_budget() {
 }
 
 #[test]
-fn rejects_fan_fallback_recovery_when_policy_requires_strict_recovery() {
+fn rejects_unrecovered_tetrahedron_components_recovery_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
-    mesh.backend.tetrahedron_fan_fallback_component_count = 1;
+    mesh.backend.tetrahedron_unrecovered_component_count = 1;
 
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
-            require_no_fan_fallback: true,
+            require_no_unrecovered_tetrahedron_components: true,
             ..AnalysisMeshValidationOptions::default()
         },
     )
-    .expect_err("strict recovery policy should reject fan fallback evidence");
+    .expect_err("strict recovery policy should reject unrecovered Tetrahedron components evidence");
 
     assert_eq!(
         err,
-        AnalysisMeshValidationError::FanFallbackRecoveryPresent { component_count: 1 }
+        AnalysisMeshValidationError::UnrecoveredTetrahedronComponentsPresent { component_count: 1 }
     );
     assert_eq!(
         analysis_mesh_validation_error_code(&err),
-        "fan_fallback_recovery_present"
+        "unrecovered_tetrahedron_components_present"
     );
 }
 

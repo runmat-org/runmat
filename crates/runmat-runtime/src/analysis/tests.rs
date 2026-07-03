@@ -2441,7 +2441,7 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
         Some(volume_element_count as u64)
     );
     assert_eq!(
-        payload["mesh"]["backend"]["tetrahedron_fan_fallback_component_count"].as_u64(),
+        payload["mesh"]["backend"]["tetrahedron_unrecovered_component_count"].as_u64(),
         Some(0)
     );
     assert_eq!(
@@ -2468,7 +2468,9 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
         Some(1)
     );
     assert_eq!(
-        evidence_payload["mesh_evidence"]["validation"]["require_no_fan_fallback"].as_bool(),
+        evidence_payload["mesh_evidence"]["validation"]
+            ["require_no_unrecovered_tetrahedron_components"]
+            .as_bool(),
         Some(true)
     );
     assert_eq!(
@@ -2581,7 +2583,7 @@ fn generated_solid_mesh_validation_requires_strict_recovery() {
 
     let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
 
-    assert!(options.require_no_fan_fallback);
+    assert!(options.require_no_unrecovered_tetrahedron_components);
     assert!(options.require_no_unrepaired_exact_quality);
     assert_eq!(options.max_volume_component_count, Some(2));
     assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
@@ -5293,7 +5295,7 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     evidence.solve_ready = false;
     evidence.validation_error_code = Some("coverage_sample_failed".to_string());
     evidence.validation_error_message = Some("coverage sample was outside the solid".to_string());
-    evidence.fan_fallback_component_count = 1;
+    evidence.unrecovered_tetrahedron_component_count = 1;
     evidence.unrepaired_exact_quality_total_count = 3;
     evidence.unrepaired_exact_quality_general_cavity_count = 1;
     evidence.unrepaired_exact_quality_boundary_adjacent_count = 2;
@@ -5314,7 +5316,9 @@ fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     assert!(reasons[0]
         .detail
         .contains("coverage sample was outside the solid"));
-    assert!(reasons[0].detail.contains("fan_fallback_component_count=1"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrecovered_tetrahedron_component_count=1"));
     assert!(reasons[0]
         .detail
         .contains("unrepaired_exact_quality_total_count=3"));

@@ -227,7 +227,7 @@ fn curve_driven_cad_surface_preserves_single_triangle_loop_without_extra_fan_nod
 }
 
 #[test]
-fn curve_fan_fallback_orients_elements_to_cad_frame() {
+fn curve_boundary_fan_orients_elements_to_cad_frame() {
     let face = single_triangle_topology().faces[0].clone();
     let frame = planar_test_frame(face.face_id);
     let mut nodes = vec![

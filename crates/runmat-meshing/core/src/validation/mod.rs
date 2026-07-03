@@ -35,8 +35,8 @@ use quality::validate_quality;
 
 mod recovery;
 use recovery::{
-    validate_boundary_edge_recovery, validate_boundary_face_recovery, validate_no_fan_fallback,
-    validate_no_unrepaired_exact_quality,
+    validate_boundary_edge_recovery, validate_boundary_face_recovery,
+    validate_no_unrecovered_tetrahedron_components, validate_no_unrepaired_exact_quality,
 };
 
 mod regions;
@@ -94,7 +94,10 @@ pub fn validate_analysis_mesh_with_options(
 
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
-    validate_no_fan_fallback(mesh, options.require_no_fan_fallback)?;
+    validate_no_unrecovered_tetrahedron_components(
+        mesh,
+        options.require_no_unrecovered_tetrahedron_components,
+    )?;
     validate_no_unrepaired_exact_quality(mesh, options.require_no_unrepaired_exact_quality)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_coverage_samples(

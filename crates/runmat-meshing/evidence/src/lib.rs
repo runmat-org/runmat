@@ -110,7 +110,7 @@ pub struct MeshCadEvidence {
 pub struct MeshTetrahedronRecoveryEvidence {
     pub element_count: usize,
     pub recovered_component_ratio: f64,
-    pub fan_fallback_component_count: usize,
+    pub unrecovered_tetrahedron_component_count: usize,
     pub volume_coverage_ratio: f64,
     pub refinement_pass_count: usize,
     pub refinement_point_count: usize,
@@ -217,11 +217,11 @@ pub struct MeshValidationEvidence {
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
     #[serde(default)]
-    pub require_no_fan_fallback: bool,
+    pub require_no_unrecovered_tetrahedron_components: bool,
     #[serde(default)]
     pub require_no_unrepaired_exact_quality: bool,
     #[serde(default)]
-    pub fan_fallback_component_count: usize,
+    pub unrecovered_tetrahedron_component_count: usize,
     #[serde(default)]
     pub unrepaired_exact_quality_total_count: usize,
     #[serde(default)]
@@ -296,7 +296,8 @@ fn validation_options_from_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
-        require_no_fan_fallback: validation.require_no_fan_fallback,
+        require_no_unrecovered_tetrahedron_components: validation
+            .require_no_unrecovered_tetrahedron_components,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
@@ -361,7 +362,9 @@ fn tetrahedron_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetrahedron
     MeshTetrahedronRecoveryEvidence {
         element_count: mesh.backend.tetrahedron_element_count,
         recovered_component_ratio: mesh.backend.tetrahedron_recovered_component_ratio,
-        fan_fallback_component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
+        unrecovered_tetrahedron_component_count: mesh
+            .backend
+            .tetrahedron_unrecovered_component_count,
         volume_coverage_ratio: mesh.backend.tetrahedron_volume_coverage_ratio,
         refinement_pass_count: mesh.backend.tetrahedron_refinement_pass_count,
         refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
@@ -493,9 +496,12 @@ fn validation_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
-        require_no_fan_fallback: validation.require_no_fan_fallback,
+        require_no_unrecovered_tetrahedron_components: validation
+            .require_no_unrecovered_tetrahedron_components,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
-        fan_fallback_component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
+        unrecovered_tetrahedron_component_count: mesh
+            .backend
+            .tetrahedron_unrecovered_component_count,
         unrepaired_exact_quality_total_count: mesh
             .backend
             .tetrahedron_exact_quality_unrepaired_total_count,

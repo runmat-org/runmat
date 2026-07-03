@@ -4,14 +4,18 @@ use crate::contracts::AnalysisMeshArtifact;
 
 use super::{connectivity::boundary_face_edges, AnalysisMeshValidationError};
 
-pub(super) fn validate_no_fan_fallback(
+pub(super) fn validate_no_unrecovered_tetrahedron_components(
     mesh: &AnalysisMeshArtifact,
-    require_no_fan_fallback: bool,
+    require_no_unrecovered_tetrahedron_components: bool,
 ) -> Result<(), AnalysisMeshValidationError> {
-    if require_no_fan_fallback && mesh.backend.tetrahedron_fan_fallback_component_count > 0 {
-        return Err(AnalysisMeshValidationError::FanFallbackRecoveryPresent {
-            component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
-        });
+    if require_no_unrecovered_tetrahedron_components
+        && mesh.backend.tetrahedron_unrecovered_component_count > 0
+    {
+        return Err(
+            AnalysisMeshValidationError::UnrecoveredTetrahedronComponentsPresent {
+                component_count: mesh.backend.tetrahedron_unrecovered_component_count,
+            },
+        );
     }
     Ok(())
 }
