@@ -35,6 +35,7 @@ members = [
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
     "crates/runmat-analysis/fea",
+    "crates/runmat-meshing",
     "crates/runmat-meshing/core",
     "crates/runmat-meshing/cad",
     "crates/runmat-meshing/size",
@@ -104,6 +105,7 @@ runmat-geometry-io = { version = "=0.5.0", path = "crates/runmat-geometry/io" }
 runmat-geometry-ops = { version = "=0.5.0", path = "crates/runmat-geometry/ops" }
 runmat-analysis-core = { version = "=0.5.0", path = "crates/runmat-analysis/core" }
 runmat-analysis-fea = { version = "=0.5.0", path = "crates/runmat-analysis/fea" }
+runmat-meshing = { version = "=0.5.0", path = "crates/runmat-meshing" }
 runmat-meshing-core = { version = "=0.5.0", path = "crates/runmat-meshing/core" }
 runmat-meshing-cad = { version = "=0.5.0", path = "crates/runmat-meshing/cad" }
 runmat-meshing-size = { version = "=0.5.0", path = "crates/runmat-meshing/size" }

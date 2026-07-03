@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use runmat_meshing_core::{
-    artifact::ANALYSIS_MESH_SCHEMA_VERSION, provenance::AnalysisMeshProvenance,
+    artifact::ANALYSIS_MESH_SCHEMA_VERSION, provenance::AnalysisMeshProvenance, MeshBackendSummary,
 };
 
 pub(super) fn build_analysis_mesh_artifact(
@@ -26,6 +26,7 @@ pub(super) fn build_analysis_mesh_artifact(
         sizing.growth_rate = options.growth_rate;
     }
 
+    let tetrahedron_element_count = volume_elements.len();
     compact_analysis_mesh_nodes(AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: format!("analysis_{}", input.mesh_id),
@@ -35,7 +36,13 @@ pub(super) fn build_analysis_mesh_artifact(
         boundary_edges: Vec::new(),
         quality,
         sizing,
-        backend: Default::default(),
+        backend: MeshBackendSummary {
+            backend: "structured_tetrahedron_fallback".to_string(),
+            algorithm: "structured_bbox_tetrahedron/v1".to_string(),
+            tetrahedron_element_count,
+            boundary_face_recovery_ratio: 1.0,
+            ..MeshBackendSummary::default()
+        },
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
             algorithm: "structured_bbox_tetrahedron/v1".to_string(),
