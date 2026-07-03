@@ -27637,6 +27637,242 @@
       ]
     },
     {
+      "name": "filloutliers",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = filloutliers(A, fillmethod)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "fillmethod",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement method or constant value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array with outliers filled."
+            }
+          ]
+        },
+        {
+          "label": "B = filloutliers(A, fillmethod, findmethod)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "fillmethod",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement method or constant value."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array with outliers filled."
+            }
+          ]
+        },
+        {
+          "label": "B = filloutliers(A, ___, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "fillmethod",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement method or constant value."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array with outliers filled."
+            }
+          ]
+        },
+        {
+          "label": "[B, TF] = filloutliers(___)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "fillmethod",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement method or constant value."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array with outliers filled."
+            },
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            }
+          ]
+        },
+        {
+          "label": "[B, TF, L, U, C] = filloutliers(___)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "fillmethod",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement method or constant value."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array with outliers filled."
+            },
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            },
+            {
+              "name": "L",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower threshold."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper threshold."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Center value used by the detection method."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OUTLIERS.INVALID_ARGUMENT",
+          "identifier": "RunMat:outliers:InvalidArgument",
+          "when": "Inputs, methods, dimensions, or name-value options are malformed.",
+          "message": "outlier builtin: invalid argument"
+        },
+        {
+          "code": "RM.OUTLIERS.UNSUPPORTED",
+          "identifier": "RunMat:outliers:Unsupported",
+          "when": "A table/timetable or advanced smoothing/interpolation form is requested.",
+          "message": "outlier builtin: unsupported form"
+        },
+        {
+          "code": "RM.OUTLIERS.INTERNAL",
+          "identifier": "RunMat:outliers:Internal",
+          "when": "Internal tensor or logical array materialization fails.",
+          "message": "outlier builtin: internal error"
+        },
+        {
+          "code": "RM.OUTLIERS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:outliers:TooManyOutputs",
+          "when": "More outputs are requested than the builtin can return.",
+          "message": "outlier builtin: too many outputs"
+        }
+      ]
+    },
+    {
       "name": "filter",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -43650,6 +43886,165 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "isoutlier",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "TF = isoutlier(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            }
+          ]
+        },
+        {
+          "label": "TF = isoutlier(A, method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            }
+          ]
+        },
+        {
+          "label": "TF = isoutlier(A, ___, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            }
+          ]
+        },
+        {
+          "label": "[TF, L, U, C] = isoutlier(___)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input numeric array."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection method, dimension, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TF",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical mask of detected outliers."
+            },
+            {
+              "name": "L",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower threshold."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper threshold."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Center value used by the detection method."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OUTLIERS.INVALID_ARGUMENT",
+          "identifier": "RunMat:outliers:InvalidArgument",
+          "when": "Inputs, methods, dimensions, or name-value options are malformed.",
+          "message": "outlier builtin: invalid argument"
+        },
+        {
+          "code": "RM.OUTLIERS.UNSUPPORTED",
+          "identifier": "RunMat:outliers:Unsupported",
+          "when": "A table/timetable or advanced smoothing/interpolation form is requested.",
+          "message": "outlier builtin: unsupported form"
+        },
+        {
+          "code": "RM.OUTLIERS.INTERNAL",
+          "identifier": "RunMat:outliers:Internal",
+          "when": "Internal tensor or logical array materialization fails.",
+          "message": "outlier builtin: internal error"
+        },
+        {
+          "code": "RM.OUTLIERS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:outliers:TooManyOutputs",
+          "when": "More outputs are requested than the builtin can return.",
+          "message": "outlier builtin: too many outputs"
         }
       ]
     },

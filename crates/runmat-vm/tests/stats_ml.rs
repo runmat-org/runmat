@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{LogicalArray, Tensor, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -22,6 +22,25 @@ fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
 fn has_bool(vars: &[Value], expected: bool) -> bool {
     vars.iter()
         .any(|value| matches!(value, Value::Bool(value) if *value == expected))
+}
+
+fn has_logical_shape(vars: &[Value], shape: &[usize]) -> bool {
+    vars.iter().any(|value| match value {
+        Value::LogicalArray(LogicalArray {
+            shape: logical_shape,
+            ..
+        }) => logical_shape == shape,
+        _ => false,
+    })
+}
+
+fn has_logical_true_at(vars: &[Value], index: usize) -> bool {
+    vars.iter().any(|value| match value {
+        Value::LogicalArray(LogicalArray { data, .. }) => {
+            data.get(index).copied().unwrap_or(0) != 0
+        }
+        _ => false,
+    })
 }
 
 fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
@@ -109,4 +128,16 @@ fn ecdf_and_cdfplot_surface_executes_from_scripts() {
     assert!(has_num(&vars, 0.25));
     assert!(has_num(&vars, 2.0));
     assert!(has_num(&vars, 2.0));
+}
+
+#[test]
+fn outlier_cleanup_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "A = [1;2;100;4;5]; [tf,L,U,C] = isoutlier(A); B = filloutliers(A, 'linear'); C2 = filloutliers(A, -1); b3 = B(3); c3 = C2(3);",
+    )
+    .expect("outlier cleanup script");
+    assert!(has_logical_shape(&vars, &[5, 1]));
+    assert!(has_logical_true_at(&vars, 2));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, -1.0));
 }
