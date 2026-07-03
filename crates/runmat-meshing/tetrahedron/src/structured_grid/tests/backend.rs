@@ -2,34 +2,35 @@ use super::common::*;
 use super::*;
 
 #[test]
-fn auto_backend_uses_solid_backend_by_default() {
+fn auto_backend_is_not_owned_by_structured_grid_stage() {
     let geometry = cube_geometry();
-    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
-        .expect("auto backend should generate with solid backend");
+    let err = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect_err("auto backend selection belongs to the orchestration layer");
 
-    validate_analysis_mesh(&mesh, QualityThresholds::default())
-        .expect("auto solid mesh should validate");
-    assert_eq!(mesh.provenance.algorithm, "plc_tetrahedron/v1");
-    assert_eq!(mesh.backend.backend, "solid");
+    assert!(matches!(
+        err,
+        MeshingError::UnsupportedBackend(MeshBackendKind::Auto)
+    ));
 }
 #[test]
-fn explicit_solid_backend_generates_analysis_mesh() {
+fn explicit_solid_backend_is_not_owned_by_structured_grid_stage() {
     let geometry = cube_geometry();
-    let mesh = generate_analysis_mesh(
+    let err = generate_analysis_mesh(
         &geometry,
         VolumeMeshingOptions {
             backend: MeshBackendKind::Solid,
             ..VolumeMeshingOptions::default()
         },
     )
-    .expect("solid backend should generate an analysis mesh");
+    .expect_err("solid backend belongs to the solid meshing orchestration layer");
 
-    validate_analysis_mesh(&mesh, QualityThresholds::default())
-        .expect("solid analysis mesh should validate");
-    assert_eq!(mesh.provenance.algorithm, "plc_tetrahedron/v1");
+    assert!(matches!(
+        err,
+        MeshingError::UnsupportedBackend(MeshBackendKind::Solid)
+    ));
 }
 #[test]
-fn solid_backend_carries_external_sizing_field() {
+fn explicit_solid_backend_with_sizing_is_not_owned_by_structured_grid_stage() {
     let geometry = cube_geometry();
     let mut options = VolumeMeshingOptions {
         backend: MeshBackendKind::Solid,
@@ -50,47 +51,11 @@ fn solid_backend_carries_external_sizing_field() {
         ..MeshSizingField::default()
     };
 
-    let refined = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
-        .expect("solid sizing-driven mesh should generate");
+    let err = generate_analysis_mesh_with_sizing(&geometry, options, &sizing)
+        .expect_err("solid backend belongs to the solid meshing orchestration layer");
 
-    assert_eq!(refined.backend.backend, "solid");
-    assert_eq!(
-        refined.backend.tetrahedron_element_count,
-        refined.volume_elements.len()
-    );
-    assert_eq!(
-        refined.sizing.global_target_size_m,
-        Some(0.6),
-        "external sizing should lower the solid target size within the growth envelope"
-    );
-    assert_eq!(refined.sizing.min_size_m, Some(0.4));
-    assert_eq!(refined.sizing.max_size_m, Some(0.75));
-    assert_eq!(refined.sizing.growth_rate, Some(1.25));
-    assert!(refined.sizing.applied_samples.is_empty());
-    assert_eq!(refined.sizing.rejected_samples.len(), 1);
-    assert_eq!(refined.sizing.rejected_samples[0].target_size_m, 0.5);
-    assert_eq!(
-        refined.sizing.rejected_samples[0].status.as_str(),
-        "not_inserted_by_tetrahedron_generation"
-    );
-    assert_eq!(
-        refined.sizing.rejected_samples[0].reason.as_deref(),
-        Some("structural.stress_gradient")
-    );
-    assert_eq!(
-        refined.backend.tetrahedron_requested_refinement_point_count,
-        1
-    );
-    assert_eq!(
-        refined
-            .backend
-            .tetrahedron_accepted_requested_refinement_point_count,
-        0
-    );
-    assert_eq!(
-        refined
-            .backend
-            .tetrahedron_rejected_requested_refinement_point_count,
-        1
-    );
+    assert!(matches!(
+        err,
+        MeshingError::UnsupportedBackend(MeshBackendKind::Solid)
+    ));
 }

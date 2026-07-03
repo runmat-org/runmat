@@ -4749,7 +4749,8 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
         required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
         ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
     };
-    let evidence = runmat_meshing_core::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let evidence =
+        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
     let evidence_path = root.join("mesh_evidence.json");
     fs::write(
         &evidence_path,
@@ -5284,7 +5285,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
 #[test]
 fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
     let mesh = minimal_analysis_mesh();
-    let mut evidence = runmat_meshing_core::build_mesh_evidence_artifact(
+    let mut evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
         &mesh,
         &runmat_meshing_core::AnalysisMeshValidationOptions::default(),
     )
@@ -5357,7 +5358,7 @@ fn analysis_mesh_evidence_failure_rejects_direct_run() {
     fs::create_dir_all(&root).expect("create artifact root");
 
     let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let evidence = runmat_meshing_core::build_mesh_evidence_artifact(
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
         &mesh,
         &runmat_meshing_core::AnalysisMeshValidationOptions {
             coverage_sample_points_m: vec![[9.0, 9.0, 9.0]],

@@ -6,7 +6,7 @@ use runmat_meshing_core::{
     artifact::{
         AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
     },
-    backend::{select_volume_backend, MeshBackendKind},
+    backend::MeshBackendKind,
     boundary::{BoundaryMeshInput, BoundaryMeshInputError},
     options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
     predicate::tetrahedron_scaled_jacobian,
@@ -20,7 +20,6 @@ use runmat_meshing_core::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
-    solid::{generate_solid_analysis_mesh, generate_solid_analysis_mesh_with_sizing},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
@@ -40,7 +39,7 @@ pub enum MeshingError {
     InvalidElementBudget,
     InvalidTargetSize,
     EmptyBoundaryRegions,
-    SolidBackend(String),
+    UnsupportedBackend(MeshBackendKind),
 }
 
 impl std::fmt::Display for MeshingError {
@@ -61,7 +60,12 @@ impl std::fmt::Display for MeshingError {
                 )
             }
             Self::EmptyBoundaryRegions => write!(formatter, "boundary mesh has no region ids"),
-            Self::SolidBackend(message) => write!(formatter, "{message}"),
+            Self::UnsupportedBackend(backend) => {
+                write!(
+                    formatter,
+                    "structured Tetrahedron meshing does not own backend {backend:?}"
+                )
+            }
         }
     }
 }
@@ -178,17 +182,11 @@ pub fn generate_analysis_mesh(
     geometry: &runmat_geometry_core::GeometryAsset,
     options: VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
+    validate_structured_backend(options.backend)?;
     validate_volume_meshing_options(&options)?;
     let input = BoundaryMeshInput::from_geometry(geometry)?;
     validate_boundary_regions(&input)?;
-    match select_volume_backend(&options).selected {
-        MeshBackendKind::StructuredTetrahedronFallback => {
-            StructuredTetrahedronMesher.mesh(&input, &options)
-        }
-        MeshBackendKind::Solid => generate_solid_analysis_mesh(geometry, &options)
-            .map_err(|err| MeshingError::SolidBackend(err.to_string())),
-        MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
-    }
+    StructuredTetrahedronMesher.mesh(&input, &options)
 }
 
 pub fn generate_analysis_mesh_with_sizing(
@@ -196,18 +194,18 @@ pub fn generate_analysis_mesh_with_sizing(
     options: VolumeMeshingOptions,
     sizing: &MeshSizingField,
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
+    validate_structured_backend(options.backend)?;
     validate_volume_meshing_options(&options)?;
     let input = BoundaryMeshInput::from_geometry(geometry)?;
     validate_boundary_regions(&input)?;
-    match select_volume_backend(&options).selected {
-        MeshBackendKind::StructuredTetrahedronFallback => {
-            StructuredTetrahedronMesher.mesh_with_sizing(&input, &options, Some(sizing))
-        }
-        MeshBackendKind::Solid => {
-            generate_solid_analysis_mesh_with_sizing(geometry, &options, sizing)
-                .map_err(|err| MeshingError::SolidBackend(err.to_string()))
-        }
-        MeshBackendKind::Auto => unreachable!("backend selection must resolve auto"),
+    StructuredTetrahedronMesher.mesh_with_sizing(&input, &options, Some(sizing))
+}
+
+fn validate_structured_backend(backend: MeshBackendKind) -> Result<(), MeshingError> {
+    if backend == MeshBackendKind::StructuredTetrahedronFallback {
+        Ok(())
+    } else {
+        Err(MeshingError::UnsupportedBackend(backend))
     }
 }
 

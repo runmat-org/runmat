@@ -5815,6 +5815,8 @@ dependencies = [
  "runmat-hir",
  "runmat-macros",
  "runmat-meshing-core",
+ "runmat-meshing-evidence",
+ "runmat-meshing-tetrahedron",
  "runmat-plot",
  "runmat-thread-local",
  "runmat-time",
