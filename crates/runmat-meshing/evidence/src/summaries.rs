@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::{
     adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus},
-    artifact::{AnalysisMeshArtifact, AnalysisVolumeElement},
-    topology::VolumeElementKind,
+    contracts::{AnalysisMeshArtifact, AnalysisVolumeElement, VolumeElementKind},
 };
 
 pub const MODULE_PURPOSE: &str = "compact solid evidence summaries";

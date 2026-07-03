@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{
-    artifact::AnalysisMeshArtifact,
-    topology::{BoundaryElementKind, VolumeElementKind},
-};
+use crate::contracts::{AnalysisMeshArtifact, BoundaryElementKind, VolumeElementKind};
 
 pub(super) fn boundary_face_edges(mesh: &AnalysisMeshArtifact) -> BTreeSet<[u32; 2]> {
     let mut edges = BTreeSet::<[u32; 2]>::new();

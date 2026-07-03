@@ -1,4 +1,4 @@
-use crate::{artifact::AnalysisMeshArtifact, quality::QualityThresholds};
+use crate::{contracts::AnalysisMeshArtifact, quality::QualityThresholds};
 
 use super::AnalysisMeshValidationError;
 

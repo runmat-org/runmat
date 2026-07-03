@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{AnalysisMeshArtifact, ANALYSIS_MESH_SCHEMA_VERSION},
+    contracts::{artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact},
     quality::QualityThresholds,
 };
 

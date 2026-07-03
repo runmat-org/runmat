@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::{
-    artifact::{AnalysisMeshArtifact, MeshBackendSummary},
+    contracts::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::QualityThresholds,
     validation::{
         analysis_mesh_validation_error_code, mesh_contains_point,

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::artifact::AnalysisMeshArtifact;
+use crate::contracts::AnalysisMeshArtifact;
 
 use super::AnalysisMeshValidationError;
 

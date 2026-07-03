@@ -1,4 +1,4 @@
-use crate::artifact::AnalysisMeshArtifact;
+use crate::contracts::AnalysisMeshArtifact;
 
 use super::{
     geometry::{mesh_boundary_area_m2, mesh_bounds_m, mesh_contains_point, mesh_volume_m3},

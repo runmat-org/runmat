@@ -1,13 +1,12 @@
 use super::*;
 use crate::{
-    artifact::{
-        AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-        AnalysisVolumeElement, ANALYSIS_MESH_SCHEMA_VERSION,
+    contracts::{
+        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
+        AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
+        BoundaryElementKind, VolumeElementKind,
     },
-    provenance::AnalysisMeshProvenance,
     quality::{AnalysisMeshQualityReport, ElementQuality},
     size::field::MeshSizingField,
-    topology::{BoundaryElementKind, VolumeElementKind},
 };
 
 fn valid_tetrahedron_mesh() -> AnalysisMeshArtifact {

@@ -1,4 +1,4 @@
-use crate::artifact::AnalysisMeshArtifact;
+use crate::contracts::AnalysisMeshArtifact;
 
 use super::{volume_component_count, AnalysisMeshValidationError};
 

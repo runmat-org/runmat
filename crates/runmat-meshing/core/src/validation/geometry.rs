@@ -1,7 +1,4 @@
-use crate::{
-    artifact::AnalysisMeshArtifact,
-    topology::{BoundaryElementKind, VolumeElementKind},
-};
+use crate::contracts::{AnalysisMeshArtifact, BoundaryElementKind, VolumeElementKind};
 
 pub(super) fn mesh_bounds_m(mesh: &AnalysisMeshArtifact) -> Option<[[f64; 3]; 2]> {
     let mut nodes = mesh.nodes.iter();

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    options::{MeshRefinementOptions, RefinementIndicatorMode, RefinementStrategy},
+    contracts::{MeshRefinementOptions, RefinementIndicatorMode, RefinementStrategy},
     size::field::{MeshSizingField, SizingSample},
 };
 

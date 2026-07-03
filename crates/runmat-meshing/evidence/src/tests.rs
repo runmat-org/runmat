@@ -4,18 +4,17 @@ use runmat_meshing_core::{
         AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
         RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
     },
-    artifact::{
-        AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshNode, AnalysisVolumeElement,
-        ANALYSIS_MESH_SCHEMA_VERSION,
+    contracts::RefinementIndicatorMode,
+    contracts::{
+        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
+        AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement, BoundaryElementKind,
+        VolumeElementKind,
     },
-    options::RefinementIndicatorMode,
-    provenance::AnalysisMeshProvenance,
     quality::{AnalysisMeshQualityReport, ElementQuality},
     size::field::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
-    topology::{BoundaryElementKind, VolumeElementKind},
 };
 use std::collections::BTreeMap;
 

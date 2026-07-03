@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::artifact::AnalysisMeshArtifact;
+use crate::contracts::AnalysisMeshArtifact;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoundaryFaceScalarValue {
@@ -276,14 +276,13 @@ fn validate_nodal_vector_field<'a>(
 mod tests {
     use super::*;
     use crate::{
-        artifact::{
-            AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
-            MeshBackendSummary,
+        contracts::{
+            AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
+            AnalysisMeshProvenance, AnalysisVolumeElement, BoundaryElementKind, MeshBackendSummary,
+            VolumeElementKind,
         },
-        provenance::AnalysisMeshProvenance,
         quality::AnalysisMeshQualityReport,
         size::field::MeshSizingField,
-        topology::{BoundaryElementKind, VolumeElementKind},
     };
 
     #[test]
@@ -476,14 +475,13 @@ mod tests {
     #[test]
     fn rejects_boundary_edges_referencing_unknown_nodes() {
         let mut mesh = field_mapping_mesh();
-        mesh.boundary_edges
-            .push(crate::artifact::AnalysisBoundaryEdge {
-                edge_id: "be1".to_string(),
-                node_ids: [1, 99],
-                adjacent_boundary_face_ids: Vec::new(),
-                region_ids: Vec::new(),
-                provenance: Vec::new(),
-            });
+        mesh.boundary_edges.push(AnalysisBoundaryEdge {
+            edge_id: "be1".to_string(),
+            node_ids: [1, 99],
+            adjacent_boundary_face_ids: Vec::new(),
+            region_ids: Vec::new(),
+            provenance: Vec::new(),
+        });
 
         let err = map_nodal_vector_field_to_boundary_nodes(&mesh, &nodal_vector_values())
             .expect_err("unknown boundary edge node should fail");

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{artifact::AnalysisMeshArtifact, topology::VolumeElementKind};
+use crate::contracts::{AnalysisMeshArtifact, VolumeElementKind};
 
 use super::{
     geometry::{element_tetrahedron_points, tetrahedron_volume_m3},
