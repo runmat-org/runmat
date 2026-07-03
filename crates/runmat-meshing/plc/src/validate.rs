@@ -33,6 +33,13 @@ pub enum PlcValidationError {
     ProtectedEdgeHasRepeatedNode {
         edge_id: TopologyEntityId,
     },
+    UnreferencedNode {
+        node_id: TopologyEntityId,
+    },
+    ProtectedEdgeNotOnBoundary {
+        edge_id: TopologyEntityId,
+        node_ids: [TopologyEntityId; 2],
+    },
     OpenBoundaryEdge {
         node_ids: [TopologyEntityId; 2],
         incidence_count: usize,
@@ -81,6 +88,18 @@ impl std::fmt::Display for PlcValidationError {
                     edge_id.id
                 )
             }
+            Self::UnreferencedNode { node_id } => {
+                write!(
+                    formatter,
+                    "PLC node {} is not referenced by any facet",
+                    node_id.id
+                )
+            }
+            Self::ProtectedEdgeNotOnBoundary { edge_id, node_ids } => write!(
+                formatter,
+                "PLC protected edge {} references non-boundary edge {}-{}",
+                edge_id.id, node_ids[0].id, node_ids[1].id
+            ),
             Self::OpenBoundaryEdge {
                 node_ids,
                 incidence_count,
@@ -137,14 +156,24 @@ pub fn validate_protected_boundary_complex(
     }
 
     let mut edge_incidence = BTreeMap::<[TopologyEntityId; 2], usize>::new();
+    let mut referenced_node_ids = BTreeSet::<TopologyEntityId>::new();
     for facet in &plc.facets {
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
+        referenced_node_ids.extend(facet.node_ids.iter().cloned());
         for edge_index in 0..3 {
             let edge = sorted_edge(
                 facet.node_ids[edge_index].clone(),
                 facet.node_ids[(edge_index + 1) % 3].clone(),
             );
             *edge_incidence.entry(edge).or_insert(0) += 1;
+        }
+    }
+
+    for node_id in &node_ids {
+        if !referenced_node_ids.contains(node_id) {
+            return Err(PlcValidationError::UnreferencedNode {
+                node_id: node_id.clone(),
+            });
         }
     }
 
@@ -161,6 +190,16 @@ pub fn validate_protected_boundary_complex(
                     node_id: node_id.clone(),
                 });
             }
+        }
+        let edge = sorted_edge(
+            protected_edge.node_ids[0].clone(),
+            protected_edge.node_ids[1].clone(),
+        );
+        if !edge_incidence.contains_key(&edge) {
+            return Err(PlcValidationError::ProtectedEdgeNotOnBoundary {
+                edge_id: protected_edge.edge_id.clone(),
+                node_ids: edge,
+            });
         }
     }
 
@@ -266,6 +305,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unreferenced_node() {
+        let mut plc = tetrahedron_plc();
+        plc.nodes.push(node("4", [2.0, 2.0, 2.0]));
+
+        assert!(matches!(
+            validate_protected_boundary_complex(&plc),
+            Err(PlcValidationError::UnreferencedNode { .. })
+        ));
+    }
+
+    #[test]
     fn rejects_protected_edge_that_references_unknown_node() {
         let mut plc = tetrahedron_plc();
         plc.protected_edges.push(PlcProtectedEdge {
@@ -277,6 +327,21 @@ mod tests {
         assert!(matches!(
             validate_protected_boundary_complex(&plc),
             Err(PlcValidationError::ProtectedEdgeReferencesUnknownNode { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_protected_edge_that_is_not_a_boundary_edge() {
+        let mut plc = octahedron_plc();
+        plc.protected_edges.push(PlcProtectedEdge {
+            edge_id: entity("pole_to_pole"),
+            node_ids: [entity("0"), entity("5")],
+            source_edge_id: entity("source_edge"),
+        });
+
+        assert!(matches!(
+            validate_protected_boundary_complex(&plc),
+            Err(PlcValidationError::ProtectedEdgeNotOnBoundary { .. })
         ));
     }
 
@@ -294,6 +359,38 @@ mod tests {
                 facet("f1", ["0", "1", "3"]),
                 facet("f2", ["1", "2", "3"]),
                 facet("f3", ["2", "0", "3"]),
+            ],
+            protected_edges: Vec::new(),
+            validation: PlcValidationSummary {
+                watertight: true,
+                manifold: true,
+                shell_nesting_classified: true,
+                material_interfaces_classified: true,
+            },
+            evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+        }
+    }
+
+    fn octahedron_plc() -> ProtectedBoundaryComplex {
+        ProtectedBoundaryComplex {
+            complex_id: "octahedron_plc".to_string(),
+            nodes: vec![
+                node("0", [0.0, 0.0, 1.0]),
+                node("1", [1.0, 0.0, 0.0]),
+                node("2", [0.0, 1.0, 0.0]),
+                node("3", [-1.0, 0.0, 0.0]),
+                node("4", [0.0, -1.0, 0.0]),
+                node("5", [0.0, 0.0, -1.0]),
+            ],
+            facets: vec![
+                facet("f0", ["0", "1", "2"]),
+                facet("f1", ["0", "2", "3"]),
+                facet("f2", ["0", "3", "4"]),
+                facet("f3", ["0", "4", "1"]),
+                facet("f4", ["5", "2", "1"]),
+                facet("f5", ["5", "3", "2"]),
+                facet("f6", ["5", "4", "3"]),
+                facet("f7", ["5", "1", "4"]),
             ],
             protected_edges: Vec::new(),
             validation: PlcValidationSummary {

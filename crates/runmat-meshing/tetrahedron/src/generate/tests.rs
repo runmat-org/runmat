@@ -129,11 +129,11 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
 }
 
 #[test]
-fn solver_generation_rejects_extra_interior_plc_nodes() {
-    assert_eq!(
+fn solver_generation_rejects_unreferenced_plc_nodes_before_shape_selection() {
+    assert!(matches!(
         generate_solver_tetrahedron_mesh_from_plc(&octahedron_with_extra_interior_node_plc()),
-        Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
-    );
+        Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex { .. })
+    ));
 }
 
 #[test]

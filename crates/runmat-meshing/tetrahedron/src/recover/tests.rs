@@ -34,17 +34,15 @@ fn recovery_queue_rejects_missing_source_face() {
 }
 
 #[test]
-fn recovery_queue_rejects_missing_source_edge() {
+fn recovery_queue_rejects_invalid_protected_edge_before_recovery() {
     let mut plc = tetrahedron_plc();
     plc.nodes.push(plc_node("4", [2.0, 2.0, 2.0]));
     plc.protected_edges[0].node_ids[1] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
 
-    assert_eq!(
+    assert!(matches!(
         build_recovery_queue_from_plc(&plc, &tetrahedron_mesh()),
-        Err(TetrahedronRecoveryError::MissingSourceEdgeRecovery {
-            edge_id: "edge_1".to_string()
-        })
-    );
+        Err(TetrahedronRecoveryError::InvalidProtectedBoundaryComplex { .. })
+    ));
 }
 
 #[test]
