@@ -4,15 +4,10 @@ pub use runmat_meshing_core::contracts::{
 
 pub const MODULE_PURPOSE: &str = "deterministic Tetrahedron4 generation from a validated PLC";
 
-#[path = "generate/initial.rs"]
 mod initial;
-#[path = "generate/single_tetrahedron.rs"]
 mod single_tetrahedron;
-#[path = "generate/solver.rs"]
 mod solver;
-#[path = "generate/structured_box.rs"]
 mod structured_box;
-#[path = "generate/types.rs"]
 mod types;
 pub use initial::generate_initial_tetrahedron_mesh_from_plc;
 pub use single_tetrahedron::generate_single_tetrahedron_mesh_from_plc;

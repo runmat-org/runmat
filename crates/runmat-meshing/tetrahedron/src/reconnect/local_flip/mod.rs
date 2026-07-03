@@ -2,11 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-#[path = "local_flip/quality.rs"]
 mod quality;
 pub use quality::evaluate_local_tetrahedron_flip_quality;
 
-#[path = "local_flip/topology.rs"]
 mod topology;
 pub use topology::local_tetrahedron_boundary_faces;
 use topology::{
@@ -15,7 +13,6 @@ use topology::{
 };
 
 #[cfg(test)]
-#[path = "local_flip/tests.rs"]
 mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
