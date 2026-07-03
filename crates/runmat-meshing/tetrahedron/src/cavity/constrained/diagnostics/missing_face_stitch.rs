@@ -5,6 +5,8 @@ mod exact_cover;
 #[cfg(test)]
 mod local_cap;
 #[cfg(test)]
+mod setup;
+#[cfg(test)]
 mod shared_cap;
 
 #[cfg(test)]
