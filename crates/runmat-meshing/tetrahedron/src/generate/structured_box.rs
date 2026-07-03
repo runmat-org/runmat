@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
     TetrahedronMeshNode,
@@ -12,12 +13,7 @@ use runmat_meshing_core::{
 pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
-    if !plc.validation.valid_for_volume_meshing() {
-        return Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex);
-    }
-    if plc.nodes.is_empty() || plc.facets.is_empty() {
-        return Err(TetrahedronGenerationError::EmptyProtectedBoundaryComplex);
-    }
+    validate_tetrahedron_generation_plc(plc)?;
 
     let bounds = plc_bounds(plc)?;
     validate_structured_box_plc(plc, bounds)?;

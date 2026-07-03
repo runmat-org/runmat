@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 
+use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
     TetrahedronMeshNode,
@@ -13,12 +14,7 @@ use super::{
 pub fn generate_single_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
-    if !plc.validation.valid_for_volume_meshing() {
-        return Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex);
-    }
-    if plc.nodes.is_empty() || plc.facets.is_empty() {
-        return Err(TetrahedronGenerationError::EmptyProtectedBoundaryComplex);
-    }
+    validate_tetrahedron_generation_plc(plc)?;
     if plc.nodes.len() != 4 || plc.facets.len() != 4 {
         return Err(TetrahedronGenerationError::UnsupportedSingleTetrahedronPlc);
     }

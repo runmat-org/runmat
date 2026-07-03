@@ -10,6 +10,7 @@ mod single_tetrahedron;
 mod solver;
 mod structured_box;
 mod types;
+mod validation;
 pub use convex_polyhedron::generate_convex_polyhedron_tetrahedron_mesh_from_plc;
 pub use initial::generate_initial_tetrahedron_mesh_from_plc;
 pub use single_tetrahedron::generate_single_tetrahedron_mesh_from_plc;

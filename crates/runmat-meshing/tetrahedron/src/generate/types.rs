@@ -1,7 +1,8 @@
+use runmat_meshing_plc::validate::PlcValidationError;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TetrahedronGenerationError {
-    InvalidProtectedBoundaryComplex,
-    EmptyProtectedBoundaryComplex,
+    InvalidProtectedBoundaryComplex { error: PlcValidationError },
     MissingPlcNode { node_id: String },
     NonFinitePlcNode { node_id: String },
     NonFiniteInteriorPoint,
@@ -17,11 +18,11 @@ pub enum TetrahedronGenerationError {
 impl std::fmt::Display for TetrahedronGenerationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidProtectedBoundaryComplex => {
-                write!(formatter, "Tetrahedron generation requires a validated PLC")
-            }
-            Self::EmptyProtectedBoundaryComplex => {
-                write!(formatter, "validated PLC has no nodes or facets")
+            Self::InvalidProtectedBoundaryComplex { error } => {
+                write!(
+                    formatter,
+                    "Tetrahedron generation requires a validated PLC: {error}"
+                )
             }
             Self::MissingPlcNode { node_id } => {
                 write!(formatter, "PLC facet references missing node {node_id}")

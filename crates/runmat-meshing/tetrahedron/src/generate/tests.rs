@@ -26,20 +26,16 @@ fn rejects_unvalidated_plc_before_tetrahedron_generation() {
     let mut plc = tetra_plc();
     plc.validation.watertight = false;
 
-    assert_eq!(
+    assert!(matches!(
         generate_initial_tetrahedron_mesh_from_plc(&plc),
-        Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex)
-    );
+        Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex { .. })
+    ));
 }
 
 #[test]
 fn rejects_degenerate_plc_facet() {
     let mut plc = tetra_plc();
-    plc.facets[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-    ];
+    plc.nodes[2].coordinates_m = plc.nodes[1].coordinates_m;
 
     assert!(matches!(
         generate_initial_tetrahedron_mesh_from_plc(&plc),
@@ -141,6 +137,17 @@ fn solver_generation_rejects_extra_interior_plc_nodes() {
 }
 
 #[test]
+fn solver_generation_rejects_open_plc_even_when_summary_claims_ready() {
+    let mut plc = tetra_plc();
+    plc.facets.pop();
+
+    assert!(matches!(
+        generate_solver_tetrahedron_mesh_from_plc(&plc),
+        Err(TetrahedronGenerationError::InvalidProtectedBoundaryComplex { .. })
+    ));
+}
+
+#[test]
 fn single_tetrahedron_generation_rejects_non_tetrahedron_plc() {
     assert_eq!(
         generate_single_tetrahedron_mesh_from_plc(&box_plc()),
@@ -172,11 +179,7 @@ fn structured_box_generation_rejects_non_box_plc() {
 #[test]
 fn convex_polyhedron_generation_rejects_nonconvex_boundary_facet() {
     let mut plc = octahedron_plc();
-    plc.facets[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
+    plc.nodes[1].coordinates_m = [-0.1, 0.0, 0.1];
 
     assert_eq!(
         generate_convex_polyhedron_tetrahedron_mesh_from_plc(&plc),
