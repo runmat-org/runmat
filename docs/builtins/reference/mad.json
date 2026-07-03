@@ -1,0 +1,30 @@
+{
+  "title": "mad",
+  "category": "stats/summary",
+  "keywords": ["mad", "mean absolute deviation", "median absolute deviation", "statistics"],
+  "summary": "Compute mean or median absolute deviation.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`mad(X)` computes mean absolute deviation from the mean. `mad(X,1)` computes median absolute deviation from the median. Dimension, vector-dimension, and `\"all\"` forms are supported.",
+  "behaviors": [
+    "The default flag `0` uses mean absolute deviation from the mean.",
+    "Flag `1` uses median absolute deviation from the median.",
+    "NaNs are treated as missing and omitted from each slice by default.",
+    "Empty slices return `NaN`."
+  ],
+  "examples": [{ "description": "Median absolute deviation", "input": "d = mad([1 2 10], 1, \"all\")" }],
+  "faqs": [{ "question": "What is the default deviation center?", "answer": "`mad(X)` uses the arithmetic mean as the center. Pass flag `1` to use the median." }],
+  "links": [{ "label": "mean", "url": "./mean" }, { "label": "median", "url": "./median" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

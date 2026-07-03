@@ -1,0 +1,30 @@
+{
+  "title": "geomean",
+  "category": "stats/summary",
+  "keywords": ["geomean", "geometric mean", "statistics", "summary"],
+  "summary": "Compute the geometric mean of numeric data.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`geomean(X)` computes the geometric mean along the first non-singleton dimension. `geomean(X,dim)`, `geomean(X,vecdim)`, and `geomean(X,\"all\")` select the reduction axes.",
+  "behaviors": [
+    "NaNs are included by default.",
+    "`\"omitnan\"` skips NaNs in each slice; empty slices return `NaN`.",
+    "Zero values produce a zero geometric mean for that slice.",
+    "Negative values produce `NaN` for the affected slice."
+  ],
+  "examples": [{ "description": "Column geometric means", "input": "m = geomean([1 9; 4 16])" }],
+  "faqs": [{ "question": "How do I ignore missing values?", "answer": "Pass `\"omitnan\"`, for example `geomean(X,1,\"omitnan\")`." }],
+  "links": [{ "label": "harmmean", "url": "./harmmean" }, { "label": "mean", "url": "./mean" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

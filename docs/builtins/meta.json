@@ -32622,6 +32622,111 @@
       ]
     },
     {
+      "name": "geomean",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = geomean(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = geomean(X, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = geomean(X, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.geomean.INVALID_ARGUMENT",
+          "identifier": "RunMat:geomean:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.geomean.INTERNAL",
+          "identifier": "RunMat:geomean:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
+        }
+      ]
+    },
+    {
       "name": "geometry.inspect",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -34482,6 +34587,111 @@
           "identifier": "RunMat:hann:InternalError",
           "when": "Window materialization fails internally.",
           "message": "hann: internal error"
+        }
+      ]
+    },
+    {
+      "name": "harmmean",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = harmmean(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = harmmean(X, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = harmmean(X, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.harmmean.INVALID_ARGUMENT",
+          "identifier": "RunMat:harmmean:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.harmmean.INTERNAL",
+          "identifier": "RunMat:harmmean:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
         }
       ]
     },
@@ -44262,6 +44472,118 @@
       ]
     },
     {
+      "name": "kurtosis",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = kurtosis(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = kurtosis(X, flag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = kurtosis(X, flag, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.kurtosis.INVALID_ARGUMENT",
+          "identifier": "RunMat:kurtosis:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.kurtosis.INTERNAL",
+          "identifier": "RunMat:kurtosis:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
+        }
+      ]
+    },
+    {
       "name": "lab2rgb",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -47546,6 +47868,118 @@
           "identifier": "RunMat:lu:Internal",
           "when": "Runtime cannot materialize LU outputs.",
           "message": "lu: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "mad",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = mad(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = mad(X, flag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = mad(X, flag, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.mad.INVALID_ARGUMENT",
+          "identifier": "RunMat:mad:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.mad.INTERNAL",
+          "identifier": "RunMat:mad:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
         }
       ]
     },
@@ -70211,6 +70645,335 @@
       ]
     },
     {
+      "name": "rms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = rms(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = rms(X, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = rms(X, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.rms.INVALID_ARGUMENT",
+          "identifier": "RunMat:rms:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.rms.INTERNAL",
+          "identifier": "RunMat:rms:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
+        }
+      ]
+    },
+    {
+      "name": "rmse",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "E = rmse(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "E = rmse(X, Y, \"Weights\", W)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input data array."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"Weights\"",
+              "description": "Name-value option name."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Observation weights."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "E = rmse(X, Y, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "E = rmse(X, Y, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "E = rmse(X, Y, dim, nanflag, \"Weights\", W)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second input data array."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"Weights\"",
+              "description": "Name-value option name."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Observation weights."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.rmse.INVALID_ARGUMENT",
+          "identifier": "RunMat:rmse:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.rmse.INTERNAL",
+          "identifier": "RunMat:rmse:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
+        }
+      ]
+    },
+    {
       "name": "rng",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -74200,6 +74963,118 @@
           "identifier": null,
           "when": "Output row vector tensor construction fails.",
           "message": "size: failed to build output"
+        }
+      ]
+    },
+    {
+      "name": "skewness",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = skewness(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = skewness(X, flag)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        },
+        {
+          "label": "Y = skewness(X, flag, dim)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Normalization or deviation mode flag."
+            },
+            {
+              "name": "dim",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dimension, dimension vector, or \"all\" selector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional dimension and missing-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed statistic."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.skewness.INVALID_ARGUMENT",
+          "identifier": "RunMat:skewness:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.skewness.INTERNAL",
+          "identifier": "RunMat:skewness:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
         }
       ]
     },
@@ -82510,6 +83385,48 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "tabulate",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tbl = tabulate(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input data array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tbl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Frequency table."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.tabulate.INVALID_ARGUMENT",
+          "identifier": "RunMat:tabulate:InvalidArgument",
+          "when": "Inputs, flags, dimensions, or options are malformed.",
+          "message": "descriptive statistics: invalid argument"
+        },
+        {
+          "code": "RM.tabulate.INTERNAL",
+          "identifier": "RunMat:tabulate:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "descriptive statistics: internal error"
         }
       ]
     },

@@ -1,0 +1,30 @@
+{
+  "title": "skewness",
+  "category": "stats/summary",
+  "keywords": ["skewness", "third moment", "statistics", "summary"],
+  "summary": "Compute sample skewness.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`skewness(X)` computes biased sample skewness along the first non-singleton dimension. `skewness(X,0,...)` applies the bias correction. Dimension, vector-dimension, and `\"all\"` forms are supported.",
+  "behaviors": [
+    "Flag `1` is the default biased moment estimator.",
+    "Flag `0` applies the usual finite-sample bias correction and returns `NaN` for slices with fewer than three values.",
+    "Slices with zero variance return `NaN`.",
+    "NaNs are treated as missing and omitted from each slice by default."
+  ],
+  "examples": [{ "description": "Skewness across all values", "input": "s = skewness(x, 0, \"all\")" }],
+  "faqs": [{ "question": "What is the default flag?", "answer": "The default is `1`, the biased moment estimator used by MATLAB." }],
+  "links": [{ "label": "kurtosis", "url": "./kurtosis" }, { "label": "mean", "url": "./mean" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}
