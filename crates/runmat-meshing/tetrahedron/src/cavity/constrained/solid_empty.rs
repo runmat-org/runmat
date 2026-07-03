@@ -1,3 +1,5 @@
+use runmat_meshing_core::predicate::Triangle3;
+
 use super::*;
 
 pub fn constrained_cavity_solid_empty_boundary_faces(

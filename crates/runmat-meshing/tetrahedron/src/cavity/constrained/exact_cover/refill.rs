@@ -1,3 +1,5 @@
+use runmat_meshing_core::predicate::Triangle3;
+
 use super::*;
 
 mod on_demand;

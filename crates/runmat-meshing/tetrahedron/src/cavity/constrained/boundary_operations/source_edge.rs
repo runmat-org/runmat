@@ -1,3 +1,7 @@
+use runmat_meshing_core::predicate::{
+    orient_tetrahedron_node_ids, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
+};
+
 use super::*;
 
 pub fn split_constrained_cavity_source_edge(

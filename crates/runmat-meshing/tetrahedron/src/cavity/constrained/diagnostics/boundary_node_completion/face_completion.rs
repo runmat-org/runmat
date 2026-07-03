@@ -1,3 +1,5 @@
+use runmat_meshing_core::predicate::{tetrahedron_scaled_jacobian, Triangle3};
+
 use super::*;
 
 #[cfg(test)]
