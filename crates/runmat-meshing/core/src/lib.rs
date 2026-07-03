@@ -34,7 +34,7 @@ pub mod source_topology {
 #[path = "quality/spatial_index.rs"]
 pub mod spatial_index;
 pub use runmat_meshing_surface as surface;
-pub mod tet;
+pub mod tetrahedron;
 #[path = "quality/tolerance.rs"]
 pub mod tolerance;
 #[path = "contracts/topology.rs"]
@@ -88,8 +88,8 @@ pub use contracts::{
     CurveMeshNode, MeshingStage, MeshingStageArtifacts, MeshingStageContractError, PlcFacet,
     PlcNode, PlcProtectedEdge, PlcValidationSummary, ProtectedBoundaryComplex, SizingFieldContract,
     SolveReadinessReport, StageEvidence, StageEvidenceStatus, SurfaceMesh, SurfaceMeshNode,
-    SurfaceMeshTriangle, Tet4Element, TetBoundaryFace, TetMesh, TetMeshNode, TopologyEntityId,
-    MESHING_CONTRACT_SCHEMA_VERSION,
+    SurfaceMeshTriangle, Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh,
+    TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
 };
 pub use curve::{
     discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
@@ -108,9 +108,9 @@ pub use field_mapping::{
     BoundaryNodeVectorValue, FieldMappingError,
 };
 pub use opt::sliver::recovery::{
-    classify_sliver_tets, evaluate_sliver_removal, SliverClassification,
+    classify_sliver_tetrahedra, evaluate_sliver_removal, SliverClassification,
     SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
-    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetQuality,
+    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetrahedronQuality,
 };
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
@@ -120,10 +120,10 @@ pub use options::{
 };
 pub use predicate::{
     closest_point_on_triangle, distance, distance_squared, point_in_closed_triangle_surface,
-    point_triangle_distance, ray_triangle_intersection, tet_centroid, tet_circumsphere,
-    tet_circumsphere_contains_point, tet_edge_aspect_ratio, tet_signed_volume, tet_volume,
-    triangle_area, triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3,
-    Triangle3,
+    point_triangle_distance, ray_triangle_intersection, tetrahedron_centroid,
+    tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point,
+    tetrahedron_edge_aspect_ratio, tetrahedron_signed_volume, tetrahedron_volume, triangle_area,
+    triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3, Triangle3,
 };
 pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use quality::boundary::{
@@ -159,35 +159,37 @@ pub use surface::{
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
     SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
-pub use tet::cavity::{
-    constrained_cavity_from_refill_tet_component, constrained_cavity_from_selected_tets,
-    evaluate_constrained_cavity_refill_candidates, flip_refill_tets_across_shared_face,
-    flip_refill_tets_around_shared_edge, generate_constrained_cavity_component_steiner_nodes,
+pub use tetrahedron::cavity::{
+    constrained_cavity_from_refill_tetrahedron_component,
+    constrained_cavity_from_selected_tetrahedra, evaluate_constrained_cavity_refill_candidates,
+    flip_refill_tetrahedra_across_shared_face, flip_refill_tetrahedra_around_shared_edge,
+    generate_constrained_cavity_component_steiner_nodes,
     generate_constrained_cavity_refill_candidates, retriangulate_constrained_cavity_from_nodes,
     split_constrained_cavity_boundary_face, split_constrained_cavity_boundary_face_at_barycentric,
     split_constrained_cavity_boundary_face_at_centroid, split_constrained_cavity_boundary_faces,
     split_constrained_cavity_boundary_faces_at_centroids,
-    split_refill_tets_across_shared_face_at_barycentric, validate_constrained_cavity,
+    split_refill_tetrahedra_across_shared_face_at_barycentric, validate_constrained_cavity,
     validate_constrained_cavity_boundary_preserved, validate_constrained_cavity_refill_volume,
     ConstrainedCavity, ConstrainedCavityBoundaryFace, ConstrainedCavityBoundaryFaceSplitError,
     ConstrainedCavityBoundarySplitError, ConstrainedCavityExtractionError, ConstrainedCavityNode,
     ConstrainedCavityRefill, ConstrainedCavityRefillError, ConstrainedCavityRefillEvaluation,
-    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTet,
-    ConstrainedCavityRefillTetFlipError, ConstrainedCavityRefillTetSplitError,
+    ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
+    ConstrainedCavityRefillTetrahedronFlipError, ConstrainedCavityRefillTetrahedronSplitError,
     ConstrainedCavityValidationError, ConstrainedCavityValidationReport,
 };
-pub use tet::reconnect::{
-    evaluate_local_tet_flip_quality, local_tet_boundary_faces, three_to_two_edge_flip_candidate,
-    two_to_three_face_flip_candidate, LocalTet, LocalTetFlipCandidate, LocalTetFlipError,
-    LocalTetFlipKind, LocalTetFlipQualityReport, LocalTetFlipQualityThresholds,
+pub use tetrahedron::reconnect::{
+    evaluate_local_tetrahedron_flip_quality, local_tetrahedron_boundary_faces,
+    three_to_two_edge_flip_candidate, two_to_three_face_flip_candidate, LocalTetrahedron,
+    LocalTetrahedronFlipCandidate, LocalTetrahedronFlipError, LocalTetrahedronFlipKind,
+    LocalTetrahedronFlipQualityReport, LocalTetrahedronFlipQualityThresholds,
 };
-pub use tet::recover::boundary_queue::{
+pub use tetrahedron::recover::boundary_queue::{
     build_boundary_recovery_queue, BoundaryRecoveryPriority, BoundaryRecoveryQueue,
     BoundaryRecoveryQueueError, BoundaryRecoveryQueueItem, BoundaryRecoveryReason,
 };
-pub use tet::structured_grid::{
-    generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError, StructuredTetMesher,
-    VolumeMesher,
+pub use tetrahedron::structured_grid::{
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing, MeshingError,
+    StructuredTetrahedronMesher, VolumeMesher,
 };
 pub use tolerance::MeshingTolerance;
 pub use topology::{BoundaryElementKind, VolumeElementKind};
@@ -237,7 +239,7 @@ pub enum MeshConnectivityClass {
 pub enum ElementFamilyHint {
     Triangle,
     Quad,
-    Tet,
+    Tetrahedron,
     Hex,
     Mixed,
 }
@@ -467,7 +469,7 @@ pub fn prepare_geometry_for_analysis(
             }
             MeshKind::Volume => {
                 if element_count % 2 == 0 {
-                    ElementFamilyHint::Tet
+                    ElementFamilyHint::Tetrahedron
                 } else {
                     ElementFamilyHint::Hex
                 }

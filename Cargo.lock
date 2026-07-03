@@ -5703,7 +5703,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-meshing-tet"
+name = "runmat-meshing-tetrahedron"
 version = "0.5.0"
 dependencies = [
  "runmat-meshing-core",

@@ -18,8 +18,8 @@ impl Default for SliverRecoveryOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct SliverTetQuality {
-    pub tet_id: u32,
+pub struct SliverTetrahedronQuality {
+    pub tetrahedron_id: u32,
     pub aspect_ratio: f64,
     pub exact_scaled_jacobian: f64,
 }
@@ -33,7 +33,7 @@ pub enum SliverClassificationReason {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SliverClassification {
-    pub tet_id: u32,
+    pub tetrahedron_id: u32,
     pub aspect_ratio: f64,
     pub exact_scaled_jacobian: f64,
     pub reason: SliverClassificationReason,
@@ -68,25 +68,25 @@ pub struct SliverRemovalEvaluation {
 #[serde(rename_all = "snake_case")]
 pub enum SliverRecoveryError {
     InvalidOptions,
-    NonFiniteQuality { tet_id: u32 },
+    NonFiniteQuality { tetrahedron_id: u32 },
 }
 
-pub fn classify_sliver_tets(
-    tets: &[SliverTetQuality],
+pub fn classify_sliver_tetrahedra(
+    tetrahedra: &[SliverTetrahedronQuality],
     options: SliverRecoveryOptions,
 ) -> Result<Vec<SliverClassification>, SliverRecoveryError> {
     validate_options(options)?;
     let mut classifications = Vec::<SliverClassification>::new();
-    for tet in tets {
-        validate_tet_quality(*tet)?;
-        if tet.aspect_ratio <= options.sliver_aspect_ratio {
+    for tetrahedron in tetrahedra {
+        validate_tetrahedron_quality(*tetrahedron)?;
+        if tetrahedron.aspect_ratio <= options.sliver_aspect_ratio {
             continue;
         }
         classifications.push(SliverClassification {
-            tet_id: tet.tet_id,
-            aspect_ratio: tet.aspect_ratio,
-            exact_scaled_jacobian: tet.exact_scaled_jacobian,
-            reason: if tet.exact_scaled_jacobian < options.min_exact_scaled_jacobian {
+            tetrahedron_id: tetrahedron.tetrahedron_id,
+            aspect_ratio: tetrahedron.aspect_ratio,
+            exact_scaled_jacobian: tetrahedron.exact_scaled_jacobian,
+            reason: if tetrahedron.exact_scaled_jacobian < options.min_exact_scaled_jacobian {
                 SliverClassificationReason::AspectRatioAndExactQuality
             } else {
                 SliverClassificationReason::AspectRatioOnly
@@ -97,14 +97,14 @@ pub fn classify_sliver_tets(
         right
             .aspect_ratio
             .total_cmp(&left.aspect_ratio)
-            .then_with(|| left.tet_id.cmp(&right.tet_id))
+            .then_with(|| left.tetrahedron_id.cmp(&right.tetrahedron_id))
     });
     Ok(classifications)
 }
 
 pub fn evaluate_sliver_removal(
-    current: &[SliverTetQuality],
-    proposed: &[SliverTetQuality],
+    current: &[SliverTetrahedronQuality],
+    proposed: &[SliverTetrahedronQuality],
     options: SliverRecoveryOptions,
 ) -> Result<SliverRemovalEvaluation, SliverRecoveryError> {
     validate_options(options)?;
@@ -156,21 +156,22 @@ struct SliverQualitySummary {
 }
 
 fn sliver_quality_summary(
-    tets: &[SliverTetQuality],
+    tetrahedra: &[SliverTetrahedronQuality],
     options: SliverRecoveryOptions,
 ) -> SliverQualitySummary {
     let mut sliver_count = 0_usize;
     let mut exact_quality_violation_count = 0_usize;
     let mut min_exact_scaled_jacobian = f64::INFINITY;
     let mut max_aspect_ratio = 0.0_f64;
-    for tet in tets {
-        sliver_count += usize::from(tet.aspect_ratio > options.sliver_aspect_ratio);
+    for tetrahedron in tetrahedra {
+        sliver_count += usize::from(tetrahedron.aspect_ratio > options.sliver_aspect_ratio);
         exact_quality_violation_count +=
-            usize::from(tet.exact_scaled_jacobian < options.min_exact_scaled_jacobian);
-        min_exact_scaled_jacobian = min_exact_scaled_jacobian.min(tet.exact_scaled_jacobian);
-        max_aspect_ratio = max_aspect_ratio.max(tet.aspect_ratio);
+            usize::from(tetrahedron.exact_scaled_jacobian < options.min_exact_scaled_jacobian);
+        min_exact_scaled_jacobian =
+            min_exact_scaled_jacobian.min(tetrahedron.exact_scaled_jacobian);
+        max_aspect_ratio = max_aspect_ratio.max(tetrahedron.aspect_ratio);
     }
-    if tets.is_empty() {
+    if tetrahedra.is_empty() {
         min_exact_scaled_jacobian = 0.0;
     }
     SliverQualitySummary {
@@ -194,19 +195,25 @@ fn validate_options(options: SliverRecoveryOptions) -> Result<(), SliverRecovery
     Ok(())
 }
 
-fn validate_quality_set(tets: &[SliverTetQuality]) -> Result<(), SliverRecoveryError> {
-    for tet in tets {
-        validate_tet_quality(*tet)?;
+fn validate_quality_set(
+    tetrahedra: &[SliverTetrahedronQuality],
+) -> Result<(), SliverRecoveryError> {
+    for tetrahedron in tetrahedra {
+        validate_tetrahedron_quality(*tetrahedron)?;
     }
     Ok(())
 }
 
-fn validate_tet_quality(tet: SliverTetQuality) -> Result<(), SliverRecoveryError> {
-    if !tet.aspect_ratio.is_finite()
-        || tet.aspect_ratio <= 0.0
-        || !tet.exact_scaled_jacobian.is_finite()
+fn validate_tetrahedron_quality(
+    tetrahedron: SliverTetrahedronQuality,
+) -> Result<(), SliverRecoveryError> {
+    if !tetrahedron.aspect_ratio.is_finite()
+        || tetrahedron.aspect_ratio <= 0.0
+        || !tetrahedron.exact_scaled_jacobian.is_finite()
     {
-        return Err(SliverRecoveryError::NonFiniteQuality { tet_id: tet.tet_id });
+        return Err(SliverRecoveryError::NonFiniteQuality {
+            tetrahedron_id: tetrahedron.tetrahedron_id,
+        });
     }
     Ok(())
 }
@@ -217,19 +224,19 @@ mod tests {
 
     #[test]
     fn classifies_slivers_by_aspect_ratio_and_quality() {
-        let tets = vec![
+        let tetrahedra = vec![
             quality(1, 8.0, 0.6),
             quality(2, 25.0, 0.5),
             quality(3, 30.0, 0.05),
         ];
 
-        let classifications =
-            classify_sliver_tets(&tets, options()).expect("classification should succeed");
+        let classifications = classify_sliver_tetrahedra(&tetrahedra, options())
+            .expect("classification should succeed");
 
         assert_eq!(
             classifications
                 .iter()
-                .map(|classification| (classification.tet_id, classification.reason))
+                .map(|classification| (classification.tetrahedron_id, classification.reason))
                 .collect::<Vec<_>>(),
             vec![
                 (3, SliverClassificationReason::AspectRatioAndExactQuality),
@@ -302,15 +309,22 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_quality_inputs() {
-        let err = classify_sliver_tets(&[quality(7, f64::INFINITY, 0.4)], options())
+        let err = classify_sliver_tetrahedra(&[quality(7, f64::INFINITY, 0.4)], options())
             .expect_err("non-finite aspect ratio should fail");
 
-        assert_eq!(err, SliverRecoveryError::NonFiniteQuality { tet_id: 7 });
+        assert_eq!(
+            err,
+            SliverRecoveryError::NonFiniteQuality { tetrahedron_id: 7 }
+        );
     }
 
-    fn quality(tet_id: u32, aspect_ratio: f64, exact_scaled_jacobian: f64) -> SliverTetQuality {
-        SliverTetQuality {
-            tet_id,
+    fn quality(
+        tetrahedron_id: u32,
+        aspect_ratio: f64,
+        exact_scaled_jacobian: f64,
+    ) -> SliverTetrahedronQuality {
+        SliverTetrahedronQuality {
+            tetrahedron_id,
             aspect_ratio,
             exact_scaled_jacobian,
         }

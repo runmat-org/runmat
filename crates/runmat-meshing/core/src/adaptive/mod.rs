@@ -779,7 +779,7 @@ mod tests {
                 detail: Some("field available".to_string()),
             }],
             markers: vec![RefinementMarker {
-                entity_id: "tet_1".to_string(),
+                entity_id: "tetrahedron_1".to_string(),
                 weight: 1.0,
                 reason: "stress_gradient".to_string(),
             }],
@@ -1030,25 +1030,25 @@ mod tests {
     fn refinement_markers_are_deterministic_and_create_sizing_samples() {
         let samples = vec![
             RefinementIndicatorSample {
-                entity_id: "tet_low".to_string(),
+                entity_id: "tetrahedron_low".to_string(),
                 position_m: [0.0, 0.0, 0.0],
                 indicator_value: 0.2,
                 current_size_m: 0.08,
             },
             RefinementIndicatorSample {
-                entity_id: "tet_b".to_string(),
+                entity_id: "tetrahedron_b".to_string(),
                 position_m: [1.0, 0.0, 0.0],
                 indicator_value: 1.0,
                 current_size_m: 0.06,
             },
             RefinementIndicatorSample {
-                entity_id: "tet_a".to_string(),
+                entity_id: "tetrahedron_a".to_string(),
                 position_m: [0.0, 1.0, 0.0],
                 indicator_value: 1.0,
                 current_size_m: 0.04,
             },
             RefinementIndicatorSample {
-                entity_id: "tet_mid".to_string(),
+                entity_id: "tetrahedron_mid".to_string(),
                 position_m: [0.0, 0.0, 1.0],
                 indicator_value: 0.5,
                 current_size_m: 0.1,
@@ -1071,7 +1071,7 @@ mod tests {
                 .iter()
                 .map(|marker| marker.entity_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["tet_a", "tet_b", "tet_mid"]
+            vec!["tetrahedron_a", "tetrahedron_b", "tetrahedron_mid"]
         );
         assert_eq!(markers[0].weight, 1.0);
         assert_eq!(markers[2].weight, 0.5);
@@ -1120,7 +1120,7 @@ mod tests {
     #[test]
     fn refinement_marker_options_are_validated() {
         let sample = [RefinementIndicatorSample {
-            entity_id: "tet".to_string(),
+            entity_id: "tetrahedron".to_string(),
             position_m: [0.0, 0.0, 0.0],
             indicator_value: 1.0,
             current_size_m: 0.1,

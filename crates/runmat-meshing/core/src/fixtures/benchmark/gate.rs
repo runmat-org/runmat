@@ -209,7 +209,11 @@ pub fn evaluate_mesh_benchmark_suite_gate(
         let rejected_requested_refinement_count = suite
             .reports
             .iter()
-            .map(|report| report.sizing.rejected_requested_tet_refinement_point_count)
+            .map(|report| {
+                report
+                    .sizing
+                    .rejected_requested_tetrahedron_refinement_point_count
+            })
             .sum::<usize>();
         if rejected_requested_refinement_count > 0 {
             violations.push(gate_violation(
@@ -224,7 +228,11 @@ pub fn evaluate_mesh_benchmark_suite_gate(
         let dropped_requested_refinement_count = suite
             .reports
             .iter()
-            .map(|report| report.sizing.dropped_requested_tet_refinement_point_count)
+            .map(|report| {
+                report
+                    .sizing
+                    .dropped_requested_tetrahedron_refinement_point_count
+            })
             .sum::<usize>();
         if dropped_requested_refinement_count > 0 {
             violations.push(gate_violation(

@@ -64,7 +64,7 @@ pub fn triangle_centroid(points: Triangle3) -> Point3 {
     scale(add(add(points[0], points[1]), points[2]), 1.0 / 3.0)
 }
 
-pub fn tet_centroid(points: Tetrahedron3) -> Point3 {
+pub fn tetrahedron_centroid(points: Tetrahedron3) -> Point3 {
     scale(
         add(add(points[0], points[1]), add(points[2], points[3])),
         0.25,
@@ -75,19 +75,22 @@ pub fn triangle_area(points: Triangle3) -> f64 {
     0.5 * norm(cross(sub(points[1], points[0]), sub(points[2], points[0])))
 }
 
-pub fn tet_signed_volume(points: Tetrahedron3) -> f64 {
+pub fn tetrahedron_signed_volume(points: Tetrahedron3) -> f64 {
     dot(
         sub(points[1], points[0]),
         cross(sub(points[2], points[0]), sub(points[3], points[0])),
     ) / 6.0
 }
 
-pub fn tet_volume(points: Tetrahedron3) -> f64 {
-    tet_signed_volume(points).abs()
+pub fn tetrahedron_volume(points: Tetrahedron3) -> f64 {
+    tetrahedron_signed_volume(points).abs()
 }
 
-pub fn orient_tet_node_ids(mut node_ids: [u32; 4], points: Tetrahedron3) -> ([u32; 4], f64) {
-    let mut signed_volume = tet_signed_volume(points);
+pub fn orient_tetrahedron_node_ids(
+    mut node_ids: [u32; 4],
+    points: Tetrahedron3,
+) -> ([u32; 4], f64) {
+    let mut signed_volume = tetrahedron_signed_volume(points);
     if signed_volume < 0.0 {
         node_ids.swap(1, 2);
         signed_volume = -signed_volume;
@@ -95,7 +98,7 @@ pub fn orient_tet_node_ids(mut node_ids: [u32; 4], points: Tetrahedron3) -> ([u3
     (node_ids, signed_volume)
 }
 
-pub fn tet_edge_aspect_ratio(points: Tetrahedron3) -> f64 {
+pub fn tetrahedron_edge_aspect_ratio(points: Tetrahedron3) -> f64 {
     let mut min_edge = f64::INFINITY;
     let mut max_edge = 0.0_f64;
     for left_index in 0..4 {
@@ -108,7 +111,7 @@ pub fn tet_edge_aspect_ratio(points: Tetrahedron3) -> f64 {
     max_edge / min_edge.max(f64::EPSILON)
 }
 
-pub fn tet_scaled_jacobian(points: Tetrahedron3) -> f64 {
+pub fn tetrahedron_scaled_jacobian(points: Tetrahedron3) -> f64 {
     let corners = [
         (points[0], points[1], points[2], points[3]),
         (points[1], points[0], points[3], points[2]),
@@ -222,18 +225,19 @@ pub fn ray_has_odd_surface_intersections(
     intersections.len() % 2 == 1
 }
 
-pub fn tet_circumsphere_contains_point(
-    tet_points: Tetrahedron3,
+pub fn tetrahedron_circumsphere_contains_point(
+    tetrahedron_points: Tetrahedron3,
     point: Point3,
     tolerance: MeshingTolerance,
 ) -> bool {
-    let Some((center, radius_squared)) = tet_circumsphere(tet_points, tolerance) else {
+    let Some((center, radius_squared)) = tetrahedron_circumsphere(tetrahedron_points, tolerance)
+    else {
         return false;
     };
     distance_squared(center, point) <= radius_squared * (1.0 + tolerance.relative)
 }
 
-pub fn tet_circumsphere(
+pub fn tetrahedron_circumsphere(
     points: Tetrahedron3,
     tolerance: MeshingTolerance,
 ) -> Option<(Point3, f64)> {
@@ -366,23 +370,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tet_signed_volume_reports_orientation() {
-        let tet = [
+    fn tetrahedron_signed_volume_reports_orientation() {
+        let tetrahedron = [
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
         ];
 
-        assert!((tet_signed_volume(tet) - 1.0 / 6.0).abs() < 1.0e-12);
-        let (node_ids, volume) =
-            orient_tet_node_ids([1, 3, 2, 4], [tet[0], tet[2], tet[1], tet[3]]);
+        assert!((tetrahedron_signed_volume(tetrahedron) - 1.0 / 6.0).abs() < 1.0e-12);
+        let (node_ids, volume) = orient_tetrahedron_node_ids(
+            [1, 3, 2, 4],
+            [
+                tetrahedron[0],
+                tetrahedron[2],
+                tetrahedron[1],
+                tetrahedron[3],
+            ],
+        );
         assert_eq!(node_ids, [1, 2, 3, 4]);
         assert!((volume - 1.0 / 6.0).abs() < 1.0e-12);
     }
 
     #[test]
-    fn tet_scaled_jacobian_reports_shape_quality() {
+    fn tetrahedron_scaled_jacobian_reports_shape_quality() {
         let orthogonal = [
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -396,8 +407,8 @@ mod tests {
             [1.0e-4, 1.0e-4, 1.0e-5],
         ];
 
-        assert!(tet_scaled_jacobian(orthogonal) > 0.5);
-        assert!(tet_scaled_jacobian(sliver) < 0.01);
+        assert!(tetrahedron_scaled_jacobian(orthogonal) > 0.5);
+        assert!(tetrahedron_scaled_jacobian(sliver) < 0.01);
     }
 
     #[test]
@@ -435,21 +446,21 @@ mod tests {
     }
 
     #[test]
-    fn circumsphere_contains_regular_tet_center() {
-        let tet = [
+    fn circumsphere_contains_regular_tetrahedron_center() {
+        let tetrahedron = [
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
         ];
 
-        assert!(tet_circumsphere_contains_point(
-            tet,
+        assert!(tetrahedron_circumsphere_contains_point(
+            tetrahedron,
             [0.5, 0.5, 0.5],
             MeshingTolerance::default()
         ));
-        assert!(!tet_circumsphere_contains_point(
-            tet,
+        assert!(!tetrahedron_circumsphere_contains_point(
+            tetrahedron,
             [2.0, 2.0, 2.0],
             MeshingTolerance::default()
         ));

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CadModel, CurveMesh, MeshingStage, ProtectedBoundaryComplex, SizingFieldContract,
-    SolveReadinessReport, SurfaceMesh, TetMesh,
+    SolveReadinessReport, SurfaceMesh, TetrahedronMesh,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -18,11 +18,11 @@ pub struct MeshingStageArtifacts {
     #[serde(default)]
     pub protected_boundary_complex: Option<ProtectedBoundaryComplex>,
     #[serde(default)]
-    pub initial_tet_mesh: Option<TetMesh>,
+    pub initial_tetrahedron_mesh: Option<TetrahedronMesh>,
     #[serde(default)]
-    pub recovered_tet_mesh: Option<TetMesh>,
+    pub recovered_tetrahedron_mesh: Option<TetrahedronMesh>,
     #[serde(default)]
-    pub optimized_tet_mesh: Option<TetMesh>,
+    pub optimized_tetrahedron_mesh: Option<TetrahedronMesh>,
     #[serde(default)]
     pub solve_readiness: Option<SolveReadinessReport>,
 }
@@ -34,8 +34,8 @@ pub enum MeshingStageContractError {
         prerequisite: MeshingStage,
     },
     InvalidProtectedBoundaryComplex,
-    UnrecoveredTetMesh,
-    UnoptimizedTetMesh,
+    UnrecoveredTetrahedronMesh,
+    UnoptimizedTetrahedronMesh,
     SolveReadinessFailed,
 }
 
@@ -50,13 +50,19 @@ impl std::fmt::Display for MeshingStageContractError {
                 "{stage:?} requires completed {prerequisite:?} before it can run"
             ),
             Self::InvalidProtectedBoundaryComplex => {
-                write!(formatter, "Tet generation requires a validated PLC")
+                write!(formatter, "Tetrahedron generation requires a validated PLC")
             }
-            Self::UnrecoveredTetMesh => {
-                write!(formatter, "optimization requires recovered Tet constraints")
+            Self::UnrecoveredTetrahedronMesh => {
+                write!(
+                    formatter,
+                    "optimization requires recovered Tetrahedron constraints"
+                )
             }
-            Self::UnoptimizedTetMesh => {
-                write!(formatter, "solve readiness requires optimized Tet topology")
+            Self::UnoptimizedTetrahedronMesh => {
+                write!(
+                    formatter,
+                    "solve readiness requires optimized Tetrahedron topology"
+                )
             }
             Self::SolveReadinessFailed => {
                 write!(
@@ -106,10 +112,10 @@ pub fn validate_meshing_stage_order(
             MeshingStage::SurfaceMesh,
         )?;
     }
-    if artifacts.initial_tet_mesh.is_some() {
+    if artifacts.initial_tetrahedron_mesh.is_some() {
         require(
             artifacts.protected_boundary_complex.is_some(),
-            MeshingStage::TetMesh,
+            MeshingStage::TetrahedronMesh,
             MeshingStage::ProtectedBoundaryComplex,
         )?;
         let plc = artifacts
@@ -120,35 +126,35 @@ pub fn validate_meshing_stage_order(
             return Err(MeshingStageContractError::InvalidProtectedBoundaryComplex);
         }
     }
-    if artifacts.recovered_tet_mesh.is_some() {
+    if artifacts.recovered_tetrahedron_mesh.is_some() {
         require(
-            artifacts.initial_tet_mesh.is_some(),
+            artifacts.initial_tetrahedron_mesh.is_some(),
             MeshingStage::ConstraintRecovery,
-            MeshingStage::TetMesh,
+            MeshingStage::TetrahedronMesh,
         )?;
     }
-    if let Some(mesh) = &artifacts.optimized_tet_mesh {
+    if let Some(mesh) = &artifacts.optimized_tetrahedron_mesh {
         require(
-            artifacts.recovered_tet_mesh.is_some(),
+            artifacts.recovered_tetrahedron_mesh.is_some(),
             MeshingStage::Optimization,
             MeshingStage::ConstraintRecovery,
         )?;
         if !mesh.recovery_complete {
-            return Err(MeshingStageContractError::UnrecoveredTetMesh);
+            return Err(MeshingStageContractError::UnrecoveredTetrahedronMesh);
         }
     }
     if let Some(report) = &artifacts.solve_readiness {
         require(
-            artifacts.optimized_tet_mesh.is_some(),
+            artifacts.optimized_tetrahedron_mesh.is_some(),
             MeshingStage::SolveReadiness,
             MeshingStage::Optimization,
         )?;
         let mesh = artifacts
-            .optimized_tet_mesh
+            .optimized_tetrahedron_mesh
             .as_ref()
             .expect("optimized mesh presence was checked");
         if !mesh.quality_optimized {
-            return Err(MeshingStageContractError::UnoptimizedTetMesh);
+            return Err(MeshingStageContractError::UnoptimizedTetrahedronMesh);
         }
         if !report.ready {
             return Err(MeshingStageContractError::SolveReadinessFailed);
@@ -179,7 +185,7 @@ mod tests {
     use super::*;
     use crate::contracts::{
         CadModel, CurveMesh, MeshingStage, PlcValidationSummary, ProtectedBoundaryComplex,
-        SizingFieldContract, StageEvidence, SurfaceMesh, TetMesh,
+        SizingFieldContract, StageEvidence, SurfaceMesh, TetrahedronMesh,
     };
 
     #[test]
@@ -199,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_order_rejects_tet_mesh_without_valid_plc() {
+    fn stage_order_rejects_tetrahedron_mesh_without_valid_plc() {
         let mut artifacts = complete_prefix_through_plc();
         artifacts
             .protected_boundary_complex
@@ -207,7 +213,7 @@ mod tests {
             .expect("PLC exists")
             .validation
             .watertight = false;
-        artifacts.initial_tet_mesh = Some(tet_mesh(false, false));
+        artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
 
         assert_eq!(
             validate_meshing_stage_order(&artifacts),
@@ -218,8 +224,8 @@ mod tests {
     #[test]
     fn stage_order_rejects_solve_readiness_before_optimization() {
         let mut artifacts = complete_prefix_through_plc();
-        artifacts.initial_tet_mesh = Some(tet_mesh(false, false));
-        artifacts.recovered_tet_mesh = Some(tet_mesh(true, false));
+        artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+        artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
         artifacts.solve_readiness = Some(SolveReadinessReport {
             ready: true,
             evidence: vec![],
@@ -238,9 +244,9 @@ mod tests {
     #[test]
     fn stage_order_accepts_complete_meshing_sequence() {
         let mut artifacts = complete_prefix_through_plc();
-        artifacts.initial_tet_mesh = Some(tet_mesh(false, false));
-        artifacts.recovered_tet_mesh = Some(tet_mesh(true, false));
-        artifacts.optimized_tet_mesh = Some(tet_mesh(true, true));
+        artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+        artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+        artifacts.optimized_tetrahedron_mesh = Some(tetrahedron_mesh(true, true));
         artifacts.solve_readiness = Some(SolveReadinessReport {
             ready: true,
             evidence: vec![StageEvidence::complete(MeshingStage::SolveReadiness)],
@@ -340,15 +346,15 @@ mod tests {
         }
     }
 
-    fn tet_mesh(recovery_complete: bool, quality_optimized: bool) -> TetMesh {
-        TetMesh {
-            mesh_id: "tet".to_string(),
+    fn tetrahedron_mesh(recovery_complete: bool, quality_optimized: bool) -> TetrahedronMesh {
+        TetrahedronMesh {
+            mesh_id: "tetrahedron".to_string(),
             nodes: vec![],
             elements: vec![],
             boundary_faces: vec![],
             recovery_complete,
             quality_optimized,
-            evidence: StageEvidence::complete(MeshingStage::TetMesh),
+            evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
         }
     }
 }

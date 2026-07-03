@@ -7,7 +7,7 @@ use crate::VolumeMeshingOptions;
 pub enum MeshBackendKind {
     Auto,
     Solid,
-    StructuredTetFallback,
+    StructuredTetrahedronFallback,
 }
 
 impl Default for MeshBackendKind {
@@ -38,11 +38,11 @@ pub fn select_volume_backend(options: &VolumeMeshingOptions) -> MeshBackendSelec
             solid_ready: true,
             reason: "explicit_solid_backend",
         },
-        MeshBackendKind::StructuredTetFallback => MeshBackendSelection {
-            requested: MeshBackendKind::StructuredTetFallback,
-            selected: MeshBackendKind::StructuredTetFallback,
+        MeshBackendKind::StructuredTetrahedronFallback => MeshBackendSelection {
+            requested: MeshBackendKind::StructuredTetrahedronFallback,
+            selected: MeshBackendKind::StructuredTetrahedronFallback,
             solid_ready: false,
-            reason: "explicit_structured_tet_fallback",
+            reason: "explicit_structured_tetrahedron_fallback",
         },
     }
 }
@@ -64,13 +64,19 @@ mod tests {
     #[test]
     fn explicit_fallback_remains_available() {
         let selection = select_volume_backend(&VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredTetFallback,
+            backend: MeshBackendKind::StructuredTetrahedronFallback,
             ..VolumeMeshingOptions::default()
         });
 
-        assert_eq!(selection.requested, MeshBackendKind::StructuredTetFallback);
-        assert_eq!(selection.selected, MeshBackendKind::StructuredTetFallback);
+        assert_eq!(
+            selection.requested,
+            MeshBackendKind::StructuredTetrahedronFallback
+        );
+        assert_eq!(
+            selection.selected,
+            MeshBackendKind::StructuredTetrahedronFallback
+        );
         assert!(!selection.solid_ready);
-        assert_eq!(selection.reason, "explicit_structured_tet_fallback");
+        assert_eq!(selection.reason, "explicit_structured_tetrahedron_fallback");
     }
 }

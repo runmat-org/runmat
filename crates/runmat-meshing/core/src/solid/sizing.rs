@@ -671,7 +671,10 @@ pub(super) fn solid_mesh_sizing(
             let requested_id = requested_sample_ids.get(&sample_index).copied();
             let inserted_breakpoint_count = usize::from(
                 requested_id.is_some()
-                    && tet_mesh_has_node_near(&preparation.solver_tet_mesh, sample.position_m),
+                    && tetrahedron_mesh_has_node_near(
+                        &preparation.solver_tetrahedron_mesh,
+                        sample.position_m,
+                    ),
             );
             if inserted_breakpoint_count > 0 {
                 mesh_sizing.applied_samples.push(SizingSampleApplication {
@@ -679,16 +682,17 @@ pub(super) fn solid_mesh_sizing(
                     target_size_m,
                     inserted_breakpoint_count,
                     reason: sample.reason.clone(),
-                    detail: Some("solid_requested_tet_point_present".to_string()),
+                    detail: Some("solid_requested_tetrahedron_point_present".to_string()),
                 });
             } else if requested_id.is_some() {
                 mesh_sizing.rejected_samples.push(SizingSampleRejection {
                     position_m: sample.position_m,
                     target_size_m,
-                    status: "not_inserted_by_tet_generation".to_string(),
+                    status: "not_inserted_by_tetrahedron_generation".to_string(),
                     reason: sample.reason.clone(),
                     detail: Some(
-                        "native Tet generation does not insert requested points yet".to_string(),
+                        "native Tetrahedron generation does not insert requested points yet"
+                            .to_string(),
                     ),
                 });
             } else {
@@ -697,7 +701,7 @@ pub(super) fn solid_mesh_sizing(
                     target_size_m,
                     status: "skipped_budget".to_string(),
                     reason: sample.reason.clone(),
-                    detail: Some("requested Tet seed budget was exhausted".to_string()),
+                    detail: Some("requested Tetrahedron seed budget was exhausted".to_string()),
                 });
             }
         }

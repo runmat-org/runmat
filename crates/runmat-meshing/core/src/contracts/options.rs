@@ -236,7 +236,7 @@ impl Default for VolumeMeshingOptions {
         Self {
             backend: MeshBackendKind::Auto,
             kind: MeshKindRequest::Solid,
-            element: VolumeElementKind::Tet4,
+            element: VolumeElementKind::Tetrahedron4,
             element_order: MeshElementOrder::Linear,
             profile: MeshProfile::AnalysisReady,
             max_elements: 250_000,

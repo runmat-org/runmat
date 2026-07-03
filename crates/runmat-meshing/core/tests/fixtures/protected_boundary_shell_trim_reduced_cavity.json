@@ -2,12 +2,12 @@
   "schema_version": "runmat-reduced-cavity/v1",
   "fixture_kind": "protected_boundary_shell_trim",
   "seed_node_id": 178,
-  "anchor_tet_index": 409,
-  "source_tet_count": 711,
+  "anchor_tetrahedron_index": 409,
+  "source_tetrahedron_count": 711,
   "source_node_count": 241,
   "quality_threshold": 0.15,
   "cavity": {
-    "removed_tet_ids": [
+    "removed_tetrahedron_ids": [
       407,
       408,
       409,
@@ -50,7 +50,7 @@
           89,
           5
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -67,7 +67,7 @@
           5,
           172
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -84,7 +84,7 @@
           88,
           17
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -101,7 +101,7 @@
           17,
           89
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -118,7 +118,7 @@
           202,
           88
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           413
         ],
         "source_face_id": null,
@@ -137,7 +137,7 @@
           172,
           184
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -154,7 +154,7 @@
           4,
           184
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           331,
           359
         ],
@@ -174,7 +174,7 @@
           89,
           17
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -191,7 +191,7 @@
           17,
           178
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           474,
           551
         ],
@@ -211,7 +211,7 @@
           198,
           172
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -228,7 +228,7 @@
           5,
           178
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           474
         ],
         "source_face_id": null,
@@ -247,7 +247,7 @@
           18,
           96
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -264,7 +264,7 @@
           17,
           198
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -281,7 +281,7 @@
           88,
           208
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           417
         ],
         "source_face_id": null,
@@ -300,7 +300,7 @@
           96,
           178
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           551
         ],
         "source_face_id": null,
@@ -319,7 +319,7 @@
           17,
           208
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -336,7 +336,7 @@
           18,
           198
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           554
         ],
         "source_face_id": null,
@@ -355,7 +355,7 @@
           179,
           189
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           564,
           567
         ],
@@ -375,7 +375,7 @@
           179,
           41
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           460,
           493
         ],
@@ -395,7 +395,7 @@
           41,
           189
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           601
         ],
         "source_face_id": null,
@@ -414,7 +414,7 @@
           202,
           184
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           416
         ],
         "source_face_id": null,
@@ -433,7 +433,7 @@
           184,
           208
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           416
         ],
         "source_face_id": null,
@@ -452,7 +452,7 @@
           96,
           172
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           549
         ],
         "source_face_id": null,
@@ -471,7 +471,7 @@
           192,
           172
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           530,
           532
         ],
@@ -491,7 +491,7 @@
           96,
           198
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           554
         ],
         "source_face_id": null,
@@ -510,7 +510,7 @@
           172,
           189
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           599
         ],
         "source_face_id": null,
@@ -529,7 +529,7 @@
           172,
           199
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -546,7 +546,7 @@
           172,
           178
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           470
         ],
         "source_face_id": null,
@@ -565,7 +565,7 @@
           192,
           189
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           537
         ],
         "source_face_id": null,
@@ -584,7 +584,7 @@
           198,
           199
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -601,7 +601,7 @@
           173,
           189
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           564,
           568
         ],
@@ -621,7 +621,7 @@
           173,
           199
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           493
         ],
         "source_face_id": null,
@@ -640,7 +640,7 @@
           198,
           184
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           411
         ],
         "source_face_id": null,
@@ -659,7 +659,7 @@
           198,
           208
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           420
         ],
         "source_face_id": null,
@@ -678,7 +678,7 @@
           192,
           199
         ],
-        "outside_tet_ids": [
+        "outside_tetrahedron_ids": [
           561
         ],
         "source_face_id": null,
@@ -697,7 +697,7 @@
           198,
           199
         ],
-        "outside_tet_ids": [],
+        "outside_tetrahedron_ids": [],
         "source_face_id": null,
         "source_edge_ids": [
           null,
@@ -1998,9 +1998,9 @@
       ]
     }
   ],
-  "source_tets": [
+  "source_tetrahedra": [
     {
-      "tet_id": 1,
+      "tetrahedron_id": 1,
       "node_ids": [
         0,
         262,
@@ -2011,7 +2011,7 @@
       "exact_scaled_jacobian": 0.34773158167477236
     },
     {
-      "tet_id": 3,
+      "tetrahedron_id": 3,
       "node_ids": [
         254,
         260,
@@ -2022,7 +2022,7 @@
       "exact_scaled_jacobian": 0.3582027372464062
     },
     {
-      "tet_id": 6,
+      "tetrahedron_id": 6,
       "node_ids": [
         255,
         261,
@@ -2033,7 +2033,7 @@
       "exact_scaled_jacobian": 0.35820273724640644
     },
     {
-      "tet_id": 14,
+      "tetrahedron_id": 14,
       "node_ids": [
         234,
         255,
@@ -2044,7 +2044,7 @@
       "exact_scaled_jacobian": 0.29787807587920423
     },
     {
-      "tet_id": 17,
+      "tetrahedron_id": 17,
       "node_ids": [
         235,
         166,
@@ -2055,7 +2055,7 @@
       "exact_scaled_jacobian": 0.29787807587920395
     },
     {
-      "tet_id": 20,
+      "tetrahedron_id": 20,
       "node_ids": [
         1,
         262,
@@ -2066,7 +2066,7 @@
       "exact_scaled_jacobian": 0.28276488367848973
     },
     {
-      "tet_id": 21,
+      "tetrahedron_id": 21,
       "node_ids": [
         234,
         254,
@@ -2077,7 +2077,7 @@
       "exact_scaled_jacobian": 0.2827648836784898
     },
     {
-      "tet_id": 23,
+      "tetrahedron_id": 23,
       "node_ids": [
         234,
         235,
@@ -2088,7 +2088,7 @@
       "exact_scaled_jacobian": 0.27672283448275486
     },
     {
-      "tet_id": 24,
+      "tetrahedron_id": 24,
       "node_ids": [
         235,
         255,
@@ -2099,7 +2099,7 @@
       "exact_scaled_jacobian": 0.2827648836784893
     },
     {
-      "tet_id": 26,
+      "tetrahedron_id": 26,
       "node_ids": [
         235,
         37,
@@ -2110,7 +2110,7 @@
       "exact_scaled_jacobian": 0.27672283448275464
     },
     {
-      "tet_id": 36,
+      "tetrahedron_id": 36,
       "node_ids": [
         234,
         239,
@@ -2121,7 +2121,7 @@
       "exact_scaled_jacobian": 0.1832905026587657
     },
     {
-      "tet_id": 37,
+      "tetrahedron_id": 37,
       "node_ids": [
         234,
         255,
@@ -2132,7 +2132,7 @@
       "exact_scaled_jacobian": 0.34302757542200996
     },
     {
-      "tet_id": 38,
+      "tetrahedron_id": 38,
       "node_ids": [
         234,
         241,
@@ -2143,7 +2143,7 @@
       "exact_scaled_jacobian": 0.35634099462070995
     },
     {
-      "tet_id": 40,
+      "tetrahedron_id": 40,
       "node_ids": [
         24,
         239,
@@ -2154,7 +2154,7 @@
       "exact_scaled_jacobian": 0.19595322359986245
     },
     {
-      "tet_id": 41,
+      "tetrahedron_id": 41,
       "node_ids": [
         24,
         239,
@@ -2165,7 +2165,7 @@
       "exact_scaled_jacobian": 0.42159001230041937
     },
     {
-      "tet_id": 42,
+      "tetrahedron_id": 42,
       "node_ids": [
         24,
         36,
@@ -2176,7 +2176,7 @@
       "exact_scaled_jacobian": 0.2290819391732933
     },
     {
-      "tet_id": 47,
+      "tetrahedron_id": 47,
       "node_ids": [
         235,
         245,
@@ -2187,7 +2187,7 @@
       "exact_scaled_jacobian": 0.24306371985102557
     },
     {
-      "tet_id": 48,
+      "tetrahedron_id": 48,
       "node_ids": [
         37,
         235,
@@ -2198,7 +2198,7 @@
       "exact_scaled_jacobian": 0.38176282367304243
     },
     {
-      "tet_id": 49,
+      "tetrahedron_id": 49,
       "node_ids": [
         37,
         239,
@@ -2209,7 +2209,7 @@
       "exact_scaled_jacobian": 0.17727649085225805
     },
     {
-      "tet_id": 50,
+      "tetrahedron_id": 50,
       "node_ids": [
         38,
         235,
@@ -2220,7 +2220,7 @@
       "exact_scaled_jacobian": 0.19184689849572736
     },
     {
-      "tet_id": 51,
+      "tetrahedron_id": 51,
       "node_ids": [
         224,
         225,
@@ -2231,7 +2231,7 @@
       "exact_scaled_jacobian": 0.19184689849572736
     },
     {
-      "tet_id": 52,
+      "tetrahedron_id": 52,
       "node_ids": [
         224,
         235,
@@ -2242,7 +2242,7 @@
       "exact_scaled_jacobian": 0.38176282367304226
     },
     {
-      "tet_id": 53,
+      "tetrahedron_id": 53,
       "node_ids": [
         234,
         235,
@@ -2253,7 +2253,7 @@
       "exact_scaled_jacobian": 0.17727649085225797
     },
     {
-      "tet_id": 54,
+      "tetrahedron_id": 54,
       "node_ids": [
         24,
         37,
@@ -2264,7 +2264,7 @@
       "exact_scaled_jacobian": 0.3406708715862129
     },
     {
-      "tet_id": 56,
+      "tetrahedron_id": 56,
       "node_ids": [
         25,
         166,
@@ -2275,7 +2275,7 @@
       "exact_scaled_jacobian": 0.36268113598228724
     },
     {
-      "tet_id": 57,
+      "tetrahedron_id": 57,
       "node_ids": [
         25,
         166,
@@ -2286,7 +2286,7 @@
       "exact_scaled_jacobian": 0.41943469375046566
     },
     {
-      "tet_id": 58,
+      "tetrahedron_id": 58,
       "node_ids": [
         13,
         64,
@@ -2297,7 +2297,7 @@
       "exact_scaled_jacobian": 0.20176724188061548
     },
     {
-      "tet_id": 59,
+      "tetrahedron_id": 59,
       "node_ids": [
         14,
         64,
@@ -2308,7 +2308,7 @@
       "exact_scaled_jacobian": 0.30499777120306437
     },
     {
-      "tet_id": 60,
+      "tetrahedron_id": 60,
       "node_ids": [
         64,
         13,
@@ -2319,7 +2319,7 @@
       "exact_scaled_jacobian": 0.0861025612410953
     },
     {
-      "tet_id": 61,
+      "tetrahedron_id": 61,
       "node_ids": [
         1,
         13,
@@ -2330,7 +2330,7 @@
       "exact_scaled_jacobian": 0.18571210738717844
     },
     {
-      "tet_id": 62,
+      "tetrahedron_id": 62,
       "node_ids": [
         234,
         13,
@@ -2341,7 +2341,7 @@
       "exact_scaled_jacobian": 0.276722834482755
     },
     {
-      "tet_id": 63,
+      "tetrahedron_id": 63,
       "node_ids": [
         64,
         234,
@@ -2352,7 +2352,7 @@
       "exact_scaled_jacobian": 0.07938613445813658
     },
     {
-      "tet_id": 64,
+      "tetrahedron_id": 64,
       "node_ids": [
         262,
         14,
@@ -2363,7 +2363,7 @@
       "exact_scaled_jacobian": 0.21859400714620206
     },
     {
-      "tet_id": 65,
+      "tetrahedron_id": 65,
       "node_ids": [
         224,
         14,
@@ -2374,7 +2374,7 @@
       "exact_scaled_jacobian": 0.15539828618117765
     },
     {
-      "tet_id": 66,
+      "tetrahedron_id": 66,
       "node_ids": [
         224,
         241,
@@ -2385,7 +2385,7 @@
       "exact_scaled_jacobian": 0.20575608487972177
     },
     {
-      "tet_id": 67,
+      "tetrahedron_id": 67,
       "node_ids": [
         234,
         241,
@@ -2396,7 +2396,7 @@
       "exact_scaled_jacobian": 0.3436288262047419
     },
     {
-      "tet_id": 68,
+      "tetrahedron_id": 68,
       "node_ids": [
         24,
         239,
@@ -2407,7 +2407,7 @@
       "exact_scaled_jacobian": 0.19213044352008954
     },
     {
-      "tet_id": 69,
+      "tetrahedron_id": 69,
       "node_ids": [
         24,
         239,
@@ -2418,7 +2418,7 @@
       "exact_scaled_jacobian": 0.4293128933028189
     },
     {
-      "tet_id": 70,
+      "tetrahedron_id": 70,
       "node_ids": [
         37,
         235,
@@ -2429,7 +2429,7 @@
       "exact_scaled_jacobian": 0.37459789641652735
     },
     {
-      "tet_id": 71,
+      "tetrahedron_id": 71,
       "node_ids": [
         37,
         239,
@@ -2440,7 +2440,7 @@
       "exact_scaled_jacobian": 0.18572546420711908
     },
     {
-      "tet_id": 72,
+      "tetrahedron_id": 72,
       "node_ids": [
         38,
         235,
@@ -2451,7 +2451,7 @@
       "exact_scaled_jacobian": 0.19653989408238257
     },
     {
-      "tet_id": 73,
+      "tetrahedron_id": 73,
       "node_ids": [
         224,
         225,
@@ -2462,7 +2462,7 @@
       "exact_scaled_jacobian": 0.1965398940823826
     },
     {
-      "tet_id": 74,
+      "tetrahedron_id": 74,
       "node_ids": [
         224,
         235,
@@ -2473,7 +2473,7 @@
       "exact_scaled_jacobian": 0.37459789641652713
     },
     {
-      "tet_id": 75,
+      "tetrahedron_id": 75,
       "node_ids": [
         234,
         235,
@@ -2484,7 +2484,7 @@
       "exact_scaled_jacobian": 0.185725464207119
     },
     {
-      "tet_id": 76,
+      "tetrahedron_id": 76,
       "node_ids": [
         24,
         37,
@@ -2495,7 +2495,7 @@
       "exact_scaled_jacobian": 0.34478635416567055
     },
     {
-      "tet_id": 78,
+      "tetrahedron_id": 78,
       "node_ids": [
         25,
         166,
@@ -2506,7 +2506,7 @@
       "exact_scaled_jacobian": 0.36754083961250944
     },
     {
-      "tet_id": 79,
+      "tetrahedron_id": 79,
       "node_ids": [
         25,
         166,
@@ -2517,7 +2517,7 @@
       "exact_scaled_jacobian": 0.40840370669853016
     },
     {
-      "tet_id": 80,
+      "tetrahedron_id": 80,
       "node_ids": [
         224,
         241,
@@ -2528,7 +2528,7 @@
       "exact_scaled_jacobian": 0.20802325917084116
     },
     {
-      "tet_id": 81,
+      "tetrahedron_id": 81,
       "node_ids": [
         224,
         262,
@@ -2539,7 +2539,7 @@
       "exact_scaled_jacobian": 0.4011002975544136
     },
     {
-      "tet_id": 82,
+      "tetrahedron_id": 82,
       "node_ids": [
         263,
         241,
@@ -2550,7 +2550,7 @@
       "exact_scaled_jacobian": 0.35953783853638793
     },
     {
-      "tet_id": 83,
+      "tetrahedron_id": 83,
       "node_ids": [
         224,
         241,
@@ -2561,7 +2561,7 @@
       "exact_scaled_jacobian": 0.272413625014554
     },
     {
-      "tet_id": 84,
+      "tetrahedron_id": 84,
       "node_ids": [
         263,
         251,
@@ -2572,7 +2572,7 @@
       "exact_scaled_jacobian": 0.40505049156826817
     },
     {
-      "tet_id": 85,
+      "tetrahedron_id": 85,
       "node_ids": [
         234,
         254,
@@ -2583,7 +2583,7 @@
       "exact_scaled_jacobian": 0.3675408396125098
     },
     {
-      "tet_id": 86,
+      "tetrahedron_id": 86,
       "node_ids": [
         263,
         254,
@@ -2594,7 +2594,7 @@
       "exact_scaled_jacobian": 0.3336692434606081
     },
     {
-      "tet_id": 87,
+      "tetrahedron_id": 87,
       "node_ids": [
         234,
         254,
@@ -2605,7 +2605,7 @@
       "exact_scaled_jacobian": 0.2565146641212886
     },
     {
-      "tet_id": 88,
+      "tetrahedron_id": 88,
       "node_ids": [
         263,
         254,
@@ -2616,7 +2616,7 @@
       "exact_scaled_jacobian": 0.38269409738518073
     },
     {
-      "tet_id": 89,
+      "tetrahedron_id": 89,
       "node_ids": [
         263,
         25,
@@ -2627,7 +2627,7 @@
       "exact_scaled_jacobian": 0.3045645623074073
     },
     {
-      "tet_id": 90,
+      "tetrahedron_id": 90,
       "node_ids": [
         25,
         37,
@@ -2638,7 +2638,7 @@
       "exact_scaled_jacobian": 0.2080232591708411
     },
     {
-      "tet_id": 91,
+      "tetrahedron_id": 91,
       "node_ids": [
         25,
         164,
@@ -2649,7 +2649,7 @@
       "exact_scaled_jacobian": 0.41278170607224485
     },
     {
-      "tet_id": 92,
+      "tetrahedron_id": 92,
       "node_ids": [
         225,
         164,
@@ -2660,7 +2660,7 @@
       "exact_scaled_jacobian": 0.27408326667137306
     },
     {
-      "tet_id": 93,
+      "tetrahedron_id": 93,
       "node_ids": [
         25,
         164,
@@ -2671,7 +2671,7 @@
       "exact_scaled_jacobian": 0.4011002975544142
     },
     {
-      "tet_id": 94,
+      "tetrahedron_id": 94,
       "node_ids": [
         225,
         164,
@@ -2682,7 +2682,7 @@
       "exact_scaled_jacobian": 0.2835627936677712
     },
     {
-      "tet_id": 95,
+      "tetrahedron_id": 95,
       "node_ids": [
         225,
         241,
@@ -2693,7 +2693,7 @@
       "exact_scaled_jacobian": 0.26330681562284725
     },
     {
-      "tet_id": 96,
+      "tetrahedron_id": 96,
       "node_ids": [
         263,
         241,
@@ -2704,7 +2704,7 @@
       "exact_scaled_jacobian": 0.3231402211967291
     },
     {
-      "tet_id": 106,
+      "tetrahedron_id": 106,
       "node_ids": [
         1,
         2,
@@ -2715,7 +2715,7 @@
       "exact_scaled_jacobian": 0.49178599612324375
     },
     {
-      "tet_id": 107,
+      "tetrahedron_id": 107,
       "node_ids": [
         1,
         248,
@@ -2726,7 +2726,7 @@
       "exact_scaled_jacobian": 0.3556944600207952
     },
     {
-      "tet_id": 108,
+      "tetrahedron_id": 108,
       "node_ids": [
         1,
         262,
@@ -2737,7 +2737,7 @@
       "exact_scaled_jacobian": 0.3986336605508815
     },
     {
-      "tet_id": 109,
+      "tetrahedron_id": 109,
       "node_ids": [
         248,
         250,
@@ -2748,7 +2748,7 @@
       "exact_scaled_jacobian": 0.3986336605508817
     },
     {
-      "tet_id": 110,
+      "tetrahedron_id": 110,
       "node_ids": [
         248,
         251,
@@ -2759,7 +2759,7 @@
       "exact_scaled_jacobian": 0.5092175832851188
     },
     {
-      "tet_id": 111,
+      "tetrahedron_id": 111,
       "node_ids": [
         248,
         249,
@@ -2770,7 +2770,7 @@
       "exact_scaled_jacobian": 0.41581483806815034
     },
     {
-      "tet_id": 112,
+      "tetrahedron_id": 112,
       "node_ids": [
         249,
         251,
@@ -2781,7 +2781,7 @@
       "exact_scaled_jacobian": 0.39863366055088156
     },
     {
-      "tet_id": 113,
+      "tetrahedron_id": 113,
       "node_ids": [
         249,
         164,
@@ -2792,7 +2792,7 @@
       "exact_scaled_jacobian": 0.5092175832851186
     },
     {
-      "tet_id": 114,
+      "tetrahedron_id": 114,
       "node_ids": [
         249,
         26,
@@ -2803,7 +2803,7 @@
       "exact_scaled_jacobian": 0.41581483806815006
     },
     {
-      "tet_id": 120,
+      "tetrahedron_id": 120,
       "node_ids": [
         1,
         65,
@@ -2814,7 +2814,7 @@
       "exact_scaled_jacobian": 0.3500036415130546
     },
     {
-      "tet_id": 121,
+      "tetrahedron_id": 121,
       "node_ids": [
         1,
         14,
@@ -2825,7 +2825,7 @@
       "exact_scaled_jacobian": 0.19494051306502005
     },
     {
-      "tet_id": 122,
+      "tetrahedron_id": 122,
       "node_ids": [
         1,
         224,
@@ -2836,7 +2836,7 @@
       "exact_scaled_jacobian": 0.25613170561802584
     },
     {
-      "tet_id": 132,
+      "tetrahedron_id": 132,
       "node_ids": [
         2,
         14,
@@ -2847,7 +2847,7 @@
       "exact_scaled_jacobian": 0.37961553593311737
     },
     {
-      "tet_id": 133,
+      "tetrahedron_id": 133,
       "node_ids": [
         2,
         224,
@@ -2858,7 +2858,7 @@
       "exact_scaled_jacobian": 0.23357074650062282
     },
     {
-      "tet_id": 134,
+      "tetrahedron_id": 134,
       "node_ids": [
         2,
         248,
@@ -2869,7 +2869,7 @@
       "exact_scaled_jacobian": 0.2942074531031784
     },
     {
-      "tet_id": 135,
+      "tetrahedron_id": 135,
       "node_ids": [
         224,
         250,
@@ -2880,7 +2880,7 @@
       "exact_scaled_jacobian": 0.3796155359331179
     },
     {
-      "tet_id": 136,
+      "tetrahedron_id": 136,
       "node_ids": [
         224,
         248,
@@ -2891,7 +2891,7 @@
       "exact_scaled_jacobian": 0.20447010089083018
     },
     {
-      "tet_id": 137,
+      "tetrahedron_id": 137,
       "node_ids": [
         224,
         249,
@@ -2902,7 +2902,7 @@
       "exact_scaled_jacobian": 0.3046734361132549
     },
     {
-      "tet_id": 138,
+      "tetrahedron_id": 138,
       "node_ids": [
         225,
         251,
@@ -2913,7 +2913,7 @@
       "exact_scaled_jacobian": 0.3796155359331177
     },
     {
-      "tet_id": 139,
+      "tetrahedron_id": 139,
       "node_ids": [
         225,
         249,
@@ -2924,7 +2924,7 @@
       "exact_scaled_jacobian": 0.20447010089082981
     },
     {
-      "tet_id": 140,
+      "tetrahedron_id": 140,
       "node_ids": [
         225,
         26,
@@ -2935,7 +2935,7 @@
       "exact_scaled_jacobian": 0.3046734361132545
     },
     {
-      "tet_id": 176,
+      "tetrahedron_id": 176,
       "node_ids": [
         14,
         72,
@@ -2946,7 +2946,7 @@
       "exact_scaled_jacobian": 0.20176724188061523
     },
     {
-      "tet_id": 177,
+      "tetrahedron_id": 177,
       "node_ids": [
         15,
         72,
@@ -2957,7 +2957,7 @@
       "exact_scaled_jacobian": 0.30499777120306387
     },
     {
-      "tet_id": 178,
+      "tetrahedron_id": 178,
       "node_ids": [
         2,
         72,
@@ -2968,7 +2968,7 @@
       "exact_scaled_jacobian": 0.09203753199238965
     },
     {
-      "tet_id": 179,
+      "tetrahedron_id": 179,
       "node_ids": [
         2,
         15,
@@ -2979,7 +2979,7 @@
       "exact_scaled_jacobian": 0.08690525745573224
     },
     {
-      "tet_id": 180,
+      "tetrahedron_id": 180,
       "node_ids": [
         14,
         72,
@@ -2990,7 +2990,7 @@
       "exact_scaled_jacobian": 0.06176752293308375
     },
     {
-      "tet_id": 181,
+      "tetrahedron_id": 181,
       "node_ids": [
         72,
         15,
@@ -3001,7 +3001,7 @@
       "exact_scaled_jacobian": 0.1166463803776559
     },
     {
-      "tet_id": 182,
+      "tetrahedron_id": 182,
       "node_ids": [
         216,
         15,
@@ -3012,7 +3012,7 @@
       "exact_scaled_jacobian": 0.15539828618117751
     },
     {
-      "tet_id": 183,
+      "tetrahedron_id": 183,
       "node_ids": [
         216,
         231,
@@ -3023,7 +3023,7 @@
       "exact_scaled_jacobian": 0.20575608487972175
     },
     {
-      "tet_id": 184,
+      "tetrahedron_id": 184,
       "node_ids": [
         216,
         231,
@@ -3034,7 +3034,7 @@
       "exact_scaled_jacobian": 0.20391340482801373
     },
     {
-      "tet_id": 185,
+      "tetrahedron_id": 185,
       "node_ids": [
         216,
         226,
@@ -3045,7 +3045,7 @@
       "exact_scaled_jacobian": 0.2644726633263995
     },
     {
-      "tet_id": 186,
+      "tetrahedron_id": 186,
       "node_ids": [
         249,
         226,
@@ -3056,7 +3056,7 @@
       "exact_scaled_jacobian": 0.3672668999582783
     },
     {
-      "tet_id": 187,
+      "tetrahedron_id": 187,
       "node_ids": [
         216,
         226,
@@ -3067,7 +3067,7 @@
       "exact_scaled_jacobian": 0.31706786620207494
     },
     {
-      "tet_id": 188,
+      "tetrahedron_id": 188,
       "node_ids": [
         249,
         226,
@@ -3078,7 +3078,7 @@
       "exact_scaled_jacobian": 0.3137941286727536
     },
     {
-      "tet_id": 189,
+      "tetrahedron_id": 189,
       "node_ids": [
         224,
         248,
@@ -3089,7 +3089,7 @@
       "exact_scaled_jacobian": 0.37071188792842885
     },
     {
-      "tet_id": 190,
+      "tetrahedron_id": 190,
       "node_ids": [
         249,
         251,
@@ -3100,7 +3100,7 @@
       "exact_scaled_jacobian": 0.35002695204995793
     },
     {
-      "tet_id": 191,
+      "tetrahedron_id": 191,
       "node_ids": [
         26,
         164,
@@ -3111,7 +3111,7 @@
       "exact_scaled_jacobian": 0.40109289726121705
     },
     {
-      "tet_id": 192,
+      "tetrahedron_id": 192,
       "node_ids": [
         225,
         231,
@@ -3122,7 +3122,7 @@
       "exact_scaled_jacobian": 0.2230958921123369
     },
     {
-      "tet_id": 193,
+      "tetrahedron_id": 193,
       "node_ids": [
         249,
         231,
@@ -3133,7 +3133,7 @@
       "exact_scaled_jacobian": 0.34187337696330605
     },
     {
-      "tet_id": 194,
+      "tetrahedron_id": 194,
       "node_ids": [
         225,
         231,
@@ -3144,7 +3144,7 @@
       "exact_scaled_jacobian": 0.21563777849767754
     },
     {
-      "tet_id": 195,
+      "tetrahedron_id": 195,
       "node_ids": [
         249,
         231,
@@ -3155,7 +3155,7 @@
       "exact_scaled_jacobian": 0.42608484424396614
     },
     {
-      "tet_id": 196,
+      "tetrahedron_id": 196,
       "node_ids": [
         225,
         231,
@@ -3166,7 +3166,7 @@
       "exact_scaled_jacobian": 0.2332071523224542
     },
     {
-      "tet_id": 197,
+      "tetrahedron_id": 197,
       "node_ids": [
         26,
         38,
@@ -3177,7 +3177,7 @@
       "exact_scaled_jacobian": 0.20391340482801362
     },
     {
-      "tet_id": 198,
+      "tetrahedron_id": 198,
       "node_ids": [
         26,
         157,
@@ -3188,7 +3188,7 @@
       "exact_scaled_jacobian": 0.33907304612780814
     },
     {
-      "tet_id": 199,
+      "tetrahedron_id": 199,
       "node_ids": [
         217,
         157,
@@ -3199,7 +3199,7 @@
       "exact_scaled_jacobian": 0.24396685452055358
     },
     {
-      "tet_id": 200,
+      "tetrahedron_id": 200,
       "node_ids": [
         26,
         157,
@@ -3210,7 +3210,7 @@
       "exact_scaled_jacobian": 0.31706786620207483
     },
     {
-      "tet_id": 201,
+      "tetrahedron_id": 201,
       "node_ids": [
         217,
         157,
@@ -3221,7 +3221,7 @@
       "exact_scaled_jacobian": 0.2779884296656086
     },
     {
-      "tet_id": 202,
+      "tetrahedron_id": 202,
       "node_ids": [
         38,
         225,
@@ -3232,7 +3232,7 @@
       "exact_scaled_jacobian": 0.3870049178085046
     },
     {
-      "tet_id": 203,
+      "tetrahedron_id": 203,
       "node_ids": [
         39,
         225,
@@ -3243,7 +3243,7 @@
       "exact_scaled_jacobian": 0.18434376377639244
     },
     {
-      "tet_id": 204,
+      "tetrahedron_id": 204,
       "node_ids": [
         217,
         216,
@@ -3254,7 +3254,7 @@
       "exact_scaled_jacobian": 0.23210521335736556
     },
     {
-      "tet_id": 205,
+      "tetrahedron_id": 205,
       "node_ids": [
         249,
         26,
@@ -3265,7 +3265,7 @@
       "exact_scaled_jacobian": 0.2797780720331284
     },
     {
-      "tet_id": 206,
+      "tetrahedron_id": 206,
       "node_ids": [
         216,
         225,
@@ -3276,7 +3276,7 @@
       "exact_scaled_jacobian": 0.3870049178085046
     },
     {
-      "tet_id": 207,
+      "tetrahedron_id": 207,
       "node_ids": [
         216,
         217,
@@ -3287,7 +3287,7 @@
       "exact_scaled_jacobian": 0.18434376377639236
     },
     {
-      "tet_id": 221,
+      "tetrahedron_id": 221,
       "node_ids": [
         2,
         3,
@@ -3298,7 +3298,7 @@
       "exact_scaled_jacobian": 0.4158372465133266
     },
     {
-      "tet_id": 222,
+      "tetrahedron_id": 222,
       "node_ids": [
         2,
         218,
@@ -3309,7 +3309,7 @@
       "exact_scaled_jacobian": 0.29607057691112393
     },
     {
-      "tet_id": 223,
+      "tetrahedron_id": 223,
       "node_ids": [
         2,
         248,
@@ -3320,7 +3320,7 @@
       "exact_scaled_jacobian": 0.32050580114768484
     },
     {
-      "tet_id": 224,
+      "tetrahedron_id": 224,
       "node_ids": [
         218,
         226,
@@ -3331,7 +3331,7 @@
       "exact_scaled_jacobian": 0.32050580114768507
     },
     {
-      "tet_id": 225,
+      "tetrahedron_id": 225,
       "node_ids": [
         218,
         227,
@@ -3342,7 +3342,7 @@
       "exact_scaled_jacobian": 0.3884324368491286
     },
     {
-      "tet_id": 226,
+      "tetrahedron_id": 226,
       "node_ids": [
         218,
         219,
@@ -3353,7 +3353,7 @@
       "exact_scaled_jacobian": 0.36582071935718374
     },
     {
-      "tet_id": 227,
+      "tetrahedron_id": 227,
       "node_ids": [
         219,
         227,
@@ -3364,7 +3364,7 @@
       "exact_scaled_jacobian": 0.32050580114768495
     },
     {
-      "tet_id": 228,
+      "tetrahedron_id": 228,
       "node_ids": [
         219,
         157,
@@ -3375,7 +3375,7 @@
       "exact_scaled_jacobian": 0.3884324368491286
     },
     {
-      "tet_id": 229,
+      "tetrahedron_id": 229,
       "node_ids": [
         219,
         27,
@@ -3386,7 +3386,7 @@
       "exact_scaled_jacobian": 0.3658207193571834
     },
     {
-      "tet_id": 242,
+      "tetrahedron_id": 242,
       "node_ids": [
         2,
         73,
@@ -3397,7 +3397,7 @@
       "exact_scaled_jacobian": 0.3245063074158259
     },
     {
-      "tet_id": 243,
+      "tetrahedron_id": 243,
       "node_ids": [
         2,
         15,
@@ -3408,7 +3408,7 @@
       "exact_scaled_jacobian": 0.15378386002304953
     },
     {
-      "tet_id": 244,
+      "tetrahedron_id": 244,
       "node_ids": [
         2,
         216,
@@ -3419,7 +3419,7 @@
       "exact_scaled_jacobian": 0.2271794151253201
     },
     {
-      "tet_id": 245,
+      "tetrahedron_id": 245,
       "node_ids": [
         3,
         15,
@@ -3430,7 +3430,7 @@
       "exact_scaled_jacobian": 0.4052038117452394
     },
     {
-      "tet_id": 246,
+      "tetrahedron_id": 246,
       "node_ids": [
         3,
         216,
@@ -3441,7 +3441,7 @@
       "exact_scaled_jacobian": 0.2876136895571395
     },
     {
-      "tet_id": 247,
+      "tetrahedron_id": 247,
       "node_ids": [
         3,
         218,
@@ -3452,7 +3452,7 @@
       "exact_scaled_jacobian": 0.3451364274685675
     },
     {
-      "tet_id": 248,
+      "tetrahedron_id": 248,
       "node_ids": [
         216,
         226,
@@ -3463,7 +3463,7 @@
       "exact_scaled_jacobian": 0.40520381174523934
     },
     {
-      "tet_id": 249,
+      "tetrahedron_id": 249,
       "node_ids": [
         216,
         218,
@@ -3474,7 +3474,7 @@
       "exact_scaled_jacobian": 0.2455428453888333
     },
     {
-      "tet_id": 250,
+      "tetrahedron_id": 250,
       "node_ids": [
         216,
         219,
@@ -3485,7 +3485,7 @@
       "exact_scaled_jacobian": 0.29465141446660004
     },
     {
-      "tet_id": 251,
+      "tetrahedron_id": 251,
       "node_ids": [
         217,
         227,
@@ -3496,7 +3496,7 @@
       "exact_scaled_jacobian": 0.4052038117452392
     },
     {
-      "tet_id": 252,
+      "tetrahedron_id": 252,
       "node_ids": [
         217,
         219,
@@ -3507,7 +3507,7 @@
       "exact_scaled_jacobian": 0.2455428453888333
     },
     {
-      "tet_id": 253,
+      "tetrahedron_id": 253,
       "node_ids": [
         217,
         27,
@@ -3518,7 +3518,7 @@
       "exact_scaled_jacobian": 0.2946514144666
     },
     {
-      "tet_id": 287,
+      "tetrahedron_id": 287,
       "node_ids": [
         15,
         80,
@@ -3529,7 +3529,7 @@
       "exact_scaled_jacobian": 0.1681090390453326
     },
     {
-      "tet_id": 288,
+      "tetrahedron_id": 288,
       "node_ids": [
         16,
         80,
@@ -3540,7 +3540,7 @@
       "exact_scaled_jacobian": 0.30933773256549785
     },
     {
-      "tet_id": 289,
+      "tetrahedron_id": 289,
       "node_ids": [
         208,
         216,
@@ -3551,7 +3551,7 @@
       "exact_scaled_jacobian": 0.40996097147633737
     },
     {
-      "tet_id": 290,
+      "tetrahedron_id": 290,
       "node_ids": [
         3,
         80,
@@ -3562,7 +3562,7 @@
       "exact_scaled_jacobian": 0.09369148696724025
     },
     {
-      "tet_id": 291,
+      "tetrahedron_id": 291,
       "node_ids": [
         3,
         16,
@@ -3573,7 +3573,7 @@
       "exact_scaled_jacobian": 0.08778921087295866
     },
     {
-      "tet_id": 292,
+      "tetrahedron_id": 292,
       "node_ids": [
         80,
         16,
@@ -3584,7 +3584,7 @@
       "exact_scaled_jacobian": 0.05620128325972349
     },
     {
-      "tet_id": 293,
+      "tetrahedron_id": 293,
       "node_ids": [
         216,
         218,
@@ -3595,7 +3595,7 @@
       "exact_scaled_jacobian": 0.18329050265876545
     },
     {
-      "tet_id": 294,
+      "tetrahedron_id": 294,
       "node_ids": [
         208,
         16,
@@ -3606,7 +3606,7 @@
       "exact_scaled_jacobian": 0.21465048016905128
     },
     {
-      "tet_id": 295,
+      "tetrahedron_id": 295,
       "node_ids": [
         208,
         211,
@@ -3617,7 +3617,7 @@
       "exact_scaled_jacobian": 0.27430393792295016
     },
     {
-      "tet_id": 296,
+      "tetrahedron_id": 296,
       "node_ids": [
         208,
         202,
@@ -3628,7 +3628,7 @@
       "exact_scaled_jacobian": 0.39552331150252756
     },
     {
-      "tet_id": 297,
+      "tetrahedron_id": 297,
       "node_ids": [
         219,
         202,
@@ -3639,7 +3639,7 @@
       "exact_scaled_jacobian": 0.39253772745267995
     },
     {
-      "tet_id": 298,
+      "tetrahedron_id": 298,
       "node_ids": [
         217,
         216,
@@ -3650,7 +3650,7 @@
       "exact_scaled_jacobian": 0.2215429910207
     },
     {
-      "tet_id": 299,
+      "tetrahedron_id": 299,
       "node_ids": [
         219,
         227,
@@ -3661,7 +3661,7 @@
       "exact_scaled_jacobian": 0.21868468633786692
     },
     {
-      "tet_id": 300,
+      "tetrahedron_id": 300,
       "node_ids": [
         217,
         227,
@@ -3672,7 +3672,7 @@
       "exact_scaled_jacobian": 0.20009459508034302
     },
     {
-      "tet_id": 301,
+      "tetrahedron_id": 301,
       "node_ids": [
         219,
         157,
@@ -3683,7 +3683,7 @@
       "exact_scaled_jacobian": 0.36138730913199946
     },
     {
-      "tet_id": 302,
+      "tetrahedron_id": 302,
       "node_ids": [
         211,
         216,
@@ -3694,7 +3694,7 @@
       "exact_scaled_jacobian": 0.17503486834900153
     },
     {
-      "tet_id": 303,
+      "tetrahedron_id": 303,
       "node_ids": [
         218,
         219,
@@ -3705,7 +3705,7 @@
       "exact_scaled_jacobian": 0.21994860319051865
     },
     {
-      "tet_id": 304,
+      "tetrahedron_id": 304,
       "node_ids": [
         211,
         219,
@@ -3716,7 +3716,7 @@
       "exact_scaled_jacobian": 0.17876438380405255
     },
     {
-      "tet_id": 305,
+      "tetrahedron_id": 305,
       "node_ids": [
         218,
         202,
@@ -3727,7 +3727,7 @@
       "exact_scaled_jacobian": 0.33277316263249085
     },
     {
-      "tet_id": 306,
+      "tetrahedron_id": 306,
       "node_ids": [
         27,
         219,
@@ -3738,7 +3738,7 @@
       "exact_scaled_jacobian": 0.3756156857544536
     },
     {
-      "tet_id": 307,
+      "tetrahedron_id": 307,
       "node_ids": [
         27,
         211,
@@ -3749,7 +3749,7 @@
       "exact_scaled_jacobian": 0.3688496361530497
     },
     {
-      "tet_id": 308,
+      "tetrahedron_id": 308,
       "node_ids": [
         217,
         39,
@@ -3760,7 +3760,7 @@
       "exact_scaled_jacobian": 0.2279981122036975
     },
     {
-      "tet_id": 309,
+      "tetrahedron_id": 309,
       "node_ids": [
         27,
         39,
@@ -3771,7 +3771,7 @@
       "exact_scaled_jacobian": 0.21465048016905122
     },
     {
-      "tet_id": 310,
+      "tetrahedron_id": 310,
       "node_ids": [
         211,
         209,
@@ -3782,7 +3782,7 @@
       "exact_scaled_jacobian": 0.30933773256549774
     },
     {
-      "tet_id": 311,
+      "tetrahedron_id": 311,
       "node_ids": [
         27,
         209,
@@ -3793,7 +3793,7 @@
       "exact_scaled_jacobian": 0.09622059612474267
     },
     {
-      "tet_id": 312,
+      "tetrahedron_id": 312,
       "node_ids": [
         211,
         39,
@@ -3804,7 +3804,7 @@
       "exact_scaled_jacobian": 0.31308704168957485
     },
     {
-      "tet_id": 321,
+      "tetrahedron_id": 321,
       "node_ids": [
         213,
         158,
@@ -3815,7 +3815,7 @@
       "exact_scaled_jacobian": 0.3764304792856203
     },
     {
-      "tet_id": 322,
+      "tetrahedron_id": 322,
       "node_ids": [
         209,
         27,
@@ -3826,7 +3826,7 @@
       "exact_scaled_jacobian": 0.140293110435268
     },
     {
-      "tet_id": 323,
+      "tetrahedron_id": 323,
       "node_ids": [
         219,
         203,
@@ -3837,7 +3837,7 @@
       "exact_scaled_jacobian": 0.31466547664629807
     },
     {
-      "tet_id": 324,
+      "tetrahedron_id": 324,
       "node_ids": [
         209,
         203,
@@ -3848,7 +3848,7 @@
       "exact_scaled_jacobian": 0.2404386548038236
     },
     {
-      "tet_id": 325,
+      "tetrahedron_id": 325,
       "node_ids": [
         219,
         202,
@@ -3859,7 +3859,7 @@
       "exact_scaled_jacobian": 0.3613873091319995
     },
     {
-      "tet_id": 326,
+      "tetrahedron_id": 326,
       "node_ids": [
         209,
         202,
@@ -3870,7 +3870,7 @@
       "exact_scaled_jacobian": 0.2760655315931362
     },
     {
-      "tet_id": 327,
+      "tetrahedron_id": 327,
       "node_ids": [
         39,
         209,
@@ -3881,7 +3881,7 @@
       "exact_scaled_jacobian": 0.30933773256549774
     },
     {
-      "tet_id": 328,
+      "tetrahedron_id": 328,
       "node_ids": [
         208,
         211,
@@ -3892,7 +3892,7 @@
       "exact_scaled_jacobian": 0.16040649260872009
     },
     {
-      "tet_id": 329,
+      "tetrahedron_id": 329,
       "node_ids": [
         209,
         217,
@@ -3903,7 +3903,7 @@
       "exact_scaled_jacobian": 0.16810903904533245
     },
     {
-      "tet_id": 330,
+      "tetrahedron_id": 330,
       "node_ids": [
         3,
         4,
@@ -3914,7 +3914,7 @@
       "exact_scaled_jacobian": 0.44471185649855766
     },
     {
-      "tet_id": 331,
+      "tetrahedron_id": 331,
       "node_ids": [
         3,
         184,
@@ -3925,7 +3925,7 @@
       "exact_scaled_jacobian": 0.34773158167477247
     },
     {
-      "tet_id": 332,
+      "tetrahedron_id": 332,
       "node_ids": [
         3,
         218,
@@ -3936,7 +3936,7 @@
       "exact_scaled_jacobian": 0.3764304792856203
     },
     {
-      "tet_id": 333,
+      "tetrahedron_id": 333,
       "node_ids": [
         184,
         202,
@@ -3947,7 +3947,7 @@
       "exact_scaled_jacobian": 0.3764304792856204
     },
     {
-      "tet_id": 334,
+      "tetrahedron_id": 334,
       "node_ids": [
         184,
         203,
@@ -3958,7 +3958,7 @@
       "exact_scaled_jacobian": 0.4803294399475641
     },
     {
-      "tet_id": 335,
+      "tetrahedron_id": 335,
       "node_ids": [
         184,
         185,
@@ -3969,7 +3969,7 @@
       "exact_scaled_jacobian": 0.35820273724640617
     },
     {
-      "tet_id": 336,
+      "tetrahedron_id": 336,
       "node_ids": [
         185,
         203,
@@ -3980,7 +3980,7 @@
       "exact_scaled_jacobian": 0.3764304792856207
     },
     {
-      "tet_id": 337,
+      "tetrahedron_id": 337,
       "node_ids": [
         185,
         153,
@@ -3991,7 +3991,7 @@
       "exact_scaled_jacobian": 0.480329439947564
     },
     {
-      "tet_id": 338,
+      "tetrahedron_id": 338,
       "node_ids": [
         185,
         28,
@@ -4002,7 +4002,7 @@
       "exact_scaled_jacobian": 0.35820273724640617
     },
     {
-      "tet_id": 351,
+      "tetrahedron_id": 351,
       "node_ids": [
         213,
         46,
@@ -4013,7 +4013,7 @@
       "exact_scaled_jacobian": 0.33277316263249096
     },
     {
-      "tet_id": 352,
+      "tetrahedron_id": 352,
       "node_ids": [
         3,
         81,
@@ -4024,7 +4024,7 @@
       "exact_scaled_jacobian": 0.41833560985814433
     },
     {
-      "tet_id": 353,
+      "tetrahedron_id": 353,
       "node_ids": [
         3,
         16,
@@ -4035,7 +4035,7 @@
       "exact_scaled_jacobian": 0.24948548475519078
     },
     {
-      "tet_id": 354,
+      "tetrahedron_id": 354,
       "node_ids": [
         3,
         208,
@@ -4046,7 +4046,7 @@
       "exact_scaled_jacobian": 0.3327731626324908
     },
     {
-      "tet_id": 355,
+      "tetrahedron_id": 355,
       "node_ids": [
         203,
         40,
@@ -4057,7 +4057,7 @@
       "exact_scaled_jacobian": 0.24948548475519075
     },
     {
-      "tet_id": 356,
+      "tetrahedron_id": 356,
       "node_ids": [
         203,
         153,
@@ -4068,7 +4068,7 @@
       "exact_scaled_jacobian": 0.4183356098581445
     },
     {
-      "tet_id": 357,
+      "tetrahedron_id": 357,
       "node_ids": [
         4,
         16,
@@ -4079,7 +4079,7 @@
       "exact_scaled_jacobian": 0.3826445714924817
     },
     {
-      "tet_id": 358,
+      "tetrahedron_id": 358,
       "node_ids": [
         4,
         208,
@@ -4090,7 +4090,7 @@
       "exact_scaled_jacobian": 0.19742133852391114
     },
     {
-      "tet_id": 359,
+      "tetrahedron_id": 359,
       "node_ids": [
         4,
         184,
@@ -4101,7 +4101,7 @@
       "exact_scaled_jacobian": 0.2827648836784895
     },
     {
-      "tet_id": 360,
+      "tetrahedron_id": 360,
       "node_ids": [
         184,
         208,
@@ -4112,7 +4112,7 @@
       "exact_scaled_jacobian": 0.2767228344827549
     },
     {
-      "tet_id": 361,
+      "tetrahedron_id": 361,
       "node_ids": [
         184,
         202,
@@ -4123,7 +4123,7 @@
       "exact_scaled_jacobian": 0.31772610135326007
     },
     {
-      "tet_id": 362,
+      "tetrahedron_id": 362,
       "node_ids": [
         184,
         203,
@@ -4134,7 +4134,7 @@
       "exact_scaled_jacobian": 0.28276488367848945
     },
     {
-      "tet_id": 363,
+      "tetrahedron_id": 363,
       "node_ids": [
         185,
         209,
@@ -4145,7 +4145,7 @@
       "exact_scaled_jacobian": 0.2767228344827549
     },
     {
-      "tet_id": 364,
+      "tetrahedron_id": 364,
       "node_ids": [
         185,
         203,
@@ -4156,7 +4156,7 @@
       "exact_scaled_jacobian": 0.3177261013532602
     },
     {
-      "tet_id": 365,
+      "tetrahedron_id": 365,
       "node_ids": [
         185,
         153,
@@ -4167,7 +4167,7 @@
       "exact_scaled_jacobian": 0.2827648836784895
     },
     {
-      "tet_id": 367,
+      "tetrahedron_id": 367,
       "node_ids": [
         214,
         204,
@@ -4178,7 +4178,7 @@
       "exact_scaled_jacobian": 0.2727542113603848
     },
     {
-      "tet_id": 368,
+      "tetrahedron_id": 368,
       "node_ids": [
         9,
         204,
@@ -4189,7 +4189,7 @@
       "exact_scaled_jacobian": 0.1188852781830768
     },
     {
-      "tet_id": 369,
+      "tetrahedron_id": 369,
       "node_ids": [
         214,
         21,
@@ -4200,7 +4200,7 @@
       "exact_scaled_jacobian": 0.22785372079956565
     },
     {
-      "tet_id": 390,
+      "tetrahedron_id": 390,
       "node_ids": [
         21,
         214,
@@ -4211,7 +4211,7 @@
       "exact_scaled_jacobian": 0.40996097147633825
     },
     {
-      "tet_id": 401,
+      "tetrahedron_id": 401,
       "node_ids": [
         33,
         45,
@@ -4222,7 +4222,7 @@
       "exact_scaled_jacobian": 0.27430393792295016
     },
     {
-      "tet_id": 402,
+      "tetrahedron_id": 402,
       "node_ids": [
         45,
         46,
@@ -4233,7 +4233,7 @@
       "exact_scaled_jacobian": 0.22908193917329342
     },
     {
-      "tet_id": 403,
+      "tetrahedron_id": 403,
       "node_ids": [
         33,
         46,
@@ -4244,7 +4244,7 @@
       "exact_scaled_jacobian": 0.33277316263249096
     },
     {
-      "tet_id": 405,
+      "tetrahedron_id": 405,
       "node_ids": [
         33,
         46,
@@ -4255,7 +4255,7 @@
       "exact_scaled_jacobian": 0.24316460402201048
     },
     {
-      "tet_id": 406,
+      "tetrahedron_id": 406,
       "node_ids": [
         221,
         46,
@@ -4266,7 +4266,7 @@
       "exact_scaled_jacobian": 0.09622059612474264
     },
     {
-      "tet_id": 407,
+      "tetrahedron_id": 407,
       "node_ids": [
         4,
         88,
@@ -4277,7 +4277,7 @@
       "exact_scaled_jacobian": 0.39277864918214705
     },
     {
-      "tet_id": 408,
+      "tetrahedron_id": 408,
       "node_ids": [
         198,
         88,
@@ -4288,7 +4288,7 @@
       "exact_scaled_jacobian": 0.4656766626275005
     },
     {
-      "tet_id": 409,
+      "tetrahedron_id": 409,
       "node_ids": [
         4,
         88,
@@ -4299,7 +4299,7 @@
       "exact_scaled_jacobian": 0.11153894736848007
     },
     {
-      "tet_id": 410,
+      "tetrahedron_id": 410,
       "node_ids": [
         198,
         88,
@@ -4310,7 +4310,7 @@
       "exact_scaled_jacobian": 0.27970407165271544
     },
     {
-      "tet_id": 411,
+      "tetrahedron_id": 411,
       "node_ids": [
         184,
         195,
@@ -4321,7 +4321,7 @@
       "exact_scaled_jacobian": 0.46567666262750046
     },
     {
-      "tet_id": 412,
+      "tetrahedron_id": 412,
       "node_ids": [
         199,
         198,
@@ -4332,7 +4332,7 @@
       "exact_scaled_jacobian": 0.2797040716527155
     },
     {
-      "tet_id": 413,
+      "tetrahedron_id": 413,
       "node_ids": [
         4,
         16,
@@ -4343,7 +4343,7 @@
       "exact_scaled_jacobian": 0.1238625528885557
     },
     {
-      "tet_id": 414,
+      "tetrahedron_id": 414,
       "node_ids": [
         208,
         88,
@@ -4354,7 +4354,7 @@
       "exact_scaled_jacobian": 0.2547297375024372
     },
     {
-      "tet_id": 415,
+      "tetrahedron_id": 415,
       "node_ids": [
         4,
         88,
@@ -4365,7 +4365,7 @@
       "exact_scaled_jacobian": 0.33227485224295006
     },
     {
-      "tet_id": 416,
+      "tetrahedron_id": 416,
       "node_ids": [
         208,
         184,
@@ -4376,7 +4376,7 @@
       "exact_scaled_jacobian": 0.3626811359822873
     },
     {
-      "tet_id": 417,
+      "tetrahedron_id": 417,
       "node_ids": [
         16,
         88,
@@ -4387,7 +4387,7 @@
       "exact_scaled_jacobian": 0.2017672418806154
     },
     {
-      "tet_id": 418,
+      "tetrahedron_id": 418,
       "node_ids": [
         17,
         88,
@@ -4398,7 +4398,7 @@
       "exact_scaled_jacobian": 0.3049977712030642
     },
     {
-      "tet_id": 419,
+      "tetrahedron_id": 419,
       "node_ids": [
         88,
         184,
@@ -4409,7 +4409,7 @@
       "exact_scaled_jacobian": 0.20575608487972183
     },
     {
-      "tet_id": 420,
+      "tetrahedron_id": 420,
       "node_ids": [
         184,
         195,
@@ -4420,7 +4420,7 @@
       "exact_scaled_jacobian": 0.20575608487972186
     },
     {
-      "tet_id": 421,
+      "tetrahedron_id": 421,
       "node_ids": [
         184,
         203,
@@ -4431,7 +4431,7 @@
       "exact_scaled_jacobian": 0.41943469375046555
     },
     {
-      "tet_id": 422,
+      "tetrahedron_id": 422,
       "node_ids": [
         209,
         202,
@@ -4442,7 +4442,7 @@
       "exact_scaled_jacobian": 0.22185629285253328
     },
     {
-      "tet_id": 423,
+      "tetrahedron_id": 423,
       "node_ids": [
         184,
         202,
@@ -4453,7 +4453,7 @@
       "exact_scaled_jacobian": 0.36268113598228735
     },
     {
-      "tet_id": 424,
+      "tetrahedron_id": 424,
       "node_ids": [
         209,
         208,
@@ -4464,7 +4464,7 @@
       "exact_scaled_jacobian": 0.2547297375024372
     },
     {
-      "tet_id": 425,
+      "tetrahedron_id": 425,
       "node_ids": [
         195,
         199,
@@ -4475,7 +4475,7 @@
       "exact_scaled_jacobian": 0.19184689849572728
     },
     {
-      "tet_id": 426,
+      "tetrahedron_id": 426,
       "node_ids": [
         195,
         198,
@@ -4486,7 +4486,7 @@
       "exact_scaled_jacobian": 0.3817628236730422
     },
     {
-      "tet_id": 427,
+      "tetrahedron_id": 427,
       "node_ids": [
         185,
         195,
@@ -4497,7 +4497,7 @@
       "exact_scaled_jacobian": 0.3127908533233489
     },
     {
-      "tet_id": 428,
+      "tetrahedron_id": 428,
       "node_ids": [
         185,
         195,
@@ -4508,7 +4508,7 @@
       "exact_scaled_jacobian": 0.21217965195439384
     },
     {
-      "tet_id": 429,
+      "tetrahedron_id": 429,
       "node_ids": [
         209,
         195,
@@ -4519,7 +4519,7 @@
       "exact_scaled_jacobian": 0.22810715664121953
     },
     {
-      "tet_id": 430,
+      "tetrahedron_id": 430,
       "node_ids": [
         28,
         40,
@@ -4530,7 +4530,7 @@
       "exact_scaled_jacobian": 0.2057560848797218
     },
     {
-      "tet_id": 431,
+      "tetrahedron_id": 431,
       "node_ids": [
         40,
         153,
@@ -4541,7 +4541,7 @@
       "exact_scaled_jacobian": 0.26190681989024195
     },
     {
-      "tet_id": 432,
+      "tetrahedron_id": 432,
       "node_ids": [
         185,
         153,
@@ -4552,7 +4552,7 @@
       "exact_scaled_jacobian": 0.393675048139079
     },
     {
-      "tet_id": 433,
+      "tetrahedron_id": 433,
       "node_ids": [
         40,
         153,
@@ -4563,7 +4563,7 @@
       "exact_scaled_jacobian": 0.36268113598228735
     },
     {
-      "tet_id": 434,
+      "tetrahedron_id": 434,
       "node_ids": [
         185,
         153,
@@ -4574,7 +4574,7 @@
       "exact_scaled_jacobian": 0.33227485224295017
     },
     {
-      "tet_id": 435,
+      "tetrahedron_id": 435,
       "node_ids": [
         41,
         179,
@@ -4585,7 +4585,7 @@
       "exact_scaled_jacobian": 0.33858364726922924
     },
     {
-      "tet_id": 436,
+      "tetrahedron_id": 436,
       "node_ids": [
         185,
         195,
@@ -4596,7 +4596,7 @@
       "exact_scaled_jacobian": 0.3214459586594232
     },
     {
-      "tet_id": 437,
+      "tetrahedron_id": 437,
       "node_ids": [
         212,
         204,
@@ -4607,7 +4607,7 @@
       "exact_scaled_jacobian": 0.37561568575445353
     },
     {
-      "tet_id": 438,
+      "tetrahedron_id": 438,
       "node_ids": [
         212,
         204,
@@ -4618,7 +4618,7 @@
       "exact_scaled_jacobian": 0.30317625539364224
     },
     {
-      "tet_id": 439,
+      "tetrahedron_id": 439,
       "node_ids": [
         215,
         204,
@@ -4629,7 +4629,7 @@
       "exact_scaled_jacobian": 0.11888527818307686
     },
     {
-      "tet_id": 440,
+      "tetrahedron_id": 440,
       "node_ids": [
         212,
         204,
@@ -4640,7 +4640,7 @@
       "exact_scaled_jacobian": 0.27275421136038464
     },
     {
-      "tet_id": 441,
+      "tetrahedron_id": 441,
       "node_ids": [
         215,
         204,
@@ -4651,7 +4651,7 @@
       "exact_scaled_jacobian": 0.2278537207995658
     },
     {
-      "tet_id": 444,
+      "tetrahedron_id": 444,
       "node_ids": [
         8,
         182,
@@ -4662,7 +4662,7 @@
       "exact_scaled_jacobian": 0.356875481172258
     },
     {
-      "tet_id": 445,
+      "tetrahedron_id": 445,
       "node_ids": [
         182,
         212,
@@ -4673,7 +4673,7 @@
       "exact_scaled_jacobian": 0.434929422914035
     },
     {
-      "tet_id": 446,
+      "tetrahedron_id": 446,
       "node_ids": [
         182,
         204,
@@ -4684,7 +4684,7 @@
       "exact_scaled_jacobian": 0.38965068229569416
     },
     {
-      "tet_id": 447,
+      "tetrahedron_id": 447,
       "node_ids": [
         9,
         21,
@@ -4695,7 +4695,7 @@
       "exact_scaled_jacobian": 0.4241382347555336
     },
     {
-      "tet_id": 448,
+      "tetrahedron_id": 448,
       "node_ids": [
         204,
         205,
@@ -4706,7 +4706,7 @@
       "exact_scaled_jacobian": 0.4241382347555335
     },
     {
-      "tet_id": 449,
+      "tetrahedron_id": 449,
       "node_ids": [
         8,
         121,
@@ -4717,7 +4717,7 @@
       "exact_scaled_jacobian": 0.33180011434384604
     },
     {
-      "tet_id": 450,
+      "tetrahedron_id": 450,
       "node_ids": [
         8,
         21,
@@ -4728,7 +4728,7 @@
       "exact_scaled_jacobian": 0.16024772042514612
     },
     {
-      "tet_id": 451,
+      "tetrahedron_id": 451,
       "node_ids": [
         8,
         214,
@@ -4739,7 +4739,7 @@
       "exact_scaled_jacobian": 0.2589810900627976
     },
     {
-      "tet_id": 452,
+      "tetrahedron_id": 452,
       "node_ids": [
         182,
         204,
@@ -4750,7 +4750,7 @@
       "exact_scaled_jacobian": 0.2317940094431757
     },
     {
-      "tet_id": 453,
+      "tetrahedron_id": 453,
       "node_ids": [
         182,
         205,
@@ -4761,7 +4761,7 @@
       "exact_scaled_jacobian": 0.29554915336387305
     },
     {
-      "tet_id": 454,
+      "tetrahedron_id": 454,
       "node_ids": [
         214,
         215,
@@ -4772,7 +4772,7 @@
       "exact_scaled_jacobian": 0.16810903904533267
     },
     {
-      "tet_id": 456,
+      "tetrahedron_id": 456,
       "node_ids": [
         182,
         205,
@@ -4783,7 +4783,7 @@
       "exact_scaled_jacobian": 0.32050580114768445
     },
     {
-      "tet_id": 457,
+      "tetrahedron_id": 457,
       "node_ids": [
         183,
         213,
@@ -4794,7 +4794,7 @@
       "exact_scaled_jacobian": 0.36582071935718335
     },
     {
-      "tet_id": 458,
+      "tetrahedron_id": 458,
       "node_ids": [
         183,
         205,
@@ -4805,7 +4805,7 @@
       "exact_scaled_jacobian": 0.38843243684912776
     },
     {
-      "tet_id": 459,
+      "tetrahedron_id": 459,
       "node_ids": [
         183,
         154,
@@ -4816,7 +4816,7 @@
       "exact_scaled_jacobian": 0.3205058011476844
     },
     {
-      "tet_id": 460,
+      "tetrahedron_id": 460,
       "node_ids": [
         199,
         195,
@@ -4827,7 +4827,7 @@
       "exact_scaled_jacobian": 0.2536404700395491
     },
     {
-      "tet_id": 461,
+      "tetrahedron_id": 461,
       "node_ids": [
         185,
         195,
@@ -4838,7 +4838,7 @@
       "exact_scaled_jacobian": 0.40619815071394266
     },
     {
-      "tet_id": 462,
+      "tetrahedron_id": 462,
       "node_ids": [
         199,
         195,
@@ -4849,7 +4849,7 @@
       "exact_scaled_jacobian": 0.26049140147432076
     },
     {
-      "tet_id": 463,
+      "tetrahedron_id": 463,
       "node_ids": [
         185,
         195,
@@ -4860,7 +4860,7 @@
       "exact_scaled_jacobian": 0.34903465784908255
     },
     {
-      "tet_id": 464,
+      "tetrahedron_id": 464,
       "node_ids": [
         185,
         195,
@@ -4871,7 +4871,7 @@
       "exact_scaled_jacobian": 0.39155467061341426
     },
     {
-      "tet_id": 465,
+      "tetrahedron_id": 465,
       "node_ids": [
         199,
         195,
@@ -4882,7 +4882,7 @@
       "exact_scaled_jacobian": 0.2470007386284825
     },
     {
-      "tet_id": 466,
+      "tetrahedron_id": 466,
       "node_ids": [
         185,
         195,
@@ -4893,7 +4893,7 @@
       "exact_scaled_jacobian": 0.39277864918214694
     },
     {
-      "tet_id": 467,
+      "tetrahedron_id": 467,
       "node_ids": [
         4,
         5,
@@ -4904,7 +4904,7 @@
       "exact_scaled_jacobian": 0.5036323103788738
     },
     {
-      "tet_id": 468,
+      "tetrahedron_id": 468,
       "node_ids": [
         4,
         172,
@@ -4915,7 +4915,7 @@
       "exact_scaled_jacobian": 0.3174751154122312
     },
     {
-      "tet_id": 469,
+      "tetrahedron_id": 469,
       "node_ids": [
         4,
         184,
@@ -4926,7 +4926,7 @@
       "exact_scaled_jacobian": 0.35580050187791057
     },
     {
-      "tet_id": 470,
+      "tetrahedron_id": 470,
       "node_ids": [
         172,
         178,
@@ -4937,7 +4937,7 @@
       "exact_scaled_jacobian": 0.3558005018779107
     },
     {
-      "tet_id": 471,
+      "tetrahedron_id": 471,
       "node_ids": [
         172,
         179,
@@ -4948,7 +4948,7 @@
       "exact_scaled_jacobian": 0.45553628261196694
     },
     {
-      "tet_id": 472,
+      "tetrahedron_id": 472,
       "node_ids": [
         4,
         89,
@@ -4959,7 +4959,7 @@
       "exact_scaled_jacobian": 0.34233547991691976
     },
     {
-      "tet_id": 473,
+      "tetrahedron_id": 473,
       "node_ids": [
         5,
         17,
@@ -4970,7 +4970,7 @@
       "exact_scaled_jacobian": 0.3712986131109595
     },
     {
-      "tet_id": 474,
+      "tetrahedron_id": 474,
       "node_ids": [
         5,
         198,
@@ -4981,7 +4981,7 @@
       "exact_scaled_jacobian": 0.2179363220676185
     },
     {
-      "tet_id": 475,
+      "tetrahedron_id": 475,
       "node_ids": [
         5,
         172,
@@ -4992,7 +4992,7 @@
       "exact_scaled_jacobian": 0.2542404872725066
     },
     {
-      "tet_id": 476,
+      "tetrahedron_id": 476,
       "node_ids": [
         172,
         198,
@@ -5003,7 +5003,7 @@
       "exact_scaled_jacobian": 0.2693220106785561
     },
     {
-      "tet_id": 477,
+      "tetrahedron_id": 477,
       "node_ids": [
         172,
         178,
@@ -5014,7 +5014,7 @@
       "exact_scaled_jacobian": 0.2780072009972676
     },
     {
-      "tet_id": 478,
+      "tetrahedron_id": 478,
       "node_ids": [
         195,
         199,
@@ -5025,7 +5025,7 @@
       "exact_scaled_jacobian": 0.20176724188061537
     },
     {
-      "tet_id": 479,
+      "tetrahedron_id": 479,
       "node_ids": [
         195,
         41,
@@ -5036,7 +5036,7 @@
       "exact_scaled_jacobian": 0.30499777120306426
     },
     {
-      "tet_id": 480,
+      "tetrahedron_id": 480,
       "node_ids": [
         172,
         173,
@@ -5047,7 +5047,7 @@
       "exact_scaled_jacobian": 0.4158148380681504
     },
     {
-      "tet_id": 481,
+      "tetrahedron_id": 481,
       "node_ids": [
         173,
         179,
@@ -5058,7 +5058,7 @@
       "exact_scaled_jacobian": 0.39863366055088173
     },
     {
-      "tet_id": 482,
+      "tetrahedron_id": 482,
       "node_ids": [
         173,
         146,
@@ -5069,7 +5069,7 @@
       "exact_scaled_jacobian": 0.5092175832851188
     },
     {
-      "tet_id": 483,
+      "tetrahedron_id": 483,
       "node_ids": [
         173,
         29,
@@ -5080,7 +5080,7 @@
       "exact_scaled_jacobian": 0.4158148380681503
     },
     {
-      "tet_id": 484,
+      "tetrahedron_id": 484,
       "node_ids": [
         205,
         213,
@@ -5091,7 +5091,7 @@
       "exact_scaled_jacobian": 0.2946514144666
     },
     {
-      "tet_id": 485,
+      "tetrahedron_id": 485,
       "node_ids": [
         205,
         33,
@@ -5102,7 +5102,7 @@
       "exact_scaled_jacobian": 0.24554284538883342
     },
     {
-      "tet_id": 486,
+      "tetrahedron_id": 486,
       "node_ids": [
         205,
         154,
@@ -5113,7 +5113,7 @@
       "exact_scaled_jacobian": 0.4052038117452395
     },
     {
-      "tet_id": 487,
+      "tetrahedron_id": 487,
       "node_ids": [
         182,
         183,
@@ -5124,7 +5124,7 @@
       "exact_scaled_jacobian": 0.2271794151253204
     },
     {
-      "tet_id": 488,
+      "tetrahedron_id": 488,
       "node_ids": [
         183,
         205,
@@ -5135,7 +5135,7 @@
       "exact_scaled_jacobian": 0.24163101514823254
     },
     {
-      "tet_id": 489,
+      "tetrahedron_id": 489,
       "node_ids": [
         183,
         154,
@@ -5146,7 +5146,7 @@
       "exact_scaled_jacobian": 0.2759516409337465
     },
     {
-      "tet_id": 490,
+      "tetrahedron_id": 490,
       "node_ids": [
         183,
         32,
@@ -5157,7 +5157,7 @@
       "exact_scaled_jacobian": 0.2271794151253203
     },
     {
-      "tet_id": 491,
+      "tetrahedron_id": 491,
       "node_ids": [
         179,
         28,
@@ -5168,7 +5168,7 @@
       "exact_scaled_jacobian": 0.3500036415130547
     },
     {
-      "tet_id": 492,
+      "tetrahedron_id": 492,
       "node_ids": [
         172,
         179,
@@ -5179,7 +5179,7 @@
       "exact_scaled_jacobian": 0.2942074531031783
     },
     {
-      "tet_id": 493,
+      "tetrahedron_id": 493,
       "node_ids": [
         173,
         199,
@@ -5190,7 +5190,7 @@
       "exact_scaled_jacobian": 0.3046734361132549
     },
     {
-      "tet_id": 494,
+      "tetrahedron_id": 494,
       "node_ids": [
         173,
         179,
@@ -5201,7 +5201,7 @@
       "exact_scaled_jacobian": 0.3152109639886211
     },
     {
-      "tet_id": 495,
+      "tetrahedron_id": 495,
       "node_ids": [
         173,
         146,
@@ -5212,7 +5212,7 @@
       "exact_scaled_jacobian": 0.29420745310317836
     },
     {
-      "tet_id": 496,
+      "tetrahedron_id": 496,
       "node_ids": [
         8,
         182,
@@ -5223,7 +5223,7 @@
       "exact_scaled_jacobian": 0.38565474443518977
     },
     {
-      "tet_id": 497,
+      "tetrahedron_id": 497,
       "node_ids": [
         206,
         180,
@@ -5234,7 +5234,7 @@
       "exact_scaled_jacobian": 0.45485372859908
     },
     {
-      "tet_id": 498,
+      "tetrahedron_id": 498,
       "node_ids": [
         8,
         180,
@@ -5245,7 +5245,7 @@
       "exact_scaled_jacobian": 0.11089406319199119
     },
     {
-      "tet_id": 499,
+      "tetrahedron_id": 499,
       "node_ids": [
         206,
         20,
@@ -5256,7 +5256,7 @@
       "exact_scaled_jacobian": 0.2378932458820578
     },
     {
-      "tet_id": 500,
+      "tetrahedron_id": 500,
       "node_ids": [
         182,
         180,
@@ -5267,7 +5267,7 @@
       "exact_scaled_jacobian": 0.45485372859907997
     },
     {
-      "tet_id": 501,
+      "tetrahedron_id": 501,
       "node_ids": [
         207,
         180,
@@ -5278,7 +5278,7 @@
       "exact_scaled_jacobian": 0.23789324588205774
     },
     {
-      "tet_id": 502,
+      "tetrahedron_id": 502,
       "node_ids": [
         8,
         120,
@@ -5289,7 +5289,7 @@
       "exact_scaled_jacobian": 0.35282493919812197
     },
     {
-      "tet_id": 503,
+      "tetrahedron_id": 503,
       "node_ids": [
         214,
         120,
@@ -5300,7 +5300,7 @@
       "exact_scaled_jacobian": 0.3069083260416154
     },
     {
-      "tet_id": 504,
+      "tetrahedron_id": 504,
       "node_ids": [
         8,
         120,
@@ -5311,7 +5311,7 @@
       "exact_scaled_jacobian": 0.10293180636313644
     },
     {
-      "tet_id": 505,
+      "tetrahedron_id": 505,
       "node_ids": [
         214,
         120,
@@ -5322,7 +5322,7 @@
       "exact_scaled_jacobian": 0.3369226874034123
     },
     {
-      "tet_id": 506,
+      "tetrahedron_id": 506,
       "node_ids": [
         20,
         120,
@@ -5333,7 +5333,7 @@
       "exact_scaled_jacobian": 0.1918468984957275
     },
     {
-      "tet_id": 507,
+      "tetrahedron_id": 507,
       "node_ids": [
         20,
         206,
@@ -5344,7 +5344,7 @@
       "exact_scaled_jacobian": 0.3817628236730423
     },
     {
-      "tet_id": 508,
+      "tetrahedron_id": 508,
       "node_ids": [
         120,
         206,
@@ -5355,7 +5355,7 @@
       "exact_scaled_jacobian": 0.20575608487972175
     },
     {
-      "tet_id": 509,
+      "tetrahedron_id": 509,
       "node_ids": [
         182,
         206,
@@ -5366,7 +5366,7 @@
       "exact_scaled_jacobian": 0.20575608487972177
     },
     {
-      "tet_id": 510,
+      "tetrahedron_id": 510,
       "node_ids": [
         182,
         204,
@@ -5377,7 +5377,7 @@
       "exact_scaled_jacobian": 0.3069083260416155
     },
     {
-      "tet_id": 511,
+      "tetrahedron_id": 511,
       "node_ids": [
         215,
         204,
@@ -5388,7 +5388,7 @@
       "exact_scaled_jacobian": 0.336922687403412
     },
     {
-      "tet_id": 512,
+      "tetrahedron_id": 512,
       "node_ids": [
         182,
         204,
@@ -5399,7 +5399,7 @@
       "exact_scaled_jacobian": 0.6388788124584405
     },
     {
-      "tet_id": 513,
+      "tetrahedron_id": 513,
       "node_ids": [
         215,
         204,
@@ -5410,7 +5410,7 @@
       "exact_scaled_jacobian": 0.5178076457180564
     },
     {
-      "tet_id": 514,
+      "tetrahedron_id": 514,
       "node_ids": [
         201,
         206,
@@ -5421,7 +5421,7 @@
       "exact_scaled_jacobian": 0.20176724188061546
     },
     {
-      "tet_id": 515,
+      "tetrahedron_id": 515,
       "node_ids": [
         201,
         214,
@@ -5432,7 +5432,7 @@
       "exact_scaled_jacobian": 0.30499777120306387
     },
     {
-      "tet_id": 516,
+      "tetrahedron_id": 516,
       "node_ids": [
         183,
         182,
@@ -5443,7 +5443,7 @@
       "exact_scaled_jacobian": 0.27011377672979425
     },
     {
-      "tet_id": 517,
+      "tetrahedron_id": 517,
       "node_ids": [
         33,
         183,
@@ -5454,7 +5454,7 @@
       "exact_scaled_jacobian": 0.39049287894785983
     },
     {
-      "tet_id": 518,
+      "tetrahedron_id": 518,
       "node_ids": [
         33,
         154,
@@ -5465,7 +5465,7 @@
       "exact_scaled_jacobian": 0.346785477233681
     },
     {
-      "tet_id": 519,
+      "tetrahedron_id": 519,
       "node_ids": [
         33,
         201,
@@ -5476,7 +5476,7 @@
       "exact_scaled_jacobian": 0.3673602160857076
     },
     {
-      "tet_id": 520,
+      "tetrahedron_id": 520,
       "node_ids": [
         33,
         183,
@@ -5487,7 +5487,7 @@
       "exact_scaled_jacobian": 0.6234653279304231
     },
     {
-      "tet_id": 521,
+      "tetrahedron_id": 521,
       "node_ids": [
         45,
         213,
@@ -5498,7 +5498,7 @@
       "exact_scaled_jacobian": 0.44083225930284897
     },
     {
-      "tet_id": 522,
+      "tetrahedron_id": 522,
       "node_ids": [
         182,
         201,
@@ -5509,7 +5509,7 @@
       "exact_scaled_jacobian": 0.6008027587709345
     },
     {
-      "tet_id": 523,
+      "tetrahedron_id": 523,
       "node_ids": [
         183,
         205,
@@ -5520,7 +5520,7 @@
       "exact_scaled_jacobian": 0.17040629886041575
     },
     {
-      "tet_id": 524,
+      "tetrahedron_id": 524,
       "node_ids": [
         32,
         44,
@@ -5531,7 +5531,7 @@
       "exact_scaled_jacobian": 0.20575608487972172
     },
     {
-      "tet_id": 525,
+      "tetrahedron_id": 525,
       "node_ids": [
         44,
         32,
@@ -5542,7 +5542,7 @@
       "exact_scaled_jacobian": 0.38305700525347725
     },
     {
-      "tet_id": 526,
+      "tetrahedron_id": 526,
       "node_ids": [
         183,
         32,
@@ -5553,7 +5553,7 @@
       "exact_scaled_jacobian": 0.35290553350277
     },
     {
-      "tet_id": 527,
+      "tetrahedron_id": 527,
       "node_ids": [
         45,
         201,
@@ -5564,7 +5564,7 @@
       "exact_scaled_jacobian": 0.31993307573835345
     },
     {
-      "tet_id": 528,
+      "tetrahedron_id": 528,
       "node_ids": [
         183,
         32,
@@ -5575,7 +5575,7 @@
       "exact_scaled_jacobian": 0.3107667817224082
     },
     {
-      "tet_id": 529,
+      "tetrahedron_id": 529,
       "node_ids": [
         5,
         96,
@@ -5586,7 +5586,7 @@
       "exact_scaled_jacobian": 0.31076678172240807
     },
     {
-      "tet_id": 530,
+      "tetrahedron_id": 530,
       "node_ids": [
         192,
         96,
@@ -5597,7 +5597,7 @@
       "exact_scaled_jacobian": 0.3199330757383536
     },
     {
-      "tet_id": 531,
+      "tetrahedron_id": 531,
       "node_ids": [
         5,
         96,
@@ -5608,7 +5608,7 @@
       "exact_scaled_jacobian": 0.2727172846393156
     },
     {
-      "tet_id": 532,
+      "tetrahedron_id": 532,
       "node_ids": [
         192,
         96,
@@ -5619,7 +5619,7 @@
       "exact_scaled_jacobian": 0.28539023817571996
     },
     {
-      "tet_id": 533,
+      "tetrahedron_id": 533,
       "node_ids": [
         5,
         96,
@@ -5630,7 +5630,7 @@
       "exact_scaled_jacobian": 0.11241444479886246
     },
     {
-      "tet_id": 534,
+      "tetrahedron_id": 534,
       "node_ids": [
         192,
         96,
@@ -5641,7 +5641,7 @@
       "exact_scaled_jacobian": 0.24094204932396032
     },
     {
-      "tet_id": 535,
+      "tetrahedron_id": 535,
       "node_ids": [
         172,
         175,
@@ -5652,7 +5652,7 @@
       "exact_scaled_jacobian": 0.3243685897098014
     },
     {
-      "tet_id": 536,
+      "tetrahedron_id": 536,
       "node_ids": [
         193,
         189,
@@ -5663,7 +5663,7 @@
       "exact_scaled_jacobian": 0.2359730510961272
     },
     {
-      "tet_id": 537,
+      "tetrahedron_id": 537,
       "node_ids": [
         172,
         189,
@@ -5674,7 +5674,7 @@
       "exact_scaled_jacobian": 0.28539023817572
     },
     {
-      "tet_id": 538,
+      "tetrahedron_id": 538,
       "node_ids": [
         193,
         192,
@@ -5685,7 +5685,7 @@
       "exact_scaled_jacobian": 0.24094204932396035
     },
     {
-      "tet_id": 539,
+      "tetrahedron_id": 539,
       "node_ids": [
         5,
         6,
@@ -5696,7 +5696,7 @@
       "exact_scaled_jacobian": 0.4180865146413226
     },
     {
-      "tet_id": 540,
+      "tetrahedron_id": 540,
       "node_ids": [
         5,
         170,
@@ -5707,7 +5707,7 @@
       "exact_scaled_jacobian": 0.3028918575057631
     },
     {
-      "tet_id": 541,
+      "tetrahedron_id": 541,
       "node_ids": [
         5,
         172,
@@ -5718,7 +5718,7 @@
       "exact_scaled_jacobian": 0.327890053999309
     },
     {
-      "tet_id": 542,
+      "tetrahedron_id": 542,
       "node_ids": [
         170,
         174,
@@ -5729,7 +5729,7 @@
       "exact_scaled_jacobian": 0.41523515950561807
     },
     {
-      "tet_id": 543,
+      "tetrahedron_id": 543,
       "node_ids": [
         5,
         97,
@@ -5740,7 +5740,7 @@
       "exact_scaled_jacobian": 0.3207433198774689
     },
     {
-      "tet_id": 544,
+      "tetrahedron_id": 544,
       "node_ids": [
         6,
         18,
@@ -5751,7 +5751,7 @@
       "exact_scaled_jacobian": 0.3936030219700265
     },
     {
-      "tet_id": 545,
+      "tetrahedron_id": 545,
       "node_ids": [
         6,
         192,
@@ -5762,7 +5762,7 @@
       "exact_scaled_jacobian": 0.3253265443775979
     },
     {
-      "tet_id": 546,
+      "tetrahedron_id": 546,
       "node_ids": [
         6,
         170,
@@ -5773,7 +5773,7 @@
       "exact_scaled_jacobian": 0.39039185325311754
     },
     {
-      "tet_id": 547,
+      "tetrahedron_id": 547,
       "node_ids": [
         170,
         192,
@@ -5784,7 +5784,7 @@
       "exact_scaled_jacobian": 0.33471352633221113
     },
     {
-      "tet_id": 548,
+      "tetrahedron_id": 548,
       "node_ids": [
         170,
         174,
@@ -5795,7 +5795,7 @@
       "exact_scaled_jacobian": 0.36487583781541233
     },
     {
-      "tet_id": 549,
+      "tetrahedron_id": 549,
       "node_ids": [
         5,
         172,
@@ -5806,7 +5806,7 @@
       "exact_scaled_jacobian": 0.31478587424350557
     },
     {
-      "tet_id": 550,
+      "tetrahedron_id": 550,
       "node_ids": [
         198,
         178,
@@ -5817,7 +5817,7 @@
       "exact_scaled_jacobian": 0.3606119257654463
     },
     {
-      "tet_id": 551,
+      "tetrahedron_id": 551,
       "node_ids": [
         5,
         178,
@@ -5828,7 +5828,7 @@
       "exact_scaled_jacobian": 0.11811119670813676
     },
     {
-      "tet_id": 552,
+      "tetrahedron_id": 552,
       "node_ids": [
         198,
         17,
@@ -5839,7 +5839,7 @@
       "exact_scaled_jacobian": 0.2135383053260894
     },
     {
-      "tet_id": 553,
+      "tetrahedron_id": 553,
       "node_ids": [
         17,
         96,
@@ -5850,7 +5850,7 @@
       "exact_scaled_jacobian": 0.2017672418806155
     },
     {
-      "tet_id": 554,
+      "tetrahedron_id": 554,
       "node_ids": [
         18,
         96,
@@ -5861,7 +5861,7 @@
       "exact_scaled_jacobian": 0.3049977712030642
     },
     {
-      "tet_id": 555,
+      "tetrahedron_id": 555,
       "node_ids": [
         96,
         172,
@@ -5872,7 +5872,7 @@
       "exact_scaled_jacobian": 0.20575608487972186
     },
     {
-      "tet_id": 556,
+      "tetrahedron_id": 556,
       "node_ids": [
         172,
         189,
@@ -5883,7 +5883,7 @@
       "exact_scaled_jacobian": 0.2057560848797219
     },
     {
-      "tet_id": 557,
+      "tetrahedron_id": 557,
       "node_ids": [
         172,
         178,
@@ -5894,7 +5894,7 @@
       "exact_scaled_jacobian": 0.5053625763772216
     },
     {
-      "tet_id": 558,
+      "tetrahedron_id": 558,
       "node_ids": [
         199,
         178,
@@ -5905,7 +5905,7 @@
       "exact_scaled_jacobian": 0.22316314839353768
     },
     {
-      "tet_id": 559,
+      "tetrahedron_id": 559,
       "node_ids": [
         172,
         178,
@@ -5916,7 +5916,7 @@
       "exact_scaled_jacobian": 0.36061192576544626
     },
     {
-      "tet_id": 560,
+      "tetrahedron_id": 560,
       "node_ids": [
         199,
         178,
@@ -5927,7 +5927,7 @@
       "exact_scaled_jacobian": 0.21353830532608936
     },
     {
-      "tet_id": 561,
+      "tetrahedron_id": 561,
       "node_ids": [
         189,
         193,
@@ -5938,7 +5938,7 @@
       "exact_scaled_jacobian": 0.1918468984957274
     },
     {
-      "tet_id": 562,
+      "tetrahedron_id": 562,
       "node_ids": [
         189,
         192,
@@ -5949,7 +5949,7 @@
       "exact_scaled_jacobian": 0.3817628236730422
     },
     {
-      "tet_id": 563,
+      "tetrahedron_id": 563,
       "node_ids": [
         173,
         172,
@@ -5960,7 +5960,7 @@
       "exact_scaled_jacobian": 0.35290553350276993
     },
     {
-      "tet_id": 564,
+      "tetrahedron_id": 564,
       "node_ids": [
         173,
         189,
@@ -5971,7 +5971,7 @@
       "exact_scaled_jacobian": 0.22277855994223425
     },
     {
-      "tet_id": 565,
+      "tetrahedron_id": 565,
       "node_ids": [
         199,
         41,
@@ -5982,7 +5982,7 @@
       "exact_scaled_jacobian": 0.24681254990867874
     },
     {
-      "tet_id": 566,
+      "tetrahedron_id": 566,
       "node_ids": [
         29,
         41,
@@ -5993,7 +5993,7 @@
       "exact_scaled_jacobian": 0.20575608487972175
     },
     {
-      "tet_id": 567,
+      "tetrahedron_id": 567,
       "node_ids": [
         41,
         146,
@@ -6004,7 +6004,7 @@
       "exact_scaled_jacobian": 0.2553488836233323
     },
     {
-      "tet_id": 568,
+      "tetrahedron_id": 568,
       "node_ids": [
         173,
         146,
@@ -6015,7 +6015,7 @@
       "exact_scaled_jacobian": 0.42672762266616737
     },
     {
-      "tet_id": 569,
+      "tetrahedron_id": 569,
       "node_ids": [
         41,
         146,
@@ -6026,7 +6026,7 @@
       "exact_scaled_jacobian": 0.4023488639573132
     },
     {
-      "tet_id": 570,
+      "tetrahedron_id": 570,
       "node_ids": [
         173,
         146,
@@ -6037,7 +6037,7 @@
       "exact_scaled_jacobian": 0.35152430008244706
     },
     {
-      "tet_id": 571,
+      "tetrahedron_id": 571,
       "node_ids": [
         42,
         175,
@@ -6048,7 +6048,7 @@
       "exact_scaled_jacobian": 0.25458972902139476
     },
     {
-      "tet_id": 572,
+      "tetrahedron_id": 572,
       "node_ids": [
         173,
         189,
@@ -6059,7 +6059,7 @@
       "exact_scaled_jacobian": 0.3542714585718442
     },
     {
-      "tet_id": 573,
+      "tetrahedron_id": 573,
       "node_ids": [
         42,
         189,
@@ -6070,7 +6070,7 @@
       "exact_scaled_jacobian": 0.3199330757383535
     },
     {
-      "tet_id": 574,
+      "tetrahedron_id": 574,
       "node_ids": [
         173,
         29,
@@ -6081,7 +6081,7 @@
       "exact_scaled_jacobian": 0.31076678172240807
     },
     {
-      "tet_id": 575,
+      "tetrahedron_id": 575,
       "node_ids": [
         207,
         181,
@@ -6092,7 +6092,7 @@
       "exact_scaled_jacobian": 0.24681254990867874
     },
     {
-      "tet_id": 576,
+      "tetrahedron_id": 576,
       "node_ids": [
         183,
         181,
@@ -6103,7 +6103,7 @@
       "exact_scaled_jacobian": 0.4267276226661675
     },
     {
-      "tet_id": 577,
+      "tetrahedron_id": 577,
       "node_ids": [
         207,
         180,
@@ -6114,7 +6114,7 @@
       "exact_scaled_jacobian": 0.2306261363621304
     },
     {
-      "tet_id": 578,
+      "tetrahedron_id": 578,
       "node_ids": [
         183,
         180,
@@ -6125,7 +6125,7 @@
       "exact_scaled_jacobian": 0.3515243000824465
     },
     {
-      "tet_id": 579,
+      "tetrahedron_id": 579,
       "node_ids": [
         183,
         181,
@@ -6136,7 +6136,7 @@
       "exact_scaled_jacobian": 0.411527720810536
     },
     {
-      "tet_id": 580,
+      "tetrahedron_id": 580,
       "node_ids": [
         207,
         180,
@@ -6147,7 +6147,7 @@
       "exact_scaled_jacobian": 0.21682972344498527
     },
     {
-      "tet_id": 581,
+      "tetrahedron_id": 581,
       "node_ids": [
         183,
         180,
@@ -6158,7 +6158,7 @@
       "exact_scaled_jacobian": 0.3856547444351897
     },
     {
-      "tet_id": 582,
+      "tetrahedron_id": 582,
       "node_ids": [
         7,
         8,
@@ -6169,7 +6169,7 @@
       "exact_scaled_jacobian": 0.5058749512148004
     },
     {
-      "tet_id": 583,
+      "tetrahedron_id": 583,
       "node_ids": [
         7,
         182,
@@ -6180,7 +6180,7 @@
       "exact_scaled_jacobian": 0.33000338171827015
     },
     {
-      "tet_id": 584,
+      "tetrahedron_id": 584,
       "node_ids": [
         7,
         168,
@@ -6191,7 +6191,7 @@
       "exact_scaled_jacobian": 0.36984117222639046
     },
     {
-      "tet_id": 585,
+      "tetrahedron_id": 585,
       "node_ids": [
         168,
         182,
@@ -6202,7 +6202,7 @@
       "exact_scaled_jacobian": 0.3723726417972975
     },
     {
-      "tet_id": 586,
+      "tetrahedron_id": 586,
       "node_ids": [
         168,
         180,
@@ -6213,7 +6213,7 @@
       "exact_scaled_jacobian": 0.5082504979059081
     },
     {
-      "tet_id": 587,
+      "tetrahedron_id": 587,
       "node_ids": [
         8,
         20,
@@ -6224,7 +6224,7 @@
       "exact_scaled_jacobian": 0.3692156340446314
     },
     {
-      "tet_id": 588,
+      "tetrahedron_id": 588,
       "node_ids": [
         7,
         113,
@@ -6235,7 +6235,7 @@
       "exact_scaled_jacobian": 0.3404149835478287
     },
     {
-      "tet_id": 589,
+      "tetrahedron_id": 589,
       "node_ids": [
         7,
         20,
@@ -6246,7 +6246,7 @@
       "exact_scaled_jacobian": 0.18852455103218493
     },
     {
-      "tet_id": 590,
+      "tetrahedron_id": 590,
       "node_ids": [
         7,
         206,
@@ -6257,7 +6257,7 @@
       "exact_scaled_jacobian": 0.2266296755195851
     },
     {
-      "tet_id": 591,
+      "tetrahedron_id": 591,
       "node_ids": [
         168,
         180,
@@ -6268,7 +6268,7 @@
       "exact_scaled_jacobian": 0.2618062045567142
     },
     {
-      "tet_id": 592,
+      "tetrahedron_id": 592,
       "node_ids": [
         168,
         181,
@@ -6279,7 +6279,7 @@
       "exact_scaled_jacobian": 0.26719062595666015
     },
     {
-      "tet_id": 593,
+      "tetrahedron_id": 593,
       "node_ids": [
         201,
         215,
@@ -6290,7 +6290,7 @@
       "exact_scaled_jacobian": 0.1918468984957274
     },
     {
-      "tet_id": 594,
+      "tetrahedron_id": 594,
       "node_ids": [
         201,
         207,
@@ -6301,7 +6301,7 @@
       "exact_scaled_jacobian": 0.38176282367304254
     },
     {
-      "tet_id": 595,
+      "tetrahedron_id": 595,
       "node_ids": [
         168,
         181,
@@ -6312,7 +6312,7 @@
       "exact_scaled_jacobian": 0.39863366055088173
     },
     {
-      "tet_id": 596,
+      "tetrahedron_id": 596,
       "node_ids": [
         169,
         183,
@@ -6323,7 +6323,7 @@
       "exact_scaled_jacobian": 0.41581483806815045
     },
     {
-      "tet_id": 597,
+      "tetrahedron_id": 597,
       "node_ids": [
         169,
         181,
@@ -6334,7 +6334,7 @@
       "exact_scaled_jacobian": 0.509217583285119
     },
     {
-      "tet_id": 598,
+      "tetrahedron_id": 598,
       "node_ids": [
         169,
         147,
@@ -6345,7 +6345,7 @@
       "exact_scaled_jacobian": 0.39863366055088156
     },
     {
-      "tet_id": 599,
+      "tetrahedron_id": 599,
       "node_ids": [
         173,
         175,
@@ -6356,7 +6356,7 @@
       "exact_scaled_jacobian": 0.27011377672979403
     },
     {
-      "tet_id": 600,
+      "tetrahedron_id": 600,
       "node_ids": [
         193,
         175,
@@ -6367,7 +6367,7 @@
       "exact_scaled_jacobian": 0.22343180058718096
     },
     {
-      "tet_id": 601,
+      "tetrahedron_id": 601,
       "node_ids": [
         189,
         193,
@@ -6378,7 +6378,7 @@
       "exact_scaled_jacobian": 0.20176724188061548
     },
     {
-      "tet_id": 602,
+      "tetrahedron_id": 602,
       "node_ids": [
         189,
         42,
@@ -6389,7 +6389,7 @@
       "exact_scaled_jacobian": 0.3049977712030643
     },
     {
-      "tet_id": 603,
+      "tetrahedron_id": 603,
       "node_ids": [
         170,
         172,
@@ -6400,7 +6400,7 @@
       "exact_scaled_jacobian": 0.3379307052736196
     },
     {
-      "tet_id": 604,
+      "tetrahedron_id": 604,
       "node_ids": [
         170,
         173,
@@ -6411,7 +6411,7 @@
       "exact_scaled_jacobian": 0.365820719357183
     },
     {
-      "tet_id": 605,
+      "tetrahedron_id": 605,
       "node_ids": [
         171,
         175,
@@ -6422,7 +6422,7 @@
       "exact_scaled_jacobian": 0.41583724651332576
     },
     {
-      "tet_id": 606,
+      "tetrahedron_id": 606,
       "node_ids": [
         171,
         173,
@@ -6433,7 +6433,7 @@
       "exact_scaled_jacobian": 0.3379307052736197
     },
     {
-      "tet_id": 607,
+      "tetrahedron_id": 607,
       "node_ids": [
         171,
         29,
@@ -6444,7 +6444,7 @@
       "exact_scaled_jacobian": 0.365820719357183
     },
     {
-      "tet_id": 608,
+      "tetrahedron_id": 608,
       "node_ids": [
         181,
         147,
@@ -6455,7 +6455,7 @@
       "exact_scaled_jacobian": 0.3796155359331177
     },
     {
-      "tet_id": 609,
+      "tetrahedron_id": 609,
       "node_ids": [
         168,
         169,
@@ -6466,7 +6466,7 @@
       "exact_scaled_jacobian": 0.2561317056180262
     },
     {
-      "tet_id": 610,
+      "tetrahedron_id": 610,
       "node_ids": [
         169,
         181,
@@ -6477,7 +6477,7 @@
       "exact_scaled_jacobian": 0.287683978830877
     },
     {
-      "tet_id": 611,
+      "tetrahedron_id": 611,
       "node_ids": [
         169,
         147,
@@ -6488,7 +6488,7 @@
       "exact_scaled_jacobian": 0.29763390418340996
     },
     {
-      "tet_id": 612,
+      "tetrahedron_id": 612,
       "node_ids": [
         169,
         31,
@@ -6499,7 +6499,7 @@
       "exact_scaled_jacobian": 0.2561317056180262
     },
     {
-      "tet_id": 613,
+      "tetrahedron_id": 613,
       "node_ids": [
         170,
         175,
@@ -6510,7 +6510,7 @@
       "exact_scaled_jacobian": 0.3451364274685672
     },
     {
-      "tet_id": 614,
+      "tetrahedron_id": 614,
       "node_ids": [
         171,
         193,
@@ -6521,7 +6521,7 @@
       "exact_scaled_jacobian": 0.29465141446659976
     },
     {
-      "tet_id": 615,
+      "tetrahedron_id": 615,
       "node_ids": [
         171,
         175,
@@ -6532,7 +6532,7 @@
       "exact_scaled_jacobian": 0.33574103403222627
     },
     {
-      "tet_id": 616,
+      "tetrahedron_id": 616,
       "node_ids": [
         171,
         144,
@@ -6543,7 +6543,7 @@
       "exact_scaled_jacobian": 0.34513642746856704
     },
     {
-      "tet_id": 617,
+      "tetrahedron_id": 617,
       "node_ids": [
         7,
         168,
@@ -6554,7 +6554,7 @@
       "exact_scaled_jacobian": 0.33227485224295034
     },
     {
-      "tet_id": 618,
+      "tetrahedron_id": 618,
       "node_ids": [
         196,
         176,
@@ -6565,7 +6565,7 @@
       "exact_scaled_jacobian": 0.3626811359822878
     },
     {
-      "tet_id": 619,
+      "tetrahedron_id": 619,
       "node_ids": [
         7,
         168,
@@ -6576,7 +6576,7 @@
       "exact_scaled_jacobian": 0.34569567609754853
     },
     {
-      "tet_id": 620,
+      "tetrahedron_id": 620,
       "node_ids": [
         196,
         176,
@@ -6587,7 +6587,7 @@
       "exact_scaled_jacobian": 0.37850504190208806
     },
     {
-      "tet_id": 621,
+      "tetrahedron_id": 621,
       "node_ids": [
         7,
         176,
@@ -6598,7 +6598,7 @@
       "exact_scaled_jacobian": 0.11851634276736786
     },
     {
-      "tet_id": 622,
+      "tetrahedron_id": 622,
       "node_ids": [
         196,
         19,
@@ -6609,7 +6609,7 @@
       "exact_scaled_jacobian": 0.2908478593584386
     },
     {
-      "tet_id": 623,
+      "tetrahedron_id": 623,
       "node_ids": [
         168,
         176,
@@ -6620,7 +6620,7 @@
       "exact_scaled_jacobian": 0.42028503306773995
     },
     {
-      "tet_id": 624,
+      "tetrahedron_id": 624,
       "node_ids": [
         197,
         176,
@@ -6631,7 +6631,7 @@
       "exact_scaled_jacobian": 0.19213196233991842
     },
     {
-      "tet_id": 625,
+      "tetrahedron_id": 625,
       "node_ids": [
         168,
         176,
@@ -6642,7 +6642,7 @@
       "exact_scaled_jacobian": 0.3199244108441297
     },
     {
-      "tet_id": 626,
+      "tetrahedron_id": 626,
       "node_ids": [
         197,
         176,
@@ -6653,7 +6653,7 @@
       "exact_scaled_jacobian": 0.23848418338016827
     },
     {
-      "tet_id": 627,
+      "tetrahedron_id": 627,
       "node_ids": [
         6,
         104,
@@ -6664,7 +6664,7 @@
       "exact_scaled_jacobian": 0.4106765609887301
     },
     {
-      "tet_id": 628,
+      "tetrahedron_id": 628,
       "node_ids": [
         196,
         104,
@@ -6675,7 +6675,7 @@
       "exact_scaled_jacobian": 0.41419584434343953
     },
     {
-      "tet_id": 629,
+      "tetrahedron_id": 629,
       "node_ids": [
         6,
         104,
@@ -6686,7 +6686,7 @@
       "exact_scaled_jacobian": 0.11819990636366705
     },
     {
-      "tet_id": 630,
+      "tetrahedron_id": 630,
       "node_ids": [
         196,
         104,
@@ -6697,7 +6697,7 @@
       "exact_scaled_jacobian": 0.31669244419206044
     },
     {
-      "tet_id": 631,
+      "tetrahedron_id": 631,
       "node_ids": [
         170,
         177,
@@ -6708,7 +6708,7 @@
       "exact_scaled_jacobian": 0.5506331647391585
     },
     {
-      "tet_id": 632,
+      "tetrahedron_id": 632,
       "node_ids": [
         197,
         187,
@@ -6719,7 +6719,7 @@
       "exact_scaled_jacobian": 0.24752717933150073
     },
     {
-      "tet_id": 633,
+      "tetrahedron_id": 633,
       "node_ids": [
         170,
         187,
@@ -6730,7 +6730,7 @@
       "exact_scaled_jacobian": 0.35378401893239675
     },
     {
-      "tet_id": 634,
+      "tetrahedron_id": 634,
       "node_ids": [
         197,
         196,
@@ -6741,7 +6741,7 @@
       "exact_scaled_jacobian": 0.2595269631964531
     },
     {
-      "tet_id": 635,
+      "tetrahedron_id": 635,
       "node_ids": [
         168,
         176,
@@ -6752,7 +6752,7 @@
       "exact_scaled_jacobian": 0.4876647548554961
     },
     {
-      "tet_id": 636,
+      "tetrahedron_id": 636,
       "node_ids": [
         6,
         7,
@@ -6763,7 +6763,7 @@
       "exact_scaled_jacobian": 0.4753086991334093
     },
     {
-      "tet_id": 637,
+      "tetrahedron_id": 637,
       "node_ids": [
         6,
         168,
@@ -6774,7 +6774,7 @@
       "exact_scaled_jacobian": 0.39870757305633175
     },
     {
-      "tet_id": 638,
+      "tetrahedron_id": 638,
       "node_ids": [
         6,
         170,
@@ -6785,7 +6785,7 @@
       "exact_scaled_jacobian": 0.43161360868502896
     },
     {
-      "tet_id": 639,
+      "tetrahedron_id": 639,
       "node_ids": [
         7,
         19,
@@ -6796,7 +6796,7 @@
       "exact_scaled_jacobian": 0.3791568130929767
     },
     {
-      "tet_id": 640,
+      "tetrahedron_id": 640,
       "node_ids": [
         6,
         105,
@@ -6807,7 +6807,7 @@
       "exact_scaled_jacobian": 0.4235655521695607
     },
     {
-      "tet_id": 641,
+      "tetrahedron_id": 641,
       "node_ids": [
         7,
         112,
@@ -6818,7 +6818,7 @@
       "exact_scaled_jacobian": 0.32134167965463684
     },
     {
-      "tet_id": 642,
+      "tetrahedron_id": 642,
       "node_ids": [
         206,
         112,
@@ -6829,7 +6829,7 @@
       "exact_scaled_jacobian": 0.36921417698941916
     },
     {
-      "tet_id": 643,
+      "tetrahedron_id": 643,
       "node_ids": [
         7,
         112,
@@ -6840,7 +6840,7 @@
       "exact_scaled_jacobian": 0.11594051954938343
     },
     {
-      "tet_id": 644,
+      "tetrahedron_id": 644,
       "node_ids": [
         206,
         112,
@@ -6851,7 +6851,7 @@
       "exact_scaled_jacobian": 0.24033835883666937
     },
     {
-      "tet_id": 645,
+      "tetrahedron_id": 645,
       "node_ids": [
         19,
         112,
@@ -6862,7 +6862,7 @@
       "exact_scaled_jacobian": 0.19184689849572736
     },
     {
-      "tet_id": 646,
+      "tetrahedron_id": 646,
       "node_ids": [
         19,
         196,
@@ -6873,7 +6873,7 @@
       "exact_scaled_jacobian": 0.38176282367304193
     },
     {
-      "tet_id": 647,
+      "tetrahedron_id": 647,
       "node_ids": [
         112,
         196,
@@ -6884,7 +6884,7 @@
       "exact_scaled_jacobian": 0.20575608487972175
     },
     {
-      "tet_id": 648,
+      "tetrahedron_id": 648,
       "node_ids": [
         168,
         196,
@@ -6895,7 +6895,7 @@
       "exact_scaled_jacobian": 0.2057560848797218
     },
     {
-      "tet_id": 649,
+      "tetrahedron_id": 649,
       "node_ids": [
         168,
         181,
@@ -6906,7 +6906,7 @@
       "exact_scaled_jacobian": 0.4115370764431294
     },
     {
-      "tet_id": 650,
+      "tetrahedron_id": 650,
       "node_ids": [
         207,
         191,
@@ -6917,7 +6917,7 @@
       "exact_scaled_jacobian": 0.2500591072680551
     },
     {
-      "tet_id": 651,
+      "tetrahedron_id": 651,
       "node_ids": [
         168,
         191,
@@ -6928,7 +6928,7 @@
       "exact_scaled_jacobian": 0.3692141769894193
     },
     {
-      "tet_id": 652,
+      "tetrahedron_id": 652,
       "node_ids": [
         207,
         206,
@@ -6939,7 +6939,7 @@
       "exact_scaled_jacobian": 0.2403383588366693
     },
     {
-      "tet_id": 653,
+      "tetrahedron_id": 653,
       "node_ids": [
         191,
         196,
@@ -6950,7 +6950,7 @@
       "exact_scaled_jacobian": 0.20176724188061537
     },
     {
-      "tet_id": 654,
+      "tetrahedron_id": 654,
       "node_ids": [
         191,
         206,
@@ -6961,7 +6961,7 @@
       "exact_scaled_jacobian": 0.30499777120306387
     },
     {
-      "tet_id": 655,
+      "tetrahedron_id": 655,
       "node_ids": [
         169,
         181,
@@ -6972,7 +6972,7 @@
       "exact_scaled_jacobian": 0.32144595865942305
     },
     {
-      "tet_id": 656,
+      "tetrahedron_id": 656,
       "node_ids": [
         169,
         181,
@@ -6983,7 +6983,7 @@
       "exact_scaled_jacobian": 0.19003522991688904
     },
     {
-      "tet_id": 657,
+      "tetrahedron_id": 657,
       "node_ids": [
         207,
         181,
@@ -6994,7 +6994,7 @@
       "exact_scaled_jacobian": 0.2536404700395492
     },
     {
-      "tet_id": 658,
+      "tetrahedron_id": 658,
       "node_ids": [
         31,
         43,
@@ -7005,7 +7005,7 @@
       "exact_scaled_jacobian": 0.20575608487972186
     },
     {
-      "tet_id": 659,
+      "tetrahedron_id": 659,
       "node_ids": [
         43,
         145,
@@ -7016,7 +7016,7 @@
       "exact_scaled_jacobian": 0.261906819890242
     },
     {
-      "tet_id": 660,
+      "tetrahedron_id": 660,
       "node_ids": [
         169,
         145,
@@ -7027,7 +7027,7 @@
       "exact_scaled_jacobian": 0.3936750481390788
     },
     {
-      "tet_id": 661,
+      "tetrahedron_id": 661,
       "node_ids": [
         43,
         145,
@@ -7038,7 +7038,7 @@
       "exact_scaled_jacobian": 0.36268113598228763
     },
     {
-      "tet_id": 662,
+      "tetrahedron_id": 662,
       "node_ids": [
         169,
         145,
@@ -7049,7 +7049,7 @@
       "exact_scaled_jacobian": 0.3322748522429504
     },
     {
-      "tet_id": 663,
+      "tetrahedron_id": 663,
       "node_ids": [
         44,
         181,
@@ -7060,7 +7060,7 @@
       "exact_scaled_jacobian": 0.2624129562709029
     },
     {
-      "tet_id": 664,
+      "tetrahedron_id": 664,
       "node_ids": [
         169,
         191,
@@ -7071,7 +7071,7 @@
       "exact_scaled_jacobian": 0.4061981507139423
     },
     {
-      "tet_id": 665,
+      "tetrahedron_id": 665,
       "node_ids": [
         44,
         191,
@@ -7082,7 +7082,7 @@
       "exact_scaled_jacobian": 0.3998016557092537
     },
     {
-      "tet_id": 666,
+      "tetrahedron_id": 666,
       "node_ids": [
         169,
         31,
@@ -7093,7 +7093,7 @@
       "exact_scaled_jacobian": 0.34903465784908283
     },
     {
-      "tet_id": 667,
+      "tetrahedron_id": 667,
       "node_ids": [
         6,
         170,
@@ -7104,7 +7104,7 @@
       "exact_scaled_jacobian": 0.4164772374156169
     },
     {
-      "tet_id": 668,
+      "tetrahedron_id": 668,
       "node_ids": [
         192,
         174,
@@ -7115,7 +7115,7 @@
       "exact_scaled_jacobian": 0.4160332825904574
     },
     {
-      "tet_id": 669,
+      "tetrahedron_id": 669,
       "node_ids": [
         6,
         174,
@@ -7126,7 +7126,7 @@
       "exact_scaled_jacobian": 0.10160186477352508
     },
     {
-      "tet_id": 670,
+      "tetrahedron_id": 670,
       "node_ids": [
         192,
         18,
@@ -7137,7 +7137,7 @@
       "exact_scaled_jacobian": 0.23460455977777314
     },
     {
-      "tet_id": 671,
+      "tetrahedron_id": 671,
       "node_ids": [
         170,
         174,
@@ -7148,7 +7148,7 @@
       "exact_scaled_jacobian": 0.5153018526810056
     },
     {
-      "tet_id": 672,
+      "tetrahedron_id": 672,
       "node_ids": [
         193,
         174,
@@ -7159,7 +7159,7 @@
       "exact_scaled_jacobian": 0.193815733469823
     },
     {
-      "tet_id": 673,
+      "tetrahedron_id": 673,
       "node_ids": [
         170,
         174,
@@ -7170,7 +7170,7 @@
       "exact_scaled_jacobian": 0.41603328259045735
     },
     {
-      "tet_id": 674,
+      "tetrahedron_id": 674,
       "node_ids": [
         193,
         174,
@@ -7181,7 +7181,7 @@
       "exact_scaled_jacobian": 0.23460455977777303
     },
     {
-      "tet_id": 675,
+      "tetrahedron_id": 675,
       "node_ids": [
         18,
         104,
@@ -7192,7 +7192,7 @@
       "exact_scaled_jacobian": 0.16040649260872017
     },
     {
-      "tet_id": 676,
+      "tetrahedron_id": 676,
       "node_ids": [
         18,
         192,
@@ -7203,7 +7203,7 @@
       "exact_scaled_jacobian": 0.4099609714763377
     },
     {
-      "tet_id": 677,
+      "tetrahedron_id": 677,
       "node_ids": [
         104,
         192,
@@ -7214,7 +7214,7 @@
       "exact_scaled_jacobian": 0.27430393792295005
     },
     {
-      "tet_id": 678,
+      "tetrahedron_id": 678,
       "node_ids": [
         170,
         192,
@@ -7225,7 +7225,7 @@
       "exact_scaled_jacobian": 0.27430393792295005
     },
     {
-      "tet_id": 679,
+      "tetrahedron_id": 679,
       "node_ids": [
         187,
         192,
@@ -7236,7 +7236,7 @@
       "exact_scaled_jacobian": 0.16810903904533245
     },
     {
-      "tet_id": 680,
+      "tetrahedron_id": 680,
       "node_ids": [
         187,
         196,
@@ -7247,7 +7247,7 @@
       "exact_scaled_jacobian": 0.3093377325654973
     },
     {
-      "tet_id": 681,
+      "tetrahedron_id": 681,
       "node_ids": [
         171,
         170,
@@ -7258,7 +7258,7 @@
       "exact_scaled_jacobian": 0.3288416213568301
     },
     {
-      "tet_id": 682,
+      "tetrahedron_id": 682,
       "node_ids": [
         171,
         187,
@@ -7269,7 +7269,7 @@
       "exact_scaled_jacobian": 0.2186846863378665
     },
     {
-      "tet_id": 683,
+      "tetrahedron_id": 683,
       "node_ids": [
         193,
         42,
@@ -7280,7 +7280,7 @@
       "exact_scaled_jacobian": 0.22154299102070024
     },
     {
-      "tet_id": 684,
+      "tetrahedron_id": 684,
       "node_ids": [
         30,
         42,
@@ -7291,7 +7291,7 @@
       "exact_scaled_jacobian": 0.2743039379229501
     },
     {
-      "tet_id": 685,
+      "tetrahedron_id": 685,
       "node_ids": [
         42,
         144,
@@ -7302,7 +7302,7 @@
       "exact_scaled_jacobian": 0.25243752188508023
     },
     {
-      "tet_id": 686,
+      "tetrahedron_id": 686,
       "node_ids": [
         171,
         144,
@@ -7313,7 +7313,7 @@
       "exact_scaled_jacobian": 0.3613873091319991
     },
     {
-      "tet_id": 687,
+      "tetrahedron_id": 687,
       "node_ids": [
         42,
         144,
@@ -7324,7 +7324,7 @@
       "exact_scaled_jacobian": 0.36884963615304944
     },
     {
-      "tet_id": 688,
+      "tetrahedron_id": 688,
       "node_ids": [
         171,
         144,
@@ -7335,7 +7335,7 @@
       "exact_scaled_jacobian": 0.3756156857544533
     },
     {
-      "tet_id": 689,
+      "tetrahedron_id": 689,
       "node_ids": [
         43,
         30,
@@ -7346,7 +7346,7 @@
       "exact_scaled_jacobian": 0.3955233115025277
     },
     {
-      "tet_id": 690,
+      "tetrahedron_id": 690,
       "node_ids": [
         171,
         145,
@@ -7357,7 +7357,7 @@
       "exact_scaled_jacobian": 0.3925377274526801
     },
     {
-      "tet_id": 691,
+      "tetrahedron_id": 691,
       "node_ids": [
         43,
         145,
@@ -7368,7 +7368,7 @@
       "exact_scaled_jacobian": 0.2790795643338934
     },
     {
-      "tet_id": 692,
+      "tetrahedron_id": 692,
       "node_ids": [
         171,
         177,
@@ -7379,7 +7379,7 @@
       "exact_scaled_jacobian": 0.3613873091319991
     },
     {
-      "tet_id": 693,
+      "tetrahedron_id": 693,
       "node_ids": [
         169,
         168,
@@ -7390,7 +7390,7 @@
       "exact_scaled_jacobian": 0.3127908533233488
     },
     {
-      "tet_id": 694,
+      "tetrahedron_id": 694,
       "node_ids": [
         43,
         145,
@@ -7401,7 +7401,7 @@
       "exact_scaled_jacobian": 0.20970310762367045
     },
     {
-      "tet_id": 695,
+      "tetrahedron_id": 695,
       "node_ids": [
         169,
         145,
@@ -7412,7 +7412,7 @@
       "exact_scaled_jacobian": 0.3426982673268097
     },
     {
-      "tet_id": 696,
+      "tetrahedron_id": 696,
       "node_ids": [
         43,
         145,
@@ -7423,7 +7423,7 @@
       "exact_scaled_jacobian": 0.3279528259201378
     },
     {
-      "tet_id": 697,
+      "tetrahedron_id": 697,
       "node_ids": [
         171,
         177,
@@ -7434,7 +7434,7 @@
       "exact_scaled_jacobian": 0.40770188541637825
     },
     {
-      "tet_id": 698,
+      "tetrahedron_id": 698,
       "node_ids": [
         169,
         168,
@@ -7445,7 +7445,7 @@
       "exact_scaled_jacobian": 0.27835088789620444
     },
     {
-      "tet_id": 699,
+      "tetrahedron_id": 699,
       "node_ids": [
         197,
         43,
@@ -7456,7 +7456,7 @@
       "exact_scaled_jacobian": 0.20905375025625555
     },
     {
-      "tet_id": 700,
+      "tetrahedron_id": 700,
       "node_ids": [
         168,
         170,
@@ -7467,7 +7467,7 @@
       "exact_scaled_jacobian": 0.3377719145479766
     },
     {
-      "tet_id": 701,
+      "tetrahedron_id": 701,
       "node_ids": [
         168,
         171,
@@ -7478,7 +7478,7 @@
       "exact_scaled_jacobian": 0.36564882335431786
     },
     {
-      "tet_id": 702,
+      "tetrahedron_id": 702,
       "node_ids": [
         169,
         177,
@@ -7489,7 +7489,7 @@
       "exact_scaled_jacobian": 0.44406796220285266
     },
     {
-      "tet_id": 703,
+      "tetrahedron_id": 703,
       "node_ids": [
         171,
         177,
@@ -7500,7 +7500,7 @@
       "exact_scaled_jacobian": 0.34889652747193534
     },
     {
-      "tet_id": 704,
+      "tetrahedron_id": 704,
       "node_ids": [
         197,
         177,
@@ -7511,7 +7511,7 @@
       "exact_scaled_jacobian": 0.26527887834265484
     },
     {
-      "tet_id": 705,
+      "tetrahedron_id": 705,
       "node_ids": [
         191,
         207,
@@ -7522,7 +7522,7 @@
       "exact_scaled_jacobian": 0.19184689849572734
     },
     {
-      "tet_id": 706,
+      "tetrahedron_id": 706,
       "node_ids": [
         191,
         197,
@@ -7533,7 +7533,7 @@
       "exact_scaled_jacobian": 0.3817628236730424
     },
     {
-      "tet_id": 707,
+      "tetrahedron_id": 707,
       "node_ids": [
         169,
         171,
@@ -7544,7 +7544,7 @@
       "exact_scaled_jacobian": 0.33089351483787743
     },
     {
-      "tet_id": 708,
+      "tetrahedron_id": 708,
       "node_ids": [
         169,
         30,
@@ -7555,7 +7555,7 @@
       "exact_scaled_jacobian": 0.35820273724640606
     },
     {
-      "tet_id": 709,
+      "tetrahedron_id": 709,
       "node_ids": [
         187,
         197,
@@ -7566,7 +7566,7 @@
       "exact_scaled_jacobian": 0.1604064926087201
     },
     {
-      "tet_id": 710,
+      "tetrahedron_id": 710,
       "node_ids": [
         187,
         193,
@@ -7582,7 +7582,7 @@
     "zero_candidate_boundary_face_count": 1,
     "min_boundary_face_candidate_count": 0,
     "max_boundary_face_candidate_count": 14,
-    "selected_tet_count": 0,
+    "selected_tetrahedron_count": 0,
     "search_attempt_count": 1,
     "found_cover": false,
     "reason": "cover_not_found"
@@ -7595,11 +7595,11 @@
       "19": 1
     },
     "inserted_node_count": 17,
-    "candidate_tet_count": 39,
+    "candidate_tetrahedron_count": 39,
     "open_interior_face_count": 0,
     "open_interior_component_count": 0,
     "cover_dead_end_reason": "not_evaluated",
-    "selected_tet_count": 0,
+    "selected_tetrahedron_count": 0,
     "search_attempt_count": 0,
     "found_cover": false,
     "reason": "incomplete_local_caps",

@@ -9,10 +9,10 @@ use crate::{
     artifact::AnalysisMeshArtifact,
     evidence::{
         build_mesh_evidence_artifact, MeshCadEvidence, MeshQualityEvidence, MeshRegionEvidence,
-        MeshSizingEvidence, MeshTetRecoveryEvidence,
+        MeshSizingEvidence, MeshTetrahedronRecoveryEvidence,
     },
     generate_analysis_mesh, generate_analysis_mesh_with_sizing,
-    predicate::{tet_volume, triangle_area},
+    predicate::{tetrahedron_volume, triangle_area},
     size::field::MeshSizingField,
     topology::VolumeElementKind,
     validation::{volume_component_count, AnalysisMeshValidationOptions},
@@ -129,7 +129,7 @@ pub struct MeshBenchmarkReport {
     pub sizing: MeshSizingEvidence,
     pub coverage: MeshBenchmarkCoverageMetrics,
     pub quality: MeshQualityEvidence,
-    pub tet_recovery: MeshTetRecoveryEvidence,
+    pub tetrahedron_recovery: MeshTetrahedronRecoveryEvidence,
     pub regions: MeshRegionEvidence,
     pub solve_readiness: MeshBenchmarkSolveReadiness,
 }
@@ -329,7 +329,7 @@ pub fn build_mesh_benchmark_report(
                 .boundary_edge_recovery_ratio,
         },
         quality: evidence.quality,
-        tet_recovery: evidence.tet_recovery,
+        tetrahedron_recovery: evidence.tetrahedron_recovery,
         regions: evidence.regions,
         solve_readiness: MeshBenchmarkSolveReadiness {
             solve_ready: evidence.validation.solve_ready,
@@ -803,12 +803,14 @@ fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
     mesh.volume_elements
         .iter()
         .filter_map(|element| match element.kind {
-            VolumeElementKind::Tet4 if element.node_ids.len() == 4 => Some(tet_volume([
-                *nodes.get(&element.node_ids[0])?,
-                *nodes.get(&element.node_ids[1])?,
-                *nodes.get(&element.node_ids[2])?,
-                *nodes.get(&element.node_ids[3])?,
-            ])),
+            VolumeElementKind::Tetrahedron4 if element.node_ids.len() == 4 => {
+                Some(tetrahedron_volume([
+                    *nodes.get(&element.node_ids[0])?,
+                    *nodes.get(&element.node_ids[1])?,
+                    *nodes.get(&element.node_ids[2])?,
+                    *nodes.get(&element.node_ids[3])?,
+                ]))
+            }
             _ => None,
         })
         .sum()

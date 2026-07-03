@@ -7,7 +7,7 @@ pub(super) fn analysis_mesh_from_preparation(
 ) -> Result<AnalysisMeshArtifact, SolidMeshError> {
     let mut node_id_map = BTreeMap::<TopologyEntityId, u32>::new();
     let nodes = preparation
-        .solver_tet_mesh
+        .solver_tetrahedron_mesh
         .nodes
         .iter()
         .enumerate()
@@ -21,7 +21,7 @@ pub(super) fn analysis_mesh_from_preparation(
                     source_geometry_id: preparation.topology.source_geometry_id.clone(),
                     source_geometry_revision: preparation.topology.source_geometry_revision,
                     source_entity_kind: match node.node_id.stage {
-                        crate::contracts::MeshingStage::TetMesh => SourceEntityKind::Body,
+                        crate::contracts::MeshingStage::TetrahedronMesh => SourceEntityKind::Body,
                         _ => SourceEntityKind::Mesh,
                     },
                     source_entity_id: node.node_id.id.clone(),
@@ -31,80 +31,85 @@ pub(super) fn analysis_mesh_from_preparation(
         })
         .collect::<Vec<_>>();
 
-    let mut source_surface_to_tet = BTreeMap::<u32, Vec<String>>::new();
+    let mut source_surface_to_tetrahedron = BTreeMap::<u32, Vec<String>>::new();
     let mut volume_elements = Vec::<AnalysisVolumeElement>::new();
     let mut quality_elements = Vec::<ElementQuality>::new();
-    let mut tet_centroids = Vec::<(String, [f64; 3])>::new();
-    let tet_nodes_by_id = preparation
-        .solver_tet_mesh
+    let mut tetrahedron_centroids = Vec::<(String, [f64; 3])>::new();
+    let tetrahedron_nodes_by_id = preparation
+        .solver_tetrahedron_mesh
         .nodes
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    for (tet_index, tet) in preparation.solver_tet_mesh.elements.iter().enumerate() {
-        let element_id = format!("solid_tet_{}", tet_index + 1);
-        let node_ids =
-            tet.node_ids
-                .iter()
-                .map(|node_id| {
-                    node_id_map.get(node_id).copied().ok_or_else(|| {
-                        SolidMeshError::MissingTetNode {
-                            node_id: node_id.id.clone(),
-                        }
-                    })
+    for (tetrahedron_index, tetrahedron) in preparation
+        .solver_tetrahedron_mesh
+        .elements
+        .iter()
+        .enumerate()
+    {
+        let element_id = format!("solid_tetrahedron_{}", tetrahedron_index + 1);
+        let node_ids = tetrahedron
+            .node_ids
+            .iter()
+            .map(|node_id| {
+                node_id_map.get(node_id).copied().ok_or_else(|| {
+                    SolidMeshError::MissingTetrahedronNode {
+                        node_id: node_id.id.clone(),
+                    }
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         if let Some(source_surface_element_id) =
-            solver_tet_source_surface_element_id(preparation, tet_index)
+            solver_tetrahedron_source_surface_element_id(preparation, tetrahedron_index)
         {
-            source_surface_to_tet
+            source_surface_to_tetrahedron
                 .entry(source_surface_element_id)
                 .or_default()
                 .push(element_id.clone());
         }
         volume_elements.push(AnalysisVolumeElement {
             element_id: element_id.clone(),
-            kind: VolumeElementKind::Tet4,
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids,
-            material_region_id: tet.material_region_id.clone(),
+            material_region_id: tetrahedron.material_region_id.clone(),
             provenance: vec![MeshEntityProvenance {
                 source_geometry_id: preparation.topology.source_geometry_id.clone(),
                 source_geometry_revision: preparation.topology.source_geometry_revision,
                 source_entity_kind: SourceEntityKind::Body,
-                source_entity_id: tet.element_id.id.clone(),
-                region_ids: vec![tet.material_region_id.clone()],
+                source_entity_id: tetrahedron.element_id.id.clone(),
+                region_ids: vec![tetrahedron.material_region_id.clone()],
             }],
         });
-        let tet_points = [
-            *tet_nodes_by_id.get(&tet.node_ids[0]).ok_or_else(|| {
-                SolidMeshError::MissingTetNode {
-                    node_id: tet.node_ids[0].id.clone(),
-                }
-            })?,
-            *tet_nodes_by_id.get(&tet.node_ids[1]).ok_or_else(|| {
-                SolidMeshError::MissingTetNode {
-                    node_id: tet.node_ids[1].id.clone(),
-                }
-            })?,
-            *tet_nodes_by_id.get(&tet.node_ids[2]).ok_or_else(|| {
-                SolidMeshError::MissingTetNode {
-                    node_id: tet.node_ids[2].id.clone(),
-                }
-            })?,
-            *tet_nodes_by_id.get(&tet.node_ids[3]).ok_or_else(|| {
-                SolidMeshError::MissingTetNode {
-                    node_id: tet.node_ids[3].id.clone(),
-                }
-            })?,
+        let tetrahedron_points = [
+            *tetrahedron_nodes_by_id
+                .get(&tetrahedron.node_ids[0])
+                .ok_or_else(|| SolidMeshError::MissingTetrahedronNode {
+                    node_id: tetrahedron.node_ids[0].id.clone(),
+                })?,
+            *tetrahedron_nodes_by_id
+                .get(&tetrahedron.node_ids[1])
+                .ok_or_else(|| SolidMeshError::MissingTetrahedronNode {
+                    node_id: tetrahedron.node_ids[1].id.clone(),
+                })?,
+            *tetrahedron_nodes_by_id
+                .get(&tetrahedron.node_ids[2])
+                .ok_or_else(|| SolidMeshError::MissingTetrahedronNode {
+                    node_id: tetrahedron.node_ids[2].id.clone(),
+                })?,
+            *tetrahedron_nodes_by_id
+                .get(&tetrahedron.node_ids[3])
+                .ok_or_else(|| SolidMeshError::MissingTetrahedronNode {
+                    node_id: tetrahedron.node_ids[3].id.clone(),
+                })?,
         ];
-        tet_centroids.push((element_id.clone(), tet_centroid(tet_points)));
-        let aspect_ratio = tet_edge_aspect_ratio(tet_points);
+        tetrahedron_centroids.push((element_id.clone(), tetrahedron_centroid(tetrahedron_points)));
+        let aspect_ratio = tetrahedron_edge_aspect_ratio(tetrahedron_points);
         quality_elements.push(ElementQuality {
             element_id,
             scaled_jacobian: (1.0 / aspect_ratio.max(1.0)).min(1.0),
-            exact_scaled_jacobian: tet_scaled_jacobian(tet_points),
+            exact_scaled_jacobian: tetrahedron_scaled_jacobian(tetrahedron_points),
             aspect_ratio,
-            volume_m3: tet_volume(tet_points),
+            volume_m3: tetrahedron_volume(tetrahedron_points),
         });
     }
 
@@ -119,21 +124,23 @@ pub(super) fn analysis_mesh_from_preparation(
                 .map(|node_id| {
                     let plc_node_id = plc_node_topology_id(*node_id);
                     node_id_map.get(&plc_node_id).copied().ok_or_else(|| {
-                        SolidMeshError::MissingTetNode {
+                        SolidMeshError::MissingTetrahedronNode {
                             node_id: plc_node_id.id,
                         }
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut adjacent_volume_element_ids = source_surface_to_tet
+            let mut adjacent_volume_element_ids = source_surface_to_tetrahedron
                 .get(&element.element_id)
                 .cloned()
                 .unwrap_or_default();
             if adjacent_volume_element_ids.is_empty() {
-                if let Some(nearest_tet_id) =
-                    nearest_tet_for_boundary_element(element, &preparation.surface, &tet_centroids)
-                {
-                    adjacent_volume_element_ids.push(nearest_tet_id);
+                if let Some(nearest_tetrahedron_id) = nearest_tetrahedron_for_boundary_element(
+                    element,
+                    &preparation.surface,
+                    &tetrahedron_centroids,
+                ) {
+                    adjacent_volume_element_ids.push(nearest_tetrahedron_id);
                 }
             }
             Ok(AnalysisBoundaryFace {
@@ -180,7 +187,7 @@ pub(super) fn analysis_mesh_from_preparation(
         backend,
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
-            algorithm: "plc_tet/v1".to_string(),
+            algorithm: "plc_tetrahedron/v1".to_string(),
             source_geometry_id: preparation.topology.source_geometry_id.clone(),
             source_geometry_revision: preparation.topology.source_geometry_revision,
             source_geometry_sha256: preparation.topology.source_geometry_sha256.clone(),
@@ -199,7 +206,7 @@ fn solid_backend_summary(
 ) -> MeshBackendSummary {
     MeshBackendSummary {
         backend: "solid".to_string(),
-        algorithm: "plc_tet/v1".to_string(),
+        algorithm: "plc_tetrahedron/v1".to_string(),
         source_topology_vertex_count: preparation.topology.vertices.len(),
         source_topology_edge_count: preparation.topology.edges.len(),
         source_topology_face_count: preparation.topology.faces.len(),
@@ -285,81 +292,86 @@ fn solid_backend_summary(
         surface_max_cad_projection_error_m: surface_max_cad_projection_error_m(
             &preparation.surface,
         ),
-        volume_component_count: preparation.tet_stage.volume_component_count,
-        interior_seed_point_count: preparation.tet_stage.interior_seed_point_count,
-        tet_element_count: preparation.solver_tet_mesh.elements.len(),
-        tet_recovered_component_ratio: preparation.tet_stage.recovered_component_ratio,
-        tet_fan_fallback_component_count: 0,
-        tet_volume_coverage_ratio: 1.0,
-        tet_refinement_pass_count: 0,
-        tet_refinement_point_count: 0,
-        tet_requested_refinement_point_count: preparation
-            .tet_stage
+        volume_component_count: preparation.tetrahedron_stage.volume_component_count,
+        interior_seed_point_count: preparation.tetrahedron_stage.interior_seed_point_count,
+        tetrahedron_element_count: preparation.solver_tetrahedron_mesh.elements.len(),
+        tetrahedron_recovered_component_ratio: preparation
+            .tetrahedron_stage
+            .recovered_component_ratio,
+        tetrahedron_fan_fallback_component_count: 0,
+        tetrahedron_volume_coverage_ratio: 1.0,
+        tetrahedron_refinement_pass_count: 0,
+        tetrahedron_refinement_point_count: 0,
+        tetrahedron_requested_refinement_point_count: preparation
+            .tetrahedron_stage
             .requested_refinement_point_count,
-        tet_accepted_requested_refinement_location_count: preparation
-            .tet_stage
+        tetrahedron_accepted_requested_refinement_location_count: preparation
+            .tetrahedron_stage
             .accepted_requested_refinement_point_count,
-        tet_accepted_requested_refinement_point_count: preparation
-            .tet_stage
+        tetrahedron_accepted_requested_refinement_point_count: preparation
+            .tetrahedron_stage
             .accepted_requested_refinement_point_count,
-        tet_accepted_requested_refinement_surrogate_point_count: preparation
-            .tet_stage
+        tetrahedron_accepted_requested_refinement_surrogate_point_count: preparation
+            .tetrahedron_stage
             .accepted_requested_refinement_surrogate_point_count,
-        tet_rejected_requested_refinement_point_count: preparation
-            .tet_stage
+        tetrahedron_rejected_requested_refinement_point_count: preparation
+            .tetrahedron_stage
             .rejected_requested_refinement_point_count,
-        tet_requested_refinement_rejected_by_reason: preparation
-            .tet_stage
+        tetrahedron_requested_refinement_rejected_by_reason: preparation
+            .tetrahedron_stage
             .requested_refinement_rejected_by_reason
             .clone(),
-        tet_dropped_requested_refinement_point_count: preparation
-            .tet_stage
+        tetrahedron_dropped_requested_refinement_point_count: preparation
+            .tetrahedron_stage
             .dropped_requested_refinement_point_count,
-        tet_requested_refinement_dropped_by_reason: preparation
-            .tet_stage
+        tetrahedron_requested_refinement_dropped_by_reason: preparation
+            .tetrahedron_stage
             .requested_refinement_dropped_by_reason
             .clone(),
-        tet_max_radius_edge_ratio: quality.max_aspect_ratio,
-        tet_sizing_violation_count: 0,
-        tet_min_exact_scaled_jacobian: quality.min_exact_scaled_jacobian,
-        tet_exact_scaled_jacobian_below_threshold_count:
+        tetrahedron_max_radius_edge_ratio: quality.max_aspect_ratio,
+        tetrahedron_sizing_violation_count: 0,
+        tetrahedron_min_exact_scaled_jacobian: quality.min_exact_scaled_jacobian,
+        tetrahedron_exact_scaled_jacobian_below_threshold_count:
             exact_scaled_jacobian_below_threshold_count(quality),
-        tet_exact_scaled_jacobian_bins: exact_scaled_jacobian_bins(quality),
-        tet_optimization_pass_count: usize::from(preparation.solver_tet_mesh.quality_optimized),
-        tet_smoothed_point_count: 0,
-        tet_sliver_count: 0,
-        tet_sliver_removed_count: 0,
-        tet_optimization_target_seed_count: 0,
-        tet_optimization_skipped_target_seed_count: 0,
-        tet_optimization_rejected_edit_count: 0,
-        tet_optimization_initial_max_aspect_ratio: quality.max_aspect_ratio,
-        tet_optimization_final_max_aspect_ratio: quality.max_aspect_ratio,
-        tet_optimization_initial_min_exact_scaled_jacobian: quality.min_exact_scaled_jacobian,
-        tet_optimization_final_min_exact_scaled_jacobian: quality.min_exact_scaled_jacobian,
-        tet_untangling_pass_count: 0,
-        tet_untangling_initial_near_singular_count: 0,
-        tet_untangling_final_near_singular_count: 0,
-        tet_untangling_relocated_seed_count: 0,
-        tet_untangling_reconnected_edge_star_count: 0,
-        tet_untangling_reconnected_boundary_adjacent_cavity_count: 0,
-        tet_untangling_reconnected_node_adjacent_cavity_count: 0,
-        tet_exact_quality_repair_pass_count: 0,
-        tet_exact_quality_reconnected_cavity_count: 0,
-        tet_exact_quality_reconnection_quality_gain_count: 0,
-        tet_exact_quality_face_neighbor_reconnected_cavity_count: 0,
-        tet_exact_quality_connected_reconnected_cavity_count: 0,
-        tet_exact_quality_node_adjacent_reconnected_cavity_count: 0,
-        tet_exact_quality_boundary_adjacent_reconnected_cavity_count: 0,
-        tet_exact_quality_expanded_connected_reconnected_cavity_count: 0,
-        tet_exact_quality_split_cavity_count: 0,
-        tet_exact_quality_seed_star_collapse_count: 0,
-        tet_exact_quality_seed_star_relocation_count: 0,
-        tet_exact_quality_unrepaired_total_count: 0,
-        tet_exact_quality_unrepaired_general_cavity_count: 0,
-        tet_exact_quality_unrepaired_boundary_adjacent_count: 0,
-        tet_exact_quality_unrepaired_node_adjacent_count: 0,
-        tet_exact_quality_unrepaired_interior_seed_count: 0,
-        tet_exact_quality_unrepaired_edge_star_count: 0,
+        tetrahedron_exact_scaled_jacobian_bins: exact_scaled_jacobian_bins(quality),
+        tetrahedron_optimization_pass_count: usize::from(
+            preparation.solver_tetrahedron_mesh.quality_optimized,
+        ),
+        tetrahedron_smoothed_point_count: 0,
+        tetrahedron_sliver_count: 0,
+        tetrahedron_sliver_removed_count: 0,
+        tetrahedron_optimization_target_seed_count: 0,
+        tetrahedron_optimization_skipped_target_seed_count: 0,
+        tetrahedron_optimization_rejected_edit_count: 0,
+        tetrahedron_optimization_initial_max_aspect_ratio: quality.max_aspect_ratio,
+        tetrahedron_optimization_final_max_aspect_ratio: quality.max_aspect_ratio,
+        tetrahedron_optimization_initial_min_exact_scaled_jacobian: quality
+            .min_exact_scaled_jacobian,
+        tetrahedron_optimization_final_min_exact_scaled_jacobian: quality.min_exact_scaled_jacobian,
+        tetrahedron_untangling_pass_count: 0,
+        tetrahedron_untangling_initial_near_singular_count: 0,
+        tetrahedron_untangling_final_near_singular_count: 0,
+        tetrahedron_untangling_relocated_seed_count: 0,
+        tetrahedron_untangling_reconnected_edge_star_count: 0,
+        tetrahedron_untangling_reconnected_boundary_adjacent_cavity_count: 0,
+        tetrahedron_untangling_reconnected_node_adjacent_cavity_count: 0,
+        tetrahedron_exact_quality_repair_pass_count: 0,
+        tetrahedron_exact_quality_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_reconnection_quality_gain_count: 0,
+        tetrahedron_exact_quality_face_neighbor_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_connected_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_node_adjacent_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_boundary_adjacent_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_expanded_connected_reconnected_cavity_count: 0,
+        tetrahedron_exact_quality_split_cavity_count: 0,
+        tetrahedron_exact_quality_seed_star_collapse_count: 0,
+        tetrahedron_exact_quality_seed_star_relocation_count: 0,
+        tetrahedron_exact_quality_unrepaired_total_count: 0,
+        tetrahedron_exact_quality_unrepaired_general_cavity_count: 0,
+        tetrahedron_exact_quality_unrepaired_boundary_adjacent_count: 0,
+        tetrahedron_exact_quality_unrepaired_node_adjacent_count: 0,
+        tetrahedron_exact_quality_unrepaired_interior_seed_count: 0,
+        tetrahedron_exact_quality_unrepaired_edge_star_count: 0,
         boundary_face_recovery_ratio: boundary_face_recovery_ratio(boundary_faces),
         boundary_edge_recovery_ratio: boundary_edge_recovery_ratio(boundary_faces, boundary_edges),
     }
@@ -409,10 +421,10 @@ fn boundary_face_recovery_ratio(boundary_faces: &[AnalysisBoundaryFace]) -> f64 
     recovered_count as f64 / boundary_faces.len() as f64
 }
 
-fn nearest_tet_for_boundary_element(
+fn nearest_tetrahedron_for_boundary_element(
     element: &crate::surface::SurfaceElement,
     surface: &SurfaceDiscretization,
-    tet_centroids: &[(String, [f64; 3])],
+    tetrahedron_centroids: &[(String, [f64; 3])],
 ) -> Option<String> {
     let points = [
         surface.nodes[element.node_ids[0] as usize].coordinates_m,
@@ -420,7 +432,7 @@ fn nearest_tet_for_boundary_element(
         surface.nodes[element.node_ids[2] as usize].coordinates_m,
     ];
     let centroid = triangle_centroid(points);
-    tet_centroids
+    tetrahedron_centroids
         .iter()
         .min_by(|(_, left), (_, right)| {
             distance_squared(*left, centroid).total_cmp(&distance_squared(*right, centroid))
@@ -540,14 +552,14 @@ fn plc_node_topology_id(node_id: u32) -> TopologyEntityId {
     }
 }
 
-fn solver_tet_source_surface_element_id(
+fn solver_tetrahedron_source_surface_element_id(
     preparation: &SolidMeshPreparation,
-    tet_index: usize,
+    tetrahedron_index: usize,
 ) -> Option<u32> {
     preparation
-        .solver_tet_mesh
+        .solver_tetrahedron_mesh
         .boundary_faces
-        .get(tet_index)
+        .get(tetrahedron_index)
         .and_then(|face| face.face_id.id.parse::<u32>().ok())
 }
 
@@ -561,17 +573,20 @@ pub(super) fn solid_validation_options(
         max_volume_component_count: options
             .validation
             .max_volume_component_count
-            .or(Some(preparation.tet_stage.volume_component_count)),
-        coverage_sample_points_m: preparation.tet_stage.coverage_sample_points_m.clone(),
+            .or(Some(preparation.tetrahedron_stage.volume_component_count)),
+        coverage_sample_points_m: preparation
+            .tetrahedron_stage
+            .coverage_sample_points_m
+            .clone(),
         min_coverage_sample_ratio: 1.0,
         expected_bounds_m: Some([
             preparation.topology.bounds_min_m,
             preparation.topology.bounds_max_m,
         ]),
         min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
-        expected_volume_m3: Some(preparation.tet_stage.expected_volume_m3),
+        expected_volume_m3: Some(preparation.tetrahedron_stage.expected_volume_m3),
         min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
-        expected_boundary_area_m2: Some(preparation.tet_stage.expected_boundary_area_m2),
+        expected_boundary_area_m2: Some(preparation.tetrahedron_stage.expected_boundary_area_m2),
         min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,

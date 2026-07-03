@@ -22,8 +22,8 @@ use crate::{
     plc::build::{build_protected_boundary_complex, PlcBuildError, ProtectedBoundaryComplex},
     predicate::{
         distance_squared, dot, point_in_closed_triangle_surface, point_triangle_distance,
-        tet_centroid, tet_edge_aspect_ratio, tet_scaled_jacobian, tet_volume, triangle_centroid,
-        PointInClosedSurface, Triangle3,
+        tetrahedron_centroid, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
+        tetrahedron_volume, triangle_centroid, PointInClosedSurface, Triangle3,
     },
     provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind},
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
@@ -44,11 +44,14 @@ use crate::{
         discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
         SurfaceDiscretizationOptions,
     },
-    tet::generate::{
-        generate_initial_tet_mesh_from_plc, generate_structured_box_tet_mesh_from_plc,
-        TetGenerationError, TetMesh,
+    tetrahedron::generate::{
+        generate_initial_tetrahedron_mesh_from_plc,
+        generate_structured_box_tetrahedron_mesh_from_plc, TetrahedronGenerationError,
+        TetrahedronMesh,
     },
-    tet::recover::{build_recovery_queue_from_plc, TetRecoveryError, TetRecoveryQueue},
+    tetrahedron::recover::{
+        build_recovery_queue_from_plc, TetrahedronRecoveryError, TetrahedronRecoveryQueue,
+    },
     tolerance::MeshingTolerance,
     topology::{BoundaryElementKind, VolumeElementKind},
     validation::{
@@ -68,15 +71,15 @@ pub struct SolidMeshPreparation {
     pub surface_validation: SurfaceValidationReport,
     pub surface_recovery: SurfaceRecoveryReport,
     pub protected_boundary_complex: ProtectedBoundaryComplex,
-    pub initial_tet_mesh: TetMesh,
-    pub recovery_queue: TetRecoveryQueue,
-    pub solver_tet_mesh: TetMesh,
-    pub tet_stage: SolidTetStageEvidence,
+    pub initial_tetrahedron_mesh: TetrahedronMesh,
+    pub recovery_queue: TetrahedronRecoveryQueue,
+    pub solver_tetrahedron_mesh: TetrahedronMesh,
+    pub tetrahedron_stage: SolidTetrahedronStageEvidence,
     pub effective_sizing: Option<MeshSizingField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SolidTetStageEvidence {
+pub struct SolidTetrahedronStageEvidence {
     pub volume_component_count: usize,
     pub interior_seed_point_count: usize,
     pub expected_volume_m3: f64,
@@ -105,10 +108,10 @@ pub enum SolidMeshError {
     SurfaceValidation(SurfaceValidationError),
     SurfaceRecovery(SurfaceRecoveryError),
     ProtectedBoundaryComplex(PlcBuildError),
-    TetGeneration(TetGenerationError),
-    TetRecovery(TetRecoveryError),
+    TetrahedronGeneration(TetrahedronGenerationError),
+    TetrahedronRecovery(TetrahedronRecoveryError),
     Validation(AnalysisMeshValidationError),
-    MissingTetNode { node_id: String },
+    MissingTetrahedronNode { node_id: String },
 }
 
 impl std::fmt::Display for SolidMeshError {
@@ -127,15 +130,19 @@ impl std::fmt::Display for SolidMeshError {
                     "protected boundary complex validation failed: {err}"
                 )
             }
-            Self::TetGeneration(err) => write!(formatter, "initial Tet generation failed: {err}"),
-            Self::TetRecovery(err) => write!(formatter, "Tet recovery failed: {err}"),
+            Self::TetrahedronGeneration(err) => {
+                write!(formatter, "initial Tetrahedron generation failed: {err}")
+            }
+            Self::TetrahedronRecovery(err) => {
+                write!(formatter, "Tetrahedron recovery failed: {err}")
+            }
             Self::Validation(err) => {
                 write!(formatter, "solid mesh validation failed: {err:?}")
             }
-            Self::MissingTetNode { node_id } => {
+            Self::MissingTetrahedronNode { node_id } => {
                 write!(
                     formatter,
-                    "solid Tet mesh references missing node {node_id}"
+                    "solid Tetrahedron mesh references missing node {node_id}"
                 )
             }
         }
@@ -207,17 +214,19 @@ fn prepare_solid_mesh_internal(
             .map_err(SolidMeshError::SurfaceRecovery)?;
     let protected_boundary_complex = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshError::ProtectedBoundaryComplex)?;
-    let initial_tet_mesh = generate_initial_tet_mesh_from_plc(&protected_boundary_complex)
-        .map_err(SolidMeshError::TetGeneration)?;
-    let solver_tet_mesh = generate_structured_box_tet_mesh_from_plc(&protected_boundary_complex)
-        .map_err(SolidMeshError::TetGeneration)?;
+    let initial_tetrahedron_mesh =
+        generate_initial_tetrahedron_mesh_from_plc(&protected_boundary_complex)
+            .map_err(SolidMeshError::TetrahedronGeneration)?;
+    let solver_tetrahedron_mesh =
+        generate_structured_box_tetrahedron_mesh_from_plc(&protected_boundary_complex)
+            .map_err(SolidMeshError::TetrahedronGeneration)?;
     let recovery_queue =
-        build_recovery_queue_from_plc(&protected_boundary_complex, &solver_tet_mesh)
-            .map_err(SolidMeshError::TetRecovery)?;
-    let tet_stage = build_solid_tet_stage_evidence(
+        build_recovery_queue_from_plc(&protected_boundary_complex, &solver_tetrahedron_mesh)
+            .map_err(SolidMeshError::TetrahedronRecovery)?;
+    let tetrahedron_stage = build_solid_tetrahedron_stage_evidence(
         &topology,
         &surface,
-        &solver_tet_mesh,
+        &solver_tetrahedron_mesh,
         effective_sizing.as_ref(),
     );
     Ok(SolidMeshPreparation {
@@ -230,10 +239,10 @@ fn prepare_solid_mesh_internal(
         surface_validation,
         surface_recovery,
         protected_boundary_complex,
-        initial_tet_mesh,
+        initial_tetrahedron_mesh,
         recovery_queue,
-        solver_tet_mesh,
-        tet_stage,
+        solver_tetrahedron_mesh,
+        tetrahedron_stage,
         effective_sizing,
     })
 }
@@ -328,26 +337,27 @@ fn surface_options_for_mesh(topology: &SourceTopologyModel) -> SurfaceDiscretiza
     }
 }
 
-fn build_solid_tet_stage_evidence(
+fn build_solid_tetrahedron_stage_evidence(
     topology: &SourceTopologyModel,
     surface: &SurfaceDiscretization,
-    tet_mesh: &TetMesh,
+    tetrahedron_mesh: &TetrahedronMesh,
     sizing: Option<&MeshSizingField>,
-) -> SolidTetStageEvidence {
+) -> SolidTetrahedronStageEvidence {
     let requested = requested_refinement_selection(topology, sizing);
-    let tet_nodes_by_id = tet_mesh
+    let tetrahedron_nodes_by_id = tetrahedron_mesh
         .nodes
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
     let mut expected_volume_m3 = 0.0;
     let mut coverage_sample_points_m = Vec::<[f64; 3]>::new();
-    for tet in &tet_mesh.elements {
-        let Some(points) = tet_points_from_mesh(tet, &tet_nodes_by_id) else {
+    for tetrahedron in &tetrahedron_mesh.elements {
+        let Some(points) = tetrahedron_points_from_mesh(tetrahedron, &tetrahedron_nodes_by_id)
+        else {
             continue;
         };
-        expected_volume_m3 += tet_volume(points).abs();
-        coverage_sample_points_m.push(tet_centroid(points));
+        expected_volume_m3 += tetrahedron_volume(points).abs();
+        coverage_sample_points_m.push(tetrahedron_centroid(points));
     }
     coverage_sample_points_m.extend(requested.points[..requested.count].iter().copied());
     coverage_sample_points_m.truncate(64);
@@ -356,7 +366,7 @@ fn build_solid_tet_stage_evidence(
         .points
         .iter()
         .take(requested.count)
-        .filter(|point| tet_mesh_has_node_near(tet_mesh, **point))
+        .filter(|point| tetrahedron_mesh_has_node_near(tetrahedron_mesh, **point))
         .count();
     let rejected_requested_refinement_point_count = requested
         .count
@@ -364,17 +374,17 @@ fn build_solid_tet_stage_evidence(
     let mut requested_refinement_rejected_by_reason = BTreeMap::<String, usize>::new();
     if rejected_requested_refinement_point_count > 0 {
         requested_refinement_rejected_by_reason.insert(
-            "native_tet_generator_has_no_requested_point_insertion".to_string(),
+            "native_tetrahedron_generator_has_no_requested_point_insertion".to_string(),
             rejected_requested_refinement_point_count,
         );
     }
 
-    SolidTetStageEvidence {
-        volume_component_count: usize::from(!tet_mesh.elements.is_empty()),
-        interior_seed_point_count: tet_mesh
+    SolidTetrahedronStageEvidence {
+        volume_component_count: usize::from(!tetrahedron_mesh.elements.is_empty()),
+        interior_seed_point_count: tetrahedron_mesh
             .nodes
             .iter()
-            .filter(|node| node.node_id.stage == crate::contracts::MeshingStage::TetMesh)
+            .filter(|node| node.node_id.stage == crate::contracts::MeshingStage::TetrahedronMesh)
             .count(),
         expected_volume_m3,
         expected_boundary_area_m2: surface.elements.iter().map(|element| element.area_m2).sum(),
@@ -390,22 +400,22 @@ fn build_solid_tet_stage_evidence(
     }
 }
 
-fn tet_points_from_mesh(
-    tet: &crate::contracts::Tet4Element,
+fn tetrahedron_points_from_mesh(
+    tetrahedron: &crate::contracts::Tetrahedron4Element,
     nodes: &BTreeMap<TopologyEntityId, [f64; 3]>,
 ) -> Option<Triangle3PlusOne> {
     Some([
-        *nodes.get(&tet.node_ids[0])?,
-        *nodes.get(&tet.node_ids[1])?,
-        *nodes.get(&tet.node_ids[2])?,
-        *nodes.get(&tet.node_ids[3])?,
+        *nodes.get(&tetrahedron.node_ids[0])?,
+        *nodes.get(&tetrahedron.node_ids[1])?,
+        *nodes.get(&tetrahedron.node_ids[2])?,
+        *nodes.get(&tetrahedron.node_ids[3])?,
     ])
 }
 
 type Triangle3PlusOne = [[f64; 3]; 4];
 
-fn tet_mesh_has_node_near(tet_mesh: &TetMesh, point: [f64; 3]) -> bool {
-    tet_mesh
+fn tetrahedron_mesh_has_node_near(tetrahedron_mesh: &TetrahedronMesh, point: [f64; 3]) -> bool {
+    tetrahedron_mesh
         .nodes
         .iter()
         .any(|node| distance_squared(node.coordinates_m, point) <= 1.0e-20)

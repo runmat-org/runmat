@@ -3,22 +3,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VolumeElementKind {
-    Tet4,
-    Tet10,
+    Tetrahedron4,
+    Tetrahedron10,
     Hex8,
 }
 
 impl VolumeElementKind {
     pub const fn node_count(self) -> usize {
         match self {
-            Self::Tet4 => 4,
-            Self::Tet10 => 10,
+            Self::Tetrahedron4 => 4,
+            Self::Tetrahedron10 => 10,
             Self::Hex8 => 8,
         }
     }
 
     pub const fn is_supported_for_solid_solve(self) -> bool {
-        matches!(self, Self::Tet4)
+        matches!(self, Self::Tetrahedron4)
     }
 }
 

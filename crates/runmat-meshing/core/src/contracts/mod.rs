@@ -8,7 +8,7 @@ pub mod size;
 pub mod solve;
 pub mod stage;
 pub mod surface;
-pub mod tet;
+pub mod tetrahedron;
 
 pub use cad::{
     CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract, CadModel, CadShellContract,
@@ -25,4 +25,6 @@ pub use size::SizingFieldContract;
 pub use solve::SolveReadinessReport;
 pub use stage::{MeshingStage, StageEvidence, StageEvidenceStatus, TopologyEntityId};
 pub use surface::{SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle};
-pub use tet::{Tet4Element, TetBoundaryFace, TetMesh, TetMeshNode};
+pub use tetrahedron::{
+    Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh, TetrahedronMeshNode,
+};

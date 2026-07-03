@@ -31,7 +31,7 @@ pub struct MeshEvidenceArtifact {
     pub sizing: MeshSizingEvidence,
     pub quality: MeshQualityEvidence,
     #[serde(default)]
-    pub tet_recovery: MeshTetRecoveryEvidence,
+    pub tetrahedron_recovery: MeshTetrahedronRecoveryEvidence,
     pub regions: MeshRegionEvidence,
     pub validation: MeshValidationEvidence,
 }
@@ -197,29 +197,29 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub uninserted_sample_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
-    pub requested_tet_refinement_point_count: usize,
+    pub requested_tetrahedron_refinement_point_count: usize,
     #[serde(default)]
-    pub accepted_requested_tet_refinement_location_count: usize,
+    pub accepted_requested_tetrahedron_refinement_location_count: usize,
     #[serde(default)]
-    pub accepted_requested_tet_refinement_point_count: usize,
+    pub accepted_requested_tetrahedron_refinement_point_count: usize,
     #[serde(default)]
-    pub accepted_requested_tet_refinement_surrogate_point_count: usize,
+    pub accepted_requested_tetrahedron_refinement_surrogate_point_count: usize,
     #[serde(default)]
-    pub accepted_requested_tet_refinement_exact_point_count: usize,
+    pub accepted_requested_tetrahedron_refinement_exact_point_count: usize,
     #[serde(default)]
-    pub rejected_requested_tet_refinement_point_count: usize,
+    pub rejected_requested_tetrahedron_refinement_point_count: usize,
     #[serde(default)]
-    pub requested_tet_refinement_rejected_by_reason: BTreeMap<String, usize>,
+    pub requested_tetrahedron_refinement_rejected_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
-    pub dropped_requested_tet_refinement_point_count: usize,
+    pub dropped_requested_tetrahedron_refinement_point_count: usize,
     #[serde(default)]
-    pub requested_tet_refinement_dropped_by_reason: BTreeMap<String, usize>,
+    pub requested_tetrahedron_refinement_dropped_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
-    pub requested_tet_refinement_acceptance_ratio: Option<f64>,
+    pub requested_tetrahedron_refinement_acceptance_ratio: Option<f64>,
     #[serde(default)]
-    pub requested_tet_refinement_rejection_ratio: Option<f64>,
+    pub requested_tetrahedron_refinement_rejection_ratio: Option<f64>,
     #[serde(default)]
-    pub requested_tet_refinement_surrogate_ratio: Option<f64>,
+    pub requested_tetrahedron_refinement_surrogate_ratio: Option<f64>,
     #[serde(default)]
     pub generated_cad_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
@@ -266,7 +266,7 @@ pub struct MeshQualityEvidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct MeshTetRecoveryEvidence {
+pub struct MeshTetrahedronRecoveryEvidence {
     pub element_count: usize,
     pub recovered_component_ratio: f64,
     pub fan_fallback_component_count: usize,
@@ -455,7 +455,7 @@ pub fn build_mesh_evidence_artifact_with_validation_evidence(
         adaptive: adaptive_evidence(mesh),
         sizing: sizing_evidence(mesh),
         quality: quality_evidence(mesh),
-        tet_recovery: tet_recovery_evidence(mesh),
+        tetrahedron_recovery: tetrahedron_recovery_evidence(mesh),
         regions: region_evidence(mesh),
         validation,
     }
@@ -719,14 +719,15 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         *rejected_by_reason.entry(reason).or_default() += 1;
     }
 
-    let accepted_requested_tet_refinement_point_count =
-        mesh.backend.tet_accepted_requested_refinement_point_count;
-    let accepted_requested_tet_refinement_location_count = mesh
+    let accepted_requested_tetrahedron_refinement_point_count = mesh
         .backend
-        .tet_accepted_requested_refinement_location_count;
-    let accepted_requested_tet_refinement_surrogate_point_count = mesh
+        .tetrahedron_accepted_requested_refinement_point_count;
+    let accepted_requested_tetrahedron_refinement_location_count = mesh
         .backend
-        .tet_accepted_requested_refinement_surrogate_point_count;
+        .tetrahedron_accepted_requested_refinement_location_count;
+    let accepted_requested_tetrahedron_refinement_surrogate_point_count = mesh
+        .backend
+        .tetrahedron_accepted_requested_refinement_surrogate_point_count;
 
     MeshSizingEvidence {
         global_target_size_m: mesh.sizing.global_target_size_m,
@@ -747,61 +748,64 @@ fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence {
         inserted_breakpoint_count,
         inserted_breakpoint_by_reason,
         uninserted_sample_by_reason,
-        requested_tet_refinement_point_count: mesh.backend.tet_requested_refinement_point_count,
-        accepted_requested_tet_refinement_location_count,
-        accepted_requested_tet_refinement_point_count,
-        accepted_requested_tet_refinement_surrogate_point_count,
-        accepted_requested_tet_refinement_exact_point_count:
-            accepted_requested_tet_refinement_point_count
-                .saturating_sub(accepted_requested_tet_refinement_surrogate_point_count),
-        rejected_requested_tet_refinement_point_count: mesh
+        requested_tetrahedron_refinement_point_count: mesh
             .backend
-            .tet_rejected_requested_refinement_point_count,
-        requested_tet_refinement_rejected_by_reason: mesh
+            .tetrahedron_requested_refinement_point_count,
+        accepted_requested_tetrahedron_refinement_location_count,
+        accepted_requested_tetrahedron_refinement_point_count,
+        accepted_requested_tetrahedron_refinement_surrogate_point_count,
+        accepted_requested_tetrahedron_refinement_exact_point_count:
+            accepted_requested_tetrahedron_refinement_point_count
+                .saturating_sub(accepted_requested_tetrahedron_refinement_surrogate_point_count),
+        rejected_requested_tetrahedron_refinement_point_count: mesh
             .backend
-            .tet_requested_refinement_rejected_by_reason
+            .tetrahedron_rejected_requested_refinement_point_count,
+        requested_tetrahedron_refinement_rejected_by_reason: mesh
+            .backend
+            .tetrahedron_requested_refinement_rejected_by_reason
             .clone(),
-        dropped_requested_tet_refinement_point_count: mesh
+        dropped_requested_tetrahedron_refinement_point_count: mesh
             .backend
-            .tet_dropped_requested_refinement_point_count,
-        requested_tet_refinement_dropped_by_reason: mesh
+            .tetrahedron_dropped_requested_refinement_point_count,
+        requested_tetrahedron_refinement_dropped_by_reason: mesh
             .backend
-            .tet_requested_refinement_dropped_by_reason
+            .tetrahedron_requested_refinement_dropped_by_reason
             .clone(),
-        requested_tet_refinement_acceptance_ratio: if mesh
+        requested_tetrahedron_refinement_acceptance_ratio: if mesh
             .backend
-            .tet_requested_refinement_point_count
+            .tetrahedron_requested_refinement_point_count
             > 0
         {
             Some(
-                mesh.backend.tet_accepted_requested_refinement_point_count as f64
-                    / mesh.backend.tet_requested_refinement_point_count as f64,
+                mesh.backend
+                    .tetrahedron_accepted_requested_refinement_point_count as f64
+                    / mesh.backend.tetrahedron_requested_refinement_point_count as f64,
             )
         } else {
             None
         },
-        requested_tet_refinement_rejection_ratio: if mesh
+        requested_tetrahedron_refinement_rejection_ratio: if mesh
             .backend
-            .tet_requested_refinement_point_count
+            .tetrahedron_requested_refinement_point_count
             > 0
         {
             Some(
-                mesh.backend.tet_rejected_requested_refinement_point_count as f64
-                    / mesh.backend.tet_requested_refinement_point_count as f64,
+                mesh.backend
+                    .tetrahedron_rejected_requested_refinement_point_count as f64
+                    / mesh.backend.tetrahedron_requested_refinement_point_count as f64,
             )
         } else {
             None
         },
-        requested_tet_refinement_surrogate_ratio: if accepted_requested_tet_refinement_point_count
-            > 0
-        {
-            Some(
-                accepted_requested_tet_refinement_surrogate_point_count as f64
-                    / accepted_requested_tet_refinement_point_count as f64,
-            )
-        } else {
-            None
-        },
+        requested_tetrahedron_refinement_surrogate_ratio:
+            if accepted_requested_tetrahedron_refinement_point_count > 0 {
+                Some(
+                    accepted_requested_tetrahedron_refinement_surrogate_point_count as f64
+                        / accepted_requested_tetrahedron_refinement_point_count as f64,
+                )
+            } else {
+                None
+            },
         generated_cad_by_reason,
         anisotropic_by_reason,
         invalid_anisotropic_by_reason,
@@ -870,93 +874,99 @@ fn quality_evidence(mesh: &AnalysisMeshArtifact) -> MeshQualityEvidence {
     }
 }
 
-fn tet_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetRecoveryEvidence {
-    MeshTetRecoveryEvidence {
-        element_count: mesh.backend.tet_element_count,
-        recovered_component_ratio: mesh.backend.tet_recovered_component_ratio,
-        fan_fallback_component_count: mesh.backend.tet_fan_fallback_component_count,
-        volume_coverage_ratio: mesh.backend.tet_volume_coverage_ratio,
-        refinement_pass_count: mesh.backend.tet_refinement_pass_count,
-        refinement_point_count: mesh.backend.tet_refinement_point_count,
-        optimization_pass_count: mesh.backend.tet_optimization_pass_count,
-        smoothed_point_count: mesh.backend.tet_smoothed_point_count,
-        sliver_count: mesh.backend.tet_sliver_count,
-        sliver_removed_count: mesh.backend.tet_sliver_removed_count,
-        optimization_target_seed_count: mesh.backend.tet_optimization_target_seed_count,
+fn tetrahedron_recovery_evidence(mesh: &AnalysisMeshArtifact) -> MeshTetrahedronRecoveryEvidence {
+    MeshTetrahedronRecoveryEvidence {
+        element_count: mesh.backend.tetrahedron_element_count,
+        recovered_component_ratio: mesh.backend.tetrahedron_recovered_component_ratio,
+        fan_fallback_component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
+        volume_coverage_ratio: mesh.backend.tetrahedron_volume_coverage_ratio,
+        refinement_pass_count: mesh.backend.tetrahedron_refinement_pass_count,
+        refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
+        optimization_pass_count: mesh.backend.tetrahedron_optimization_pass_count,
+        smoothed_point_count: mesh.backend.tetrahedron_smoothed_point_count,
+        sliver_count: mesh.backend.tetrahedron_sliver_count,
+        sliver_removed_count: mesh.backend.tetrahedron_sliver_removed_count,
+        optimization_target_seed_count: mesh.backend.tetrahedron_optimization_target_seed_count,
         optimization_skipped_target_seed_count: mesh
             .backend
-            .tet_optimization_skipped_target_seed_count,
-        optimization_rejected_edit_count: mesh.backend.tet_optimization_rejected_edit_count,
+            .tetrahedron_optimization_skipped_target_seed_count,
+        optimization_rejected_edit_count: mesh.backend.tetrahedron_optimization_rejected_edit_count,
         optimization_initial_max_aspect_ratio: mesh
             .backend
-            .tet_optimization_initial_max_aspect_ratio,
-        optimization_final_max_aspect_ratio: mesh.backend.tet_optimization_final_max_aspect_ratio,
+            .tetrahedron_optimization_initial_max_aspect_ratio,
+        optimization_final_max_aspect_ratio: mesh
+            .backend
+            .tetrahedron_optimization_final_max_aspect_ratio,
         optimization_initial_min_exact_scaled_jacobian: mesh
             .backend
-            .tet_optimization_initial_min_exact_scaled_jacobian,
+            .tetrahedron_optimization_initial_min_exact_scaled_jacobian,
         optimization_final_min_exact_scaled_jacobian: mesh
             .backend
-            .tet_optimization_final_min_exact_scaled_jacobian,
-        untangling_pass_count: mesh.backend.tet_untangling_pass_count,
+            .tetrahedron_optimization_final_min_exact_scaled_jacobian,
+        untangling_pass_count: mesh.backend.tetrahedron_untangling_pass_count,
         untangling_initial_near_singular_count: mesh
             .backend
-            .tet_untangling_initial_near_singular_count,
-        untangling_final_near_singular_count: mesh.backend.tet_untangling_final_near_singular_count,
-        untangling_relocated_seed_count: mesh.backend.tet_untangling_relocated_seed_count,
+            .tetrahedron_untangling_initial_near_singular_count,
+        untangling_final_near_singular_count: mesh
+            .backend
+            .tetrahedron_untangling_final_near_singular_count,
+        untangling_relocated_seed_count: mesh.backend.tetrahedron_untangling_relocated_seed_count,
         untangling_reconnected_edge_star_count: mesh
             .backend
-            .tet_untangling_reconnected_edge_star_count,
+            .tetrahedron_untangling_reconnected_edge_star_count,
         untangling_reconnected_boundary_adjacent_cavity_count: mesh
             .backend
-            .tet_untangling_reconnected_boundary_adjacent_cavity_count,
+            .tetrahedron_untangling_reconnected_boundary_adjacent_cavity_count,
         untangling_reconnected_node_adjacent_cavity_count: mesh
             .backend
-            .tet_untangling_reconnected_node_adjacent_cavity_count,
-        exact_quality_repair_pass_count: mesh.backend.tet_exact_quality_repair_pass_count,
+            .tetrahedron_untangling_reconnected_node_adjacent_cavity_count,
+        exact_quality_repair_pass_count: mesh.backend.tetrahedron_exact_quality_repair_pass_count,
         exact_quality_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_reconnected_cavity_count,
+            .tetrahedron_exact_quality_reconnected_cavity_count,
         exact_quality_reconnection_quality_gain_count: mesh
             .backend
-            .tet_exact_quality_reconnection_quality_gain_count,
+            .tetrahedron_exact_quality_reconnection_quality_gain_count,
         exact_quality_face_neighbor_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_face_neighbor_reconnected_cavity_count,
+            .tetrahedron_exact_quality_face_neighbor_reconnected_cavity_count,
         exact_quality_connected_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_connected_reconnected_cavity_count,
+            .tetrahedron_exact_quality_connected_reconnected_cavity_count,
         exact_quality_node_adjacent_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_node_adjacent_reconnected_cavity_count,
+            .tetrahedron_exact_quality_node_adjacent_reconnected_cavity_count,
         exact_quality_boundary_adjacent_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_boundary_adjacent_reconnected_cavity_count,
+            .tetrahedron_exact_quality_boundary_adjacent_reconnected_cavity_count,
         exact_quality_expanded_connected_reconnected_cavity_count: mesh
             .backend
-            .tet_exact_quality_expanded_connected_reconnected_cavity_count,
-        exact_quality_split_cavity_count: mesh.backend.tet_exact_quality_split_cavity_count,
+            .tetrahedron_exact_quality_expanded_connected_reconnected_cavity_count,
+        exact_quality_split_cavity_count: mesh.backend.tetrahedron_exact_quality_split_cavity_count,
         exact_quality_seed_star_collapse_count: mesh
             .backend
-            .tet_exact_quality_seed_star_collapse_count,
+            .tetrahedron_exact_quality_seed_star_collapse_count,
         exact_quality_seed_star_relocation_count: mesh
             .backend
-            .tet_exact_quality_seed_star_relocation_count,
-        exact_quality_unrepaired_total_count: mesh.backend.tet_exact_quality_unrepaired_total_count,
+            .tetrahedron_exact_quality_seed_star_relocation_count,
+        exact_quality_unrepaired_total_count: mesh
+            .backend
+            .tetrahedron_exact_quality_unrepaired_total_count,
         exact_quality_unrepaired_general_cavity_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_general_cavity_count,
+            .tetrahedron_exact_quality_unrepaired_general_cavity_count,
         exact_quality_unrepaired_boundary_adjacent_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_boundary_adjacent_count,
+            .tetrahedron_exact_quality_unrepaired_boundary_adjacent_count,
         exact_quality_unrepaired_node_adjacent_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_node_adjacent_count,
+            .tetrahedron_exact_quality_unrepaired_node_adjacent_count,
         exact_quality_unrepaired_interior_seed_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_interior_seed_count,
+            .tetrahedron_exact_quality_unrepaired_interior_seed_count,
         exact_quality_unrepaired_edge_star_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_edge_star_count,
+            .tetrahedron_exact_quality_unrepaired_edge_star_count,
     }
 }
 
@@ -1018,16 +1028,19 @@ fn region_evidence(mesh: &AnalysisMeshArtifact) -> MeshRegionEvidence {
 }
 
 fn element_volume_m3(mesh: &AnalysisMeshArtifact, element: &AnalysisVolumeElement) -> f64 {
-    if element.kind != VolumeElementKind::Tet4 || element.node_ids.len() != 4 {
+    if element.kind != VolumeElementKind::Tetrahedron4 || element.node_ids.len() != 4 {
         return 0.0;
     }
-    let Some(points) = element_tet_points(mesh, element.node_ids.as_slice()) else {
+    let Some(points) = element_tetrahedron_points(mesh, element.node_ids.as_slice()) else {
         return 0.0;
     };
-    tet_volume_m3(points)
+    tetrahedron_volume_m3(points)
 }
 
-fn element_tet_points(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[[f64; 3]; 4]> {
+fn element_tetrahedron_points(
+    mesh: &AnalysisMeshArtifact,
+    node_ids: &[u32],
+) -> Option<[[f64; 3]; 4]> {
     Some([
         mesh_node(mesh, node_ids[0])?,
         mesh_node(mesh, node_ids[1])?,
@@ -1043,7 +1056,7 @@ fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
         .map(|node| node.coordinates_m)
 }
 
-fn tet_volume_m3(points: [[f64; 3]; 4]) -> f64 {
+fn tetrahedron_volume_m3(points: [[f64; 3]; 4]) -> f64 {
     let ab = [
         points[1][0] - points[0][0],
         points[1][1] - points[0][1],
@@ -1109,23 +1122,25 @@ fn validation_evidence(
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
         require_no_fan_fallback: validation.require_no_fan_fallback,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
-        fan_fallback_component_count: mesh.backend.tet_fan_fallback_component_count,
-        unrepaired_exact_quality_total_count: mesh.backend.tet_exact_quality_unrepaired_total_count,
+        fan_fallback_component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
+        unrepaired_exact_quality_total_count: mesh
+            .backend
+            .tetrahedron_exact_quality_unrepaired_total_count,
         unrepaired_exact_quality_general_cavity_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_general_cavity_count,
+            .tetrahedron_exact_quality_unrepaired_general_cavity_count,
         unrepaired_exact_quality_boundary_adjacent_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_boundary_adjacent_count,
+            .tetrahedron_exact_quality_unrepaired_boundary_adjacent_count,
         unrepaired_exact_quality_node_adjacent_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_node_adjacent_count,
+            .tetrahedron_exact_quality_unrepaired_node_adjacent_count,
         unrepaired_exact_quality_interior_seed_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_interior_seed_count,
+            .tetrahedron_exact_quality_unrepaired_interior_seed_count,
         unrepaired_exact_quality_edge_star_count: mesh
             .backend
-            .tet_exact_quality_unrepaired_edge_star_count,
+            .tetrahedron_exact_quality_unrepaired_edge_star_count,
         required_boundary_region_ids: validation.required_boundary_region_ids.clone(),
         required_material_region_ids: validation.required_material_region_ids.clone(),
         boundary_recovery: boundary_recovery_evidence(mesh),

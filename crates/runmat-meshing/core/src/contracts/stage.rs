@@ -10,7 +10,7 @@ pub enum MeshingStage {
     CurveMesh,
     SurfaceMesh,
     ProtectedBoundaryComplex,
-    TetMesh,
+    TetrahedronMesh,
     ConstraintRecovery,
     Optimization,
     SolveReadiness,

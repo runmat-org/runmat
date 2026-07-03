@@ -16,7 +16,7 @@ use runmat_geometry_core::{
 };
 
 #[test]
-fn preparation_runs_topology_curve_surface_plc_and_tet_stages() {
+fn preparation_runs_topology_curve_surface_plc_and_tetrahedron_stages() {
     let preparation = prepare_solid_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
         .expect("solid preparation should run");
 
@@ -77,15 +77,15 @@ fn preparation_runs_topology_curve_surface_plc_and_tet_stages() {
         .protected_edges
         .is_empty());
     assert_eq!(
-        preparation.initial_tet_mesh.elements.len(),
+        preparation.initial_tetrahedron_mesh.elements.len(),
         preparation.protected_boundary_complex.facets.len()
     );
     assert_eq!(
-        preparation.initial_tet_mesh.nodes.len(),
+        preparation.initial_tetrahedron_mesh.nodes.len(),
         preparation.protected_boundary_complex.nodes.len() + 1
     );
-    assert!(!preparation.initial_tet_mesh.recovery_complete);
-    assert!(!preparation.initial_tet_mesh.quality_optimized);
+    assert!(!preparation.initial_tetrahedron_mesh.recovery_complete);
+    assert!(!preparation.initial_tetrahedron_mesh.quality_optimized);
     assert_eq!(
         preparation.recovery_queue.evidence.entity_counts["source_face_items"],
         preparation.protected_boundary_complex.facets.len()
@@ -95,28 +95,28 @@ fn preparation_runs_topology_curve_surface_plc_and_tet_stages() {
         preparation.protected_boundary_complex.protected_edges.len()
     );
     assert!(preparation.recovery_queue.evidence.entity_counts["material_interface_items"] > 0);
-    assert_eq!(preparation.tet_stage.volume_component_count, 1);
-    assert_eq!(preparation.solver_tet_mesh.elements.len(), 6);
-    assert_eq!(preparation.tet_stage.interior_seed_point_count, 8);
-    assert_eq!(preparation.tet_stage.recovered_component_ratio, 1.0);
-    assert!((preparation.tet_stage.expected_volume_m3 - 1.0).abs() < 1.0e-12);
-    assert!((preparation.tet_stage.expected_boundary_area_m2 - 6.0).abs() < 1.0e-12);
+    assert_eq!(preparation.tetrahedron_stage.volume_component_count, 1);
+    assert_eq!(preparation.solver_tetrahedron_mesh.elements.len(), 6);
+    assert_eq!(preparation.tetrahedron_stage.interior_seed_point_count, 8);
+    assert_eq!(preparation.tetrahedron_stage.recovered_component_ratio, 1.0);
+    assert!((preparation.tetrahedron_stage.expected_volume_m3 - 1.0).abs() < 1.0e-12);
+    assert!((preparation.tetrahedron_stage.expected_boundary_area_m2 - 6.0).abs() < 1.0e-12);
     assert!(!preparation.curves.elements.is_empty());
 }
 
 #[test]
-fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
+fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tetrahedron_mesh() {
     let preparation = prepare_solid_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
         .expect("solid preparation should generate");
     let mesh = generate_solid_analysis_mesh(&cube_geometry(), &VolumeMeshingOptions::default())
-        .expect("solid mesh should generate from native solver TetMesh");
+        .expect("solid mesh should generate from native solver TetrahedronMesh");
 
     crate::validate_analysis_mesh(&mesh, crate::QualityThresholds::default())
         .expect("solid topology-first mesh should validate");
     assert!(mesh.nodes.len() > 9);
     assert_eq!(
         mesh.volume_elements.len(),
-        preparation.solver_tet_mesh.elements.len()
+        preparation.solver_tetrahedron_mesh.elements.len()
     );
     assert_eq!(mesh.volume_elements.len(), 6);
     assert_eq!(mesh.boundary_faces.len(), 768);
@@ -126,7 +126,7 @@ fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
         .iter()
         .all(|edge| !edge.adjacent_boundary_face_ids.is_empty()));
     assert_eq!(mesh.backend.backend, "solid");
-    assert_eq!(mesh.backend.algorithm, "plc_tet/v1");
+    assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
     assert_eq!(mesh.backend.source_topology_face_count, 12);
     assert_eq!(mesh.backend.cad_topology_source, "generic_cad_mesh");
     assert_eq!(mesh.backend.cad_vertex_count, 8);
@@ -158,10 +158,13 @@ fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
     assert_eq!(mesh.backend.surface_rejected_exact_cad_sample_count, 0);
     assert_eq!(mesh.backend.surface_max_cad_projection_error_m, 0.0);
     assert_eq!(mesh.backend.volume_component_count, 1);
-    assert_eq!(mesh.backend.tet_element_count, mesh.volume_elements.len());
-    assert_eq!(mesh.backend.tet_fan_fallback_component_count, 0);
-    assert_eq!(mesh.backend.tet_recovered_component_ratio, 1.0);
-    assert!((mesh.backend.tet_volume_coverage_ratio - 1.0).abs() < 1.0e-12);
+    assert_eq!(
+        mesh.backend.tetrahedron_element_count,
+        mesh.volume_elements.len()
+    );
+    assert_eq!(mesh.backend.tetrahedron_fan_fallback_component_count, 0);
+    assert_eq!(mesh.backend.tetrahedron_recovered_component_ratio, 1.0);
+    assert!((mesh.backend.tetrahedron_volume_coverage_ratio - 1.0).abs() < 1.0e-12);
     let validation_options =
         solid_validation_options(&preparation, &VolumeMeshingOptions::default());
     assert!(!validation_options.coverage_sample_points_m.is_empty());
@@ -171,14 +174,20 @@ fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
         .coverage_sample_points_m
         .iter()
         .all(|point| point.iter().all(|value| value.is_finite())));
-    assert!(mesh.backend.tet_max_radius_edge_ratio.is_finite());
-    assert!(mesh.backend.tet_min_exact_scaled_jacobian.is_finite());
+    assert!(mesh.backend.tetrahedron_max_radius_edge_ratio.is_finite());
+    assert!(mesh
+        .backend
+        .tetrahedron_min_exact_scaled_jacobian
+        .is_finite());
     assert!(
-        (mesh.backend.tet_min_exact_scaled_jacobian - mesh.quality.min_exact_scaled_jacobian).abs()
+        (mesh.backend.tetrahedron_min_exact_scaled_jacobian
+            - mesh.quality.min_exact_scaled_jacobian)
+            .abs()
             < 1.0e-12
     );
     assert_eq!(
-        mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
+        mesh.backend
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count,
         mesh.quality
             .elements
             .iter()
@@ -187,42 +196,51 @@ fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
             .count()
     );
     assert_eq!(
-        mesh.backend.tet_exact_scaled_jacobian_below_threshold_count,
+        mesh.backend
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count,
         0
     );
     assert_eq!(
         mesh.backend
-            .tet_exact_scaled_jacobian_bins
+            .tetrahedron_exact_scaled_jacobian_bins
             .values()
             .sum::<usize>(),
-        mesh.backend.tet_element_count
+        mesh.backend.tetrahedron_element_count
     );
-    assert!(!mesh.backend.tet_exact_scaled_jacobian_bins.is_empty());
-    assert!(mesh.backend.tet_optimization_pass_count <= 2);
-    assert!(mesh.backend.tet_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2);
+    assert!(!mesh
+        .backend
+        .tetrahedron_exact_scaled_jacobian_bins
+        .is_empty());
+    assert!(mesh.backend.tetrahedron_optimization_pass_count <= 2);
+    assert!(
+        mesh.backend.tetrahedron_smoothed_point_count <= mesh.backend.interior_seed_point_count * 2
+    );
     assert!(mesh
         .backend
-        .tet_optimization_initial_max_aspect_ratio
+        .tetrahedron_optimization_initial_max_aspect_ratio
         .is_finite());
     assert!(mesh
         .backend
-        .tet_optimization_final_max_aspect_ratio
+        .tetrahedron_optimization_final_max_aspect_ratio
         .is_finite());
     assert!(
-        mesh.backend.tet_optimization_final_max_aspect_ratio
-            <= mesh.backend.tet_optimization_initial_max_aspect_ratio + 1.0e-12
+        mesh.backend.tetrahedron_optimization_final_max_aspect_ratio
+            <= mesh
+                .backend
+                .tetrahedron_optimization_initial_max_aspect_ratio
+                + 1.0e-12
     );
     assert!(mesh
         .backend
-        .tet_optimization_initial_min_exact_scaled_jacobian
+        .tetrahedron_optimization_initial_min_exact_scaled_jacobian
         .is_finite());
     assert!(
         mesh.backend
-            .tet_optimization_final_min_exact_scaled_jacobian
+            .tetrahedron_optimization_final_min_exact_scaled_jacobian
             + 1.0e-12
             >= mesh
                 .backend
-                .tet_optimization_initial_min_exact_scaled_jacobian
+                .tetrahedron_optimization_initial_min_exact_scaled_jacobian
     );
     assert!(mesh.quality.min_exact_scaled_jacobian.is_finite());
     assert!(mesh
@@ -236,7 +254,7 @@ fn solid_mesh_generates_analysis_mesh_artifact_from_solver_tet_mesh() {
     );
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert_eq!(mesh.backend.boundary_edge_recovery_ratio, 1.0);
-    assert_eq!(mesh.provenance.algorithm, "plc_tet/v1");
+    assert_eq!(mesh.provenance.algorithm, "plc_tetrahedron/v1");
 }
 
 #[test]
@@ -251,13 +269,24 @@ fn solid_mesh_evidence_reports_native_recovery_and_optimization_summary() {
         &solid_validation_options(&preparation, &options),
     );
 
-    assert_eq!(mesh.backend.tet_untangling_pass_count, 0);
-    assert_eq!(mesh.backend.tet_exact_quality_repair_pass_count, 0);
-    assert_eq!(mesh.backend.tet_exact_quality_unrepaired_total_count, 0);
-    assert_eq!(evidence.tet_recovery.untangling_pass_count, 0);
-    assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 0);
+    assert_eq!(mesh.backend.tetrahedron_untangling_pass_count, 0);
+    assert_eq!(mesh.backend.tetrahedron_exact_quality_repair_pass_count, 0);
     assert_eq!(
-        evidence.tet_recovery.exact_quality_unrepaired_total_count,
+        mesh.backend
+            .tetrahedron_exact_quality_unrepaired_total_count,
+        0
+    );
+    assert_eq!(evidence.tetrahedron_recovery.untangling_pass_count, 0);
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_repair_pass_count,
+        0
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_unrepaired_total_count,
         0
     );
 }
@@ -414,13 +443,15 @@ fn solid_mesh_preserves_regions_through_requested_refinement() {
         .expect("required regions should remain selectable after requested refinement");
     let evidence = crate::build_mesh_evidence_artifact(&mesh, &validation);
 
-    assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
+    assert_eq!(mesh.backend.tetrahedron_requested_refinement_point_count, 2);
     assert_eq!(
-        mesh.backend.tet_accepted_requested_refinement_point_count,
+        mesh.backend
+            .tetrahedron_accepted_requested_refinement_point_count,
         0
     );
     assert_eq!(
-        mesh.backend.tet_rejected_requested_refinement_point_count,
+        mesh.backend
+            .tetrahedron_rejected_requested_refinement_point_count,
         2
     );
     for sample in &sizing.samples {
@@ -428,33 +459,34 @@ fn solid_mesh_preserves_regions_through_requested_refinement() {
         assert!(
             mesh.sizing.rejected_samples.iter().any(|rejected| {
                 rejected.reason.as_deref() == Some(reason)
-                    && rejected.status == "not_inserted_by_tet_generation"
+                    && rejected.status == "not_inserted_by_tetrahedron_generation"
             }),
             "{reason} should be tracked as requested but not yet inserted"
         );
     }
     assert_eq!(
         mesh.backend
-            .tet_requested_refinement_rejected_by_reason
-            .get("native_tet_generator_has_no_requested_point_insertion"),
+            .tetrahedron_requested_refinement_rejected_by_reason
+            .get("native_tetrahedron_generator_has_no_requested_point_insertion"),
         Some(&2)
     );
     assert_eq!(
-        evidence.sizing.requested_tet_refinement_point_count,
-        mesh.backend.tet_requested_refinement_point_count
+        evidence.sizing.requested_tetrahedron_refinement_point_count,
+        mesh.backend.tetrahedron_requested_refinement_point_count
     );
     assert_eq!(
         evidence
             .sizing
-            .accepted_requested_tet_refinement_point_count,
-        mesh.backend.tet_accepted_requested_refinement_point_count
+            .accepted_requested_tetrahedron_refinement_point_count,
+        mesh.backend
+            .tetrahedron_accepted_requested_refinement_point_count
     );
     assert!(evidence.sizing.applied_by_reason.is_empty());
     assert_eq!(
         evidence
             .sizing
-            .requested_tet_refinement_rejected_by_reason
-            .get("native_tet_generator_has_no_requested_point_insertion"),
+            .requested_tetrahedron_refinement_rejected_by_reason
+            .get("native_tetrahedron_generator_has_no_requested_point_insertion"),
         Some(&2)
     );
     assert!(
@@ -496,7 +528,7 @@ fn solid_mesh_preserves_regions_through_requested_refinement() {
 }
 
 #[test]
-fn solid_boundary_patch_refinement_tracks_existing_tet_nodes() {
+fn solid_boundary_patch_refinement_tracks_existing_tetrahedron_nodes() {
     let mut options = VolumeMeshingOptions::default();
     options.target_size = MeshTargetSize::LengthM(1.0);
     options.refinement.strategy = crate::options::RefinementStrategy::Adaptive;
@@ -534,14 +566,15 @@ fn solid_boundary_patch_refinement_tracks_existing_tet_nodes() {
         .expect("boundary patch refinement should preserve required regions");
     let evidence = crate::build_mesh_evidence_artifact(&mesh, &validation);
 
-    assert_eq!(mesh.backend.tet_requested_refinement_point_count, 2);
+    assert_eq!(mesh.backend.tetrahedron_requested_refinement_point_count, 2);
     assert_eq!(
-        mesh.backend.tet_accepted_requested_refinement_point_count,
+        mesh.backend
+            .tetrahedron_accepted_requested_refinement_point_count,
         2
     );
     assert_eq!(
         mesh.backend
-            .tet_accepted_requested_refinement_surrogate_point_count,
+            .tetrahedron_accepted_requested_refinement_surrogate_point_count,
         0
     );
     for sample in &sizing.samples {
@@ -550,30 +583,30 @@ fn solid_boundary_patch_refinement_tracks_existing_tet_nodes() {
             mesh.sizing.applied_samples.iter().any(|applied| {
                 applied.reason.as_deref() == Some(reason) && applied.inserted_breakpoint_count > 0
             }),
-            "{reason} should be tracked on an existing Tet node"
+            "{reason} should be tracked on an existing Tetrahedron node"
         );
     }
     assert!(mesh
         .backend
-        .tet_requested_refinement_rejected_by_reason
+        .tetrahedron_requested_refinement_rejected_by_reason
         .is_empty());
     assert!(mesh
         .backend
-        .tet_requested_refinement_dropped_by_reason
+        .tetrahedron_requested_refinement_dropped_by_reason
         .is_empty());
     assert_eq!(
         evidence
             .sizing
-            .accepted_requested_tet_refinement_surrogate_point_count,
+            .accepted_requested_tetrahedron_refinement_surrogate_point_count,
         0
     );
     assert!(evidence
         .sizing
-        .requested_tet_refinement_rejected_by_reason
+        .requested_tetrahedron_refinement_rejected_by_reason
         .is_empty());
     assert!(evidence
         .sizing
-        .requested_tet_refinement_dropped_by_reason
+        .requested_tetrahedron_refinement_dropped_by_reason
         .is_empty());
     assert_eq!(
         evidence
@@ -655,7 +688,7 @@ fn non_box_topology_is_not_thin_low_face_topology() {
 }
 
 #[test]
-fn thin_box_generates_native_structured_box_tet_mesh() {
+fn thin_box_generates_native_structured_box_tetrahedron_mesh() {
     let mut options = VolumeMeshingOptions::default();
     options.target_size = MeshTargetSize::LengthM(0.1_f64.cbrt() / 2.0);
 
@@ -664,8 +697,8 @@ fn thin_box_generates_native_structured_box_tet_mesh() {
     let mesh = analysis_mesh_from_preparation(&preparation, &options, None)
         .expect("thin analysis mesh should build");
 
-    assert_eq!(preparation.solver_tet_mesh.elements.len(), 6);
-    assert_eq!(preparation.tet_stage.volume_component_count, 1);
+    assert_eq!(preparation.solver_tetrahedron_mesh.elements.len(), 6);
+    assert_eq!(preparation.tetrahedron_stage.volume_component_count, 1);
     assert_eq!(volume_component_count(&mesh), 1);
 }
 
@@ -893,7 +926,7 @@ fn solid_sizing_reports_unaccepted_requested_samples_as_rejections() {
     assert_eq!(
         evidence
             .sizing
-            .requested_tet_refinement_rejected_by_reason
+            .requested_tetrahedron_refinement_rejected_by_reason
             .get("outside_volume"),
         Some(&1)
     );
@@ -995,7 +1028,8 @@ fn solid_sizing_includes_cad_curvature_samples() {
             .count()
     );
     assert_eq!(
-        mesh.backend.tet_rejected_requested_refinement_point_count,
+        mesh.backend
+            .tetrahedron_rejected_requested_refinement_point_count,
         0
     );
 }
@@ -1314,7 +1348,7 @@ fn faceted_cylinder_generation_timing_is_observable() {
 }
 
 #[test]
-fn faceted_cylinder_fails_closed_until_general_plc_tet_generation_exists() {
+fn faceted_cylinder_fails_closed_until_general_plc_tetrahedron_generation_exists() {
     let geometry = faceted_cylinder_geometry();
     let mut options = VolumeMeshingOptions::default();
     options.target_size = MeshTargetSize::LengthM(0.459_259_458_684_314_6);
@@ -1322,8 +1356,8 @@ fn faceted_cylinder_fails_closed_until_general_plc_tet_generation_exists() {
 
     assert_eq!(
         prepare_solid_mesh(&geometry, &options),
-        Err(SolidMeshError::TetGeneration(
-            TetGenerationError::UnsupportedStructuredBoxPlc
+        Err(SolidMeshError::TetrahedronGeneration(
+            TetrahedronGenerationError::UnsupportedStructuredBoxPlc
         ))
     );
 }
@@ -1404,14 +1438,15 @@ fn log_preparation_stage_timings(
     );
 
     let stage = std::time::Instant::now();
-    let solver_tet_mesh = generate_structured_box_tet_mesh_from_plc(&protected_boundary_complex)
-        .expect("structured box Tet mesh");
+    let solver_tetrahedron_mesh =
+        generate_structured_box_tetrahedron_mesh_from_plc(&protected_boundary_complex)
+            .expect("structured box Tetrahedron mesh");
     eprintln!(
-        "{label} tet elapsed_ms={:.1} nodes={} elements={} boundary_faces={}",
+        "{label} tetrahedron elapsed_ms={:.1} nodes={} elements={} boundary_faces={}",
         stage.elapsed().as_secs_f64() * 1000.0,
-        solver_tet_mesh.nodes.len(),
-        solver_tet_mesh.elements.len(),
-        solver_tet_mesh.boundary_faces.len()
+        solver_tetrahedron_mesh.nodes.len(),
+        solver_tetrahedron_mesh.elements.len(),
+        solver_tetrahedron_mesh.boundary_faces.len()
     );
 }
 
@@ -1590,7 +1625,7 @@ fn solid_sizing_includes_interface_samples_by_focus_level() {
 fn quality_report_summarizes_boundary_projection_error() {
     let quality = quality_report(
         vec![ElementQuality {
-            element_id: "tet_1".to_string(),
+            element_id: "tetrahedron_1".to_string(),
             scaled_jacobian: 0.5,
             exact_scaled_jacobian: 0.45,
             aspect_ratio: 2.0,

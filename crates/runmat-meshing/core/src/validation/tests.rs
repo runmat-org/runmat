@@ -10,7 +10,7 @@ use crate::{
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
-fn valid_tet_mesh() -> AnalysisMeshArtifact {
+fn valid_tetrahedron_mesh() -> AnalysisMeshArtifact {
     AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: "mesh_valid".to_string(),
@@ -38,7 +38,7 @@ fn valid_tet_mesh() -> AnalysisMeshArtifact {
         ],
         volume_elements: vec![AnalysisVolumeElement {
             element_id: "e1".to_string(),
-            kind: VolumeElementKind::Tet4,
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids: vec![1, 2, 3, 4],
             material_region_id: "mat_region".to_string(),
             provenance: Vec::new(),
@@ -66,8 +66,8 @@ fn valid_tet_mesh() -> AnalysisMeshArtifact {
 }
 
 #[test]
-fn accepts_minimal_valid_tet4_mesh() {
-    let mesh = valid_tet_mesh();
+fn accepts_minimal_valid_tetrahedron4_mesh() {
+    let mesh = valid_tetrahedron_mesh();
     validate_analysis_mesh(&mesh, QualityThresholds::default()).expect("mesh should validate");
 }
 
@@ -92,7 +92,7 @@ fn validation_options_round_trip_with_required_regions() {
 
 #[test]
 fn rejects_empty_volume_elements() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.volume_elements.clear();
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("empty volume elements should fail");
@@ -101,7 +101,7 @@ fn rejects_empty_volume_elements() {
 
 #[test]
 fn rejects_mesh_that_exceeds_element_budget() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -121,8 +121,8 @@ fn rejects_mesh_that_exceeds_element_budget() {
 
 #[test]
 fn rejects_fan_fallback_recovery_when_policy_requires_strict_recovery() {
-    let mut mesh = valid_tet_mesh();
-    mesh.backend.tet_fan_fallback_component_count = 1;
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_fan_fallback_component_count = 1;
 
     let err = validate_analysis_mesh_with_options(
         &mesh,
@@ -145,14 +145,15 @@ fn rejects_fan_fallback_recovery_when_policy_requires_strict_recovery() {
 
 #[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
-        .tet_exact_quality_unrepaired_boundary_adjacent_count = 2;
+        .tetrahedron_exact_quality_unrepaired_boundary_adjacent_count = 2;
     mesh.backend
-        .tet_exact_quality_unrepaired_node_adjacent_count = 4;
+        .tetrahedron_exact_quality_unrepaired_node_adjacent_count = 4;
     mesh.backend
-        .tet_exact_quality_unrepaired_interior_seed_count = 3;
-    mesh.backend.tet_exact_quality_unrepaired_edge_star_count = 5;
+        .tetrahedron_exact_quality_unrepaired_interior_seed_count = 3;
+    mesh.backend
+        .tetrahedron_exact_quality_unrepaired_edge_star_count = 5;
 
     let err = validate_analysis_mesh_with_options(
         &mesh,
@@ -182,10 +183,11 @@ fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
 
 #[test]
 fn rejects_unrepaired_general_cavity_exact_quality_when_policy_requires_strict_recovery() {
-    let mut mesh = valid_tet_mesh();
-    mesh.backend.tet_exact_quality_unrepaired_total_count = 1;
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
-        .tet_exact_quality_unrepaired_general_cavity_count = 1;
+        .tetrahedron_exact_quality_unrepaired_total_count = 1;
+    mesh.backend
+        .tetrahedron_exact_quality_unrepaired_general_cavity_count = 1;
 
     let err = validate_analysis_mesh_with_options(
         &mesh,
@@ -211,7 +213,7 @@ fn rejects_unrepaired_general_cavity_exact_quality_when_policy_requires_strict_r
 
 #[test]
 fn accepts_face_connected_volume_components_within_budget() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.nodes.push(AnalysisMeshNode {
         node_id: 5,
         coordinates_m: [0.0, 0.0, -1.0],
@@ -219,7 +221,7 @@ fn accepts_face_connected_volume_components_within_budget() {
     });
     mesh.volume_elements.push(AnalysisVolumeElement {
         element_id: "e2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![1, 3, 2, 5],
         material_region_id: "mat_region".to_string(),
         provenance: Vec::new(),
@@ -233,12 +235,12 @@ fn accepts_face_connected_volume_components_within_budget() {
             ..AnalysisMeshValidationOptions::default()
         },
     )
-    .expect("face-connected tets should remain one volume component");
+    .expect("face-connected tetrahedra should remain one volume component");
 }
 
 #[test]
 fn rejects_unintended_isolated_volume_components() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.nodes.extend([
         AnalysisMeshNode {
             node_id: 5,
@@ -263,7 +265,7 @@ fn rejects_unintended_isolated_volume_components() {
     ]);
     mesh.volume_elements.push(AnalysisVolumeElement {
         element_id: "e2".to_string(),
-        kind: VolumeElementKind::Tet4,
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: vec![5, 6, 7, 8],
         material_region_id: "mat_region".to_string(),
         provenance: Vec::new(),
@@ -289,7 +291,7 @@ fn rejects_unintended_isolated_volume_components() {
 
 #[test]
 fn rejects_unsupported_element_kind_until_assembly_exists() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
     mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
@@ -304,7 +306,7 @@ fn rejects_unsupported_element_kind_until_assembly_exists() {
 
 #[test]
 fn rejects_missing_material_coverage() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.volume_elements[0].material_region_id.clear();
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("missing material region should fail");
@@ -318,7 +320,7 @@ fn rejects_missing_material_coverage() {
 
 #[test]
 fn rejects_unmapped_boundary_nodes() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_faces[0].node_ids = vec![1, 2, 99];
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("unknown boundary node should fail");
@@ -333,7 +335,7 @@ fn rejects_unmapped_boundary_nodes() {
 
 #[test]
 fn rejects_unmapped_boundary_edge_nodes() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_edges = vec![AnalysisBoundaryEdge {
         edge_id: "edge1".to_string(),
         node_ids: [1, 99],
@@ -354,7 +356,7 @@ fn rejects_unmapped_boundary_edge_nodes() {
 
 #[test]
 fn rejects_missing_boundary_edge_recovery_when_required() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -374,7 +376,7 @@ fn rejects_missing_boundary_edge_recovery_when_required() {
 
 #[test]
 fn rejects_boundary_edge_adjacent_to_unknown_face() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_edges = vec![AnalysisBoundaryEdge {
         edge_id: "edge1".to_string(),
         node_ids: [1, 2],
@@ -395,7 +397,7 @@ fn rejects_boundary_edge_adjacent_to_unknown_face() {
 
 #[test]
 fn rejects_quality_threshold_failures() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.quality.min_scaled_jacobian = 0.01;
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("low jacobian should fail");
@@ -413,7 +415,7 @@ fn rejects_quality_threshold_failures() {
 
 #[test]
 fn rejects_exact_quality_threshold_failures() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.quality.min_exact_scaled_jacobian = 0.01;
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("low exact jacobian should fail");
@@ -427,7 +429,7 @@ fn rejects_exact_quality_threshold_failures() {
 
 #[test]
 fn rejects_element_exact_quality_threshold_failures() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.quality.elements.push(ElementQuality {
         element_id: "e1".to_string(),
         scaled_jacobian: 0.8,
@@ -447,7 +449,7 @@ fn rejects_element_exact_quality_threshold_failures() {
 
 #[test]
 fn rejects_boundary_projection_quality_threshold_failures() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.quality.max_boundary_projection_error_m = 2.0e-6;
 
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
@@ -463,7 +465,7 @@ fn rejects_boundary_projection_quality_threshold_failures() {
 
 #[test]
 fn rejects_mesh_that_underfills_expected_bounds() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -484,7 +486,7 @@ fn rejects_mesh_that_underfills_expected_bounds() {
 
 #[test]
 fn rejects_mesh_that_underfills_expected_volume() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -504,7 +506,7 @@ fn rejects_mesh_that_underfills_expected_volume() {
 
 #[test]
 fn rejects_uncovered_interior_coverage_samples() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -525,7 +527,7 @@ fn rejects_uncovered_interior_coverage_samples() {
 
 #[test]
 fn accepts_covered_interior_coverage_samples() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -538,8 +540,8 @@ fn accepts_covered_interior_coverage_samples() {
 }
 
 #[test]
-fn rejects_nearby_uncovered_samples_for_small_tets() {
-    let mut mesh = valid_tet_mesh();
+fn rejects_nearby_uncovered_samples_for_small_tetrahedra() {
+    let mut mesh = valid_tetrahedron_mesh();
     for node in &mut mesh.nodes {
         for coordinate in &mut node.coordinates_m {
             *coordinate *= 1.0e-3;
@@ -553,7 +555,7 @@ fn rejects_nearby_uncovered_samples_for_small_tets() {
             ..AnalysisMeshValidationOptions::default()
         },
     )
-    .expect_err("sample outside a small tet should fail");
+    .expect_err("sample outside a small tetrahedron should fail");
     assert_eq!(
         err,
         AnalysisMeshValidationError::CoverageSampleFailed {
@@ -565,7 +567,7 @@ fn rejects_nearby_uncovered_samples_for_small_tets() {
 
 #[test]
 fn rejects_mesh_that_underfills_expected_boundary_area() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -585,7 +587,7 @@ fn rejects_mesh_that_underfills_expected_boundary_area() {
 
 #[test]
 fn rejects_unrecovered_boundary_faces_when_required() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_faces[0].adjacent_volume_element_ids.clear();
     let err = validate_analysis_mesh_with_options(
         &mesh,
@@ -606,7 +608,7 @@ fn rejects_unrecovered_boundary_faces_when_required() {
 
 #[test]
 fn rejects_missing_required_boundary_region() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -625,7 +627,7 @@ fn rejects_missing_required_boundary_region() {
 
 #[test]
 fn rejects_required_boundary_region_without_recovered_face() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_faces[0].adjacent_volume_element_ids.clear();
     let err = validate_analysis_mesh_with_options(
         &mesh,
@@ -645,7 +647,7 @@ fn rejects_required_boundary_region_without_recovered_face() {
 
 #[test]
 fn rejects_missing_required_material_region() {
-    let mesh = valid_tet_mesh();
+    let mesh = valid_tetrahedron_mesh();
     let err = validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -668,7 +670,7 @@ fn rejects_missing_required_material_region() {
 
 #[test]
 fn rejects_required_material_region_without_positive_volume() {
-    let mut mesh = valid_tet_mesh();
+    let mut mesh = valid_tetrahedron_mesh();
     mesh.nodes[3].coordinates_m = mesh.nodes[0].coordinates_m;
     let err = validate_analysis_mesh_with_options(
         &mesh,

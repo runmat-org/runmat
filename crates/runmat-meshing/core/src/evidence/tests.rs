@@ -30,8 +30,8 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             node(4, [0.0, 0.0, 1.0]),
         ],
         volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tet_1".to_string(),
-            kind: VolumeElementKind::Tet4,
+            element_id: "tetrahedron_1".to_string(),
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids: vec![1, 2, 3, 4],
             material_region_id: "solid".to_string(),
             provenance: Vec::new(),
@@ -40,7 +40,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             face_id: "face_1".to_string(),
             kind: BoundaryElementKind::Tri3,
             node_ids: vec![1, 2, 3],
-            adjacent_volume_element_ids: vec!["tet_1".to_string()],
+            adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
             region_ids: vec!["fixed".to_string()],
             provenance: Vec::new(),
         }],
@@ -58,7 +58,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             mean_boundary_projection_error_m: 0.0,
             max_boundary_projection_error_m: 0.0,
             elements: vec![ElementQuality {
-                element_id: "tet_1".to_string(),
+                element_id: "tetrahedron_1".to_string(),
                 scaled_jacobian: 0.5,
                 exact_scaled_jacobian: 0.45,
                 aspect_ratio: 2.0,
@@ -162,61 +162,61 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             surface_exact_cad_sample_node_count: 4,
             surface_rejected_exact_cad_sample_count: 5,
             surface_max_cad_projection_error_m: 3.0e-6,
-            tet_element_count: 12,
-            tet_recovered_component_ratio: 1.0,
-            tet_fan_fallback_component_count: 0,
-            tet_volume_coverage_ratio: 0.99,
-            tet_refinement_pass_count: 2,
-            tet_refinement_point_count: 5,
-            tet_requested_refinement_point_count: 5,
-            tet_accepted_requested_refinement_location_count: 5,
-            tet_accepted_requested_refinement_point_count: 3,
-            tet_accepted_requested_refinement_surrogate_point_count: 2,
-            tet_rejected_requested_refinement_point_count: 1,
-            tet_requested_refinement_rejected_by_reason: BTreeMap::from([(
+            tetrahedron_element_count: 12,
+            tetrahedron_recovered_component_ratio: 1.0,
+            tetrahedron_fan_fallback_component_count: 0,
+            tetrahedron_volume_coverage_ratio: 0.99,
+            tetrahedron_refinement_pass_count: 2,
+            tetrahedron_refinement_point_count: 5,
+            tetrahedron_requested_refinement_point_count: 5,
+            tetrahedron_accepted_requested_refinement_location_count: 5,
+            tetrahedron_accepted_requested_refinement_point_count: 3,
+            tetrahedron_accepted_requested_refinement_surrogate_point_count: 2,
+            tetrahedron_rejected_requested_refinement_point_count: 1,
+            tetrahedron_requested_refinement_rejected_by_reason: BTreeMap::from([(
                 "quality_or_recovery".to_string(),
                 1,
             )]),
-            tet_dropped_requested_refinement_point_count: 2,
-            tet_requested_refinement_dropped_by_reason: BTreeMap::from([(
+            tetrahedron_dropped_requested_refinement_point_count: 2,
+            tetrahedron_requested_refinement_dropped_by_reason: BTreeMap::from([(
                 "not_retained_after_repair".to_string(),
                 2,
             )]),
-            tet_optimization_pass_count: 1,
-            tet_smoothed_point_count: 2,
-            tet_sliver_count: 1,
-            tet_sliver_removed_count: 2,
-            tet_optimization_target_seed_count: 7,
-            tet_optimization_skipped_target_seed_count: 4,
-            tet_optimization_rejected_edit_count: 3,
-            tet_optimization_initial_max_aspect_ratio: 6.0,
-            tet_optimization_final_max_aspect_ratio: 4.0,
-            tet_optimization_initial_min_exact_scaled_jacobian: 0.32,
-            tet_optimization_final_min_exact_scaled_jacobian: 0.40,
-            tet_untangling_pass_count: 2,
-            tet_untangling_initial_near_singular_count: 6,
-            tet_untangling_final_near_singular_count: 1,
-            tet_untangling_relocated_seed_count: 3,
-            tet_untangling_reconnected_edge_star_count: 4,
-            tet_untangling_reconnected_boundary_adjacent_cavity_count: 5,
-            tet_untangling_reconnected_node_adjacent_cavity_count: 11,
-            tet_exact_quality_repair_pass_count: 1,
-            tet_exact_quality_reconnected_cavity_count: 2,
-            tet_exact_quality_reconnection_quality_gain_count: 1,
-            tet_exact_quality_face_neighbor_reconnected_cavity_count: 6,
-            tet_exact_quality_connected_reconnected_cavity_count: 7,
-            tet_exact_quality_node_adjacent_reconnected_cavity_count: 12,
-            tet_exact_quality_boundary_adjacent_reconnected_cavity_count: 8,
-            tet_exact_quality_expanded_connected_reconnected_cavity_count: 9,
-            tet_exact_quality_split_cavity_count: 3,
-            tet_exact_quality_seed_star_collapse_count: 4,
-            tet_exact_quality_seed_star_relocation_count: 5,
-            tet_exact_quality_unrepaired_total_count: 9,
-            tet_exact_quality_unrepaired_general_cavity_count: 1,
-            tet_exact_quality_unrepaired_boundary_adjacent_count: 6,
-            tet_exact_quality_unrepaired_node_adjacent_count: 10,
-            tet_exact_quality_unrepaired_interior_seed_count: 7,
-            tet_exact_quality_unrepaired_edge_star_count: 8,
+            tetrahedron_optimization_pass_count: 1,
+            tetrahedron_smoothed_point_count: 2,
+            tetrahedron_sliver_count: 1,
+            tetrahedron_sliver_removed_count: 2,
+            tetrahedron_optimization_target_seed_count: 7,
+            tetrahedron_optimization_skipped_target_seed_count: 4,
+            tetrahedron_optimization_rejected_edit_count: 3,
+            tetrahedron_optimization_initial_max_aspect_ratio: 6.0,
+            tetrahedron_optimization_final_max_aspect_ratio: 4.0,
+            tetrahedron_optimization_initial_min_exact_scaled_jacobian: 0.32,
+            tetrahedron_optimization_final_min_exact_scaled_jacobian: 0.40,
+            tetrahedron_untangling_pass_count: 2,
+            tetrahedron_untangling_initial_near_singular_count: 6,
+            tetrahedron_untangling_final_near_singular_count: 1,
+            tetrahedron_untangling_relocated_seed_count: 3,
+            tetrahedron_untangling_reconnected_edge_star_count: 4,
+            tetrahedron_untangling_reconnected_boundary_adjacent_cavity_count: 5,
+            tetrahedron_untangling_reconnected_node_adjacent_cavity_count: 11,
+            tetrahedron_exact_quality_repair_pass_count: 1,
+            tetrahedron_exact_quality_reconnected_cavity_count: 2,
+            tetrahedron_exact_quality_reconnection_quality_gain_count: 1,
+            tetrahedron_exact_quality_face_neighbor_reconnected_cavity_count: 6,
+            tetrahedron_exact_quality_connected_reconnected_cavity_count: 7,
+            tetrahedron_exact_quality_node_adjacent_reconnected_cavity_count: 12,
+            tetrahedron_exact_quality_boundary_adjacent_reconnected_cavity_count: 8,
+            tetrahedron_exact_quality_expanded_connected_reconnected_cavity_count: 9,
+            tetrahedron_exact_quality_split_cavity_count: 3,
+            tetrahedron_exact_quality_seed_star_collapse_count: 4,
+            tetrahedron_exact_quality_seed_star_relocation_count: 5,
+            tetrahedron_exact_quality_unrepaired_total_count: 9,
+            tetrahedron_exact_quality_unrepaired_general_cavity_count: 1,
+            tetrahedron_exact_quality_unrepaired_boundary_adjacent_count: 6,
+            tetrahedron_exact_quality_unrepaired_node_adjacent_count: 10,
+            tetrahedron_exact_quality_unrepaired_interior_seed_count: 7,
+            tetrahedron_exact_quality_unrepaired_edge_star_count: 8,
             ..MeshBackendSummary::default()
         },
         adaptive_iterations: Vec::new(),
@@ -322,65 +322,76 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
         8
     );
     assert_eq!(evidence.sizing.inserted_breakpoint_count, 2);
-    assert_eq!(evidence.sizing.requested_tet_refinement_point_count, 5);
     assert_eq!(
-        evidence
-            .sizing
-            .accepted_requested_tet_refinement_location_count,
+        evidence.sizing.requested_tetrahedron_refinement_point_count,
         5
     );
     assert_eq!(
         evidence
             .sizing
-            .accepted_requested_tet_refinement_point_count,
+            .accepted_requested_tetrahedron_refinement_location_count,
+        5
+    );
+    assert_eq!(
+        evidence
+            .sizing
+            .accepted_requested_tetrahedron_refinement_point_count,
         3
     );
     assert_eq!(
         evidence
             .sizing
-            .rejected_requested_tet_refinement_point_count,
+            .rejected_requested_tetrahedron_refinement_point_count,
         1
     );
     assert_eq!(
         evidence
             .sizing
-            .requested_tet_refinement_rejected_by_reason
+            .requested_tetrahedron_refinement_rejected_by_reason
             .get("quality_or_recovery"),
         Some(&1)
     );
     assert_eq!(
-        evidence.sizing.dropped_requested_tet_refinement_point_count,
+        evidence
+            .sizing
+            .dropped_requested_tetrahedron_refinement_point_count,
         2
     );
     assert_eq!(
         evidence
             .sizing
-            .requested_tet_refinement_dropped_by_reason
+            .requested_tetrahedron_refinement_dropped_by_reason
             .get("not_retained_after_repair"),
         Some(&2)
     );
     assert_eq!(
         evidence
             .sizing
-            .accepted_requested_tet_refinement_surrogate_point_count,
+            .accepted_requested_tetrahedron_refinement_surrogate_point_count,
         2
     );
     assert_eq!(
         evidence
             .sizing
-            .accepted_requested_tet_refinement_exact_point_count,
+            .accepted_requested_tetrahedron_refinement_exact_point_count,
         1
     );
     assert_eq!(
-        evidence.sizing.requested_tet_refinement_acceptance_ratio,
+        evidence
+            .sizing
+            .requested_tetrahedron_refinement_acceptance_ratio,
         Some(0.6)
     );
     assert_eq!(
-        evidence.sizing.requested_tet_refinement_rejection_ratio,
+        evidence
+            .sizing
+            .requested_tetrahedron_refinement_rejection_ratio,
         Some(0.2)
     );
     assert_eq!(
-        evidence.sizing.requested_tet_refinement_surrogate_ratio,
+        evidence
+            .sizing
+            .requested_tetrahedron_refinement_surrogate_ratio,
         Some(2.0 / 3.0)
     );
     assert_eq!(evidence.sizing.sample_count, 3);
@@ -425,150 +436,191 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             .get("cad.curvature"),
         Some(&1)
     );
-    assert_eq!(evidence.tet_recovery.element_count, 12);
-    assert_eq!(evidence.tet_recovery.recovered_component_ratio, 1.0);
-    assert_eq!(evidence.tet_recovery.volume_coverage_ratio, 0.99);
-    assert_eq!(evidence.tet_recovery.refinement_pass_count, 2);
-    assert_eq!(evidence.tet_recovery.refinement_point_count, 5);
-    assert_eq!(evidence.tet_recovery.optimization_pass_count, 1);
-    assert_eq!(evidence.tet_recovery.smoothed_point_count, 2);
-    assert_eq!(evidence.tet_recovery.sliver_count, 1);
-    assert_eq!(evidence.tet_recovery.sliver_removed_count, 2);
-    assert_eq!(evidence.tet_recovery.optimization_target_seed_count, 7);
+    assert_eq!(evidence.tetrahedron_recovery.element_count, 12);
+    assert_eq!(evidence.tetrahedron_recovery.recovered_component_ratio, 1.0);
+    assert_eq!(evidence.tetrahedron_recovery.volume_coverage_ratio, 0.99);
+    assert_eq!(evidence.tetrahedron_recovery.refinement_pass_count, 2);
+    assert_eq!(evidence.tetrahedron_recovery.refinement_point_count, 5);
+    assert_eq!(evidence.tetrahedron_recovery.optimization_pass_count, 1);
+    assert_eq!(evidence.tetrahedron_recovery.smoothed_point_count, 2);
+    assert_eq!(evidence.tetrahedron_recovery.sliver_count, 1);
+    assert_eq!(evidence.tetrahedron_recovery.sliver_removed_count, 2);
     assert_eq!(
-        evidence.tet_recovery.optimization_skipped_target_seed_count,
+        evidence.tetrahedron_recovery.optimization_target_seed_count,
+        7
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .optimization_skipped_target_seed_count,
         4
     );
-    assert_eq!(evidence.tet_recovery.optimization_rejected_edit_count, 3);
     assert_eq!(
-        evidence.tet_recovery.optimization_initial_max_aspect_ratio,
+        evidence
+            .tetrahedron_recovery
+            .optimization_rejected_edit_count,
+        3
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .optimization_initial_max_aspect_ratio,
         6.0
     );
     assert_eq!(
-        evidence.tet_recovery.optimization_final_max_aspect_ratio,
+        evidence
+            .tetrahedron_recovery
+            .optimization_final_max_aspect_ratio,
         4.0
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .optimization_initial_min_exact_scaled_jacobian,
         0.32
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .optimization_final_min_exact_scaled_jacobian,
         0.40
     );
-    assert_eq!(evidence.tet_recovery.untangling_pass_count, 2);
+    assert_eq!(evidence.tetrahedron_recovery.untangling_pass_count, 2);
     assert_eq!(
-        evidence.tet_recovery.untangling_initial_near_singular_count,
+        evidence
+            .tetrahedron_recovery
+            .untangling_initial_near_singular_count,
         6
     );
     assert_eq!(
-        evidence.tet_recovery.untangling_final_near_singular_count,
+        evidence
+            .tetrahedron_recovery
+            .untangling_final_near_singular_count,
         1
     );
-    assert_eq!(evidence.tet_recovery.untangling_relocated_seed_count, 3);
     assert_eq!(
-        evidence.tet_recovery.untangling_reconnected_edge_star_count,
+        evidence
+            .tetrahedron_recovery
+            .untangling_relocated_seed_count,
+        3
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .untangling_reconnected_edge_star_count,
         4
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .untangling_reconnected_boundary_adjacent_cavity_count,
         5
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .untangling_reconnected_node_adjacent_cavity_count,
         11
     );
-    assert_eq!(evidence.tet_recovery.exact_quality_repair_pass_count, 1);
     assert_eq!(
-        evidence.tet_recovery.exact_quality_reconnected_cavity_count,
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_repair_pass_count,
+        1
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_reconnected_cavity_count,
         2
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_reconnection_quality_gain_count,
         1
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_face_neighbor_reconnected_cavity_count,
         6
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_connected_reconnected_cavity_count,
         7
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_node_adjacent_reconnected_cavity_count,
         12
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_boundary_adjacent_reconnected_cavity_count,
         8
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_expanded_connected_reconnected_cavity_count,
         9
     );
-    assert_eq!(evidence.tet_recovery.exact_quality_split_cavity_count, 3);
     assert_eq!(
-        evidence.tet_recovery.exact_quality_seed_star_collapse_count,
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_split_cavity_count,
+        3
+    );
+    assert_eq!(
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_seed_star_collapse_count,
         4
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_seed_star_relocation_count,
         5
     );
     assert_eq!(
-        evidence.tet_recovery.exact_quality_unrepaired_total_count,
+        evidence
+            .tetrahedron_recovery
+            .exact_quality_unrepaired_total_count,
         9
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_unrepaired_general_cavity_count,
         1
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_unrepaired_boundary_adjacent_count,
         6
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_unrepaired_node_adjacent_count,
         10
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_unrepaired_interior_seed_count,
         7
     );
     assert_eq!(
         evidence
-            .tet_recovery
+            .tetrahedron_recovery
             .exact_quality_unrepaired_edge_star_count,
         8
     );
@@ -724,12 +776,12 @@ fn evidence_summarizes_adaptive_iterations_without_raw_marker_details() {
             ],
             markers: vec![
                 RefinementMarker {
-                    entity_id: "tet_1".to_string(),
+                    entity_id: "tetrahedron_1".to_string(),
                     weight: 1.0,
                     reason: "structural.stress_gradient".to_string(),
                 },
                 RefinementMarker {
-                    entity_id: "tet_2".to_string(),
+                    entity_id: "tetrahedron_2".to_string(),
                     weight: 0.5,
                     reason: "structural.stress_gradient".to_string(),
                 },
@@ -828,7 +880,7 @@ fn dev_mesh_evidence_caps_debug_events() {
             node(3, [0.0, 1.0, 0.0]),
             node(4, [0.0, 0.0, 1.0]),
         ],
-        volume_elements: vec![volume_element("tet_1", [1, 2, 3, 4])],
+        volume_elements: vec![volume_element("tetrahedron_1", [1, 2, 3, 4])],
         boundary_faces: vec![boundary_face("face_1", [1, 2, 3])],
         boundary_edges: vec![
             boundary_edge("edge_1", [1, 2]),
@@ -852,7 +904,7 @@ fn dev_mesh_evidence_caps_debug_events() {
         &AnalysisMeshValidationOptions::default(),
         vec![
             MeshDebugEvent::new("surface", "info", "surface recovery accepted"),
-            MeshDebugEvent::new("volume", "warning", "Tet quality improved"),
+            MeshDebugEvent::new("volume", "warning", "Tetrahedron quality improved"),
             MeshDebugEvent::new("validation", "info", "solve readiness checked"),
         ],
         2,
@@ -899,8 +951,8 @@ fn minimal_evidence_mesh() -> AnalysisMeshArtifact {
             node(4, [0.0, 0.0, 1.0]),
         ],
         volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tet_1".to_string(),
-            kind: VolumeElementKind::Tet4,
+            element_id: "tetrahedron_1".to_string(),
+            kind: VolumeElementKind::Tetrahedron4,
             node_ids: vec![1, 2, 3, 4],
             material_region_id: "solid".to_string(),
             provenance: Vec::new(),
@@ -909,7 +961,7 @@ fn minimal_evidence_mesh() -> AnalysisMeshArtifact {
             face_id: "face_1".to_string(),
             kind: BoundaryElementKind::Tri3,
             node_ids: vec![1, 2, 3],
-            adjacent_volume_element_ids: vec!["tet_1".to_string()],
+            adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
             region_ids: vec!["fixed".to_string()],
             provenance: Vec::new(),
         }],
@@ -928,7 +980,7 @@ fn minimal_evidence_mesh() -> AnalysisMeshArtifact {
             mean_boundary_projection_error_m: 0.0,
             max_boundary_projection_error_m: 0.0,
             elements: vec![ElementQuality {
-                element_id: "tet_1".to_string(),
+                element_id: "tetrahedron_1".to_string(),
                 scaled_jacobian: 0.5,
                 exact_scaled_jacobian: 0.45,
                 aspect_ratio: 2.0,
@@ -952,7 +1004,7 @@ fn boundary_face(face_id: &str, node_ids: [u32; 3]) -> AnalysisBoundaryFace {
         face_id: face_id.to_string(),
         kind: BoundaryElementKind::Tri3,
         node_ids: node_ids.into(),
-        adjacent_volume_element_ids: vec!["tet_1".to_string()],
+        adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
         region_ids: vec!["fixed".to_string()],
         provenance: Vec::new(),
     }
@@ -962,7 +1014,7 @@ fn boundary_face(face_id: &str, node_ids: [u32; 3]) -> AnalysisBoundaryFace {
 fn volume_element(element_id: &str, node_ids: [u32; 4]) -> AnalysisVolumeElement {
     AnalysisVolumeElement {
         element_id: element_id.to_string(),
-        kind: VolumeElementKind::Tet4,
+        kind: VolumeElementKind::Tetrahedron4,
         node_ids: node_ids.into(),
         material_region_id: "solid".to_string(),
         provenance: Vec::new(),
@@ -980,7 +1032,7 @@ fn quality_report() -> AnalysisMeshQualityReport {
         mean_boundary_projection_error_m: 0.0,
         max_boundary_projection_error_m: 0.0,
         elements: vec![ElementQuality {
-            element_id: "tet_1".to_string(),
+            element_id: "tetrahedron_1".to_string(),
             scaled_jacobian: 0.5,
             exact_scaled_jacobian: 0.45,
             aspect_ratio: 2.0,

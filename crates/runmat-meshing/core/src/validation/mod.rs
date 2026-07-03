@@ -500,9 +500,9 @@ fn validate_no_fan_fallback(
     mesh: &AnalysisMeshArtifact,
     require_no_fan_fallback: bool,
 ) -> Result<(), AnalysisMeshValidationError> {
-    if require_no_fan_fallback && mesh.backend.tet_fan_fallback_component_count > 0 {
+    if require_no_fan_fallback && mesh.backend.tetrahedron_fan_fallback_component_count > 0 {
         return Err(AnalysisMeshValidationError::FanFallbackRecoveryPresent {
-            component_count: mesh.backend.tet_fan_fallback_component_count,
+            component_count: mesh.backend.tetrahedron_fan_fallback_component_count,
         });
     }
     Ok(())
@@ -517,17 +517,19 @@ fn validate_no_unrepaired_exact_quality(
     }
     let boundary_adjacent_count = mesh
         .backend
-        .tet_exact_quality_unrepaired_boundary_adjacent_count;
+        .tetrahedron_exact_quality_unrepaired_boundary_adjacent_count;
     let general_cavity_count = mesh
         .backend
-        .tet_exact_quality_unrepaired_general_cavity_count;
+        .tetrahedron_exact_quality_unrepaired_general_cavity_count;
     let interior_seed_count = mesh
         .backend
-        .tet_exact_quality_unrepaired_interior_seed_count;
+        .tetrahedron_exact_quality_unrepaired_interior_seed_count;
     let node_adjacent_count = mesh
         .backend
-        .tet_exact_quality_unrepaired_node_adjacent_count;
-    let edge_star_count = mesh.backend.tet_exact_quality_unrepaired_edge_star_count;
+        .tetrahedron_exact_quality_unrepaired_node_adjacent_count;
+    let edge_star_count = mesh
+        .backend
+        .tetrahedron_exact_quality_unrepaired_edge_star_count;
     let categorized_lower_bound = [
         boundary_adjacent_count,
         node_adjacent_count,
@@ -540,7 +542,7 @@ fn validate_no_unrepaired_exact_quality(
     .unwrap_or_default();
     let total_count = mesh
         .backend
-        .tet_exact_quality_unrepaired_total_count
+        .tetrahedron_exact_quality_unrepaired_total_count
         .max(categorized_lower_bound);
     if total_count > 0 {
         return Err(AnalysisMeshValidationError::UnrepairedExactQualityPresent {
@@ -703,12 +705,14 @@ fn validate_required_material_regions(
     let positive_volume = mesh
         .volume_elements
         .iter()
-        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
         .filter(|element| {
-            let Some(points) = element_tet_points(mesh, element.node_ids.as_slice()) else {
+            element.kind == VolumeElementKind::Tetrahedron4 && element.node_ids.len() == 4
+        })
+        .filter(|element| {
+            let Some(points) = element_tetrahedron_points(mesh, element.node_ids.as_slice()) else {
                 return false;
             };
-            let volume_m3 = tet_volume_m3(points);
+            let volume_m3 = tetrahedron_volume_m3(points);
             volume_m3.is_finite() && volume_m3 > f64::EPSILON
         })
         .map(|element| element.material_region_id.as_str())
@@ -916,10 +920,10 @@ pub fn volume_component_element_counts(mesh: &AnalysisMeshArtifact) -> Vec<usize
     }
     let mut face_to_elements = BTreeMap::<[u32; 3], Vec<usize>>::new();
     for (element_index, element) in mesh.volume_elements.iter().enumerate() {
-        if element.kind != VolumeElementKind::Tet4 || element.node_ids.len() != 4 {
+        if element.kind != VolumeElementKind::Tetrahedron4 || element.node_ids.len() != 4 {
             continue;
         }
-        for face in tet_element_faces(element.node_ids.as_slice()) {
+        for face in tetrahedron_element_faces(element.node_ids.as_slice()) {
             face_to_elements
                 .entry(face)
                 .or_default()
@@ -962,7 +966,7 @@ pub fn volume_component_element_counts(mesh: &AnalysisMeshArtifact) -> Vec<usize
     component_element_counts
 }
 
-fn tet_element_faces(node_ids: &[u32]) -> [[u32; 3]; 4] {
+fn tetrahedron_element_faces(node_ids: &[u32]) -> [[u32; 3]; 4] {
     [
         sorted_node_face([node_ids[0], node_ids[1], node_ids[2]]),
         sorted_node_face([node_ids[0], node_ids[1], node_ids[3]]),
@@ -974,9 +978,11 @@ fn tet_element_faces(node_ids: &[u32]) -> [[u32; 3]; 4] {
 fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
     mesh.volume_elements
         .iter()
-        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
+        .filter(|element| {
+            element.kind == VolumeElementKind::Tetrahedron4 && element.node_ids.len() == 4
+        })
         .filter_map(|element| {
-            Some(tet_volume_m3(element_tet_points(
+            Some(tetrahedron_volume_m3(element_tetrahedron_points(
                 mesh,
                 element.node_ids.as_slice(),
             )?))
@@ -984,7 +990,10 @@ fn mesh_volume_m3(mesh: &AnalysisMeshArtifact) -> f64 {
         .sum()
 }
 
-fn element_tet_points(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[[f64; 3]; 4]> {
+fn element_tetrahedron_points(
+    mesh: &AnalysisMeshArtifact,
+    node_ids: &[u32],
+) -> Option<[[f64; 3]; 4]> {
     Some([
         mesh_node(mesh, node_ids[0])?,
         mesh_node(mesh, node_ids[1])?,
@@ -1017,7 +1026,9 @@ fn mesh_node(mesh: &AnalysisMeshArtifact, node_id: u32) -> Option<[f64; 3]> {
 pub fn mesh_contains_point(mesh: &AnalysisMeshArtifact, point: [f64; 3]) -> bool {
     mesh.volume_elements
         .iter()
-        .filter(|element| element.kind == VolumeElementKind::Tet4 && element.node_ids.len() == 4)
+        .filter(|element| {
+            element.kind == VolumeElementKind::Tetrahedron4 && element.node_ids.len() == 4
+        })
         .filter_map(|element| {
             Some([
                 mesh_node(mesh, element.node_ids[0])?,
@@ -1026,23 +1037,24 @@ pub fn mesh_contains_point(mesh: &AnalysisMeshArtifact, point: [f64; 3]) -> bool
                 mesh_node(mesh, element.node_ids[3])?,
             ])
         })
-        .any(|tet| point_in_tet(point, tet))
+        .any(|tetrahedron| point_in_tetrahedron(point, tetrahedron))
 }
 
-fn point_in_tet(point: [f64; 3], tet: [[f64; 3]; 4]) -> bool {
-    let total = tet_volume_m3(tet);
+fn point_in_tetrahedron(point: [f64; 3], tetrahedron: [[f64; 3]; 4]) -> bool {
+    let total = tetrahedron_volume_m3(tetrahedron);
     if !total.is_finite() || total <= f64::EPSILON {
         return false;
     }
-    let subvolume_sum = tet_volume_m3([point, tet[1], tet[2], tet[3]])
-        + tet_volume_m3([tet[0], point, tet[2], tet[3]])
-        + tet_volume_m3([tet[0], tet[1], point, tet[3]])
-        + tet_volume_m3([tet[0], tet[1], tet[2], point]);
+    let subvolume_sum =
+        tetrahedron_volume_m3([point, tetrahedron[1], tetrahedron[2], tetrahedron[3]])
+            + tetrahedron_volume_m3([tetrahedron[0], point, tetrahedron[2], tetrahedron[3]])
+            + tetrahedron_volume_m3([tetrahedron[0], tetrahedron[1], point, tetrahedron[3]])
+            + tetrahedron_volume_m3([tetrahedron[0], tetrahedron[1], tetrahedron[2], point]);
     let tolerance = total * 1.0e-8 + f64::EPSILON;
     (subvolume_sum - total).abs() <= tolerance
 }
 
-fn tet_volume_m3(points: [[f64; 3]; 4]) -> f64 {
+fn tetrahedron_volume_m3(points: [[f64; 3]; 4]) -> f64 {
     dot(
         sub(points[1], points[0]),
         cross(sub(points[2], points[0]), sub(points[3], points[0])),
