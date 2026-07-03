@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -85,6 +85,31 @@ const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Discrete uniform random sample.",
 }];
 
+const OUTPUT_BOOTSTAT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bootstat",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Bootstrap statistics, one bootstrap replicate per row.",
+}];
+
+const OUTPUT_BOOTSTAT_BOOTSAM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bootstat",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bootstrap statistics, one bootstrap replicate per row.",
+    },
+    BuiltinParamDescriptor {
+        name: "bootsam",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based bootstrap sample indices.",
+    },
+];
+
 const PARAM_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "data",
     ty: BuiltinParamType::Any,
@@ -125,12 +150,37 @@ const PARAM_SZ: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Output dimensions.",
 };
 
+const PARAM_NBOOT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nboot",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bootstrap samples.",
+};
+
+const PARAM_BOOTFUN: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "bootfun",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Function handle applied to each bootstrap sample.",
+};
+
+const PARAM_BOOT_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "data",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Data arrays and name-value options.",
+};
+
 const INPUTS_DATA_K: [BuiltinParamDescriptor; 2] = [PARAM_DATA, PARAM_K];
 const INPUTS_DATA_K_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_DATA, PARAM_K, PARAM_OPTIONS];
 const INPUTS_N_K: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_K];
 const INPUTS_N_K_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_N, PARAM_K, PARAM_OPTIONS];
 const INPUTS_N: [BuiltinParamDescriptor; 1] = [PARAM_N];
 const INPUTS_N_SZ: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_SZ];
+const INPUTS_BOOTSTRP: [BuiltinParamDescriptor; 3] = [PARAM_NBOOT, PARAM_BOOTFUN, PARAM_BOOT_DATA];
 
 const DATASAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
@@ -188,6 +238,24 @@ const UNIDRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "r = unidrnd(n, sz1, sz2, ...)",
         inputs: &INPUTS_N_SZ,
         outputs: &OUTPUT_R,
+    },
+];
+
+const BOOTSTRP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "bootstat = bootstrp(nboot, bootfun, d)",
+        inputs: &INPUTS_BOOTSTRP,
+        outputs: &OUTPUT_BOOTSTAT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bootstat = bootstrp(nboot, bootfun, d1, ..., dN)",
+        inputs: &INPUTS_BOOTSTRP,
+        outputs: &OUTPUT_BOOTSTAT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[bootstat, bootsam] = bootstrp(___)",
+        inputs: &INPUTS_BOOTSTRP,
+        outputs: &OUTPUT_BOOTSTAT_BOOTSAM,
     },
 ];
 
@@ -519,6 +587,56 @@ fn sample_char_axis(
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))
 }
 
+fn sample_cell_axis(
+    array: &CellArray,
+    axis: usize,
+    indices: &[usize],
+    name: &str,
+) -> BuiltinResult<Value> {
+    let shape = normalize_shape(array.shape.clone());
+    let mut out_shape = shape.clone();
+    out_shape[axis] = indices.len();
+    let out_len = tensor::element_count(&out_shape);
+    let mut out = vec![Value::Num(0.0); out_len];
+    let source_strides = row_major_strides(&shape);
+    let output_strides = row_major_strides(&out_shape);
+    for output_linear in 0..out_len {
+        let mut rem = output_linear;
+        let mut coords = vec![0usize; out_shape.len()];
+        for (dim, stride) in output_strides.iter().enumerate() {
+            coords[dim] = rem / *stride;
+            rem %= *stride;
+        }
+        let source_axis = indices[coords[axis]];
+        if source_axis >= shape[axis] {
+            return Err(sampling_error(
+                name,
+                format!("{name}: sample index out of range"),
+            ));
+        }
+        coords[axis] = source_axis;
+        let source_linear = coords
+            .iter()
+            .zip(source_strides.iter())
+            .map(|(coord, stride)| coord * stride)
+            .sum::<usize>();
+        out[output_linear] = array.data[source_linear].clone();
+    }
+    CellArray::new_with_shape(out, out_shape)
+        .map(Value::Cell)
+        .map_err(|err| sampling_error(name, format!("{name}: {err}")))
+}
+
+fn row_major_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1usize; shape.len()];
+    let mut acc = 1usize;
+    for idx in (0..shape.len()).rev() {
+        strides[idx] = acc;
+        acc = acc.saturating_mul(shape[idx]);
+    }
+    strides
+}
+
 fn sample_value_axis(
     data: Value,
     axis: usize,
@@ -555,6 +673,7 @@ fn sample_value_axis(
         ),
         Value::StringArray(array) => sample_string_axis(&array, axis, indices, name),
         Value::CharArray(array) => sample_char_axis(&array, axis, indices, name),
+        Value::Cell(array) => sample_cell_axis(&array, axis, indices, name),
         other => Err(sampling_error(
             name,
             format!("{name}: unsupported population type {other:?}"),
@@ -568,6 +687,7 @@ fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::LogicalArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
+        Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(vec![1, 1]),
         other => Err(sampling_error(
             "datasample",
@@ -936,6 +1056,340 @@ pub mod unidrnd {
     }
 }
 
+struct BootstrpArgs {
+    nboot: usize,
+    bootfun: Value,
+    data: Vec<Value>,
+    sample_axis: usize,
+    sample_len: usize,
+    weights: Option<Vec<f64>>,
+}
+
+struct BootstrpEval {
+    bootstat: Value,
+    bootsam: Option<Value>,
+}
+
+fn is_empty_function(value: &Value) -> bool {
+    match value {
+        Value::Tensor(t) => t.data.is_empty(),
+        Value::LogicalArray(a) => a.data.is_empty(),
+        Value::Cell(c) => c.data.is_empty(),
+        Value::String(s) => s.is_empty(),
+        Value::StringArray(a) => a.data.is_empty(),
+        Value::CharArray(a) => a.data.is_empty(),
+        _ => false,
+    }
+}
+
+fn is_scalar_boot_arg(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
+        Value::Tensor(t) => t.data.len() == 1,
+        Value::LogicalArray(a) => a.data.len() == 1,
+        Value::StringArray(a) => a.data.len() == 1,
+        Value::CharArray(a) => a.data.len() == 1,
+        Value::Cell(a) => a.data.len() == 1,
+        _ => false,
+    }
+}
+
+fn bootstrp_data_axis(
+    value: &Value,
+    single_data_arg: bool,
+) -> BuiltinResult<Option<(usize, usize)>> {
+    if is_scalar_boot_arg(value) {
+        return Ok(None);
+    }
+    let shape = shape_of_sampled_value(value)
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {}", err.message())))?;
+    if single_data_arg && shape.iter().filter(|dim| **dim > 1).count() == 1 {
+        let axis = first_non_singleton(&shape);
+        Ok(Some((axis, shape[axis])))
+    } else {
+        Ok(Some((0, shape[0])))
+    }
+}
+
+async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
+    if args.len() < 3 {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: expected nboot, bootfun, and at least one data argument",
+        ));
+    }
+    let nboot = parse_positive_usize("bootstrp", &args[0], "nboot")?;
+    let bootfun = gathered(args[1].clone(), "bootstrp").await?;
+    let mut data = Vec::new();
+    let mut weight_value = None;
+    let mut idx = 2usize;
+    while idx < args.len() {
+        if let Some(keyword) = keyword_of(&args[idx]) {
+            match keyword.as_str() {
+                "weights" => {
+                    let Some(value) = args.get(idx + 1) else {
+                        return Err(sampling_error(
+                            "bootstrp",
+                            "bootstrp: weights requires a value",
+                        ));
+                    };
+                    weight_value = Some(gathered(value.clone(), "bootstrp").await?);
+                    idx += 2;
+                    continue;
+                }
+                "options" => {
+                    let Some(value) = args.get(idx + 1) else {
+                        return Err(sampling_error(
+                            "bootstrp",
+                            "bootstrp: options requires a value",
+                        ));
+                    };
+                    let options = gathered(value.clone(), "bootstrp").await?;
+                    if !matches!(options, Value::Struct(_)) {
+                        return Err(sampling_error(
+                            "bootstrp",
+                            "bootstrp: Options must be a statset/options struct",
+                        ));
+                    }
+                    idx += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        data.push(gathered(args[idx].clone(), "bootstrp").await?);
+        idx += 1;
+    }
+    if data.is_empty() {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: at least one data argument is required",
+        ));
+    }
+    let single_nonscalar_arg = data
+        .iter()
+        .filter(|value| !is_scalar_boot_arg(value))
+        .count()
+        == 1;
+    let mut sample_axis = 0usize;
+    let mut sample_len = None;
+    for value in &data {
+        let Some((axis, len)) = bootstrp_data_axis(value, single_nonscalar_arg)? else {
+            continue;
+        };
+        if let Some(expected) = sample_len {
+            if len != expected {
+                return Err(sampling_error(
+                    "bootstrp",
+                    "bootstrp: nonscalar data arguments must have the same number of rows",
+                ));
+            }
+        } else {
+            sample_axis = axis;
+            sample_len = Some(len);
+        }
+    }
+    let sample_len = sample_len.unwrap_or(1);
+    if sample_len == 0 {
+        return Err(sampling_error("bootstrp", "bootstrp: data cannot be empty"));
+    }
+    let weights = match weight_value {
+        Some(value) => Some(parse_weights("bootstrp", value, sample_len)?),
+        None => None,
+    };
+    Ok(BootstrpArgs {
+        nboot,
+        bootfun,
+        data,
+        sample_axis,
+        sample_len,
+        weights,
+    })
+}
+
+async fn bootstat_row(value: Value) -> BuiltinResult<Vec<f64>> {
+    let mut value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+    if let Value::OutputList(values) = value {
+        if values.len() != 1 {
+            return Err(sampling_error(
+                "bootstrp",
+                "bootstrp: bootfun must return exactly one output",
+            ));
+        }
+        value = values.into_iter().next().unwrap_or(Value::Num(0.0));
+        value = gather_if_needed_async(&value)
+            .await
+            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+    }
+    match value {
+        Value::OutputList(_) => Err(sampling_error(
+            "bootstrp",
+            "bootstrp: bootfun must return exactly one output",
+        )),
+        Value::Num(v) => Ok(vec![v]),
+        Value::Int(v) => Ok(vec![v.to_f64()]),
+        Value::Bool(v) => Ok(vec![if v { 1.0 } else { 0.0 }]),
+        Value::Tensor(t) => Ok(t.data),
+        Value::LogicalArray(a) => Ok(a
+            .data
+            .into_iter()
+            .map(|value| if value != 0 { 1.0 } else { 0.0 })
+            .collect()),
+        other => Err(sampling_error(
+            "bootstrp",
+            format!("bootstrp: bootfun must return numeric or logical values, got {other:?}"),
+        )),
+    }
+}
+
+fn bootsam_value(samples: &[Vec<usize>], n: usize, nboot: usize) -> BuiltinResult<Value> {
+    let len = n.checked_mul(nboot).ok_or_else(|| {
+        sampling_error(
+            "bootstrp",
+            "bootstrp: bootstrap sample index output is too large",
+        )
+    })?;
+    let mut data = Vec::with_capacity(len);
+    for sample in samples {
+        data.extend(sample.iter().map(|idx| (*idx + 1) as f64));
+    }
+    Tensor::new(data, vec![n, nboot])
+        .map(Value::Tensor)
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))
+}
+
+fn empty_bootstat(nboot: usize) -> BuiltinResult<Value> {
+    Tensor::new(Vec::new(), vec![nboot, 0])
+        .map(Value::Tensor)
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))
+}
+
+async fn bootstrp_compute(
+    args: BootstrpArgs,
+    include_bootsam: bool,
+) -> BuiltinResult<BootstrpEval> {
+    let mut samples = if include_bootsam {
+        Some(Vec::with_capacity(args.nboot))
+    } else {
+        None
+    };
+    let mut rows = Vec::with_capacity(args.nboot);
+    for _ in 0..args.nboot {
+        let indices = sample_indices(
+            "bootstrp",
+            args.sample_len,
+            args.sample_len,
+            true,
+            args.weights.as_deref(),
+        )?;
+        if !is_empty_function(&args.bootfun) {
+            let mut callback_args = Vec::with_capacity(args.data.len());
+            for value in args.data.iter().cloned() {
+                if is_scalar_boot_arg(&value) {
+                    callback_args.push(value);
+                } else {
+                    callback_args.push(sample_value_axis(
+                        value,
+                        args.sample_axis,
+                        &indices,
+                        "bootstrp",
+                    )?);
+                }
+            }
+            let result =
+                crate::call_feval_async_with_outputs(args.bootfun.clone(), &callback_args, 1)
+                    .await
+                    .map_err(|err| {
+                        sampling_error(
+                            "bootstrp",
+                            format!("bootstrp: bootfun failed: {}", err.message()),
+                        )
+                    })?;
+            rows.push(bootstat_row(result).await?);
+        }
+        if let Some(samples) = samples.as_mut() {
+            samples.push(indices);
+        }
+    }
+    let bootsam = match samples {
+        Some(samples) => Some(bootsam_value(&samples, args.sample_len, args.nboot)?),
+        None => None,
+    };
+    let bootstat = if is_empty_function(&args.bootfun) {
+        empty_bootstat(args.nboot)?
+    } else {
+        let width = rows.first().map(|row| row.len()).unwrap_or(0);
+        if rows.iter().any(|row| row.len() != width) {
+            return Err(sampling_error(
+                "bootstrp",
+                "bootstrp: bootfun output size must be consistent across bootstrap samples",
+            ));
+        }
+        let len = args.nboot.checked_mul(width).ok_or_else(|| {
+            sampling_error(
+                "bootstrp",
+                "bootstrp: bootstrap statistic output is too large",
+            )
+        })?;
+        let mut data = vec![0.0; len];
+        for (boot_idx, row) in rows.iter().enumerate() {
+            for (col, value) in row.iter().enumerate() {
+                data[boot_idx + col * args.nboot] = *value;
+            }
+        }
+        Tensor::new(data, vec![args.nboot, width])
+            .map(tensor::tensor_into_value)
+            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?
+    };
+    Ok(BootstrpEval { bootstat, bootsam })
+}
+
+pub mod bootstrp {
+    use super::*;
+    sampling_descriptor!(
+        "bootstrp",
+        BOOTSTRP_SIGNATURES,
+        BuiltinOutputMode::ByRequestedOutputCount
+    );
+
+    #[runtime_builtin(
+        name = "bootstrp",
+        category = "stats/random",
+        summary = "Bootstrap samples and evaluate a statistic.",
+        keywords = "bootstrp,bootstrap,resampling,statistics,weights",
+        type_resolver(super::sampling_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::random::sampling::bootstrp"
+    )]
+    pub(crate) async fn bootstrp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        let requested_outputs = crate::output_count::current_output_count();
+        match requested_outputs {
+            Some(0) => return Ok(Value::OutputList(Vec::new())),
+            Some(count) if count > 2 => {
+                return Err(super::sampling_error(
+                    "bootstrp",
+                    "bootstrp: too many output arguments; maximum is 2",
+                ));
+            }
+            _ => {}
+        }
+        let include_bootsam = matches!(requested_outputs, Some(2));
+        let args = super::parse_bootstrp_args(args).await?;
+        let eval = super::bootstrp_compute(args, include_bootsam).await?;
+        match requested_outputs {
+            Some(1) => Ok(Value::OutputList(vec![eval.bootstat])),
+            Some(2) => Ok(Value::OutputList(vec![
+                eval.bootstat,
+                eval.bootsam.unwrap_or(Value::Num(0.0)),
+            ])),
+            None => Ok(eval.bootstat),
+            Some(0) | Some(_) => unreachable!("validated output count before evaluation"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -996,6 +1450,51 @@ mod tests {
                 assert_eq!(chars.data, vec!['G'; 5]);
             }
             other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn datasample_supports_cell_arrays() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let data = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::from("a"),
+                    Value::from("b"),
+                    Value::from("c"),
+                    Value::from("d"),
+                ],
+                2,
+                2,
+            )
+            .unwrap(),
+        );
+        let out = block_on(datasample::datasample_builtin(
+            data,
+            vec![
+                Value::Num(3.0),
+                Value::from("Weights"),
+                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+            ],
+        ))
+        .unwrap();
+        match out {
+            Value::Cell(cell) => {
+                assert_eq!(cell.shape, vec![3, 2]);
+                assert_eq!(
+                    cell.data,
+                    vec![
+                        Value::from("c"),
+                        Value::from("d"),
+                        Value::from("c"),
+                        Value::from("d"),
+                        Value::from("c"),
+                        Value::from("d"),
+                    ]
+                );
+            }
+            other => panic!("expected cell array, got {other:?}"),
         }
     }
 
@@ -1067,5 +1566,160 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn bootstrp_weighted_mean_returns_stats_and_samples() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let data = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(4.0),
+            Value::FunctionHandle("mean".to_string()),
+            data,
+            Value::from("Weights"),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap()),
+        ]))
+        .unwrap();
+        match out {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 2);
+                match &values[0] {
+                    Value::Tensor(t) => {
+                        assert_eq!(t.shape, vec![4, 1]);
+                        assert_eq!(t.data, vec![10.0; 4]);
+                    }
+                    Value::Num(value) => assert_eq!(*value, 10.0),
+                    other => panic!("expected tensor bootstat, got {other:?}"),
+                }
+                match &values[1] {
+                    Value::Tensor(t) => {
+                        assert_eq!(t.shape, vec![3, 4]);
+                        assert_eq!(t.data, vec![1.0; 12]);
+                    }
+                    other => panic!("expected tensor bootsam, got {other:?}"),
+                }
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrp_empty_function_returns_indices_without_evaluating() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(2.0),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            data,
+        ]))
+        .unwrap();
+        match out {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 2);
+                match &values[0] {
+                    Value::Tensor(t) => assert_eq!(t.shape, vec![2, 0]),
+                    other => panic!("expected empty tensor bootstat, got {other:?}"),
+                }
+                match &values[1] {
+                    Value::Tensor(t) => {
+                        assert_eq!(t.shape, vec![3, 2]);
+                        assert!(t.data.iter().all(|idx| (1.0..=3.0).contains(idx)));
+                    }
+                    other => panic!("expected tensor bootsam, got {other:?}"),
+                }
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrp_multiple_data_arguments_sample_rows_together() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
+        let out = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(3.0),
+            Value::FunctionHandle("corr".to_string()),
+            x,
+            y,
+        ]))
+        .unwrap();
+        match out {
+            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            other => panic!("expected tensor bootstat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrp_scalar_data_arguments_are_passed_through() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let out = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(3.0),
+            Value::FunctionHandle("mean".to_string()),
+            Value::Num(42.0),
+        ]))
+        .unwrap();
+        match out {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.data, vec![42.0; 3]);
+            }
+            other => panic!("expected tensor bootstat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrp_row_vector_sampling_ignores_scalar_passthrough_for_axis_choice() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap());
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(2.0),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            row,
+            Value::from("tag"),
+        ]))
+        .unwrap();
+        match out {
+            Value::OutputList(values) => match &values[1] {
+                Value::Tensor(t) => {
+                    assert_eq!(t.shape, vec![4, 2]);
+                    assert!(t.data.iter().all(|idx| (1.0..=4.0).contains(idx)));
+                }
+                other => panic!("expected tensor bootsam, got {other:?}"),
+            },
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrp_rejects_mismatched_data_and_extra_outputs() {
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let err = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(2.0),
+            Value::FunctionHandle("corr".to_string()),
+            x,
+            y,
+        ]))
+        .unwrap_err();
+        assert!(err.message().contains("same number of rows"));
+
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let err = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Num(2.0),
+            Value::FunctionHandle("definitely_missing_bootstrap_callback".to_string()),
+            data,
+        ]))
+        .unwrap_err();
+        assert!(err.message().contains("too many output"));
     }
 }

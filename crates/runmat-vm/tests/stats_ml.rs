@@ -79,3 +79,15 @@ fn ttest2_surface_executes_from_scripts() {
         .iter()
         .any(|value| matches!(value, Value::Num(value) if (*value - 1.031_813).abs() < 1.0e-6)));
 }
+
+#[test]
+fn bootstrp_surface_executes_from_scripts() {
+    let vars =
+        execute_source("rng('default'); x = [1;2;3;4]; [b,s] = bootstrp(4, @mean, x); n = s(1,1);")
+            .expect("bootstrp script");
+    assert!(has_tensor_shape(&vars, &[4, 1]));
+    assert!(has_tensor_shape(&vars, &[4, 4]));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (1.0..=4.0).contains(value))));
+}

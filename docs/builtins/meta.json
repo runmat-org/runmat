@@ -5515,6 +5515,139 @@
       ]
     },
     {
+      "name": "bootstrp",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bootstat = bootstrp(nboot, bootfun, d)",
+          "inputs": [
+            {
+              "name": "nboot",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bootstrap samples."
+            },
+            {
+              "name": "bootfun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle applied to each bootstrap sample."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Data arrays and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bootstat",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bootstrap statistics, one bootstrap replicate per row."
+            }
+          ]
+        },
+        {
+          "label": "bootstat = bootstrp(nboot, bootfun, d1, ..., dN)",
+          "inputs": [
+            {
+              "name": "nboot",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bootstrap samples."
+            },
+            {
+              "name": "bootfun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle applied to each bootstrap sample."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Data arrays and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bootstat",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bootstrap statistics, one bootstrap replicate per row."
+            }
+          ]
+        },
+        {
+          "label": "[bootstat, bootsam] = bootstrp(___)",
+          "inputs": [
+            {
+              "name": "nboot",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bootstrap samples."
+            },
+            {
+              "name": "bootfun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle applied to each bootstrap sample."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Data arrays and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bootstat",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bootstrap statistics, one bootstrap replicate per row."
+            },
+            {
+              "name": "bootsam",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based bootstrap sample indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.bootstrp.INVALID_ARGUMENT",
+          "identifier": "RunMat:bootstrp:InvalidArgument",
+          "when": "Inputs, dimensions, replacement flags, or weights are malformed.",
+          "message": "sampling: invalid argument"
+        },
+        {
+          "code": "RM.bootstrp.INTERNAL",
+          "identifier": "RunMat:bootstrp:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "sampling: internal error"
+        }
+      ]
+    },
+    {
       "name": "bounds",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
