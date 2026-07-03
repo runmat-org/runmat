@@ -4,7 +4,7 @@ use runmat_meshing_core::{
         MeshingStage, PlcFacet, PlcNode, PlcProtectedEdge, PlcValidationSummary,
         ProtectedBoundaryComplex, StageEvidence, TopologyEntityId,
     },
-    predicate::tetrahedron_signed_volume,
+    quality::predicate::tetrahedron_signed_volume,
 };
 
 #[test]

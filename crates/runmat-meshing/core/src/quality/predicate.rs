@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::tolerance::MeshingTolerance;
+use super::tolerance::MeshingTolerance;
 
 pub type Point3 = [f64; 3];
 pub type Triangle3 = [Point3; 3];

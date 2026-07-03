@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
-    predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
+    quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 
 use super::{

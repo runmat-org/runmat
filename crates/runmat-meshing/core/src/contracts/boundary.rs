@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use serde::{Deserialize, Serialize};
 
-use crate::provenance::{MeshEntityProvenance, SourceEntityKind};
+use super::provenance::{MeshEntityProvenance, SourceEntityKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoundaryMeshTriangle {

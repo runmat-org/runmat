@@ -1,27 +1,17 @@
 extern crate self as runmat_meshing_core;
 
 pub mod adaptive;
-#[path = "contracts/artifact.rs"]
-pub mod artifact;
-#[path = "contracts/backend.rs"]
-pub mod backend;
-#[path = "contracts/boundary.rs"]
-pub mod boundary;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
+pub use contracts::{artifact, backend, boundary, options, provenance, topology};
 pub use runmat_meshing_curve as curve;
 #[path = "visualization/field_mapping.rs"]
 pub mod field_mapping;
 pub mod fixtures;
 pub use runmat_meshing_opt as opt;
-#[path = "contracts/options.rs"]
-pub mod options;
-#[path = "quality/predicate.rs"]
-pub mod predicate;
 pub mod prep;
-#[path = "contracts/provenance.rs"]
-pub mod provenance;
 pub mod quality;
+pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size as size;
 pub mod source_topology {
     pub use runmat_meshing_cad::topology::{
@@ -29,13 +19,7 @@ pub mod source_topology {
         SourceTopologyModel, SourceTopologyVertex,
     };
 }
-#[path = "quality/spatial_index.rs"]
-pub mod spatial_index;
 pub use runmat_meshing_surface as surface;
-#[path = "quality/tolerance.rs"]
-pub mod tolerance;
-#[path = "contracts/topology.rs"]
-pub mod topology;
 pub mod validation;
 
 pub use adaptive::{

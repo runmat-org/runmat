@@ -2,12 +2,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::{
-    artifact::ANALYSIS_MESH_SCHEMA_VERSION,
-    predicate::{tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian, tetrahedron_volume},
-    AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-    AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, BoundaryElementKind,
-    ElementQuality, MeshBackendSummary, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
-    VolumeElementKind,
+    contracts::{
+        artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
+        AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
+        BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, SourceEntityKind,
+        VolumeElementKind,
+    },
+    quality::{
+        predicate::{
+            tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian, tetrahedron_volume,
+        },
+        AnalysisMeshQualityReport, ElementQuality,
+    },
+    size::field::MeshSizingField,
 };
 use runmat_meshing_surface::SurfaceDiscretization;
 use runmat_meshing_tetrahedron::generate::TetrahedronMesh;

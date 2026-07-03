@@ -3,24 +3,22 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_core::{
-    artifact::{
+    contracts::{
         AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
+        BoundaryElementKind, BoundaryMeshInput, BoundaryMeshInputError, MeshBackendKind,
+        MeshEntityProvenance, MeshKindRequest, MeshProfile, MeshTargetSize, SourceEntityKind,
+        VolumeElementKind, VolumeMeshingOptions,
     },
-    backend::MeshBackendKind,
-    boundary::{BoundaryMeshInput, BoundaryMeshInputError},
-    options::{MeshKindRequest, MeshProfile, MeshTargetSize, VolumeMeshingOptions},
-    predicate::tetrahedron_scaled_jacobian,
-    provenance::{MeshEntityProvenance, SourceEntityKind},
     quality::boundary::{
         evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
         BoundaryQualityCandidateOptions,
     },
+    quality::predicate::tetrahedron_scaled_jacobian,
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
     size::field::{
         AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
         SizingSampleRejection,
     },
-    topology::{BoundaryElementKind, VolumeElementKind},
 };
 
 pub trait VolumeMesher {

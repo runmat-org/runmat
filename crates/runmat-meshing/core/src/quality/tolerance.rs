@@ -46,7 +46,7 @@ impl MeshingTolerance {
     }
 
     pub fn point_nearly_equal(self, left: [f64; 3], right: [f64; 3], scale_m: f64) -> bool {
-        crate::predicate::distance(left, right) <= self.length_epsilon(scale_m)
+        super::predicate::distance(left, right) <= self.length_epsilon(scale_m)
     }
 }
 

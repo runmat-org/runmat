@@ -1,4 +1,4 @@
-use runmat_meshing_core::predicate::{
+use runmat_meshing_core::quality::predicate::{
     orient_tetrahedron_node_ids, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
 };
 

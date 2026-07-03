@@ -1,4 +1,4 @@
-use runmat_meshing_core::predicate::tetrahedron_scaled_jacobian;
+use runmat_meshing_core::quality::predicate::tetrahedron_scaled_jacobian;
 
 use super::super::*;
 

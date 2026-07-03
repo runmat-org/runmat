@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use runmat_meshing_core::{
-    artifact::ANALYSIS_MESH_SCHEMA_VERSION, provenance::AnalysisMeshProvenance, MeshBackendSummary,
+use runmat_meshing_core::contracts::{
+    artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshProvenance, MeshBackendSummary,
 };
 
 pub(super) fn build_analysis_mesh_artifact(

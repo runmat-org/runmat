@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::predicate::{distance_squared, Point3, Triangle3};
-use crate::tolerance::MeshingTolerance;
+use super::predicate::{distance_squared, Point3, Triangle3};
+use super::tolerance::MeshingTolerance;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Aabb3 {

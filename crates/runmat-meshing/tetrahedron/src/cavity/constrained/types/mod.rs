@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use runmat_meshing_core::predicate::Point3;
+use runmat_meshing_core::quality::predicate::Point3;
 
 #[cfg(test)]
 mod diagnostics;

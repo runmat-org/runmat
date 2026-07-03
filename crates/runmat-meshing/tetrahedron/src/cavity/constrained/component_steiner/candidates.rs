@@ -1,9 +1,9 @@
 use runmat_meshing_core::{
-    predicate::{
+    quality::predicate::{
         tetrahedron_centroid, tetrahedron_circumsphere, tetrahedron_scaled_jacobian, triangle_area,
         Point3,
     },
-    tolerance::MeshingTolerance,
+    quality::tolerance::MeshingTolerance,
 };
 
 use super::super::topology::{tetrahedron_edges, tetrahedron_faces};

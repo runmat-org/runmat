@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{tetrahedron_circumsphere_contains_point, tetrahedron_signed_volume},
-    tolerance::MeshingTolerance,
+    quality::predicate::{tetrahedron_circumsphere_contains_point, tetrahedron_signed_volume},
+    quality::tolerance::MeshingTolerance,
 };
 
 use super::{ConnectivityPoint, ConnectivityTetrahedron};

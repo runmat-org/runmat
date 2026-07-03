@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::predicate::Triangle3;
+use runmat_meshing_core::quality::predicate::Triangle3;
 
 use super::exact_cover::finish_cap_stitch_exact_cover_diagnostic;
 use super::*;

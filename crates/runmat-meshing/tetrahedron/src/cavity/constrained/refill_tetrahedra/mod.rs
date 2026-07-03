@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::predicate::{
+use runmat_meshing_core::quality::predicate::{
     tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian, tetrahedron_signed_volume, Point3,
 };
 

@@ -1,4 +1,4 @@
-use runmat_meshing_core::predicate::Triangle3;
+use runmat_meshing_core::quality::predicate::Triangle3;
 
 use super::*;
 

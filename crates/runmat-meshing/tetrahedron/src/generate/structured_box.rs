@@ -6,7 +6,7 @@ use super::{
 };
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
-    predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
+    quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 
 pub fn generate_structured_box_tetrahedron_mesh_from_plc(

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::predicate::{distance_squared, Point3, Triangle3};
+use runmat_meshing_core::quality::predicate::{distance_squared, Point3, Triangle3};
 
 use super::{
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefillError,

@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 #[cfg(test)]
-use runmat_meshing_core::predicate::tetrahedron_centroid;
+use runmat_meshing_core::quality::predicate::tetrahedron_centroid;
 use runmat_meshing_core::{
-    predicate::{
+    quality::predicate::{
         distance_squared, point_in_closed_triangle_surface, PointInClosedSurface, Triangle3,
     },
-    tolerance::MeshingTolerance,
+    quality::tolerance::MeshingTolerance,
 };
 
 #[cfg(test)]

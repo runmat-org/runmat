@@ -1,4 +1,7 @@
 pub mod boundary;
+pub mod predicate;
+pub mod spatial_index;
+pub mod tolerance;
 
 use serde::{Deserialize, Serialize};
 

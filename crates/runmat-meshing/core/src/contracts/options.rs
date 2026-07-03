@@ -4,7 +4,9 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Serialize};
 
-use crate::{backend::MeshBackendKind, quality::QualityThresholds, topology::VolumeElementKind};
+use crate::quality::QualityThresholds;
+
+use super::{backend::MeshBackendKind, topology::VolumeElementKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::predicate::{Point3, Triangle3};
+use runmat_meshing_core::quality::predicate::{Point3, Triangle3};
 
 mod candidates;
 mod selection;

@@ -3,10 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{
+    quality::predicate::{
         point_in_closed_triangle_surface, tetrahedron_centroid, Point3, PointInClosedSurface,
     },
-    tolerance::MeshingTolerance,
+    quality::tolerance::MeshingTolerance,
 };
 
 mod boundary_completion;

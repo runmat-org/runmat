@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{point_in_closed_triangle_surface, PointInClosedSurface},
-    tolerance::MeshingTolerance,
+    quality::predicate::{point_in_closed_triangle_surface, PointInClosedSurface},
+    quality::tolerance::MeshingTolerance,
 };
 
 use super::{

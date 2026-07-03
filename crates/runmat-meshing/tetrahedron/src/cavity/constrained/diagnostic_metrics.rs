@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::predicate::Point3;
+use runmat_meshing_core::quality::predicate::Point3;
 
 #[cfg(test)]
 pub(super) fn diagnostic_scaled_jacobian_bin(value: f64) -> String {
@@ -25,12 +25,12 @@ pub(super) fn diagnostic_face_apex_height_ratio(
 ) -> f64 {
     let triangle = face.map(|node_id| boundary_nodes[&node_id]);
     let apex = boundary_nodes[&apex_node_id];
-    let longest_edge = runmat_meshing_core::predicate::distance(triangle[0], triangle[1])
-        .max(runmat_meshing_core::predicate::distance(
+    let longest_edge = runmat_meshing_core::quality::predicate::distance(triangle[0], triangle[1])
+        .max(runmat_meshing_core::quality::predicate::distance(
             triangle[1],
             triangle[2],
         ))
-        .max(runmat_meshing_core::predicate::distance(
+        .max(runmat_meshing_core::quality::predicate::distance(
             triangle[2],
             triangle[0],
         ));
@@ -94,19 +94,19 @@ pub(super) fn diagnostic_scaled_jacobian_worst_corner_label(points: [Point3; 4])
     let worst_corner = corners
         .into_iter()
         .map(|(index, origin, first, second, third)| {
-            let first = runmat_meshing_core::predicate::sub(first, origin);
-            let second = runmat_meshing_core::predicate::sub(second, origin);
-            let third = runmat_meshing_core::predicate::sub(third, origin);
-            let denominator = runmat_meshing_core::predicate::norm(first)
-                * runmat_meshing_core::predicate::norm(second)
-                * runmat_meshing_core::predicate::norm(third);
+            let first = runmat_meshing_core::quality::predicate::sub(first, origin);
+            let second = runmat_meshing_core::quality::predicate::sub(second, origin);
+            let third = runmat_meshing_core::quality::predicate::sub(third, origin);
+            let denominator = runmat_meshing_core::quality::predicate::norm(first)
+                * runmat_meshing_core::quality::predicate::norm(second)
+                * runmat_meshing_core::quality::predicate::norm(third);
             let scaled_jacobian = if denominator <= f64::EPSILON {
                 0.0
             } else {
                 (2.0_f64.sqrt()
-                    * runmat_meshing_core::predicate::dot(
+                    * runmat_meshing_core::quality::predicate::dot(
                         first,
-                        runmat_meshing_core::predicate::cross(second, third),
+                        runmat_meshing_core::quality::predicate::cross(second, third),
                     )
                     / denominator)
                     .abs()

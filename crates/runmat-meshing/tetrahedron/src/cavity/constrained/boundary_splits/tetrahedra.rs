@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::predicate::Point3;
+use runmat_meshing_core::quality::predicate::Point3;
 
 use super::super::{
     raw_refill_tetrahedron_with_rejection_reason,

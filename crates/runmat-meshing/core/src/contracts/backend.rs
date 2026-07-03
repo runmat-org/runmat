@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::VolumeMeshingOptions;
+use super::options::VolumeMeshingOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

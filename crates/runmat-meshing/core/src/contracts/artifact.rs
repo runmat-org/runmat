@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    adaptive::AdaptiveIterationSummary,
-    provenance::{AnalysisMeshProvenance, MeshEntityProvenance},
-    quality::AnalysisMeshQualityReport,
+    adaptive::AdaptiveIterationSummary, quality::AnalysisMeshQualityReport,
     size::field::MeshSizingField,
+};
+
+use super::{
+    provenance::{AnalysisMeshProvenance, MeshEntityProvenance},
     topology::{BoundaryElementKind, VolumeElementKind},
 };
 
