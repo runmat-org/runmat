@@ -21,6 +21,9 @@ use coverage::{
 mod geometry;
 pub use geometry::mesh_contains_point;
 
+mod nodes;
+use nodes::validate_nodes;
+
 mod quality;
 use quality::validate_quality;
 
@@ -75,23 +78,7 @@ pub fn validate_analysis_mesh_with_options(
         }
     }
 
-    let mut node_ids = BTreeSet::<u32>::new();
-    for node in &mesh.nodes {
-        if !node_ids.insert(node.node_id) {
-            return Err(AnalysisMeshValidationError::DuplicateNodeId {
-                node_id: node.node_id,
-            });
-        }
-        if node
-            .coordinates_m
-            .iter()
-            .any(|coordinate| !coordinate.is_finite())
-        {
-            return Err(AnalysisMeshValidationError::NonFiniteNodeCoordinate {
-                node_id: node.node_id,
-            });
-        }
-    }
+    let node_ids = validate_nodes(mesh)?;
 
     let mut element_ids = BTreeSet::<String>::new();
     for element in &mesh.volume_elements {
