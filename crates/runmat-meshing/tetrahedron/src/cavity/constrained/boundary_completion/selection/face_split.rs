@@ -1,0 +1,61 @@
+use super::*;
+
+pub(in super::super::super) fn best_boundary_face_split_completion_for_faces(
+    faces: &[[u32; 3]],
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    boundary_triangles: &[Triangle3],
+    refill_tetrahedra: &[ConstrainedCavityRefillTetrahedron],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<
+    Option<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTetrahedron>,
+    )>,
+    ConstrainedCavityValidationError,
+> {
+    let current_delta = refill_boundary_face_delta(cavity, refill_tetrahedra)?;
+    let current_delta_count = current_delta.missing.len() + current_delta.unexpected.len();
+    let mut best = None::<(
+        ConstrainedCavity,
+        ConstrainedCavityNode,
+        Vec<ConstrainedCavityRefillTetrahedron>,
+        f64,
+    )>;
+    for face in faces {
+        let Some((split_cavity, split_node, split_tetrahedra)) =
+            best_boundary_face_split_completion(
+                *face,
+                cavity,
+                boundary_nodes,
+                boundary_triangles,
+                refill_tetrahedra,
+                options,
+            )?
+        else {
+            continue;
+        };
+        let mut candidate_tetrahedra = refill_tetrahedra.to_vec();
+        candidate_tetrahedra.extend(split_tetrahedra.clone());
+        let candidate_delta = refill_boundary_face_delta(&split_cavity, &candidate_tetrahedra)?;
+        let candidate_delta_count =
+            candidate_delta.missing.len() + candidate_delta.unexpected.len();
+        if candidate_delta_count >= current_delta_count {
+            continue;
+        }
+        let min_quality = split_tetrahedra
+            .iter()
+            .map(|tetrahedron| tetrahedron.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, _, best_quality)| min_quality > *best_quality)
+        {
+            best = Some((split_cavity, split_node, split_tetrahedra, min_quality));
+        }
+    }
+    Ok(best.map(|(split_cavity, split_node, split_tetrahedra, _)| {
+        (split_cavity, split_node, split_tetrahedra)
+    }))
+}
