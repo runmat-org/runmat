@@ -1,0 +1,63 @@
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MissingFaceLocalCapQualityDiagnostic {
+    pub missing_face_count: usize,
+    pub pass_face_count: usize,
+    pub failed_face_count: usize,
+    pub candidate_count: usize,
+    pub candidate_source_bins: BTreeMap<&'static str, usize>,
+    pub max_scaled_jacobian: f64,
+    pub max_failed_face_scaled_jacobian: f64,
+    pub failed_face_scaled_jacobian_bins: BTreeMap<String, usize>,
+    pub failed_face_source_bins: BTreeMap<&'static str, usize>,
+    pub rejected_by_reason: BTreeMap<&'static str, usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
+    pub missing_face_count: usize,
+    pub missing_faces: Vec<[u32; 3]>,
+    pub patch_count: usize,
+    pub patch_size_histogram: BTreeMap<usize, usize>,
+    pub patch_capped_face_count_histogram: BTreeMap<usize, usize>,
+    pub incomplete_patch_size_histogram: BTreeMap<usize, usize>,
+    pub uncapped_faces: Vec<[u32; 3]>,
+    pub capped_face_count: usize,
+    pub inserted_node_count: usize,
+    pub side_connector_candidate_count: usize,
+    pub candidate_tetrahedron_count: usize,
+    pub cap_side_face_count: usize,
+    pub zero_mate_cap_side_face_count: usize,
+    pub min_cap_side_face_mate_count: usize,
+    pub max_cap_side_face_mate_count: usize,
+    pub open_interior_face_count: usize,
+    pub open_interior_component_count: usize,
+    pub open_interior_component_size_histogram: BTreeMap<usize, usize>,
+    pub candidate_with_orphan_interior_face_count: usize,
+    pub candidate_without_orphan_interior_face_count: usize,
+    pub root_boundary_zero_raw_candidate_face_count: usize,
+    pub root_boundary_zero_addable_candidate_face_count: usize,
+    pub root_boundary_min_raw_candidate_count: usize,
+    pub root_boundary_min_addable_candidate_count: usize,
+    pub root_boundary_max_addable_candidate_count: usize,
+    pub cover_dead_end_reason: &'static str,
+    pub cover_dead_end_depth: usize,
+    pub cover_dead_end_reason_histogram: BTreeMap<&'static str, usize>,
+    pub selected_tetrahedron_count: usize,
+    pub search_attempt_count: usize,
+    pub found_cover: bool,
+    pub reason: &'static str,
+    pub max_min_scaled_jacobian: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
+    pub missing_face_count: usize,
+    pub edge_component_count: usize,
+    pub edge_component_size_histogram: BTreeMap<usize, usize>,
+    pub node_component_count: usize,
+    pub node_component_size_histogram: BTreeMap<usize, usize>,
+    pub node_component_common_node_count_histogram: BTreeMap<usize, usize>,
+    pub node_component_common_node_ids: BTreeMap<u32, usize>,
+}
