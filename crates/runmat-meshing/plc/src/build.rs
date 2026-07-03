@@ -8,6 +8,8 @@ use runmat_meshing_core::{
     surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID},
 };
 
+use crate::validate::{validate_protected_boundary_complex, PlcValidationError};
+
 pub const MODULE_PURPOSE: &str = "oriented protected boundary complex construction";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub enum PlcBuildError {
         node_ids: [u32; 2],
         incidence_count: usize,
     },
+    ProtectedBoundaryValidation(PlcValidationError),
 }
 
 impl std::fmt::Display for PlcBuildError {
@@ -77,6 +80,9 @@ impl std::fmt::Display for PlcBuildError {
                 "PLC edge {}-{} has non-manifold incidence {incidence_count}, expected 2",
                 node_ids[0], node_ids[1]
             ),
+            Self::ProtectedBoundaryValidation(error) => {
+                write!(formatter, "built PLC failed validation: {error}")
+            }
         }
     }
 }
@@ -201,7 +207,7 @@ pub fn build_protected_boundary_complex(
         .entity_counts
         .insert("protected_edges".to_string(), protected_edges.len());
 
-    Ok(ProtectedBoundaryComplex {
+    let mut plc = ProtectedBoundaryComplex {
         complex_id: "plc_surface_boundary".to_string(),
         nodes: surface
             .nodes
@@ -220,7 +226,10 @@ pub fn build_protected_boundary_complex(
             material_interfaces_classified: true,
         },
         evidence,
-    })
+    };
+    plc.validation = validate_protected_boundary_complex(&plc)
+        .map_err(PlcBuildError::ProtectedBoundaryValidation)?;
+    Ok(plc)
 }
 
 fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
@@ -276,6 +285,19 @@ mod tests {
             build_protected_boundary_complex(&surface),
             Err(PlcBuildError::DuplicateFacet { element_id: 99 })
         );
+    }
+
+    #[test]
+    fn rejects_inconsistent_surface_orientation_before_returning_plc() {
+        let mut surface = tetra_surface();
+        surface.elements[0].node_ids = [0, 1, 2];
+
+        assert!(matches!(
+            build_protected_boundary_complex(&surface),
+            Err(PlcBuildError::ProtectedBoundaryValidation(
+                PlcValidationError::InconsistentBoundaryEdgeOrientation { .. }
+            ))
+        ));
     }
 
     fn tetra_surface() -> SurfaceDiscretization {
