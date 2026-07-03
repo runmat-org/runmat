@@ -1,0 +1,311 @@
+use super::*;
+
+impl<'a> BoundaryExactCoverSearch<'a> {
+    pub(in super::super::super) fn search_with_trace(
+        &mut self,
+    ) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
+        let mut trace = BoundaryExactCoverTrace {
+            dead_end: None,
+            dead_ends: Vec::new(),
+            dead_end_reason_counts: BTreeMap::new(),
+            dead_end_faces_by_reason: BTreeMap::new(),
+        };
+        let result = self.search_from_traced(
+            0.0,
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut trace,
+        );
+        (result, trace)
+    }
+
+    #[cfg(test)]
+    pub(in super::super::super) fn search_without_forced_with_trace(
+        &mut self,
+    ) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
+        let mut trace = BoundaryExactCoverTrace {
+            dead_end: None,
+            dead_ends: Vec::new(),
+            dead_end_reason_counts: BTreeMap::new(),
+            dead_end_faces_by_reason: BTreeMap::new(),
+        };
+        let result = self.search_from_without_forced_traced(
+            0.0,
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut trace,
+        );
+        (result, trace)
+    }
+
+    pub(in super::super::super) fn record_dead_end(
+        &self,
+        trace: &mut BoundaryExactCoverTrace,
+        selected: &[usize],
+        selected_roles: &[&'static str],
+        reason: &'static str,
+    ) {
+        self.record_dead_end_for_face(trace, selected, selected_roles, reason, None, None);
+    }
+
+    pub(in super::super::super) fn record_dead_end_for_face(
+        &self,
+        trace: &mut BoundaryExactCoverTrace,
+        selected: &[usize],
+        selected_roles: &[&'static str],
+        reason: &'static str,
+        face: Option<[u32; 3]>,
+        volume: Option<(f64, f64, f64)>,
+    ) {
+        *trace.dead_end_reason_counts.entry(reason).or_default() += 1;
+        if let Some(face) = face {
+            trace
+                .dead_end_faces_by_reason
+                .entry(reason)
+                .or_default()
+                .insert(face);
+        }
+        let (current_volume_m3, candidate_volume_m3, target_volume_m3) =
+            volume.unwrap_or((0.0, 0.0, self.target_volume_m3));
+        let dead_end = BoundaryExactCoverDeadEnd {
+            reason,
+            face,
+            depth: selected.len(),
+            selected_tetrahedra: selected
+                .iter()
+                .map(|candidate_index| self.candidates[*candidate_index].node_ids)
+                .collect(),
+            selected_roles: selected_roles.to_vec(),
+            current_volume_m3,
+            candidate_volume_m3,
+            target_volume_m3,
+        };
+        if trace.dead_end.is_none() {
+            trace.dead_end = Some(dead_end.clone());
+        }
+        if trace.dead_ends.len() < 128 {
+            trace.dead_ends.push(dead_end);
+        }
+    }
+
+    #[cfg(test)]
+    pub(in super::super::super) fn root_boundary_availability(
+        &self,
+    ) -> BoundaryExactCoverRootAvailability {
+        let face_counts = BTreeMap::<[u32; 3], usize>::new();
+        let selected = Vec::<usize>::new();
+        let mut zero_raw = 0_usize;
+        let mut zero_addable = 0_usize;
+        let mut min_raw = usize::MAX;
+        let mut min_addable = usize::MAX;
+        let mut max_addable = 0_usize;
+        for face in &self.boundary_faces {
+            let raw_count = self
+                .candidate_faces
+                .iter()
+                .filter(|candidate_faces| candidate_faces.contains(face))
+                .count();
+            let addable_count = (0..self.candidates.len())
+                .filter(|candidate_index| {
+                    self.candidate_can_be_added_for_face(
+                        *candidate_index,
+                        *face,
+                        &face_counts,
+                        &selected,
+                    )
+                })
+                .count();
+            zero_raw += usize::from(raw_count == 0);
+            zero_addable += usize::from(addable_count == 0);
+            min_raw = min_raw.min(raw_count);
+            min_addable = min_addable.min(addable_count);
+            max_addable = max_addable.max(addable_count);
+        }
+        if self.boundary_faces.is_empty() {
+            min_raw = 0;
+            min_addable = 0;
+        }
+        BoundaryExactCoverRootAvailability {
+            zero_raw_candidate_face_count: zero_raw,
+            zero_addable_candidate_face_count: zero_addable,
+            min_raw_candidate_count: min_raw,
+            min_addable_candidate_count: min_addable,
+            max_addable_candidate_count: max_addable,
+        }
+    }
+
+    pub(in super::super::super) fn search_from_traced(
+        &mut self,
+        current_volume_m3: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+        selected_roles: &mut Vec<&'static str>,
+        trace: &mut BoundaryExactCoverTrace,
+    ) -> Option<Vec<usize>> {
+        self.attempts += 1;
+        if self.attempts > self.max_attempt_count {
+            self.record_dead_end(trace, selected, selected_roles, "attempt_limit");
+            return None;
+        }
+        if current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3 {
+            self.record_dead_end(trace, selected, selected_roles, "volume_overflow");
+            return None;
+        }
+        let (forced_volume_m3, forced_indices) = match self.propagate_forced_interior_mates_traced(
+            current_volume_m3,
+            face_counts,
+            selected,
+            selected_roles,
+        ) {
+            Ok(forced) => forced,
+            Err(reason) => {
+                self.record_dead_end_for_face(
+                    trace,
+                    selected,
+                    selected_roles,
+                    reason.reason(),
+                    reason.face(),
+                    reason.volume(),
+                );
+                return None;
+            }
+        };
+        let current_volume_m3 = current_volume_m3 + forced_volume_m3;
+        let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
+            let boundary_ok = self
+                .boundary_faces
+                .iter()
+                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+            let interior_ok = face_counts
+                .iter()
+                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
+            if boundary_ok
+                && interior_ok
+                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
+            {
+                return Some(selected.clone());
+            }
+            let reason = if !boundary_ok {
+                "boundary_incomplete"
+            } else if !interior_ok {
+                "interior_incomplete"
+            } else {
+                "volume_mismatch"
+            };
+            self.record_dead_end(trace, selected, selected_roles, reason);
+            self.rollback_selected_candidates_with_roles(
+                &forced_indices,
+                face_counts,
+                selected,
+                selected_roles,
+            );
+            return None;
+        };
+        for candidate_index in candidate_indices {
+            if selected.contains(&candidate_index) {
+                continue;
+            }
+            for face in self.candidate_faces[candidate_index] {
+                *face_counts.entry(face).or_default() += 1;
+            }
+            selected.push(candidate_index);
+            selected_roles.push("branch");
+            if let Some(result) = self.search_from_traced(
+                current_volume_m3 + self.candidates[candidate_index].volume_m3,
+                face_counts,
+                selected,
+                selected_roles,
+                trace,
+            ) {
+                return Some(result);
+            }
+            selected_roles.pop();
+            selected.pop();
+            self.remove_candidate_faces(candidate_index, face_counts);
+        }
+        let (reason, face) = self.candidates_exhausted_reason_and_face(face_counts, selected);
+        self.record_dead_end_for_face(trace, selected, selected_roles, reason, face, None);
+        self.rollback_selected_candidates_with_roles(
+            &forced_indices,
+            face_counts,
+            selected,
+            selected_roles,
+        );
+        None
+    }
+
+    #[cfg(test)]
+    pub(in super::super::super) fn search_from_without_forced_traced(
+        &mut self,
+        current_volume_m3: f64,
+        face_counts: &mut BTreeMap<[u32; 3], usize>,
+        selected: &mut Vec<usize>,
+        selected_roles: &mut Vec<&'static str>,
+        trace: &mut BoundaryExactCoverTrace,
+    ) -> Option<Vec<usize>> {
+        self.attempts += 1;
+        if self.attempts > self.max_attempt_count {
+            self.record_dead_end(trace, selected, selected_roles, "attempt_limit");
+            return None;
+        }
+        if current_volume_m3 > self.target_volume_m3 + self.volume_tolerance_m3 {
+            self.record_dead_end(trace, selected, selected_roles, "volume_overflow");
+            return None;
+        }
+        let Some(candidate_indices) = self.next_cover_candidates(face_counts, selected) else {
+            let boundary_ok = self
+                .boundary_faces
+                .iter()
+                .all(|face| face_counts.get(face).copied().unwrap_or(0) == 1);
+            let interior_ok = face_counts
+                .iter()
+                .all(|(face, count)| self.boundary_faces.contains(face) || *count == 2);
+            if boundary_ok
+                && interior_ok
+                && (current_volume_m3 - self.target_volume_m3).abs() <= self.volume_tolerance_m3
+            {
+                return Some(selected.clone());
+            }
+            let reason = if !boundary_ok {
+                "boundary_incomplete"
+            } else if !interior_ok {
+                "interior_incomplete"
+            } else {
+                "volume_mismatch"
+            };
+            self.record_dead_end(trace, selected, selected_roles, reason);
+            return None;
+        };
+        for candidate_index in candidate_indices {
+            if selected.contains(&candidate_index) {
+                continue;
+            }
+            for face in self.candidate_faces[candidate_index] {
+                *face_counts.entry(face).or_default() += 1;
+            }
+            selected.push(candidate_index);
+            selected_roles.push("branch");
+            if let Some(result) = self.search_from_without_forced_traced(
+                current_volume_m3 + self.candidates[candidate_index].volume_m3,
+                face_counts,
+                selected,
+                selected_roles,
+                trace,
+            ) {
+                return Some(result);
+            }
+            selected_roles.pop();
+            selected.pop();
+            self.remove_candidate_faces(candidate_index, face_counts);
+        }
+        self.record_dead_end(
+            trace,
+            selected,
+            selected_roles,
+            self.candidates_exhausted_reason(face_counts, selected),
+        );
+        None
+    }
+}
