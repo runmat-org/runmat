@@ -1,7 +1,7 @@
 use runmat_meshing_cad::{CadEvaluationError, CadTopologyError, SourceTopologyError};
 use runmat_meshing_core::{MeshBackendKind, MeshKindRequest, VolumeElementKind};
 use runmat_meshing_curve::CurveDiscretizationError;
-use runmat_meshing_plc::build::PlcBuildError;
+use runmat_meshing_plc::{build::PlcBuildError, validate::PlcValidationError};
 use runmat_meshing_surface::SurfaceDiscretizationError;
 use runmat_meshing_tetrahedron::{generate::TetrahedronGenerationError, structured_grid};
 
@@ -18,6 +18,7 @@ pub enum SolidMeshingError {
     Curve(CurveDiscretizationError),
     Surface(SurfaceDiscretizationError),
     ProtectedBoundaryComplex(PlcBuildError),
+    ProtectedBoundaryValidation(PlcValidationError),
     Tetrahedron(TetrahedronGenerationError),
     StructuredGrid(structured_grid::MeshingError),
 }
@@ -47,6 +48,9 @@ impl std::fmt::Display for SolidMeshingError {
             Self::Curve(err) => write!(formatter, "curve meshing failed: {err}"),
             Self::Surface(err) => write!(formatter, "surface meshing failed: {err}"),
             Self::ProtectedBoundaryComplex(err) => write!(formatter, "PLC build failed: {err}"),
+            Self::ProtectedBoundaryValidation(err) => {
+                write!(formatter, "PLC validation failed: {err}")
+            }
             Self::Tetrahedron(err) => write!(formatter, "Tetrahedron generation failed: {err}"),
             Self::StructuredGrid(err) => {
                 write!(
