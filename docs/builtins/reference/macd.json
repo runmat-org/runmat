@@ -1,0 +1,33 @@
+{
+  "title": "macd",
+  "category": "finance",
+  "keywords": ["macd", "finance", "technical indicator", "moving average", "ema"],
+  "summary": "Compute the Moving Average Convergence/Divergence indicator.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host because MACD is a sequential financial indicator."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::finance::macd::tests", "integration": null },
+  "description": "`macd(Data)` computes the 12-period minus 26-period exponential moving-average line and the 9-period exponential signal line.",
+  "behaviors": [
+    "Matrix input must be M-by-4 with High, Low, Open, and Close prices in columns 1 through 4.",
+    "Table and timetable inputs must contain High, Low, Open, and Close variables, matched case-insensitively.",
+    "Table and timetable High, Low, Open, and Close variables must be numeric M-by-1 vectors.",
+    "The returned MACDLine and SignalLine preserve the input row count and container type.",
+    "For table and timetable inputs, outputs contain a Close variable with the computed series.",
+    "Empty M-by-4 inputs return empty M-by-1 outputs; NaNs propagate through the exponential moving-average recurrence."
+  ],
+  "examples": [
+    { "description": "Compute MACD and signal line", "input": "[m,s] = macd(priceData)" }
+  ],
+  "links": [{ "label": "timetable", "url": "./timetable" }, { "label": "table", "url": "./table" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/finance/macd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/finance/macd.rs"
+  }
+}

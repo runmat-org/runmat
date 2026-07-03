@@ -13,6 +13,7 @@ pub mod datetime;
 pub mod diagnostics;
 pub mod duration;
 pub mod fea;
+pub mod finance;
 pub mod geometry;
 pub mod image;
 pub mod introspection;
