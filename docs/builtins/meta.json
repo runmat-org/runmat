@@ -17627,6 +17627,167 @@
       ]
     },
     {
+      "name": "datasample",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = datasample(data, k)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population to sample from."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        },
+        {
+          "label": "y = datasample(data, k, dim)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population to sample from."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimension, replacement, and weights options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        },
+        {
+          "label": "y = datasample(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population to sample from."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimension, replacement, and weights options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        },
+        {
+          "label": "[y, idx] = datasample(___)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population to sample from."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimension, replacement, and weights options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            },
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based sampled indices along the sampled dimension."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.datasample.INVALID_ARGUMENT",
+          "identifier": "RunMat:datasample:InvalidArgument",
+          "when": "Inputs, dimensions, replacement flags, or weights are malformed.",
+          "message": "sampling: invalid argument"
+        },
+        {
+          "code": "RM.datasample.INTERNAL",
+          "identifier": "RunMat:datasample:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "sampling: internal error"
+        }
+      ]
+    },
+    {
       "name": "dateshift",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -66537,6 +66698,118 @@
       ]
     },
     {
+      "name": "randsample",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = randsample(n, k)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population size or upper discrete uniform bound."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        },
+        {
+          "label": "y = randsample(population, k)",
+          "inputs": [
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population to sample from."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        },
+        {
+          "label": "y = randsample(___, replacement, w)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population size or upper discrete uniform bound."
+            },
+            {
+              "name": "k",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of samples."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimension, replacement, and weights options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.randsample.INVALID_ARGUMENT",
+          "identifier": "RunMat:randsample:InvalidArgument",
+          "when": "Inputs, dimensions, replacement flags, or weights are malformed.",
+          "message": "sampling: invalid argument"
+        },
+        {
+          "code": "RM.randsample.INTERNAL",
+          "identifier": "RunMat:randsample:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "sampling: internal error"
+        }
+      ]
+    },
+    {
       "name": "range",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -85510,6 +85783,104 @@
           "identifier": "RunMat:unicode2native:InternalError",
           "when": "Internal byte-vector tensor construction failed.",
           "message": "unicode2native: internal error"
+        }
+      ]
+    },
+    {
+      "name": "unidrnd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = unidrnd(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population size or upper discrete uniform bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Discrete uniform random sample."
+            }
+          ]
+        },
+        {
+          "label": "r = unidrnd(n, sz)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population size or upper discrete uniform bound."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output dimensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Discrete uniform random sample."
+            }
+          ]
+        },
+        {
+          "label": "r = unidrnd(n, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Population size or upper discrete uniform bound."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output dimensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Discrete uniform random sample."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.unidrnd.INVALID_ARGUMENT",
+          "identifier": "RunMat:unidrnd:InvalidArgument",
+          "when": "Inputs, dimensions, replacement flags, or weights are malformed.",
+          "message": "sampling: invalid argument"
+        },
+        {
+          "code": "RM.unidrnd.INTERNAL",
+          "identifier": "RunMat:unidrnd:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "sampling: internal error"
         }
       ]
     },
