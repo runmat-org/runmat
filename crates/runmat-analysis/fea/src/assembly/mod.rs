@@ -3126,7 +3126,7 @@ mod tests {
     #[test]
     fn analysis_mesh_populates_sparse_solid_stiffness_operator() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
 
         assert_eq!(summary.dof_count, 12);
         assert_eq!(summary.structural_solid_element_count, 1);
@@ -3208,7 +3208,7 @@ mod tests {
             shell_sections: Vec::new(),
         });
 
-        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
 
         assert_eq!(summary.structural_solid_element_count, 1);
         assert_eq!(summary.structural_solid_recovery.len(), 1);
@@ -3218,17 +3218,18 @@ mod tests {
     }
 
     #[test]
-    fn strict_analysis_mesh_assembly_rejects_invalid_tet4_stiffness() {
+    fn strict_analysis_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.volume_elements[0].node_ids = vec![1, 3, 2, 4];
         mesh.boundary_faces = vec![
             boundary_face("root_face", vec![1, 2, 3], &["root"]),
             boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
         ];
 
-        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
-            .expect_err("strict analysis mesh assembly should reject inverted Tet4 stiffness");
+        let err = try_assemble_linear_system(&model, None, Some(mesh), None, None).expect_err(
+            "strict analysis mesh assembly should reject inverted Tetrahedron4 stiffness",
+        );
 
         assert!(matches!(
             err,
@@ -3253,7 +3254,7 @@ mod tests {
                 fz: 0.0,
             },
         }];
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.boundary_faces = vec![
             boundary_face("root_face", vec![1, 2, 3], &["root"]),
             boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
@@ -3285,7 +3286,7 @@ mod tests {
                 fz: 0.0,
             },
         }];
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.boundary_faces = vec![boundary_face("root_face", vec![1, 2, 3], &["root"])];
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
@@ -3319,7 +3320,7 @@ mod tests {
                 fz: 0.0,
             },
         }];
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
@@ -3345,7 +3346,7 @@ mod tests {
             region_id: "tip".to_string(),
             kind: LoadKind::Pressure { magnitude_pa: 12.0 },
         }];
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
 
         let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
@@ -3374,7 +3375,7 @@ mod tests {
                 pz: 0.0,
             },
         }];
-        let mut mesh = tet4_mesh();
+        let mut mesh = tetrahedron4_mesh();
         mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
 
         let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
@@ -3389,10 +3390,10 @@ mod tests {
         assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
     }
 
-    fn tet4_mesh() -> AnalysisMeshArtifact {
+    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
         AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "unit_tet".to_string(),
+            mesh_id: "unit_tetrahedron".to_string(),
             nodes: vec![
                 node(1, [0.0, 0.0, 0.0]),
                 node(2, [1.0, 0.0, 0.0]),
@@ -3400,7 +3401,7 @@ mod tests {
                 node(4, [0.0, 0.0, 1.0]),
             ],
             volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tet_1".to_string(),
+                element_id: "tetrahedron_1".to_string(),
                 kind: VolumeElementKind::Tetrahedron4,
                 node_ids: vec![1, 2, 3, 4],
                 material_region_id: "solid".to_string(),

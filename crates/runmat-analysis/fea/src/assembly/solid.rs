@@ -5,8 +5,8 @@ use runmat_meshing_core::{AnalysisMeshArtifact, VolumeElementKind};
 use crate::operator::CsrMatrix;
 
 use super::elements::solid::{
-    global_stiffness_matrix as tet4_global_stiffness_matrix, SolidMaterial, Tet4ElementGeometry,
-    TET4_ELEMENT_DOF_COUNT, TET4_NODE_DOF_COUNT,
+    global_stiffness_matrix as tetrahedron4_global_stiffness_matrix, SolidMaterial,
+    Tetrahedron4ElementGeometry, TETRAHEDRON4_ELEMENT_DOF_COUNT, TETRAHEDRON4_NODE_DOF_COUNT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +58,7 @@ pub fn assemble_solid_stiffness_dense(
     let topology = solid_topology_from_analysis_mesh(mesh, base_dof_count)?;
     let mut node_offsets = BTreeMap::<u32, usize>::new();
     for (index, node) in mesh.nodes.iter().enumerate() {
-        node_offsets.insert(node.node_id, index * TET4_NODE_DOF_COUNT);
+        node_offsets.insert(node.node_id, index * TETRAHEDRON4_NODE_DOF_COUNT);
     }
 
     let mut dense = vec![0.0_f64; topology.dof_count * topology.dof_count];
@@ -89,13 +89,12 @@ pub fn assemble_solid_stiffness_dense(
             })?;
         }
         let element_stiffness =
-            tet4_global_stiffness_matrix(material, Tet4ElementGeometry { nodes_m }).map_err(
-                |err| SolidAssemblyError::ElementStiffness {
+            tetrahedron4_global_stiffness_matrix(material, Tetrahedron4ElementGeometry { nodes_m })
+                .map_err(|err| SolidAssemblyError::ElementStiffness {
                     element_id: element.element_id.clone(),
                     message: err.to_string(),
-                },
-            )?;
-        scatter_tet4(
+                })?;
+        scatter_tetrahedron4(
             &mut dense,
             topology.dof_count,
             dof_offsets,
@@ -113,7 +112,7 @@ pub fn assemble_solid_stiffness_csr(
     let topology = solid_topology_from_analysis_mesh(mesh, base_dof_count)?;
     let mut node_offsets = BTreeMap::<u32, usize>::new();
     for (index, node) in mesh.nodes.iter().enumerate() {
-        node_offsets.insert(node.node_id, index * TET4_NODE_DOF_COUNT);
+        node_offsets.insert(node.node_id, index * TETRAHEDRON4_NODE_DOF_COUNT);
     }
 
     let mut rows = (0..topology.dof_count)
@@ -146,30 +145,29 @@ pub fn assemble_solid_stiffness_csr(
             })?;
         }
         let element_stiffness =
-            tet4_global_stiffness_matrix(material, Tet4ElementGeometry { nodes_m }).map_err(
-                |err| SolidAssemblyError::ElementStiffness {
+            tetrahedron4_global_stiffness_matrix(material, Tetrahedron4ElementGeometry { nodes_m })
+                .map_err(|err| SolidAssemblyError::ElementStiffness {
                     element_id: element.element_id.clone(),
                     message: err.to_string(),
-                },
-            )?;
-        scatter_tet4_csr_rows(&mut rows, dof_offsets, &element_stiffness);
+                })?;
+        scatter_tetrahedron4_csr_rows(&mut rows, dof_offsets, &element_stiffness);
     }
     Ok(rows_to_csr(rows))
 }
 
-fn scatter_tet4(
+fn scatter_tetrahedron4(
     dense: &mut [f64],
     dof_count: usize,
     dof_offsets: [usize; 4],
-    element_stiffness: &[[f64; TET4_ELEMENT_DOF_COUNT]; TET4_ELEMENT_DOF_COUNT],
+    element_stiffness: &[[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT],
 ) {
     for local_row_node in 0..4 {
-        for local_row_axis in 0..TET4_NODE_DOF_COUNT {
-            let local_row = local_row_node * TET4_NODE_DOF_COUNT + local_row_axis;
+        for local_row_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
+            let local_row = local_row_node * TETRAHEDRON4_NODE_DOF_COUNT + local_row_axis;
             let global_row = dof_offsets[local_row_node] + local_row_axis;
             for local_col_node in 0..4 {
-                for local_col_axis in 0..TET4_NODE_DOF_COUNT {
-                    let local_col = local_col_node * TET4_NODE_DOF_COUNT + local_col_axis;
+                for local_col_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
+                    let local_col = local_col_node * TETRAHEDRON4_NODE_DOF_COUNT + local_col_axis;
                     let global_col = dof_offsets[local_col_node] + local_col_axis;
                     dense[global_row * dof_count + global_col] +=
                         element_stiffness[local_row][local_col];
@@ -179,18 +177,18 @@ fn scatter_tet4(
     }
 }
 
-fn scatter_tet4_csr_rows(
+fn scatter_tetrahedron4_csr_rows(
     rows: &mut [BTreeMap<usize, f64>],
     dof_offsets: [usize; 4],
-    element_stiffness: &[[f64; TET4_ELEMENT_DOF_COUNT]; TET4_ELEMENT_DOF_COUNT],
+    element_stiffness: &[[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT],
 ) {
     for local_row_node in 0..4 {
-        for local_row_axis in 0..TET4_NODE_DOF_COUNT {
-            let local_row = local_row_node * TET4_NODE_DOF_COUNT + local_row_axis;
+        for local_row_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
+            let local_row = local_row_node * TETRAHEDRON4_NODE_DOF_COUNT + local_row_axis;
             let global_row = dof_offsets[local_row_node] + local_row_axis;
             for local_col_node in 0..4 {
-                for local_col_axis in 0..TET4_NODE_DOF_COUNT {
-                    let local_col = local_col_node * TET4_NODE_DOF_COUNT + local_col_axis;
+                for local_col_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
+                    let local_col = local_col_node * TETRAHEDRON4_NODE_DOF_COUNT + local_col_axis;
                     let global_col = dof_offsets[local_col_node] + local_col_axis;
                     *rows[global_row].entry(global_col).or_insert(0.0) +=
                         element_stiffness[local_row][local_col];
@@ -256,7 +254,7 @@ mod tests {
                 },
             ],
             volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tet_1".to_string(),
+                element_id: "tetrahedron_1".to_string(),
                 kind,
                 node_ids: vec![1, 2, 3, 4],
                 material_region_id: "region".to_string(),
@@ -278,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn solid_topology_uses_analysis_mesh_nodes_and_tets() {
+    fn solid_topology_uses_analysis_mesh_nodes_and_tetrahedron4_elements() {
         let topology =
             solid_topology_from_analysis_mesh(&mesh(VolumeElementKind::Tetrahedron4), 3).unwrap();
         assert_eq!(topology.dof_count, 12);
@@ -293,13 +291,13 @@ mod tests {
         assert_eq!(
             err,
             SolidAssemblyError::UnsupportedVolumeElementKind {
-                element_id: "tet_1".to_string()
+                element_id: "tetrahedron_1".to_string()
             }
         );
     }
 
     #[test]
-    fn solid_stiffness_scatter_assembles_tet4_dense_matrix() {
+    fn solid_stiffness_scatter_assembles_tetrahedron4_dense_matrix() {
         let mesh = mesh(VolumeElementKind::Tetrahedron4);
         let dense = assemble_solid_stiffness_dense(
             &mesh,
@@ -309,7 +307,7 @@ mod tests {
             },
             3,
         )
-        .expect("tet4 stiffness should assemble");
+        .expect("Tetrahedron4 stiffness should assemble");
         let dof_count = 12;
         assert_eq!(dense.len(), dof_count * dof_count);
         for row in 0..dof_count {
@@ -323,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn solid_stiffness_scatter_assembles_tet4_csr_matrix() {
+    fn solid_stiffness_scatter_assembles_tetrahedron4_csr_matrix() {
         let mesh = mesh(VolumeElementKind::Tetrahedron4);
         let csr = assemble_solid_stiffness_csr(
             &mesh,
@@ -333,7 +331,7 @@ mod tests {
             },
             3,
         )
-        .expect("tet4 stiffness should assemble");
+        .expect("Tetrahedron4 stiffness should assemble");
         let dof_count = 12;
         assert_eq!(csr.row_offsets.len(), dof_count + 1);
         assert_eq!(csr.row_offsets.last().copied(), Some(csr.values.len()));

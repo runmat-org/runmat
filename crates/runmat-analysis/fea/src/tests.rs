@@ -582,7 +582,9 @@ fn convergence_diagnostics_are_emitted() {
     }));
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
-            && diag.message.contains("basis=solid_tet4_constant_strain")
+            && diag
+                .message
+                .contains("basis=solid_tetrahedron4_constant_strain")
             && diag.message.contains("solver_mesh_element_count=1")
     }));
 }
@@ -639,7 +641,7 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
 
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_SOLID_ASSEMBLY"
-            && diag.message.contains("basis=solid_tet4_stiffness")
+            && diag.message.contains("basis=solid_tetrahedron4_stiffness")
             && diag.message.contains("storage=sparse_csr")
             && diag.message.contains("solid_node_count=4")
             && diag.message.contains("solid_element_count=1")
@@ -647,7 +649,9 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
     }));
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
-            && diag.message.contains("basis=solid_tet4_constant_strain")
+            && diag
+                .message
+                .contains("basis=solid_tetrahedron4_constant_strain")
             && diag.message.contains("solver_mesh_node_count=4")
             && diag.message.contains("solver_mesh_element_count=1")
     }));

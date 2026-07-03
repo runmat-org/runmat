@@ -2926,7 +2926,7 @@ mod tests {
         }];
 
         let warning = field_topology_mismatch_warning(&field, &meshes)
-            .expect("mismatched Tet4 element field should produce a warning");
+            .expect("mismatched Tetrahedron4 element field should produce a warning");
 
         assert!(warning.contains("structural.von_mises"));
         assert!(warning.contains("topology_id=analysis_mesh"));

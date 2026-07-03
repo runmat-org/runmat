@@ -7624,7 +7624,7 @@ fn analysis_boundary_face(
 fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
     AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-        mesh_id: "unit_tet".to_string(),
+        mesh_id: "unit_tetrahedron".to_string(),
         nodes: vec![
             analysis_mesh_node(1, [0.0, 0.0, 0.0]),
             analysis_mesh_node(2, [1.0, 0.0, 0.0]),

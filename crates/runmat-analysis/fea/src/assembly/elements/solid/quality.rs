@@ -9,7 +9,7 @@ pub struct SolidElementQuality {
 }
 
 impl SolidElementQuality {
-    pub fn from_tet_nodes(nodes_m: [[f64; 3]; 4], volume_m3: f64) -> Self {
+    pub fn from_tetrahedron4_nodes(nodes_m: [[f64; 3]; 4], volume_m3: f64) -> Self {
         let mut min_edge_length_m = f64::INFINITY;
         let mut max_edge_length_m = 0.0_f64;
         for (left, right) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)] {

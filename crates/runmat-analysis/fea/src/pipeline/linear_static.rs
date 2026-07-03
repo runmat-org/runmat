@@ -377,7 +377,7 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=solid_tet4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
+            "basis=solid_tetrahedron4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
             storage,
             summary.structural_node_count,
             summary.structural_solid_element_count,

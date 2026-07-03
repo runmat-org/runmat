@@ -17,7 +17,7 @@ use crate::{
     assembly::{
         dofs::StructuralDofKind,
         elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
-        elements::solid::{strain_displacement_matrix, Tet4ElementGeometry},
+        elements::solid::{strain_displacement_matrix, Tetrahedron4ElementGeometry},
         AssemblySummary, BeamRecoveryElementSummary, PrepCoordinateSummary,
         PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, SolidRecoveryElementSummary,
         StructuralMaterialSummary,
@@ -313,7 +313,7 @@ struct StructuralRecoveryEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuralRecoveryBasis {
-    SolidTet4ConstantStrain,
+    SolidTetrahedron4ConstantStrain,
     PrepConstantStrainBMatrix,
     PrepElementConnectivity,
     OperatorConnectivity,
@@ -322,7 +322,7 @@ enum StructuralRecoveryBasis {
 impl StructuralRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::SolidTet4ConstantStrain => "solid_tet4_constant_strain",
+            Self::SolidTetrahedron4ConstantStrain => "solid_tetrahedron4_constant_strain",
             Self::PrepConstantStrainBMatrix => "prep_constant_strain_b_matrix",
             Self::PrepElementConnectivity => "prep_element_connectivity",
             Self::OperatorConnectivity => "operator_connectivity",
@@ -521,9 +521,12 @@ fn recover_structural_strain(
 ) -> StructuralStrainRecovery {
     if !summary.structural_solid_recovery.is_empty() {
         return StructuralStrainRecovery {
-            values: recover_solid_tet4_strain(displacement, &summary.structural_solid_recovery),
+            values: recover_solid_tetrahedron4_strain(
+                displacement,
+                &summary.structural_solid_recovery,
+            ),
             element_count: summary.structural_solid_recovery.len().max(1),
-            basis: StructuralRecoveryBasis::SolidTet4ConstantStrain.as_str(),
+            basis: StructuralRecoveryBasis::SolidTetrahedron4ConstantStrain.as_str(),
         };
     }
 
@@ -547,13 +550,13 @@ fn recover_structural_strain(
     }
 }
 
-fn recover_solid_tet4_strain(
+fn recover_solid_tetrahedron4_strain(
     displacement: &[f64],
     elements: &[SolidRecoveryElementSummary],
 ) -> Vec<f64> {
     let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
     for (element_index, element) in elements.iter().enumerate() {
-        let Ok(b) = strain_displacement_matrix(Tet4ElementGeometry {
+        let Ok(b) = strain_displacement_matrix(Tetrahedron4ElementGeometry {
             nodes_m: element.coordinates_m,
         }) else {
             continue;
@@ -1521,9 +1524,9 @@ mod tests {
     };
 
     #[test]
-    fn solid_tet4_recovery_uses_solver_mesh_field_shapes() {
+    fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
         let solve = LinearSolveResult {
             iterations: 1,
             residual_norm: 0.0,
@@ -1562,7 +1565,7 @@ mod tests {
             .iter()
             .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
         let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
-        assert_eq!(metrics.basis, "solid_tet4_constant_strain");
+        assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
         assert_eq!(metrics.solver_mesh_node_count, 4);
         assert_eq!(metrics.solver_mesh_element_count, 1);
     }
@@ -1570,7 +1573,7 @@ mod tests {
     #[test]
     fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, None, Some(tet4_mesh()), None, None);
+        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
         let solve = LinearSolveResult {
             iterations: 10,
             residual_norm: 1.0e-4,
@@ -1613,10 +1616,10 @@ mod tests {
             .expect("field should be present")
     }
 
-    fn tet4_mesh() -> AnalysisMeshArtifact {
+    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
         AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "unit_tet".to_string(),
+            mesh_id: "unit_tetrahedron".to_string(),
             nodes: vec![
                 node(1, [0.0, 0.0, 0.0]),
                 node(2, [1.0, 0.0, 0.0]),
@@ -1624,7 +1627,7 @@ mod tests {
                 node(4, [0.0, 0.0, 1.0]),
             ],
             volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tet_1".to_string(),
+                element_id: "tetrahedron_1".to_string(),
                 kind: VolumeElementKind::Tetrahedron4,
                 node_ids: vec![1, 2, 3, 4],
                 material_region_id: "solid".to_string(),
