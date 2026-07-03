@@ -14,10 +14,7 @@ use crate::{
     },
     cad::topology::{build_cad_topology, CadTopologyError, CadTopologyModel, CadTopologySource},
     contracts::TopologyEntityId,
-    curve::{
-        discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
-        CurveDiscretizationOptions,
-    },
+    curve::{discretize_topology_curves, CurveDiscretization, CurveDiscretizationError},
     options::{MeshTargetSize, RefinementFocusLevel, VolumeMeshingOptions},
     plc::build::{build_protected_boundary_complex, PlcBuildError, ProtectedBoundaryComplex},
     predicate::{
@@ -42,7 +39,6 @@ use crate::{
     },
     surface::{
         discretize_cad_surfaces_with_curves, SurfaceDiscretization, SurfaceDiscretizationError,
-        SurfaceDiscretizationOptions,
     },
     tetrahedron::generate::{
         generate_initial_tetrahedron_mesh_from_plc,
@@ -146,6 +142,9 @@ use sizing::{
     requested_refinement_selection, solid_effective_sizing, solid_mesh_sizing,
     solid_sizing_target_size, target_size_for_mesh, thin_low_face_topology, topology_min_span,
 };
+
+mod stage_options;
+use stage_options::{curve_options_for_mesh, surface_options_for_mesh};
 
 mod tetrahedron_stage;
 use tetrahedron_stage::build_solid_tetrahedron_stage_evidence;
@@ -292,34 +291,6 @@ pub fn generate_solid_analysis_mesh_with_sizing_and_cad_evaluator(
         evaluator_provider,
     )?;
     analysis_mesh_from_preparation(&preparation, &effective_options, Some(sizing))
-}
-
-fn curve_options_for_mesh(
-    topology: &SourceTopologyModel,
-    options: &VolumeMeshingOptions,
-) -> CurveDiscretizationOptions {
-    let mut target_size_m = target_size_for_mesh(topology, options);
-    if thin_low_face_topology(topology) {
-        if let Some(min_span_m) = topology_min_span(topology) {
-            target_size_m = target_size_m.min(min_span_m.max(1.0e-6));
-        }
-    }
-    CurveDiscretizationOptions {
-        target_size_m,
-        min_segments_per_edge: 1,
-        max_segments_per_edge: options.max_elements.max(1).min(4096),
-    }
-}
-
-fn surface_options_for_mesh(topology: &SourceTopologyModel) -> SurfaceDiscretizationOptions {
-    SurfaceDiscretizationOptions {
-        max_curve_segments_per_edge: if thin_low_face_topology(topology) {
-            20
-        } else {
-            8
-        },
-        ..SurfaceDiscretizationOptions::default()
-    }
 }
 
 #[cfg(test)]
