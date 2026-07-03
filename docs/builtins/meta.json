@@ -64452,6 +64452,167 @@
       ]
     },
     {
+      "name": "pdist",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "D = pdist(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise distances."
+            }
+          ]
+        },
+        {
+          "label": "D = pdist(X, Distance, DistParameter)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Distance metric and optional metric parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise distances."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
+          "message": "distance helper: invalid argument"
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "when": "RunMat cannot allocate or construct a distance output.",
+          "message": "distance helper: internal error"
+        }
+      ]
+    },
+    {
+      "name": "pdist2",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "D = pdist2(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second observation matrix with observations in rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pairwise distances."
+            }
+          ]
+        },
+        {
+          "label": "D = pdist2(X, Y, Distance, DistParameter, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second observation matrix with observations in rows."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Distance metric, metric parameter, or Smallest/Largest selection options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected pairwise distances."
+            },
+            {
+              "name": "I",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based row indices from X for selected distances."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
+          "message": "distance helper: invalid argument"
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "when": "RunMat cannot allocate or construct a distance output.",
+          "message": "distance helper: internal error"
+        }
+      ]
+    },
+    {
       "name": "peaks",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -80986,6 +81147,76 @@
           "identifier": "RunMat:square:InternalError",
           "when": "Internal tensor construction or GPU gather fails.",
           "message": "square: internal error"
+        }
+      ]
+    },
+    {
+      "name": "squareform",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = squareform(Z)",
+          "inputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Condensed distance vector or square distance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square symmetric matrix or condensed distance vector."
+            }
+          ]
+        },
+        {
+          "label": "Y = squareform(Z, Force)",
+          "inputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Condensed distance vector or square distance matrix."
+            },
+            {
+              "name": "force",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Conversion force option: 'tomatrix' or 'tovector'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square symmetric matrix or condensed distance vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
+          "message": "distance helper: invalid argument"
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "when": "RunMat cannot allocate or construct a distance output.",
+          "message": "distance helper: internal error"
         }
       ]
     },
