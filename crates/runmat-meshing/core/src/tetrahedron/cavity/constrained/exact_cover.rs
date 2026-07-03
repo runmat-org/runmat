@@ -4,6 +4,7 @@ use super::*;
 mod diagnostics;
 #[cfg(test)]
 pub(crate) use diagnostics::*;
+mod cover_steps;
 mod refill;
 #[cfg(test)]
 pub(super) use refill::exact_cover_refill_from_on_demand_interior_mates;
