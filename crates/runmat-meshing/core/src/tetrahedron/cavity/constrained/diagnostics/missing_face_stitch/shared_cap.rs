@@ -1,16 +1,12 @@
 use super::*;
 
-#[cfg(test)]
-mod shared_cap;
-
-#[cfg(test)]
-use shared_cap::diagnostic_missing_face_shared_cap_stitch_with_link;
-
-#[cfg(test)]
-pub(crate) fn diagnostic_missing_face_local_cap_stitch(
+pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],
     options: ConstrainedCavityRefillOptions,
+    patch_link: MissingFaceLink,
+    incomplete_reason: &'static str,
+    fallback_to_face_caps: bool,
 ) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
     validate_refill_options(options)?;
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
@@ -49,7 +45,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     }
     let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tetrahedra)
         .map_err(ConstrainedCavityRefillError::Validation)?;
-    let missing_face_patches = missing_face_components(&missing_faces, MissingFaceLink::Node);
+    let missing_face_patches = missing_face_components(&missing_faces, patch_link);
     let mut diagnostic = MissingFaceLocalCapStitchDiagnostic {
         missing_face_count: missing_faces.len(),
         missing_faces: missing_faces.clone(),
@@ -107,40 +103,68 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     let mut inserted_nodes = Vec::<ConstrainedCavityNode>::new();
     let mut next_node_id = next_cavity_node_id(cavity);
     let cap_tetrahedron_start = candidate_tetrahedra.len();
-    let mut capped_missing_face_indices = BTreeSet::<usize>::new();
-    for (face_index, face) in missing_faces.iter().enumerate() {
-        let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
-            continue;
-        };
-        let Some((coordinates_m, cap_tetrahedron)) = best_local_cap_for_face(
-            *face,
-            surface_point,
+    for patch in &missing_face_patches {
+        let faces = patch
+            .iter()
+            .map(|face_index| missing_faces[*face_index])
+            .collect::<Vec<_>>();
+        if let Some((coordinates_m, mut cap_tetrahedra)) = best_shared_patch_cap_for_faces(
+            &faces,
             cavity_centroid,
             next_node_id,
             &boundary_node_map,
             &boundary_triangles,
             options,
-        ) else {
-            continue;
-        };
-        while node_points.contains_key(&next_node_id) {
+        ) {
+            while node_points.contains_key(&next_node_id) {
+                next_node_id = next_node_id.saturating_add(1);
+            }
+            node_points.insert(next_node_id, coordinates_m);
+            inserted_nodes.push(ConstrainedCavityNode {
+                node_id: next_node_id,
+                coordinates_m,
+            });
+            diagnostic.capped_face_count += cap_tetrahedra.len();
+            *diagnostic
+                .patch_capped_face_count_histogram
+                .entry(cap_tetrahedra.len())
+                .or_default() += 1;
+            candidate_tetrahedra.append(&mut cap_tetrahedra);
             next_node_id = next_node_id.saturating_add(1);
+            continue;
         }
-        node_points.insert(next_node_id, coordinates_m);
-        inserted_nodes.push(ConstrainedCavityNode {
-            node_id: next_node_id,
-            coordinates_m,
-        });
-        candidate_tetrahedra.push(cap_tetrahedron);
-        diagnostic.capped_face_count += 1;
-        capped_missing_face_indices.insert(face_index);
-        next_node_id = next_node_id.saturating_add(1);
-    }
-    for patch in &missing_face_patches {
-        let capped_count = patch
-            .iter()
-            .filter(|face_index| capped_missing_face_indices.contains(face_index))
-            .count();
+
+        let mut capped_count = 0_usize;
+        if fallback_to_face_caps {
+            for face in &faces {
+                let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
+                    continue;
+                };
+                while node_points.contains_key(&next_node_id) {
+                    next_node_id = next_node_id.saturating_add(1);
+                }
+                let Some((coordinates_m, cap_tetrahedron)) = best_local_cap_for_face(
+                    *face,
+                    surface_point,
+                    cavity_centroid,
+                    next_node_id,
+                    &boundary_node_map,
+                    &boundary_triangles,
+                    options,
+                ) else {
+                    continue;
+                };
+                node_points.insert(next_node_id, coordinates_m);
+                inserted_nodes.push(ConstrainedCavityNode {
+                    node_id: next_node_id,
+                    coordinates_m,
+                });
+                candidate_tetrahedra.push(cap_tetrahedron);
+                capped_count += 1;
+                next_node_id = next_node_id.saturating_add(1);
+            }
+            diagnostic.capped_face_count += capped_count;
+        }
         *diagnostic
             .patch_capped_face_count_histogram
             .entry(capped_count)
@@ -149,7 +173,16 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
             diagnostic.uncapped_faces.extend(
                 patch
                     .iter()
-                    .filter(|face_index| !capped_missing_face_indices.contains(face_index))
+                    .filter(|face_index| {
+                        let face = missing_faces[**face_index];
+                        !candidate_tetrahedra[cap_tetrahedron_start..]
+                            .iter()
+                            .any(|tetrahedron| {
+                                tetrahedron_faces(tetrahedron.node_ids)
+                                    .map(sorted_face)
+                                    .contains(&face)
+                            })
+                    })
                     .map(|face_index| missing_faces[*face_index]),
             );
             *diagnostic
@@ -160,7 +193,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     }
     diagnostic.inserted_node_count = inserted_nodes.len();
     if diagnostic.capped_face_count < diagnostic.missing_face_count {
-        diagnostic.reason = "incomplete_local_caps";
+        diagnostic.reason = incomplete_reason;
         diagnostic.candidate_tetrahedron_count = candidate_tetrahedra.len();
         return Ok(diagnostic);
     }
@@ -202,16 +235,17 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
             candidate_tetrahedra.push(tetrahedron);
         }
     }
+    let inserted_node_ids = inserted_nodes
+        .iter()
+        .map(|node| node.node_id)
+        .collect::<BTreeSet<_>>();
     diagnostic.side_connector_candidate_count = append_cap_side_connector_tetrahedra(
         cap_tetrahedron_start,
         cap_tetrahedron_count,
         &mut candidate_tetrahedra,
         &mut seen_tetrahedra,
         &node_points,
-        &inserted_nodes
-            .iter()
-            .map(|node| node.node_id)
-            .collect::<BTreeSet<_>>(),
+        &inserted_node_ids,
         &boundary_triangles,
         options,
     );
@@ -219,10 +253,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     let cap_side_mate_counts = cap_side_face_mate_counts(
         &candidate_tetrahedra[cap_tetrahedron_start..cap_tetrahedron_start + cap_tetrahedron_count],
         &candidate_tetrahedra,
-        &inserted_nodes
-            .iter()
-            .map(|node| node.node_id)
-            .collect::<BTreeSet<_>>(),
+        &inserted_node_ids,
     );
     diagnostic.cap_side_face_count = cap_side_mate_counts.len();
     diagnostic.zero_mate_cap_side_face_count = cap_side_mate_counts
@@ -291,52 +322,4 @@ pub(crate) fn diagnostic_missing_face_local_cap_stitch(
     diagnostic.found_cover = true;
     diagnostic.reason = "cover_found";
     Ok(diagnostic)
-}
-
-#[cfg(test)]
-pub(crate) fn diagnostic_missing_face_shared_patch_cap_stitch(
-    cavity: &ConstrainedCavity,
-    boundary_nodes: &[ConstrainedCavityNode],
-    options: ConstrainedCavityRefillOptions,
-) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
-    diagnostic_missing_face_shared_cap_stitch_with_link(
-        cavity,
-        boundary_nodes,
-        options,
-        MissingFaceLink::Node,
-        "incomplete_shared_patch_caps",
-        false,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn diagnostic_missing_face_edge_subpatch_cap_stitch(
-    cavity: &ConstrainedCavity,
-    boundary_nodes: &[ConstrainedCavityNode],
-    options: ConstrainedCavityRefillOptions,
-) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
-    diagnostic_missing_face_shared_cap_stitch_with_link(
-        cavity,
-        boundary_nodes,
-        options,
-        MissingFaceLink::Edge,
-        "incomplete_edge_subpatch_caps",
-        false,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn diagnostic_missing_face_hybrid_subpatch_cap_stitch(
-    cavity: &ConstrainedCavity,
-    boundary_nodes: &[ConstrainedCavityNode],
-    options: ConstrainedCavityRefillOptions,
-) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
-    diagnostic_missing_face_shared_cap_stitch_with_link(
-        cavity,
-        boundary_nodes,
-        options,
-        MissingFaceLink::Edge,
-        "incomplete_hybrid_subpatch_caps",
-        true,
-    )
 }
