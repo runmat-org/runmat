@@ -1,7 +1,11 @@
 use super::super::{
     boundary_completion::complete_missing_boundary_face_tetrahedra,
     exact_cover::boundary_node_exact_cover_refill_candidate,
-    refill_tetrahedra::{improve_refill_with_local_flips, refill_validation_reason},
+    refill_tetrahedra::{
+        improve_refill_with_local_flips, raw_refill_tetrahedron_with_rejection_reason,
+        refill_validation_reason,
+    },
+    tetrahedralize_points, ConnectivityPoint, ConstrainedCavityRefillTetrahedron,
 };
 use super::*;
 

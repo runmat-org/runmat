@@ -1,6 +1,6 @@
 use super::super::{
     cavity_boundary_node_centroid, next_cavity_node_id,
-    refill_tetrahedra::star_refill_candidate_with_rejection_reason,
+    refill_tetrahedra::star_refill_candidate_with_rejection_reason, ConstrainedCavityNode,
 };
 use super::*;
 
