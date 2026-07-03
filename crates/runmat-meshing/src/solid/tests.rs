@@ -41,6 +41,24 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
 }
 
 #[test]
+fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
+    let mesh = generate_analysis_mesh(
+        &octahedron_geometry(),
+        VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(10.0),
+            ..VolumeMeshingOptions::default()
+        },
+    )
+    .expect("convex octahedron PLC should run through the root solid pipeline");
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(mesh.volume_elements.len(), 8);
+    assert_eq!(mesh.boundary_faces.len(), 8);
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("convex octahedron solid mesh should be solve-ready");
+}
+
+#[test]
 fn structured_fallback_still_uses_structured_stage_explicitly() {
     let mesh = generate_analysis_mesh(
         &cube_geometry(),
@@ -114,6 +132,65 @@ fn cube_geometry() -> GeometryAsset {
             "region_boundary",
             "cube_surface",
             12,
+        )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn octahedron_geometry() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo_root_meshing_octahedron".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/generic_octahedron.step".to_string(),
+            sha256: "generic-octahedron".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "octahedron_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 6,
+            element_count: 8,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "octahedron_surface",
+            vec![
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+                [0.0, 0.0, -1.0],
+            ],
+            vec![
+                [0, 1, 2],
+                [0, 2, 3],
+                [0, 3, 4],
+                [0, 4, 1],
+                [5, 2, 1],
+                [5, 3, 2],
+                [5, 4, 3],
+                [5, 1, 4],
+            ],
+        )],
+        regions: vec![Region {
+            region_id: "region_boundary".to_string(),
+            name: "boundary".to_string(),
+            tag: Some("boundary".to_string()),
+            cad_ownership: None,
+        }],
+        region_entity_mappings: vec![RegionEntityMapping::all_faces(
+            "region_boundary",
+            "octahedron_surface",
+            8,
         )],
         diagnostics: Vec::new(),
     }

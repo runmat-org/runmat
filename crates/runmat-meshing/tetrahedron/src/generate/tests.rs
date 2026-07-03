@@ -101,6 +101,38 @@ fn solver_generation_supports_box_and_single_tetrahedron_plcs() {
 }
 
 #[test]
+fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
+    let mesh = generate_convex_polyhedron_tetrahedron_mesh_from_plc(&octahedron_plc())
+        .expect("convex octahedron PLC should generate one Tetrahedron4 per boundary facet");
+
+    assert_eq!(mesh.nodes.len(), 7);
+    assert_eq!(mesh.elements.len(), 8);
+    assert_eq!(mesh.boundary_faces.len(), 8);
+    assert_eq!(mesh.evidence.entity_counts["interior_nodes"], 1);
+    assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 8);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+    for element in &mesh.elements {
+        let points = element.node_ids.clone().map(|node_id| {
+            mesh.nodes
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .expect("node exists")
+                .coordinates_m
+        });
+        assert!(tetrahedron_signed_volume(points) > 0.0);
+    }
+}
+
+#[test]
+fn solver_generation_supports_convex_polyhedron_plcs() {
+    let mesh = generate_solver_tetrahedron_mesh_from_plc(&octahedron_plc())
+        .expect("convex octahedron PLC should use convex polyhedron solver generation");
+
+    assert_eq!(mesh.mesh_id, "convex_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.elements.len(), 8);
+}
+
+#[test]
 fn single_tetrahedron_generation_rejects_non_tetrahedron_plc() {
     assert_eq!(
         generate_single_tetrahedron_mesh_from_plc(&box_plc()),
@@ -129,6 +161,21 @@ fn structured_box_generation_rejects_non_box_plc() {
     );
 }
 
+#[test]
+fn convex_polyhedron_generation_rejects_nonconvex_boundary_facet() {
+    let mut plc = octahedron_plc();
+    plc.facets[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+
+    assert_eq!(
+        generate_convex_polyhedron_tetrahedron_mesh_from_plc(&plc),
+        Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
+    );
+}
+
 fn tetra_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "tetra".to_string(),
@@ -143,6 +190,38 @@ fn tetra_plc() -> ProtectedBoundaryComplex {
             facet("1", ["0", "1", "3"]),
             facet("2", ["1", "2", "3"]),
             facet("3", ["2", "0", "3"]),
+        ],
+        protected_edges: Vec::<PlcProtectedEdge>::new(),
+        validation: PlcValidationSummary {
+            watertight: true,
+            manifold: true,
+            shell_nesting_classified: true,
+            material_interfaces_classified: true,
+        },
+        evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    }
+}
+
+fn octahedron_plc() -> ProtectedBoundaryComplex {
+    ProtectedBoundaryComplex {
+        complex_id: "octahedron".to_string(),
+        nodes: vec![
+            node("0", [0.0, 0.0, 1.0]),
+            node("1", [1.0, 0.0, 0.0]),
+            node("2", [0.0, 1.0, 0.0]),
+            node("3", [-1.0, 0.0, 0.0]),
+            node("4", [0.0, -1.0, 0.0]),
+            node("5", [0.0, 0.0, -1.0]),
+        ],
+        facets: vec![
+            facet("0", ["0", "1", "2"]),
+            facet("1", ["0", "2", "3"]),
+            facet("2", ["0", "3", "4"]),
+            facet("3", ["0", "4", "1"]),
+            facet("4", ["5", "2", "1"]),
+            facet("5", ["5", "3", "2"]),
+            facet("6", ["5", "4", "3"]),
+            facet("7", ["5", "1", "4"]),
         ],
         protected_edges: Vec::<PlcProtectedEdge>::new(),
         validation: PlcValidationSummary {
