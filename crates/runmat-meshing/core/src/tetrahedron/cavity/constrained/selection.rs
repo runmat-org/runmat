@@ -1,0 +1,686 @@
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+};
+
+use super::{
+    topology::{
+        boundary_face_map, face_edges, sorted_edge, sorted_face, tetrahedron_edges,
+        tetrahedron_faces,
+    },
+    validate_constrained_cavity, CavityTetrahedron, ConstrainedCavity,
+    ConstrainedCavityBoundaryEdgeRecovery, ConstrainedCavityBoundaryEdgeRecoveryQueue,
+    ConstrainedCavityBoundaryEdgeRecoveryStep, ConstrainedCavityBoundaryFace,
+    ConstrainedCavityExpansionError, ConstrainedCavityExtractionError,
+    ConstrainedCavityRefillTetrahedron, ConstrainedCavityValidationError, MAX_ANCHOR_TRIM_STATES,
+    MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS,
+};
+
+pub fn constrained_cavity_from_selected_tetrahedra(
+    tetrahedra: &[CavityTetrahedron],
+    selected_tetrahedron_indices: &[usize],
+    protected_node_ids: Vec<u32>,
+) -> Result<ConstrainedCavity, ConstrainedCavityExtractionError> {
+    let selected = selected_tetrahedron_index_set(tetrahedra, selected_tetrahedron_indices)?;
+    let cavity = build_constrained_cavity_from_index_set(tetrahedra, &selected, protected_node_ids);
+    validate_constrained_cavity(&cavity).map_err(ConstrainedCavityExtractionError::Validation)?;
+    Ok(cavity)
+}
+
+pub fn constrained_cavity_from_refill_tetrahedron_component(
+    tetrahedra: &[ConstrainedCavityRefillTetrahedron],
+    inherited_boundary_faces: &[ConstrainedCavityBoundaryFace],
+    protected_node_ids: Vec<u32>,
+) -> Result<ConstrainedCavity, ConstrainedCavityValidationError> {
+    let inherited_faces = boundary_face_map(inherited_boundary_faces)?;
+    let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
+    for tetrahedron in tetrahedra {
+        for face in tetrahedron_faces(tetrahedron.node_ids) {
+            *face_counts.entry(sorted_face(face)).or_default() += 1;
+        }
+    }
+    let boundary_faces = face_counts
+        .into_iter()
+        .filter_map(|(face, count)| {
+            (count == 1).then(|| {
+                inherited_faces
+                    .get(&face)
+                    .map(|source| (*source).clone())
+                    .unwrap_or(ConstrainedCavityBoundaryFace {
+                        node_ids: face,
+                        outside_tetrahedron_ids: Vec::new(),
+                        source_face_id: None,
+                        source_edge_ids: [None, None, None],
+                        region_ids: Vec::new(),
+                    })
+            })
+        })
+        .collect::<Vec<_>>();
+    let cavity = ConstrainedCavity {
+        removed_tetrahedron_ids: (0..tetrahedra.len()).map(|index| index as u32).collect(),
+        boundary_faces,
+        protected_node_ids,
+        target_volume_m3: tetrahedra
+            .iter()
+            .map(|tetrahedron| tetrahedron.volume_m3)
+            .sum(),
+    };
+    validate_constrained_cavity(&cavity)?;
+    Ok(cavity)
+}
+
+pub fn constrained_cavity_from_selected_tetrahedra_with_anchor_trim(
+    tetrahedra: &[CavityTetrahedron],
+    selected_tetrahedron_indices: &[usize],
+    anchor_tetrahedron_index: usize,
+    protected_node_ids: Vec<u32>,
+) -> Result<Option<ConstrainedCavity>, ConstrainedCavityExtractionError> {
+    if anchor_tetrahedron_index >= tetrahedra.len() {
+        return Err(
+            ConstrainedCavityExtractionError::SelectedTetrahedronIndexOutOfBounds {
+                tetrahedron_index: anchor_tetrahedron_index,
+                tetrahedron_count: tetrahedra.len(),
+            },
+        );
+    }
+    let selected = selected_tetrahedron_index_set(tetrahedra, selected_tetrahedron_indices)?;
+    if !selected.contains(&anchor_tetrahedron_index) {
+        return Ok(None);
+    }
+
+    anchor_trimmed_constrained_cavity(
+        tetrahedra,
+        selected,
+        anchor_tetrahedron_index,
+        protected_node_ids,
+    )
+}
+
+pub fn constrained_cavity_expanded_across_boundary_face(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    boundary_face: [u32; 3],
+) -> Result<ConstrainedCavity, ConstrainedCavityExpansionError> {
+    constrained_cavity_expanded_across_boundary_faces(cavity, source_tetrahedra, &[boundary_face])
+}
+
+pub fn constrained_cavity_expanded_across_boundary_faces(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    boundary_faces: &[[u32; 3]],
+) -> Result<ConstrainedCavity, ConstrainedCavityExpansionError> {
+    let target_faces = boundary_faces
+        .iter()
+        .copied()
+        .map(sorted_face)
+        .collect::<Vec<_>>();
+
+    let mut selected_tetrahedron_ids = cavity
+        .removed_tetrahedron_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    for target in &target_faces {
+        let face = cavity
+            .boundary_faces
+            .iter()
+            .find(|face| sorted_face(face.node_ids) == *target)
+            .ok_or(ConstrainedCavityExpansionError::BoundaryFaceNotFound { node_ids: *target })?;
+        if face.outside_tetrahedron_ids.is_empty() {
+            return Err(
+                ConstrainedCavityExpansionError::BoundaryFaceHasNoOutsideTetrahedron {
+                    node_ids: *target,
+                },
+            );
+        }
+        selected_tetrahedron_ids.extend(face.outside_tetrahedron_ids.iter().copied());
+    }
+    let tetrahedron_id_to_index = source_tetrahedra
+        .iter()
+        .enumerate()
+        .map(|(index, tetrahedron)| (tetrahedron.tetrahedron_id, index))
+        .collect::<BTreeMap<_, _>>();
+
+    for step in 0..MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS {
+        let selected_indices = selected_tetrahedron_ids
+            .iter()
+            .map(|tetrahedron_id| {
+                tetrahedron_id_to_index.get(tetrahedron_id).copied().ok_or(
+                    ConstrainedCavityExpansionError::SourceTetrahedronIdNotFound {
+                        tetrahedron_id: *tetrahedron_id,
+                    },
+                )
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let expanded = build_constrained_cavity_from_index_set(
+            source_tetrahedra,
+            &selected_indices,
+            cavity.protected_node_ids.clone(),
+        );
+        match validate_constrained_cavity(&expanded) {
+            Ok(_) => return Ok(expanded),
+            Err(ConstrainedCavityValidationError::NonManifoldBoundaryEdge { node_ids, .. }) => {
+                let mut added = false;
+                for boundary in &expanded.boundary_faces {
+                    let touches_edge = face_edges(boundary.node_ids)
+                        .into_iter()
+                        .any(|edge| sorted_edge(edge) == node_ids);
+                    if !touches_edge {
+                        continue;
+                    }
+                    for tetrahedron_id in &boundary.outside_tetrahedron_ids {
+                        added |= selected_tetrahedron_ids.insert(*tetrahedron_id);
+                    }
+                }
+                if !added {
+                    for tetrahedron in source_tetrahedra {
+                        if selected_tetrahedron_ids.contains(&tetrahedron.tetrahedron_id) {
+                            continue;
+                        }
+                        let touches_edge = tetrahedron_edges(tetrahedron.node_ids)
+                            .into_iter()
+                            .any(|edge| sorted_edge(edge) == node_ids);
+                        if touches_edge {
+                            added |= selected_tetrahedron_ids.insert(tetrahedron.tetrahedron_id);
+                        }
+                    }
+                }
+                if !added {
+                    return Err(
+                        ConstrainedCavityExpansionError::BoundaryEdgeHasNoOutsideTetrahedron {
+                            node_ids,
+                        },
+                    );
+                }
+            }
+            Err(err) => {
+                return Err(ConstrainedCavityExpansionError::Extraction(
+                    ConstrainedCavityExtractionError::Validation(err),
+                ));
+            }
+        }
+        if step + 1 == MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS {
+            return Err(ConstrainedCavityExpansionError::ExpansionDidNotConverge {
+                step_count: MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS,
+            });
+        }
+    }
+
+    Err(ConstrainedCavityExpansionError::ExpansionDidNotConverge {
+        step_count: MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS,
+    })
+}
+
+pub fn constrained_cavity_expanded_across_boundary_faces_or_recovered_edge_star(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    boundary_faces: &[[u32; 3]],
+    excluded_node_ids: &[u32],
+) -> Result<ConstrainedCavityBoundaryEdgeRecovery, ConstrainedCavityExpansionError> {
+    let attempted_boundary_faces = boundary_faces
+        .iter()
+        .copied()
+        .map(sorted_face)
+        .collect::<Vec<_>>();
+    match constrained_cavity_expanded_across_boundary_faces(
+        cavity,
+        source_tetrahedra,
+        boundary_faces,
+    ) {
+        Ok(expanded) => Ok(ConstrainedCavityBoundaryEdgeRecovery {
+            cavity: expanded,
+            attempted_boundary_faces,
+            recovered_edge: None,
+        }),
+        Err(ConstrainedCavityExpansionError::BoundaryEdgeHasNoOutsideTetrahedron { node_ids }) => {
+            let expanded = constrained_cavity_expanded_across_boundary_edge_star_excluding_nodes(
+                cavity,
+                source_tetrahedra,
+                node_ids,
+                excluded_node_ids,
+            )?;
+            let before = cavity
+                .removed_tetrahedron_ids
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            let added_tetrahedron_ids = expanded
+                .removed_tetrahedron_ids
+                .iter()
+                .copied()
+                .filter(|tetrahedron_id| !before.contains(tetrahedron_id))
+                .collect::<Vec<_>>();
+            Ok(ConstrainedCavityBoundaryEdgeRecovery {
+                recovered_edge: Some(ConstrainedCavityBoundaryEdgeRecoveryStep {
+                    node_ids,
+                    added_tetrahedron_ids,
+                    removed_tetrahedron_count_before: cavity.removed_tetrahedron_ids.len(),
+                    removed_tetrahedron_count_after: expanded.removed_tetrahedron_ids.len(),
+                }),
+                cavity: expanded,
+                attempted_boundary_faces,
+            })
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub fn constrained_cavity_recovered_boundary_edge_star_excluding_nodes(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    edge: [u32; 2],
+    excluded_node_ids: &[u32],
+) -> Result<ConstrainedCavityBoundaryEdgeRecovery, ConstrainedCavityExpansionError> {
+    let target_edge = sorted_edge(edge);
+    let expanded = constrained_cavity_expanded_across_boundary_edge_star_excluding_nodes(
+        cavity,
+        source_tetrahedra,
+        target_edge,
+        excluded_node_ids,
+    )?;
+    let before = cavity
+        .removed_tetrahedron_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let added_tetrahedron_ids = expanded
+        .removed_tetrahedron_ids
+        .iter()
+        .copied()
+        .filter(|tetrahedron_id| !before.contains(tetrahedron_id))
+        .collect::<Vec<_>>();
+    let removed_tetrahedron_count_after = expanded.removed_tetrahedron_ids.len();
+    Ok(ConstrainedCavityBoundaryEdgeRecovery {
+        cavity: expanded,
+        attempted_boundary_faces: Vec::new(),
+        recovered_edge: Some(ConstrainedCavityBoundaryEdgeRecoveryStep {
+            node_ids: target_edge,
+            added_tetrahedron_ids,
+            removed_tetrahedron_count_before: cavity.removed_tetrahedron_ids.len(),
+            removed_tetrahedron_count_after,
+        }),
+    })
+}
+
+pub fn constrained_cavity_recovered_boundary_edge_star_queue_excluding_nodes(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    edges: &[[u32; 2]],
+    excluded_node_ids: &[u32],
+) -> Result<ConstrainedCavityBoundaryEdgeRecoveryQueue, ConstrainedCavityExpansionError> {
+    let mut current = cavity.clone();
+    let mut steps = Vec::<ConstrainedCavityBoundaryEdgeRecoveryStep>::new();
+    for edge in edges {
+        let recovery = constrained_cavity_recovered_boundary_edge_star_excluding_nodes(
+            &current,
+            source_tetrahedra,
+            *edge,
+            excluded_node_ids,
+        )?;
+        if let Some(step) = recovery.recovered_edge {
+            steps.push(step);
+        }
+        current = recovery.cavity;
+    }
+    Ok(ConstrainedCavityBoundaryEdgeRecoveryQueue {
+        cavity: current,
+        steps,
+    })
+}
+
+pub fn constrained_cavity_expanded_across_boundary_edge_star_excluding_nodes(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    edge: [u32; 2],
+    excluded_node_ids: &[u32],
+) -> Result<ConstrainedCavity, ConstrainedCavityExpansionError> {
+    let target_edge = sorted_edge(edge);
+    let excluded_node_ids = excluded_node_ids.iter().copied().collect::<BTreeSet<_>>();
+    let mut selected_tetrahedron_ids = cavity
+        .removed_tetrahedron_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut added = false;
+    for tetrahedron in source_tetrahedra {
+        if tetrahedron
+            .node_ids
+            .into_iter()
+            .any(|node_id| excluded_node_ids.contains(&node_id))
+        {
+            continue;
+        }
+        let touches_edge = tetrahedron_edges(tetrahedron.node_ids)
+            .into_iter()
+            .any(|candidate| sorted_edge(candidate) == target_edge);
+        if touches_edge {
+            added |= selected_tetrahedron_ids.insert(tetrahedron.tetrahedron_id);
+        }
+    }
+    if !added {
+        return Err(
+            ConstrainedCavityExpansionError::BoundaryEdgeHasNoOutsideTetrahedron {
+                node_ids: target_edge,
+            },
+        );
+    }
+
+    let tetrahedron_id_to_index = source_tetrahedra
+        .iter()
+        .enumerate()
+        .map(|(index, tetrahedron)| (tetrahedron.tetrahedron_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let selected_indices = selected_tetrahedron_ids
+        .iter()
+        .map(|tetrahedron_id| {
+            tetrahedron_id_to_index.get(tetrahedron_id).copied().ok_or(
+                ConstrainedCavityExpansionError::SourceTetrahedronIdNotFound {
+                    tetrahedron_id: *tetrahedron_id,
+                },
+            )
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    let expanded = build_constrained_cavity_from_index_set(
+        source_tetrahedra,
+        &selected_indices,
+        cavity.protected_node_ids.clone(),
+    );
+    validate_constrained_cavity(&expanded).map_err(|err| {
+        ConstrainedCavityExpansionError::Extraction(ConstrainedCavityExtractionError::Validation(
+            err,
+        ))
+    })?;
+    Ok(expanded)
+}
+
+pub fn constrained_cavity_expanded_across_first_valid_boundary_face(
+    cavity: &ConstrainedCavity,
+    source_tetrahedra: &[CavityTetrahedron],
+    boundary_faces: &[[u32; 3]],
+) -> Result<Option<ConstrainedCavity>, ConstrainedCavityExpansionError> {
+    for boundary_face in boundary_faces {
+        match constrained_cavity_expanded_across_boundary_face(
+            cavity,
+            source_tetrahedra,
+            *boundary_face,
+        ) {
+            Ok(expanded) => return Ok(Some(expanded)),
+            Err(ConstrainedCavityExpansionError::SourceTetrahedronIdNotFound {
+                tetrahedron_id,
+            }) => {
+                return Err(
+                    ConstrainedCavityExpansionError::SourceTetrahedronIdNotFound { tetrahedron_id },
+                );
+            }
+            Err(
+                ConstrainedCavityExpansionError::BoundaryFaceNotFound { .. }
+                | ConstrainedCavityExpansionError::BoundaryFaceHasNoOutsideTetrahedron { .. }
+                | ConstrainedCavityExpansionError::BoundaryEdgeHasNoOutsideTetrahedron { .. }
+                | ConstrainedCavityExpansionError::ExpansionDidNotConverge { .. }
+                | ConstrainedCavityExpansionError::Extraction(_),
+            ) => continue,
+        }
+    }
+    Ok(None)
+}
+
+fn anchor_trimmed_constrained_cavity(
+    tetrahedra: &[CavityTetrahedron],
+    selected: BTreeSet<usize>,
+    anchor_tetrahedron_index: usize,
+    protected_node_ids: Vec<u32>,
+) -> Result<Option<ConstrainedCavity>, ConstrainedCavityExtractionError> {
+    let Some(selected) =
+        anchor_connected_tetrahedron_subset(tetrahedra, &selected, anchor_tetrahedron_index)
+    else {
+        return Ok(None);
+    };
+    let selected_score = boundary_edge_defect_score(tetrahedra, &selected);
+    let mut pending = vec![(selected.clone(), selected_score)];
+    let mut visited = BTreeSet::<BTreeSet<usize>>::from([selected]);
+    let mut evaluated = 0_usize;
+
+    while !pending.is_empty() && evaluated < MAX_ANCHOR_TRIM_STATES {
+        let best_index = pending
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (candidate, score))| (*score, Reverse(candidate.len())))
+            .map(|(index, _)| index)
+            .expect("pending should be non-empty");
+        let (selected, _) = pending.swap_remove(best_index);
+        evaluated += 1;
+        let cavity = build_constrained_cavity_from_index_set(
+            tetrahedra,
+            &selected,
+            protected_node_ids.clone(),
+        );
+        match validate_constrained_cavity(&cavity) {
+            Ok(_) => return Ok(Some(cavity)),
+            Err(ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. }) => {
+                for edge in non_manifold_boundary_edges(tetrahedra, &selected) {
+                    for owner in boundary_face_owner_indices_for_edge(tetrahedra, &selected, edge) {
+                        if owner == anchor_tetrahedron_index {
+                            continue;
+                        }
+                        let mut candidate = selected.clone();
+                        candidate.remove(&owner);
+                        let Some(connected) = anchor_connected_tetrahedron_subset(
+                            tetrahedra,
+                            &candidate,
+                            anchor_tetrahedron_index,
+                        ) else {
+                            continue;
+                        };
+                        if visited.insert(connected.clone()) {
+                            let score = boundary_edge_defect_score(tetrahedra, &connected);
+                            pending.push((connected, score));
+                        }
+                    }
+                }
+            }
+            Err(ConstrainedCavityValidationError::TooFewBoundaryFaces { .. }) => continue,
+            Err(err) => return Err(ConstrainedCavityExtractionError::Validation(err)),
+        }
+    }
+    Ok(None)
+}
+
+fn selected_tetrahedron_index_set(
+    tetrahedra: &[CavityTetrahedron],
+    selected_tetrahedron_indices: &[usize],
+) -> Result<BTreeSet<usize>, ConstrainedCavityExtractionError> {
+    if selected_tetrahedron_indices.is_empty() {
+        return Err(ConstrainedCavityExtractionError::EmptySelection);
+    }
+
+    let mut selected = BTreeSet::<usize>::new();
+    for tetrahedron_index in selected_tetrahedron_indices {
+        if *tetrahedron_index >= tetrahedra.len() {
+            return Err(
+                ConstrainedCavityExtractionError::SelectedTetrahedronIndexOutOfBounds {
+                    tetrahedron_index: *tetrahedron_index,
+                    tetrahedron_count: tetrahedra.len(),
+                },
+            );
+        }
+        if !selected.insert(*tetrahedron_index) {
+            return Err(
+                ConstrainedCavityExtractionError::DuplicateSelectedTetrahedronIndex {
+                    tetrahedron_index: *tetrahedron_index,
+                },
+            );
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn build_constrained_cavity_from_index_set(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+    protected_node_ids: Vec<u32>,
+) -> ConstrainedCavity {
+    let mut target_volume_m3 = 0.0_f64;
+    let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
+    let mut all_face_owners = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for (tetrahedron_index, tetrahedron) in tetrahedra.iter().enumerate() {
+        for face in tetrahedron_faces(tetrahedron.node_ids) {
+            all_face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push(tetrahedron_index);
+        }
+    }
+    for tetrahedron_index in selected {
+        let tetrahedron = &tetrahedra[*tetrahedron_index];
+        target_volume_m3 += tetrahedron.volume_m3;
+        for face in tetrahedron_faces(tetrahedron.node_ids) {
+            face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push((*tetrahedron_index, face));
+        }
+    }
+
+    let mut boundary_faces = Vec::<ConstrainedCavityBoundaryFace>::new();
+    for owners in face_owners.values() {
+        if owners.len() != 1 {
+            continue;
+        }
+        let (tetrahedron_index, oriented_face) = owners[0];
+        let mut outside_tetrahedron_ids = all_face_owners
+            .get(&sorted_face(oriented_face))
+            .into_iter()
+            .flat_map(|owners| owners.iter())
+            .filter_map(|owner_index| {
+                (!selected.contains(owner_index)).then_some(tetrahedra[*owner_index].tetrahedron_id)
+            })
+            .collect::<Vec<_>>();
+        outside_tetrahedron_ids.sort_unstable();
+        outside_tetrahedron_ids.dedup();
+        boundary_faces.push(ConstrainedCavityBoundaryFace {
+            node_ids: oriented_face,
+            outside_tetrahedron_ids,
+            source_face_id: None,
+            source_edge_ids: [None, None, None],
+            region_ids: tetrahedra[tetrahedron_index].region_ids.clone(),
+        });
+    }
+
+    ConstrainedCavity {
+        removed_tetrahedron_ids: selected
+            .iter()
+            .map(|tetrahedron_index| tetrahedra[*tetrahedron_index].tetrahedron_id)
+            .collect(),
+        boundary_faces,
+        protected_node_ids,
+        target_volume_m3,
+    }
+}
+
+fn boundary_face_owner_indices_for_edge(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+    edge: [u32; 2],
+) -> Vec<usize> {
+    let target_edge = sorted_edge(edge);
+    boundary_face_owners(tetrahedra, selected)
+        .into_iter()
+        .filter_map(|(_, owners)| (owners.len() == 1).then_some(owners[0]))
+        .filter_map(|(tetrahedron_index, face)| {
+            face_edges(face)
+                .into_iter()
+                .any(|face_edge| sorted_edge(face_edge) == target_edge)
+                .then_some(tetrahedron_index)
+        })
+        .collect()
+}
+
+fn non_manifold_boundary_edges(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+) -> Vec<[u32; 2]> {
+    let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+    for (_, owners) in boundary_face_owners(tetrahedra, selected) {
+        if owners.len() != 1 {
+            continue;
+        }
+        for edge in face_edges(owners[0].1) {
+            *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
+        }
+    }
+    edge_counts
+        .into_iter()
+        .filter_map(|(edge, count)| (count != 2).then_some(edge))
+        .collect()
+}
+
+fn boundary_edge_defect_score(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+) -> usize {
+    let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+    for (_, owners) in boundary_face_owners(tetrahedra, selected) {
+        if owners.len() != 1 {
+            continue;
+        }
+        for edge in face_edges(owners[0].1) {
+            *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
+        }
+    }
+    edge_counts
+        .values()
+        .map(|count| count.abs_diff(2))
+        .sum::<usize>()
+}
+
+fn boundary_face_owners(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+) -> BTreeMap<[u32; 3], Vec<(usize, [u32; 3])>> {
+    let mut face_owners = BTreeMap::<[u32; 3], Vec<(usize, [u32; 3])>>::new();
+    for tetrahedron_index in selected {
+        for face in tetrahedron_faces(tetrahedra[*tetrahedron_index].node_ids) {
+            face_owners
+                .entry(sorted_face(face))
+                .or_default()
+                .push((*tetrahedron_index, face));
+        }
+    }
+    face_owners
+}
+
+fn anchor_connected_tetrahedron_subset(
+    tetrahedra: &[CavityTetrahedron],
+    selected: &BTreeSet<usize>,
+    anchor_tetrahedron_index: usize,
+) -> Option<BTreeSet<usize>> {
+    if !selected.contains(&anchor_tetrahedron_index) {
+        return None;
+    }
+    let mut face_to_tetrahedra = BTreeMap::<[u32; 3], Vec<usize>>::new();
+    for tetrahedron_index in selected {
+        for face in tetrahedron_faces(tetrahedra[*tetrahedron_index].node_ids) {
+            face_to_tetrahedra
+                .entry(sorted_face(face))
+                .or_default()
+                .push(*tetrahedron_index);
+        }
+    }
+    let mut connected = BTreeSet::<usize>::new();
+    let mut pending = vec![anchor_tetrahedron_index];
+    while let Some(tetrahedron_index) = pending.pop() {
+        if !connected.insert(tetrahedron_index) {
+            continue;
+        }
+        for face in tetrahedron_faces(tetrahedra[tetrahedron_index].node_ids) {
+            if let Some(neighbors) = face_to_tetrahedra.get(&sorted_face(face)) {
+                for neighbor in neighbors {
+                    if selected.contains(neighbor) && !connected.contains(neighbor) {
+                        pending.push(*neighbor);
+                    }
+                }
+            }
+        }
+    }
+    Some(connected)
+}
