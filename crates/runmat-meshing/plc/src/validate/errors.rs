@@ -34,6 +34,13 @@ pub enum PlcValidationError {
     ProtectedEdgeHasRepeatedNode {
         edge_id: TopologyEntityId,
     },
+    ProtectedEdgeHasEmptySourceEdgeId {
+        edge_id: TopologyEntityId,
+    },
+    ProtectedEdgeSourceEdgeStageMismatch {
+        edge_id: TopologyEntityId,
+        source_edge_id: TopologyEntityId,
+    },
     UnreferencedNode {
         node_id: TopologyEntityId,
     },
@@ -108,6 +115,19 @@ impl std::fmt::Display for PlcValidationError {
                     edge_id.id
                 )
             }
+            Self::ProtectedEdgeHasEmptySourceEdgeId { edge_id } => write!(
+                formatter,
+                "PLC protected edge {} has an empty source edge id",
+                edge_id.id
+            ),
+            Self::ProtectedEdgeSourceEdgeStageMismatch {
+                edge_id,
+                source_edge_id,
+            } => write!(
+                formatter,
+                "PLC protected edge {} source edge {} is not a CurveMesh entity",
+                edge_id.id, source_edge_id.id
+            ),
             Self::UnreferencedNode { node_id } => {
                 write!(
                     formatter,

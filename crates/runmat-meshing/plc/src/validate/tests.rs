@@ -96,7 +96,7 @@ fn rejects_protected_edge_that_references_unknown_node() {
     plc.protected_edges.push(PlcProtectedEdge {
         edge_id: entity("edge_missing"),
         node_ids: [entity("0"), entity("missing")],
-        source_edge_id: entity("source_edge"),
+        source_edge_id: source_edge("source_edge"),
     });
 
     assert!(matches!(
@@ -111,12 +111,42 @@ fn rejects_protected_edge_that_is_not_a_boundary_edge() {
     plc.protected_edges.push(PlcProtectedEdge {
         edge_id: entity("pole_to_pole"),
         node_ids: [entity("0"), entity("5")],
-        source_edge_id: entity("source_edge"),
+        source_edge_id: source_edge("source_edge"),
     });
 
     assert!(matches!(
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::ProtectedEdgeNotOnBoundary { .. })
+    ));
+}
+
+#[test]
+fn rejects_protected_edge_with_empty_source_edge_id() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_empty_source"),
+        node_ids: [entity("0"), entity("1")],
+        source_edge_id: source_edge(""),
+    });
+
+    assert!(matches!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::ProtectedEdgeHasEmptySourceEdgeId { .. })
+    ));
+}
+
+#[test]
+fn rejects_protected_edge_with_non_curve_source_edge_id() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_wrong_stage_source"),
+        node_ids: [entity("0"), entity("1")],
+        source_edge_id: entity("source_edge"),
+    });
+
+    assert!(matches!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::ProtectedEdgeSourceEdgeStageMismatch { .. })
     ));
 }
 
@@ -229,6 +259,13 @@ fn facet(id: &str, node_ids: [&str; 3]) -> PlcFacet {
 fn entity(id: &str) -> TopologyEntityId {
     TopologyEntityId {
         stage: MeshingStage::ProtectedBoundaryComplex,
+        id: id.to_string(),
+    }
+}
+
+fn source_edge(id: &str) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::CurveMesh,
         id: id.to_string(),
     }
 }

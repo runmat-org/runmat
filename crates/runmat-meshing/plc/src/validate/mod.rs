@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod errors;
 pub use errors::PlcValidationError;
 pub use runmat_meshing_core::contracts::PlcValidationSummary;
-use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
+use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
 
 pub const MODULE_PURPOSE: &str =
     "watertightness, manifold incidence, shell nesting, and material interfaces";
@@ -73,6 +73,17 @@ pub fn validate_protected_boundary_complex(
         if protected_edge.node_ids[0] == protected_edge.node_ids[1] {
             return Err(PlcValidationError::ProtectedEdgeHasRepeatedNode {
                 edge_id: protected_edge.edge_id.clone(),
+            });
+        }
+        if protected_edge.source_edge_id.id.is_empty() {
+            return Err(PlcValidationError::ProtectedEdgeHasEmptySourceEdgeId {
+                edge_id: protected_edge.edge_id.clone(),
+            });
+        }
+        if protected_edge.source_edge_id.stage != MeshingStage::CurveMesh {
+            return Err(PlcValidationError::ProtectedEdgeSourceEdgeStageMismatch {
+                edge_id: protected_edge.edge_id.clone(),
+                source_edge_id: protected_edge.source_edge_id.clone(),
             });
         }
         for node_id in &protected_edge.node_ids {
