@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_core::contracts::{StageEvidence, TopologyEntityId};
+use runmat_meshing_plc::validate::PlcValidationError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TetrahedronRecoveryError {
-    InvalidProtectedBoundaryComplex,
+    InvalidProtectedBoundaryComplex { error: PlcValidationError },
     EmptyTetrahedronMesh,
     MissingSourceFaceRecovery { face_id: String },
     MissingSourceEdgeRecovery { edge_id: String },
@@ -14,8 +15,11 @@ pub enum TetrahedronRecoveryError {
 impl std::fmt::Display for TetrahedronRecoveryError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidProtectedBoundaryComplex => {
-                write!(formatter, "Tetrahedron recovery requires a validated PLC")
+            Self::InvalidProtectedBoundaryComplex { error } => {
+                write!(
+                    formatter,
+                    "Tetrahedron recovery requires a validated PLC: {error}"
+                )
             }
             Self::EmptyTetrahedronMesh => write!(
                 formatter,

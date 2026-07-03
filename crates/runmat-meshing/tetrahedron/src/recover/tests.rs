@@ -6,13 +6,12 @@ use runmat_meshing_core::contracts::{
 
 #[test]
 fn builds_recovery_queue_for_recovered_plc_constraints() {
-    let queue =
-        build_recovery_queue_from_plc(&single_facet_plc(), &single_facet_tetrahedron_mesh())
-            .expect("matching Tetrahedron mesh should recover PLC constraints");
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &tetrahedron_mesh())
+        .expect("matching Tetrahedron mesh should recover PLC constraints");
 
-    assert_eq!(queue.items.len(), 3);
+    assert_eq!(queue.items.len(), 6);
     assert_eq!(queue.evidence.stage, MeshingStage::ConstraintRecovery);
-    assert_eq!(queue.evidence.entity_counts["source_face_items"], 1);
+    assert_eq!(queue.evidence.entity_counts["source_face_items"], 4);
     assert_eq!(queue.evidence.entity_counts["source_edge_items"], 1);
     assert_eq!(queue.evidence.entity_counts["material_interface_items"], 1);
     assert!(queue
@@ -23,11 +22,11 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
 
 #[test]
 fn recovery_queue_rejects_missing_source_face() {
-    let mut mesh = single_facet_tetrahedron_mesh();
+    let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
 
     assert_eq!(
-        build_recovery_queue_from_plc(&single_facet_plc(), &mesh),
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
         Err(TetrahedronRecoveryError::MissingSourceFaceRecovery {
             face_id: "face_1".to_string()
         })
@@ -36,14 +35,12 @@ fn recovery_queue_rejects_missing_source_face() {
 
 #[test]
 fn recovery_queue_rejects_missing_source_edge() {
-    let mut plc = single_facet_plc();
-    plc.protected_edges[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
+    let mut plc = tetrahedron_plc();
+    plc.nodes.push(plc_node("4", [2.0, 2.0, 2.0]));
+    plc.protected_edges[0].node_ids[1] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
 
     assert_eq!(
-        build_recovery_queue_from_plc(&plc, &single_facet_tetrahedron_mesh()),
+        build_recovery_queue_from_plc(&plc, &tetrahedron_mesh()),
         Err(TetrahedronRecoveryError::MissingSourceEdgeRecovery {
             edge_id: "edge_1".to_string()
         })
@@ -52,35 +49,43 @@ fn recovery_queue_rejects_missing_source_edge() {
 
 #[test]
 fn recovery_queue_rejects_missing_material_interface() {
-    let mut mesh = single_facet_tetrahedron_mesh();
+    let mut mesh = tetrahedron_mesh();
     mesh.elements[0].material_region_id = "other_body".to_string();
 
     assert_eq!(
-        build_recovery_queue_from_plc(&single_facet_plc(), &mesh),
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
         Err(TetrahedronRecoveryError::MissingMaterialInterfaceRecovery {
             material_interface_id: "solid_body".to_string()
         })
     );
 }
 
-fn single_facet_plc() -> ProtectedBoundaryComplex {
+#[test]
+fn recovery_queue_rejects_open_plc_even_when_summary_claims_ready() {
+    let mut plc = tetrahedron_plc();
+    plc.facets.pop();
+
+    assert!(matches!(
+        build_recovery_queue_from_plc(&plc, &tetrahedron_mesh()),
+        Err(TetrahedronRecoveryError::InvalidProtectedBoundaryComplex { .. })
+    ));
+}
+
+fn tetrahedron_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
-        complex_id: "single_facet_plc".to_string(),
+        complex_id: "tetrahedron_plc".to_string(),
         nodes: vec![
             plc_node("0", [0.0, 0.0, 0.0]),
             plc_node("1", [1.0, 0.0, 0.0]),
             plc_node("2", [0.0, 1.0, 0.0]),
+            plc_node("3", [0.0, 0.0, 1.0]),
         ],
-        facets: vec![PlcFacet {
-            facet_id: entity(MeshingStage::ProtectedBoundaryComplex, "facet_1"),
-            node_ids: [
-                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-            ],
-            source_face_id: entity(MeshingStage::SurfaceMesh, "face_1"),
-            material_interface_ids: vec!["solid_body".to_string()],
-        }],
+        facets: vec![
+            facet("facet_1", ["0", "2", "1"], "face_1"),
+            facet("facet_2", ["0", "1", "3"], "face_2"),
+            facet("facet_3", ["1", "2", "3"], "face_3"),
+            facet("facet_4", ["2", "0", "3"], "face_4"),
+        ],
         protected_edges: vec![PlcProtectedEdge {
             edge_id: entity(MeshingStage::ProtectedBoundaryComplex, "plc_edge_1"),
             node_ids: [
@@ -99,9 +104,9 @@ fn single_facet_plc() -> ProtectedBoundaryComplex {
     }
 }
 
-fn single_facet_tetrahedron_mesh() -> TetrahedronMesh {
+fn tetrahedron_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
-        mesh_id: "single_facet_tetrahedron".to_string(),
+        mesh_id: "tetrahedron".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
@@ -115,7 +120,10 @@ fn single_facet_tetrahedron_mesh() -> TetrahedronMesh {
                 entity(MeshingStage::ProtectedBoundaryComplex, "2"),
                 [0.0, 1.0, 0.0],
             ),
-            tetrahedron_node(entity(MeshingStage::TetrahedronMesh, "3"), [0.0, 0.0, 1.0]),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                [0.0, 0.0, 1.0],
+            ),
         ],
         elements: vec![Tetrahedron4Element {
             element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
@@ -123,19 +131,16 @@ fn single_facet_tetrahedron_mesh() -> TetrahedronMesh {
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
                 entity(MeshingStage::ProtectedBoundaryComplex, "1"),
                 entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-                entity(MeshingStage::TetrahedronMesh, "3"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
             ],
             material_region_id: "solid_body".to_string(),
         }],
-        boundary_faces: vec![TetrahedronBoundaryFace {
-            face_id: entity(MeshingStage::ProtectedBoundaryComplex, "facet_1"),
-            node_ids: [
-                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-            ],
-            source_face_id: entity(MeshingStage::SurfaceMesh, "face_1"),
-        }],
+        boundary_faces: vec![
+            boundary_face("facet_1", ["0", "2", "1"], "face_1"),
+            boundary_face("facet_2", ["0", "1", "3"], "face_2"),
+            boundary_face("facet_3", ["1", "2", "3"], "face_3"),
+            boundary_face("facet_4", ["2", "0", "3"], "face_4"),
+        ],
         recovery_complete: false,
         quality_optimized: false,
         evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
@@ -146,6 +151,31 @@ fn plc_node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
     PlcNode {
         node_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
         coordinates_m,
+    }
+}
+
+fn facet(id: &str, node_ids: [&str; 3], source_face_id: &str) -> PlcFacet {
+    PlcFacet {
+        facet_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
+        ],
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
+        material_interface_ids: vec!["solid_body".to_string()],
+    }
+}
+
+fn boundary_face(id: &str, node_ids: [&str; 3], source_face_id: &str) -> TetrahedronBoundaryFace {
+    TetrahedronBoundaryFace {
+        face_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
+        ],
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
     }
 }
 

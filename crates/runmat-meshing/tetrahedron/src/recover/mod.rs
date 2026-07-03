@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use runmat_meshing_core::contracts::{
     MeshingStage, ProtectedBoundaryComplex, StageEvidence, TetrahedronMesh,
 };
+use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
 use topology::{sorted_topology_ids, topology_face_edges};
 pub use types::{
@@ -20,9 +21,8 @@ pub fn build_recovery_queue_from_plc(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &TetrahedronMesh,
 ) -> Result<TetrahedronRecoveryQueue, TetrahedronRecoveryError> {
-    if !plc.validation.valid_for_volume_meshing() {
-        return Err(TetrahedronRecoveryError::InvalidProtectedBoundaryComplex);
-    }
+    validate_protected_boundary_complex(plc)
+        .map_err(|error| TetrahedronRecoveryError::InvalidProtectedBoundaryComplex { error })?;
     if tetrahedron_mesh.nodes.is_empty() || tetrahedron_mesh.elements.is_empty() {
         return Err(TetrahedronRecoveryError::EmptyTetrahedronMesh);
     }
