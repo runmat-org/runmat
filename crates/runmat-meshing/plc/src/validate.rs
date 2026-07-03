@@ -26,6 +26,13 @@ pub enum PlcValidationError {
     FacetHasRepeatedNode {
         facet_id: TopologyEntityId,
     },
+    FacetHasEmptyMaterialInterfaceId {
+        facet_id: TopologyEntityId,
+    },
+    FacetHasRepeatedMaterialInterfaceId {
+        facet_id: TopologyEntityId,
+        material_interface_id: String,
+    },
     ProtectedEdgeReferencesUnknownNode {
         edge_id: TopologyEntityId,
         node_id: TopologyEntityId,
@@ -79,6 +86,19 @@ impl std::fmt::Display for PlcValidationError {
             Self::FacetHasRepeatedNode { facet_id } => {
                 write!(formatter, "PLC facet {} repeats a node", facet_id.id)
             }
+            Self::FacetHasEmptyMaterialInterfaceId { facet_id } => write!(
+                formatter,
+                "PLC facet {} has an empty material interface id",
+                facet_id.id
+            ),
+            Self::FacetHasRepeatedMaterialInterfaceId {
+                facet_id,
+                material_interface_id,
+            } => write!(
+                formatter,
+                "PLC facet {} repeats material interface id {material_interface_id}",
+                facet_id.id
+            ),
             Self::ProtectedEdgeReferencesUnknownNode { edge_id, node_id } => write!(
                 formatter,
                 "PLC protected edge {} references unknown node {}",
@@ -168,6 +188,7 @@ pub fn validate_protected_boundary_complex(
     let mut referenced_node_ids = BTreeSet::<TopologyEntityId>::new();
     for facet in &plc.facets {
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
+        validate_facet_material_interfaces(facet.facet_id.clone(), &facet.material_interface_ids)?;
         referenced_node_ids.extend(facet.node_ids.iter().cloned());
         for edge_index in 0..3 {
             let left = facet.node_ids[edge_index].clone();
@@ -264,6 +285,25 @@ fn validate_facet_nodes(
     Ok(())
 }
 
+fn validate_facet_material_interfaces(
+    facet_id: TopologyEntityId,
+    material_interface_ids: &[String],
+) -> Result<(), PlcValidationError> {
+    let mut unique_material_interface_ids = BTreeSet::<&str>::new();
+    for material_interface_id in material_interface_ids {
+        if material_interface_id.is_empty() {
+            return Err(PlcValidationError::FacetHasEmptyMaterialInterfaceId { facet_id });
+        }
+        if !unique_material_interface_ids.insert(material_interface_id.as_str()) {
+            return Err(PlcValidationError::FacetHasRepeatedMaterialInterfaceId {
+                facet_id,
+                material_interface_id: material_interface_id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn sorted_edge(left: TopologyEntityId, right: TopologyEntityId) -> [TopologyEntityId; 2] {
     if left <= right {
         [left, right]
@@ -338,6 +378,28 @@ mod tests {
         assert!(matches!(
             validate_protected_boundary_complex(&plc),
             Err(PlcValidationError::FacetReferencesUnknownNode { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_material_interface_id() {
+        let mut plc = tetrahedron_plc();
+        plc.facets[0].material_interface_ids = vec!["".to_string()];
+
+        assert!(matches!(
+            validate_protected_boundary_complex(&plc),
+            Err(PlcValidationError::FacetHasEmptyMaterialInterfaceId { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_repeated_material_interface_id_on_facet() {
+        let mut plc = tetrahedron_plc();
+        plc.facets[0].material_interface_ids = vec!["body".to_string(), "body".to_string()];
+
+        assert!(matches!(
+            validate_protected_boundary_complex(&plc),
+            Err(PlcValidationError::FacetHasRepeatedMaterialInterfaceId { .. })
         ));
     }
 
