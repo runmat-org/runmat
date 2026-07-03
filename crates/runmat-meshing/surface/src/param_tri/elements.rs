@@ -45,7 +45,11 @@ pub(super) fn append_curve_driven_face_elements(
         .flat_map(|loop_segments| loop_segments.iter().copied())
         .collect::<Vec<_>>();
     if segments.len() <= 3 && !has_exact_face_domain_samples(frame) {
-        append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
+        if segments.len() == 3 {
+            append_curve_triangle_face_element(face, frame, &segments, nodes, elements);
+        } else {
+            append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
+        }
         return ExactCadSampleSurfaceReport::default();
     }
 
@@ -212,4 +216,61 @@ pub(super) fn append_curve_fan_face_elements(
             unit_normal: frame.unit_normal,
         });
     }
+}
+
+fn append_curve_triangle_face_element(
+    face: &SourceTopologyFace,
+    frame: &CadFaceEvaluationFrame,
+    segments: &[FaceCurveSegment],
+    nodes: &[SurfaceNode],
+    elements: &mut Vec<SurfaceElement>,
+) {
+    let boundary_edge_ids = segments
+        .iter()
+        .map(|segment| {
+            (
+                sorted_node_pair(segment.node_ids[0], segment.node_ids[1]),
+                segment.source_edge_id,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut node_ids = [
+        segments[0].node_ids[0],
+        segments[0].node_ids[1],
+        segments[1].node_ids[1],
+    ];
+    let mut points = node_ids.map(|node_id| nodes[node_id as usize].coordinates_m);
+    let mut parametric_node_uv =
+        node_ids.map(|node_id| project_to_face(frame, nodes[node_id as usize].coordinates_m).uv);
+    if dot(
+        cross(sub(points[1], points[0]), sub(points[2], points[0])),
+        frame.unit_normal,
+    ) < 0.0
+    {
+        node_ids.swap(1, 2);
+        points.swap(1, 2);
+        parametric_node_uv.swap(1, 2);
+    }
+    let source_edge_ids = triangle_edges_2d([0, 1, 2]).map(|edge| {
+        boundary_edge_ids
+            .get(&sorted_node_pair(node_ids[edge[0]], node_ids[edge[1]]))
+            .copied()
+            .unwrap_or(INTERNAL_SOURCE_EDGE_ID)
+    });
+    let max_projection_error_m = node_ids
+        .iter()
+        .map(|node_id| project_to_face(frame, nodes[*node_id as usize].coordinates_m).distance_m)
+        .fold(0.0_f64, f64::max);
+    elements.push(SurfaceElement {
+        element_id: elements.len() as u32,
+        source_face_id: face.face_id,
+        cad_face_id: Some(frame.face_id.clone()),
+        source_edge_ids,
+        node_ids,
+        parametric_node_uv,
+        max_projection_error_m,
+        region_ids: face.region_ids.clone(),
+        area_m2: triangle_area(points),
+        unit_normal: frame.unit_normal,
+    });
 }

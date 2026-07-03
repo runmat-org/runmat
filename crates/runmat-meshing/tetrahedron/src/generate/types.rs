@@ -7,6 +7,8 @@ pub enum TetrahedronGenerationError {
     NonFiniteInteriorPoint,
     DegeneratePlcBounds,
     UnsupportedStructuredBoxPlc,
+    UnsupportedSingleTetrahedronPlc,
+    DegenerateSingleTetrahedronPlc,
     DegenerateBoundaryFacet { facet_id: String },
 }
 
@@ -36,6 +38,15 @@ impl std::fmt::Display for TetrahedronGenerationError {
                     formatter,
                     "validated PLC is not an axis-aligned structured box"
                 )
+            }
+            Self::UnsupportedSingleTetrahedronPlc => {
+                write!(
+                    formatter,
+                    "validated PLC is not a single Tetrahedron4 boundary"
+                )
+            }
+            Self::DegenerateSingleTetrahedronPlc => {
+                write!(formatter, "validated single Tetrahedron4 PLC is degenerate")
             }
             Self::DegenerateBoundaryFacet { facet_id } => {
                 write!(

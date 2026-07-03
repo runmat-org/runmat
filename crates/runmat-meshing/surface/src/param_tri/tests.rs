@@ -193,6 +193,40 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
 }
 
 #[test]
+fn curve_driven_cad_surface_preserves_single_triangle_loop_without_extra_fan_node() {
+    let topology = single_triangle_topology();
+    let cad_topology =
+        build_cad_topology(&geometry_for_topology(), &topology).expect("cad topology");
+    let cad_evaluation =
+        build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+    let curves = discretize_topology_curves(
+        &topology,
+        CurveDiscretizationOptions {
+            target_size_m: 10.0,
+            min_segments_per_edge: 1,
+            max_segments_per_edge: 1,
+        },
+    )
+    .expect("curves should discretize");
+
+    let surface = discretize_cad_surfaces_with_curves(
+        &topology,
+        &cad_evaluation,
+        &curves,
+        SurfaceDiscretizationOptions::default(),
+    )
+    .expect("cad-owned curve surface should discretize");
+
+    assert_eq!(surface.nodes.len(), topology.vertices.len());
+    assert_eq!(surface.elements.len(), 1);
+    assert_eq!(surface.elements[0].node_ids, [0, 1, 2]);
+    assert!(surface.elements[0]
+        .source_edge_ids
+        .iter()
+        .all(|edge_id| *edge_id != INTERNAL_SOURCE_EDGE_ID));
+}
+
+#[test]
 fn curve_fan_fallback_orients_elements_to_cad_frame() {
     let face = single_triangle_topology().faces[0].clone();
     let frame = planar_test_frame(face.face_id);

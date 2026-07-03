@@ -69,6 +69,46 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 }
 
 #[test]
+fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
+    let mesh = generate_single_tetrahedron_mesh_from_plc(&tetra_plc())
+        .expect("tetrahedron PLC should generate one solver Tetrahedron4");
+
+    assert_eq!(mesh.nodes.len(), 4);
+    assert_eq!(mesh.elements.len(), 1);
+    assert_eq!(mesh.boundary_faces.len(), 4);
+    assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 1);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+    let element = &mesh.elements[0];
+    let points = element.node_ids.clone().map(|node_id| {
+        mesh.nodes
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .expect("node exists")
+            .coordinates_m
+    });
+    assert!(tetrahedron_signed_volume(points) > 0.0);
+}
+
+#[test]
+fn solver_generation_supports_box_and_single_tetrahedron_plcs() {
+    let box_mesh = generate_solver_tetrahedron_mesh_from_plc(&box_plc())
+        .expect("box PLC should use structured box solver generation");
+    let tetrahedron_mesh = generate_solver_tetrahedron_mesh_from_plc(&tetra_plc())
+        .expect("tetrahedron PLC should use single Tetrahedron solver generation");
+
+    assert_eq!(box_mesh.elements.len(), 6);
+    assert_eq!(tetrahedron_mesh.elements.len(), 1);
+}
+
+#[test]
+fn single_tetrahedron_generation_rejects_non_tetrahedron_plc() {
+    assert_eq!(
+        generate_single_tetrahedron_mesh_from_plc(&box_plc()),
+        Err(TetrahedronGenerationError::UnsupportedSingleTetrahedronPlc)
+    );
+}
+
+#[test]
 fn structured_box_generation_rejects_degenerate_bounds() {
     let mut plc = tetra_plc();
     for node in &mut plc.nodes {

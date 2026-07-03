@@ -22,7 +22,7 @@ use runmat_meshing_surface::{
     SurfaceDiscretizationOptions,
 };
 use runmat_meshing_tetrahedron::{
-    generate::{generate_structured_box_tetrahedron_mesh_from_plc, TetrahedronGenerationError},
+    generate::{generate_solver_tetrahedron_mesh_from_plc, TetrahedronGenerationError},
     structured_grid,
 };
 
@@ -152,8 +152,8 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     .map_err(SolidMeshingError::Surface)?;
     let plc = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
-    let tetrahedron_mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
-        .map_err(SolidMeshingError::Tetrahedron)?;
+    let tetrahedron_mesh =
+        generate_solver_tetrahedron_mesh_from_plc(&plc).map_err(SolidMeshingError::Tetrahedron)?;
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,
