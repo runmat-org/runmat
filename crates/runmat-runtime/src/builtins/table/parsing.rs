@@ -68,6 +68,8 @@ pub(super) fn option_value_is_empty(value: &Value) -> bool {
         Value::StringArray(array) => {
             array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
         }
+        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => {
             cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
         }

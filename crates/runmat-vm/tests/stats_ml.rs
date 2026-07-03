@@ -43,3 +43,14 @@ fn student_t_distribution_surface_executes_from_scripts() {
         .any(|value| matches!(value, Value::Num(value) if (*value - 1.675905).abs() < 1.0e-5)));
     assert!(has_tensor_shape(&vars, &[2, 3]));
 }
+
+#[test]
+fn grpstats_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [1 10; 3 30; 2 20; 4 40]; g = [2; 1; 2; 1]; [m,s,names] = grpstats(X, g, [\"mean\", \"std\", \"gname\"]); firstMean = m(1,1); secondMean = m(2,2);",
+    )
+    .expect("grpstats script");
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, 3.5));
+    assert!(has_num(&vars, 15.0));
+}

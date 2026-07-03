@@ -34237,6 +34237,171 @@
       ]
     },
     {
+      "name": "grpstats",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tblstats = grpstats(tbl, groupvars)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix or table."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variables, variable selectors, or empty grouping."
+            },
+            {
+              "name": "whichstats",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"mean\"",
+              "description": "Summary statistic name or names."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, DataVars, and VarNames options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "stats = grpstats(X, group)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix or table."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variables, variable selectors, or empty grouping."
+            },
+            {
+              "name": "whichstats",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"mean\"",
+              "description": "Summary statistic name or names."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, DataVars, and VarNames options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "[stats1, ..., statsN] = grpstats(X, group, whichstats)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix or table."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variables, variable selectors, or empty grouping."
+            },
+            {
+              "name": "whichstats",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"mean\"",
+              "description": "Summary statistic name or names."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, DataVars, and VarNames options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "gt",
       "output_mode": "Fixed",
       "completion_policy": "Public",

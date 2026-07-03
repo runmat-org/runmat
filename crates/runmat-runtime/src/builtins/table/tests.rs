@@ -1089,6 +1089,240 @@ fn groupsummary_orders_numeric_groups_numerically() {
 }
 
 #[test]
+fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
+    let x = Value::Tensor(
+        Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 10.0, 30.0, 20.0, 40.0], vec![4, 2]).unwrap(),
+    );
+    let group = Value::Tensor(Tensor::new(vec![2.0, 1.0, 2.0, 1.0], vec![4, 1]).unwrap());
+    let whichstats = Value::StringArray(
+        StringArray::new(
+            vec!["mean".into(), "std".into(), "gname".into()],
+            vec![1, 3],
+        )
+        .unwrap(),
+    );
+    let _guard = crate::output_count::push_output_count(Some(3));
+    let result = grpstats_impl(x, group, vec![whichstats]).unwrap();
+    let Value::OutputList(outputs) = result else {
+        panic!("expected output list");
+    };
+    assert_eq!(outputs.len(), 3);
+    match &outputs[0] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.data, vec![3.5, 1.5, 35.0, 15.0]);
+        }
+        other => panic!("expected mean tensor, got {other:?}"),
+    }
+    match &outputs[1] {
+        Value::Tensor(tensor) => {
+            let root_half = 0.5_f64.sqrt();
+            assert_eq!(tensor.shape, vec![2, 2]);
+            let expected = [root_half, root_half, 10.0 * root_half, 10.0 * root_half];
+            for (value, expected) in tensor.data.iter().zip(expected) {
+                assert!((*value - expected).abs() < 1.0e-12);
+            }
+        }
+        other => panic!("expected std tensor, got {other:?}"),
+    }
+    match &outputs[2] {
+        Value::Cell(cell) => {
+            assert_eq!(cell.rows, 2);
+            assert_eq!(cell.cols, 1);
+            assert_eq!(cell.data, vec![Value::from("1"), Value::from("2")]);
+        }
+        other => panic!("expected group-name cell, got {other:?}"),
+    }
+}
+
+#[test]
+fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![4, 1]).unwrap());
+    let empty_group = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+    let result = grpstats_impl(x.clone(), empty_group, Vec::new()).unwrap();
+    match result {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.data, vec![2.5]);
+        }
+        other => panic!("expected all-group mean tensor, got {other:?}"),
+    }
+
+    let group = Value::Tensor(Tensor::new(vec![f64::NAN, 2.0, 1.0, 2.0], vec![4, 1]).unwrap());
+    let names = grpstats_impl(x.clone(), group.clone(), vec![Value::from("gname")]).unwrap();
+    match names {
+        Value::Cell(cell) => assert_eq!(cell.data, vec![Value::from("1"), Value::from("2")]),
+        other => panic!("expected group names, got {other:?}"),
+    }
+    let means = grpstats_impl(x.clone(), group, vec![Value::from("mean")]).unwrap();
+    match means {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 3.5]),
+        other => panic!("expected means, got {other:?}"),
+    }
+
+    let _guard = crate::output_count::push_output_count(Some(1));
+    let err = grpstats_impl(
+        x,
+        Value::Tensor(Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).unwrap()),
+        vec![Value::StringArray(
+            StringArray::new(vec!["mean".into(), "std".into()], vec![1, 2]).unwrap(),
+        )],
+    )
+    .expect_err("expected output-count mismatch");
+    assert!(err.message.contains("number of outputs"));
+}
+
+#[test]
+fn grpstats_matrix_preserves_text_group_first_seen_order_and_builtin_handles() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![4, 1]).unwrap());
+    let group = Value::StringArray(
+        StringArray::new(
+            vec!["b".into(), "a".into(), "".into(), "b".into()],
+            vec![4, 1],
+        )
+        .unwrap(),
+    );
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let result = grpstats_impl(
+        x,
+        group,
+        vec![Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::FunctionHandle("mean".into()),
+                    Value::FunctionHandle("gname".into()),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        )],
+    )
+    .unwrap();
+    let Value::OutputList(outputs) = result else {
+        panic!("expected output list");
+    };
+    match &outputs[0] {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.5, 3.0]),
+        other => panic!("expected mean tensor, got {other:?}"),
+    }
+    match &outputs[1] {
+        Value::Cell(cell) => assert_eq!(cell.data, vec![Value::from("b"), Value::from("a")]),
+        other => panic!("expected group names, got {other:?}"),
+    }
+}
+
+#[test]
+fn grpstats_table_supports_datavars_varnames_and_multiple_stats() {
+    let group = Value::StringArray(
+        StringArray::new(
+            vec!["b".into(), "a".into(), "b".into(), "a".into()],
+            vec![4, 1],
+        )
+        .unwrap(),
+    );
+    let x = Value::Tensor(Tensor::new(vec![2.0, 10.0, 4.0, 14.0], vec![4, 1]).unwrap());
+    let y = Value::Tensor(Tensor::new(vec![1.0, 3.0, 5.0, 7.0], vec![4, 1]).unwrap());
+    let table =
+        table_from_columns(vec!["G".into(), "X".into(), "Y".into()], vec![group, x, y]).unwrap();
+    let stats = Value::StringArray(
+        StringArray::new(vec!["mean".into(), "max".into()], vec![1, 2]).unwrap(),
+    );
+    let names = Value::StringArray(
+        StringArray::new(
+            vec![
+                "Group".into(),
+                "N".into(),
+                "AverageX".into(),
+                "PeakX".into(),
+                "AverageY".into(),
+                "PeakY".into(),
+            ],
+            vec![1, 6],
+        )
+        .unwrap(),
+    );
+    let summary = grpstats_impl(
+        table,
+        Value::from("G"),
+        vec![
+            stats,
+            Value::from("DataVars"),
+            Value::StringArray(StringArray::new(vec!["X".into(), "Y".into()], vec![1, 2]).unwrap()),
+            Value::from("VarNames"),
+            names,
+        ],
+    )
+    .unwrap();
+    let summary = object(summary);
+    assert_eq!(
+        table_variable_names_from_object(&summary).unwrap(),
+        vec![
+            "Group".to_string(),
+            "N".to_string(),
+            "AverageX".to_string(),
+            "PeakX".to_string(),
+            "AverageY".to_string(),
+            "PeakY".to_string()
+        ]
+    );
+    match table_member_get(&summary, &Value::from("Group")).unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["b".to_string(), "a".to_string()]),
+        other => panic!("expected group strings, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("N")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 2.0]),
+        other => panic!("expected count tensor, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("AverageX")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 12.0]),
+        other => panic!("expected average tensor, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("PeakX")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0, 14.0]),
+        other => panic!("expected max tensor, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("AverageY")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 5.0]),
+        other => panic!("expected Y average tensor, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("PeakY")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 7.0]),
+        other => panic!("expected Y max tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn grpstats_table_supports_empty_group_and_interval_stats() {
+    let x = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(vec!["X".into()], vec![x]).unwrap();
+    let summary = object(
+        grpstats_impl(
+            table,
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            vec![Value::from("meanci")],
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&summary).unwrap(),
+        vec!["GroupCount".to_string(), "meanci_X".to_string()]
+    );
+    match table_member_get(&summary, &Value::from("GroupCount")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        other => panic!("expected count tensor, got {other:?}"),
+    }
+    match table_member_get(&summary, &Value::from("meanci_X")).unwrap() {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 2]);
+            assert!(tensor.data[0] < 4.0);
+            assert!(tensor.data[1] > 4.0);
+        }
+        other => panic!("expected interval tensor, got {other:?}"),
+    }
+}
+
+#[test]
 fn table_conversion_builtins_round_trip_arrays_cells_and_structs() {
     let matrix = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let table = block_on(array2table_builtin(

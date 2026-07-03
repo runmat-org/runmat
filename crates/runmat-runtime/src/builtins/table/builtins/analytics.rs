@@ -2,6 +2,30 @@ use super::*;
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(
+    name = "grpstats",
+    category = "stats/summary",
+    summary = "Compute summary statistics organized by group.",
+    keywords = "grpstats,group,statistics,mean,std,confidence interval,table",
+    accel = "cpu",
+    descriptor(crate::builtins::table::GRPSTATS_DESCRIPTOR),
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn grpstats_builtin(
+    value: Value,
+    group: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_control_flow)?;
+    let group = gather_if_needed_async(&group)
+        .await
+        .map_err(map_control_flow)?;
+    let rest = gather_values(&rest).await?;
+    grpstats_impl(value, group, rest)
+}
+
+#[runtime_builtin(
     name = "pivot",
     category = "table",
     summary = "Pivot or summarize table data by grouping variables.",

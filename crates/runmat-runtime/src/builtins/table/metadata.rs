@@ -138,6 +138,36 @@ const GROUPSUMMARY_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Data variable name or names.",
     },
 ];
+const GRPSTATS_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix or table.",
+    },
+    BuiltinParamDescriptor {
+        name: "group",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping variables, variable selectors, or empty grouping.",
+    },
+    BuiltinParamDescriptor {
+        name: "whichstats",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"mean\""),
+        description: "Summary statistic name or names.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Alpha, DataVars, and VarNames options.",
+    },
+];
 const OBJECT_INDEX_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
@@ -282,6 +312,23 @@ const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
     inputs: &GROUPSUMMARY_INPUTS,
     outputs: &ANY_OUTPUT,
 }];
+const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "tblstats = grpstats(tbl, groupvars)",
+        inputs: &GRPSTATS_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "stats = grpstats(X, group)",
+        inputs: &GRPSTATS_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[stats1, ..., statsN] = grpstats(X, group, whichstats)",
+        inputs: &GRPSTATS_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const HEIGHT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "n = height(T)",
     inputs: &TABLE_INPUT,
@@ -388,6 +435,12 @@ pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const GROUPSUMMARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &GROUPSUMMARY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const GRPSTATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GRPSTATS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };
