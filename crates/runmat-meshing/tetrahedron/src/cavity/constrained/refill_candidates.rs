@@ -9,21 +9,22 @@ use runmat_meshing_core::{
 };
 
 mod boundary_node;
+mod centroid;
 mod multi_interior;
 pub(super) use boundary_node::{
     boundary_node_refill_candidate, boundary_node_refill_rejection_reason,
     boundary_node_refill_validation_reason,
 };
+pub(super) use centroid::centroid_interior_refill_candidate;
 #[cfg(test)]
 pub(super) use multi_interior::multi_interior_exact_cover_failure_reason;
 pub(super) use multi_interior::multi_interior_node_refill_candidate;
 
 use super::{
-    cavity_boundary_node_centroid, cavity_boundary_node_ids,
-    exact_cover_refill_from_candidate_tetrahedra, next_cavity_node_id,
+    cavity_boundary_node_ids, exact_cover_refill_from_candidate_tetrahedra,
     refill_tetrahedra::{
         raw_refill_tetrahedron, raw_refill_tetrahedron_with_rejection_reason,
-        refill_from_tetrahedra, refill_is_better, star_refill_candidate_with_rejection_reason,
+        refill_from_tetrahedra, refill_is_better,
     },
     tetrahedralize_points, ConnectivityPoint, ConstrainedCavity, ConstrainedCavityNode,
     ConstrainedCavityRefill, ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
@@ -57,49 +58,6 @@ pub(super) fn single_tetrahedron_refill_candidate(
     let refill =
         refill_from_tetrahedra(cavity, vec![tetrahedron], options.volume_relative_tolerance)?;
     Ok(Some(refill))
-}
-
-pub(super) fn centroid_interior_refill_candidate(
-    cavity: &ConstrainedCavity,
-    boundary_nodes: &BTreeMap<u32, Point3>,
-    boundary_triangles: &[Triangle3],
-    options: ConstrainedCavityRefillOptions,
-) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
-    let Some(coordinates_m) = cavity_boundary_node_centroid(cavity, boundary_nodes) else {
-        return Ok(Err("centroid_interior_refill_empty_boundary"));
-    };
-    if point_in_closed_triangle_surface(
-        coordinates_m,
-        boundary_triangles,
-        MeshingTolerance::default(),
-    ) != PointInClosedSurface::Inside
-    {
-        return Ok(Err("centroid_interior_refill_outside_cavity"));
-    }
-    let node = ConstrainedCavityNode {
-        node_id: next_cavity_node_id(cavity),
-        coordinates_m,
-    };
-    match star_refill_candidate_with_rejection_reason(cavity, boundary_nodes, node.clone(), options)
-    {
-        Ok(Ok(mut refill)) => {
-            refill.inserted_nodes.push(node);
-            Ok(Ok(refill))
-        }
-        Ok(Err(reason)) => Ok(Err(centroid_interior_refill_rejection_reason(reason))),
-        Err(err) => Err(err),
-    }
-}
-
-fn centroid_interior_refill_rejection_reason(reason: &'static str) -> &'static str {
-    match reason {
-        "star_tetrahedron_min_volume" => "centroid_interior_refill_tetrahedron_min_volume",
-        "star_tetrahedron_aspect_ratio" => "centroid_interior_refill_tetrahedron_aspect_ratio",
-        "star_tetrahedron_scaled_jacobian" => {
-            "centroid_interior_refill_tetrahedron_scaled_jacobian"
-        }
-        other => other,
-    }
 }
 
 pub(super) fn two_interior_node_refill_candidate(
