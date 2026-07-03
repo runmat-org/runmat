@@ -14,14 +14,17 @@ use super::super::{
         boundary_face_split_node_candidates, edge_split_completion_tetrahedra_for_node,
         split_completion_tetrahedra_for_node, three_edge_split_completion_tetrahedra_for_node,
     },
-    cavity_boundary_node_ids, raw_refill_tetrahedron_with_rejection_reason,
-    split_constrained_cavity_boundary_faces, split_constrained_cavity_boundary_faces_on_edge,
+    cavity_boundary_node_ids, split_constrained_cavity_boundary_faces,
+    split_constrained_cavity_boundary_faces_on_edge,
     split_constrained_cavity_boundary_faces_on_three_edges,
     topology::{face_edges, sorted_edge, sorted_face, sorted_tetrahedron_nodes},
     validate_constrained_cavity, ConstrainedCavity, ConstrainedCavityNode,
     ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
     ConstrainedCavityValidationError,
 };
+
+mod tetrahedron;
+pub(in super::super) use tetrahedron::best_boundary_face_completion_tetrahedron;
 
 pub(in super::super) fn best_boundary_face_edge_split_completion(
     face: [u32; 3],
@@ -288,43 +291,4 @@ pub(in super::super) fn best_boundary_face_split_completion(
     split_cavity.boundary_faces = split_faces;
     validate_constrained_cavity(&split_cavity)?;
     Ok(Some((split_cavity, split_node, split_tetrahedra)))
-}
-
-pub(in super::super) fn best_boundary_face_completion_tetrahedron(
-    face: [u32; 3],
-    cavity: &ConstrainedCavity,
-    boundary_nodes: &BTreeMap<u32, Point3>,
-    refill_tetrahedra: &[ConstrainedCavityRefillTetrahedron],
-    boundary_triangles: &[Triangle3],
-    options: ConstrainedCavityRefillOptions,
-) -> Option<ConstrainedCavityRefillTetrahedron> {
-    cavity_boundary_node_ids(cavity)
-        .into_iter()
-        .filter(|node_id| !face.contains(node_id))
-        .filter_map(|node_id| {
-            let node_ids = [face[0], face[1], face[2], node_id];
-            let points = node_ids.map(|id| boundary_nodes[&id]);
-            if point_in_closed_triangle_surface(
-                tetrahedron_centroid(points),
-                boundary_triangles,
-                MeshingTolerance::default(),
-            ) != PointInClosedSurface::Inside
-            {
-                return None;
-            }
-            let tetrahedron =
-                raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options).ok()?;
-            if refill_tetrahedra.iter().any(|existing| {
-                sorted_tetrahedron_nodes(existing.node_ids)
-                    == sorted_tetrahedron_nodes(tetrahedron.node_ids)
-            }) {
-                return None;
-            }
-            Some(tetrahedron)
-        })
-        .max_by(|left, right| {
-            left.exact_scaled_jacobian
-                .total_cmp(&right.exact_scaled_jacobian)
-                .then_with(|| right.aspect_ratio.total_cmp(&left.aspect_ratio))
-        })
 }
