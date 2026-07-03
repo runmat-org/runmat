@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use crate::{
     artifact::{AnalysisMeshArtifact, ANALYSIS_MESH_SCHEMA_VERSION},
     quality::QualityThresholds,
-    topology::VolumeElementKind,
 };
 
 mod connectivity;
@@ -12,16 +11,16 @@ pub use connectivity::{volume_component_count, volume_component_element_counts};
 
 mod geometry;
 pub use geometry::mesh_contains_point;
-use geometry::{
-    element_tetrahedron_points, mesh_boundary_area_m2, mesh_bounds_m, mesh_volume_m3,
-    tetrahedron_volume_m3,
-};
+use geometry::{mesh_boundary_area_m2, mesh_bounds_m, mesh_volume_m3};
 
 mod quality;
 use quality::validate_quality;
 
 mod recovery;
 use recovery::{validate_no_fan_fallback, validate_no_unrepaired_exact_quality};
+
+mod regions;
+use regions::{validate_required_boundary_regions, validate_required_material_regions};
 
 mod types;
 pub use types::{
@@ -296,85 +295,6 @@ fn validate_coverage_samples(
             coverage_ratio: format!("{coverage_ratio:.6}"),
             required_ratio: format!("{min_coverage_sample_ratio:.6}"),
         });
-    }
-    Ok(())
-}
-
-fn validate_required_boundary_regions(
-    mesh: &AnalysisMeshArtifact,
-    required_region_ids: &[String],
-) -> Result<(), AnalysisMeshValidationError> {
-    if required_region_ids.is_empty() {
-        return Ok(());
-    }
-    let present = mesh
-        .boundary_faces
-        .iter()
-        .flat_map(|face| face.region_ids.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>();
-    let recovered = mesh
-        .boundary_faces
-        .iter()
-        .filter(|face| !face.adjacent_volume_element_ids.is_empty())
-        .flat_map(|face| face.region_ids.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>();
-    for region_id in required_region_ids {
-        if !present.contains(region_id.as_str()) {
-            return Err(AnalysisMeshValidationError::MissingRequiredBoundaryRegion {
-                region_id: region_id.clone(),
-            });
-        }
-        if !recovered.contains(region_id.as_str()) {
-            return Err(
-                AnalysisMeshValidationError::MissingRequiredBoundaryRegionRecovery {
-                    region_id: region_id.clone(),
-                },
-            );
-        }
-    }
-    Ok(())
-}
-
-fn validate_required_material_regions(
-    mesh: &AnalysisMeshArtifact,
-    required_region_ids: &[String],
-) -> Result<(), AnalysisMeshValidationError> {
-    if required_region_ids.is_empty() {
-        return Ok(());
-    }
-    let present = mesh
-        .volume_elements
-        .iter()
-        .map(|element| element.material_region_id.as_str())
-        .collect::<BTreeSet<_>>();
-    let positive_volume = mesh
-        .volume_elements
-        .iter()
-        .filter(|element| {
-            element.kind == VolumeElementKind::Tetrahedron4 && element.node_ids.len() == 4
-        })
-        .filter(|element| {
-            let Some(points) = element_tetrahedron_points(mesh, element.node_ids.as_slice()) else {
-                return false;
-            };
-            let volume_m3 = tetrahedron_volume_m3(points);
-            volume_m3.is_finite() && volume_m3 > f64::EPSILON
-        })
-        .map(|element| element.material_region_id.as_str())
-        .collect::<BTreeSet<_>>();
-    for region_id in required_region_ids {
-        if !present.contains(region_id.as_str()) {
-            return Err(AnalysisMeshValidationError::MissingRequiredMaterialRegion {
-                region_id: region_id.clone(),
-            });
-        }
-        if !positive_volume.contains(region_id.as_str()) {
-            return Err(
-                AnalysisMeshValidationError::MissingRequiredMaterialRegionCoverage {
-                    region_id: region_id.clone(),
-                },
-            );
-        }
     }
     Ok(())
 }
