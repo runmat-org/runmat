@@ -76,8 +76,16 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             provenance: vec![mesh_provenance.clone()],
         })
         .collect::<Vec<_>>();
-    let source_edge_provenance_by_edge =
-        source_edge_provenance_by_boundary_edge(geometry, surface, &node_id_map);
+    let mut source_edge_provenance_by_edge = tetrahedron_source_edge_provenance_by_boundary_edge(
+        geometry,
+        surface,
+        &node_id_map,
+        &tetrahedron_mesh,
+    );
+    merge_surface_source_edge_provenance(
+        &mut source_edge_provenance_by_edge,
+        source_edge_provenance_by_boundary_edge(geometry, surface, &node_id_map),
+    );
     let boundary_faces = tetrahedron_mesh
         .boundary_faces
         .iter()
@@ -411,6 +419,55 @@ fn source_edge_provenance_by_boundary_edge(
     provenance_by_edge
 }
 
+fn tetrahedron_source_edge_provenance_by_boundary_edge(
+    geometry: &GeometryAsset,
+    surface: &SurfaceDiscretization,
+    node_id_map: &BTreeMap<TopologyEntityId, u32>,
+    tetrahedron_mesh: &TetrahedronMesh,
+) -> BTreeMap<[u32; 2], MeshEntityProvenance> {
+    let mut provenance_by_edge = BTreeMap::<[u32; 2], MeshEntityProvenance>::new();
+    for face in &tetrahedron_mesh.boundary_faces {
+        for (source_edge_id, edge) in face.source_edge_ids.clone().into_iter().zip([
+            sorted_topology_edge(face.node_ids[0].clone(), face.node_ids[1].clone()),
+            sorted_topology_edge(face.node_ids[1].clone(), face.node_ids[2].clone()),
+            sorted_topology_edge(face.node_ids[2].clone(), face.node_ids[0].clone()),
+        ]) {
+            let Some(source_edge_id) = source_edge_id else {
+                continue;
+            };
+            let Some(edge) = analysis_edge_from_tetrahedron_edge(edge, node_id_map) else {
+                continue;
+            };
+            let region_ids = surface_region_ids(surface, &face.source_face_id.id);
+            provenance_by_edge
+                .entry(edge)
+                .and_modify(|entry| append_unique_region_ids(&mut entry.region_ids, &region_ids))
+                .or_insert_with(|| MeshEntityProvenance {
+                    source_geometry_id: geometry.geometry_id.clone(),
+                    source_geometry_revision: geometry.revision,
+                    source_entity_kind: SourceEntityKind::Edge,
+                    source_entity_id: source_edge_id.id,
+                    region_ids,
+                });
+        }
+    }
+    provenance_by_edge
+}
+
+fn merge_surface_source_edge_provenance(
+    target: &mut BTreeMap<[u32; 2], MeshEntityProvenance>,
+    source: BTreeMap<[u32; 2], MeshEntityProvenance>,
+) {
+    for (edge, provenance) in source {
+        target
+            .entry(edge)
+            .and_modify(|entry| {
+                append_unique_region_ids(&mut entry.region_ids, &provenance.region_ids)
+            })
+            .or_insert(provenance);
+    }
+}
+
 fn analysis_edge_from_surface_edge(
     edge: [u32; 2],
     node_id_map: &BTreeMap<TopologyEntityId, u32>,
@@ -418,6 +475,21 @@ fn analysis_edge_from_surface_edge(
     let left = node_id_map.get(&surface_node_plc_id(edge[0]))?;
     let right = node_id_map.get(&surface_node_plc_id(edge[1]))?;
     Some(sorted_edge(*left, *right))
+}
+
+fn analysis_edge_from_tetrahedron_edge(
+    edge: [TopologyEntityId; 2],
+    node_id_map: &BTreeMap<TopologyEntityId, u32>,
+) -> Option<[u32; 2]> {
+    let left = node_id_map.get(&edge[0])?;
+    let right = node_id_map.get(&edge[1])?;
+    Some(sorted_edge(*left, *right))
+}
+
+fn sorted_topology_edge(left: TopologyEntityId, right: TopologyEntityId) -> [TopologyEntityId; 2] {
+    let mut edge = [left, right];
+    edge.sort();
+    edge
 }
 
 fn surface_node_plc_id(node_id: u32) -> TopologyEntityId {

@@ -34,4 +34,6 @@ pub struct TetrahedronBoundaryFace {
     pub face_id: TopologyEntityId,
     pub node_ids: [TopologyEntityId; 3],
     pub source_face_id: TopologyEntityId,
+    #[serde(default)]
+    pub source_edge_ids: [Option<TopologyEntityId>; 3],
 }

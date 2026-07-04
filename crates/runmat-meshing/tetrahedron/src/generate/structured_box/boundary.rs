@@ -74,6 +74,10 @@ pub(super) fn exterior_boundary_faces(
                 stage: MeshingStage::TetrahedronMesh,
                 id: format!("structured_box_boundary_face_{boundary_face_index}"),
             },
+            source_edge_ids: super::super::source_edge_ids_for_face_edges(
+                &plc.protected_edges,
+                node_ids.clone(),
+            ),
             node_ids,
             source_face_id,
         });

@@ -142,6 +142,38 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
 }
 
 #[test]
+fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    for boundary_face in &mut mesh.boundary_faces {
+        boundary_face.source_edge_ids = [None, None, None];
+    }
+
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing protected source-edge provenance should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("matching boundary topology should repair source-edge provenance");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_source_edge_provenance_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
@@ -369,13 +401,15 @@ fn facet(id: &str, node_ids: [&str; 3], source_face_id: &str) -> PlcFacet {
 }
 
 fn boundary_face(id: &str, node_ids: [&str; 3], source_face_id: &str) -> TetrahedronBoundaryFace {
+    let node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
+        entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
+        entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
+    ];
     TetrahedronBoundaryFace {
         face_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
-        node_ids: [
-            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
-            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
-            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
-        ],
+        source_edge_ids: source_edge_ids(node_ids.clone()),
+        node_ids,
         source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
     }
 }
@@ -390,6 +424,24 @@ fn tetrahedron_node(node_id: TopologyEntityId, coordinates_m: [f64; 3]) -> Tetra
 fn sorted_face_ids(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
     node_ids.sort();
     node_ids
+}
+
+fn source_edge_ids(node_ids: [TopologyEntityId; 3]) -> [Option<TopologyEntityId>; 3] {
+    [
+        source_edge_id_for_edge([node_ids[0].clone(), node_ids[1].clone()]),
+        source_edge_id_for_edge([node_ids[1].clone(), node_ids[2].clone()]),
+        source_edge_id_for_edge([node_ids[2].clone(), node_ids[0].clone()]),
+    ]
+}
+
+fn source_edge_id_for_edge(mut node_ids: [TopologyEntityId; 2]) -> Option<TopologyEntityId> {
+    node_ids.sort();
+    (node_ids
+        == [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        ])
+    .then(|| entity(MeshingStage::CurveMesh, "edge_1"))
 }
 
 fn entity(stage: MeshingStage, id: &str) -> TopologyEntityId {

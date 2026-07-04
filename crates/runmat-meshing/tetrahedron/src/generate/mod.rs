@@ -12,6 +12,7 @@ mod solver;
 mod structured_box;
 mod types;
 mod validation;
+pub(crate) use crate::protected_edges::source_edge_ids_for_face_edges;
 pub use convex_polyhedron::generate_convex_polyhedron_tetrahedron_mesh_from_plc;
 pub use initial::generate_initial_tetrahedron_mesh_from_plc;
 pub use single_tetrahedron::generate_single_tetrahedron_mesh_from_plc;

@@ -1,13 +1,5 @@
 use runmat_meshing_core::contracts::{MeshingStage, TopologyEntityId};
 
-pub(super) fn topology_face_edges(node_ids: [TopologyEntityId; 3]) -> [[TopologyEntityId; 2]; 3] {
-    [
-        sorted_topology_ids([node_ids[0].clone(), node_ids[1].clone()]),
-        sorted_topology_ids([node_ids[1].clone(), node_ids[2].clone()]),
-        sorted_topology_ids([node_ids[2].clone(), node_ids[0].clone()]),
-    ]
-}
-
 pub(super) fn sorted_topology_ids<const N: usize>(
     mut node_ids: [TopologyEntityId; N],
 ) -> [TopologyEntityId; N] {

@@ -104,6 +104,10 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
             face_id: facet.facet_id.clone(),
             node_ids: facet.node_ids.clone(),
             source_face_id: facet.source_face_id.clone(),
+            source_edge_ids: super::source_edge_ids_for_face_edges(
+                &plc.protected_edges,
+                facet.node_ids.clone(),
+            ),
         });
     }
 
