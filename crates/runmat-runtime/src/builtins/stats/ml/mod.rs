@@ -4,6 +4,7 @@ pub mod classification;
 pub mod classification_tree;
 pub mod cvpartition;
 pub mod distance;
+pub mod kmeans;
 pub mod lasso;
 pub mod linear_model;
 pub mod ridge;

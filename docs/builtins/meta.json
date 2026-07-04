@@ -46694,6 +46694,237 @@
       ]
     },
     {
+      "name": "kmeans",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "idx = kmeans(X, k)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of clusters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based cluster index for each input observation."
+            }
+          ]
+        },
+        {
+          "label": "idx = kmeans(X, k, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of clusters."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Distance, Start, Replicates, MaxIter, EmptyAction, Display, OnlinePhase, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based cluster index for each input observation."
+            }
+          ]
+        },
+        {
+          "label": "[idx, C] = kmeans(___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of clusters."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Distance, Start, Replicates, MaxIter, EmptyAction, Display, OnlinePhase, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based cluster index for each input observation."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Final cluster centroid matrix."
+            }
+          ]
+        },
+        {
+          "label": "[idx, C, sumd] = kmeans(___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of clusters."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Distance, Start, Replicates, MaxIter, EmptyAction, Display, OnlinePhase, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based cluster index for each input observation."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Final cluster centroid matrix."
+            },
+            {
+              "name": "sumd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Within-cluster sums of point-to-centroid distances."
+            }
+          ]
+        },
+        {
+          "label": "[idx, C, sumd, D] = kmeans(___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of clusters."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Distance, Start, Replicates, MaxIter, EmptyAction, Display, OnlinePhase, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "idx",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based cluster index for each input observation."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Final cluster centroid matrix."
+            },
+            {
+              "name": "sumd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Within-cluster sums of point-to-centroid distances."
+            },
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Distance from every observation to every centroid."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.KMEANS.INVALID_ARGUMENT",
+          "identifier": "RunMat:kmeans:InvalidArgument",
+          "when": "Inputs, cluster counts, starts, distance metrics, or name-value options are malformed.",
+          "message": "kmeans: invalid argument"
+        },
+        {
+          "code": "RM.KMEANS.INTERNAL",
+          "identifier": "RunMat:kmeans:Internal",
+          "when": "RunMat cannot allocate or construct kmeans outputs.",
+          "message": "kmeans: internal error"
+        }
+      ]
+    },
+    {
       "name": "kron",
       "output_mode": "Fixed",
       "completion_policy": "Public",

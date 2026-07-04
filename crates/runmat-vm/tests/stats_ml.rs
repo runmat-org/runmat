@@ -113,6 +113,22 @@ fn classify_surface_executes_from_scripts() {
 }
 
 #[test]
+fn kmeans_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; [idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10], 'MaxIter', 20); a = idx(1); b = idx(4); c11 = C(1,1); c22 = C(2,2); dshape = size(D);",
+    )
+    .expect("kmeans script");
+    assert!(has_tensor_shape(&vars, &[4, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[4, 2]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 0.1));
+    assert!(has_num(&vars, 10.0));
+}
+
+#[test]
 fn student_t_distribution_surface_executes_from_scripts() {
     let vars = execute_source(
         "p = tcdf(0, 10); q = tcdf(10, 99, 'upper'); d = tpdf(0, 1); x = tinv(0.95, 50); r = trnd(5, 2, 3);",
