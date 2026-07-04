@@ -241,18 +241,9 @@ fn boundary_face_preference_score(
 
 pub(super) fn repair_boundary_source_edge_provenance(
     plc: &ProtectedBoundaryComplex,
-    initial_recovery_queue: &TetrahedronRecoveryQueue,
+    _initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> usize {
-    let has_recoverable_source_edge = initial_recovery_queue.items.iter().any(|item| {
-        item.kind == TetrahedronRecoveryKind::SourceEdge
-            && item.status == TetrahedronRecoveryStatus::Missing
-            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::BoundaryEdge)
-    });
-    if !has_recoverable_source_edge {
-        return 0;
-    }
-
     let mut repaired_count = 0;
     for boundary_face in &mut tetrahedron_mesh.boundary_faces {
         let expected_source_edge_ids =
