@@ -75,7 +75,15 @@ pub fn validate_protected_boundary_complex(
         }
     }
 
+    let mut protected_edge_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut protected_edge_id_by_segment =
+        BTreeMap::<[TopologyEntityId; 2], TopologyEntityId>::new();
     for protected_edge in &plc.protected_edges {
+        if !protected_edge_ids.insert(protected_edge.edge_id.clone()) {
+            return Err(PlcValidationError::DuplicateProtectedEdge {
+                edge_id: protected_edge.edge_id.clone(),
+            });
+        }
         if protected_edge.node_ids[0] == protected_edge.node_ids[1] {
             return Err(PlcValidationError::ProtectedEdgeHasRepeatedNode {
                 edge_id: protected_edge.edge_id.clone(),
@@ -104,6 +112,15 @@ pub fn validate_protected_boundary_complex(
             protected_edge.node_ids[0].clone(),
             protected_edge.node_ids[1].clone(),
         );
+        if let Some(first_edge_id) =
+            protected_edge_id_by_segment.insert(edge.clone(), protected_edge.edge_id.clone())
+        {
+            return Err(PlcValidationError::DuplicateProtectedBoundarySegment {
+                first_edge_id,
+                second_edge_id: protected_edge.edge_id.clone(),
+                node_ids: edge,
+            });
+        }
         if !edge_incidence.contains_key(&edge) {
             return Err(PlcValidationError::ProtectedEdgeNotOnBoundary {
                 edge_id: protected_edge.edge_id.clone(),

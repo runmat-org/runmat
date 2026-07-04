@@ -103,6 +103,7 @@ fn rejects_inconsistent_surface_orientation_before_returning_plc() {
         build_protected_boundary_complex(&surface),
         Err(PlcBuildError::ProtectedBoundaryValidation(
             PlcValidationError::InconsistentBoundaryEdgeOrientation { .. }
+                | PlcValidationError::DuplicateProtectedBoundarySegment { .. }
         ))
     ));
 }

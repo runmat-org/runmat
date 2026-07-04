@@ -38,6 +38,14 @@ pub enum PlcValidationError {
         edge_id: TopologyEntityId,
         node_id: TopologyEntityId,
     },
+    DuplicateProtectedEdge {
+        edge_id: TopologyEntityId,
+    },
+    DuplicateProtectedBoundarySegment {
+        first_edge_id: TopologyEntityId,
+        second_edge_id: TopologyEntityId,
+        node_ids: [TopologyEntityId; 2],
+    },
     ProtectedEdgeHasRepeatedNode {
         edge_id: TopologyEntityId,
     },
@@ -127,6 +135,22 @@ impl std::fmt::Display for PlcValidationError {
                 formatter,
                 "PLC protected edge {} references unknown node {}",
                 edge_id.id, node_id.id
+            ),
+            Self::DuplicateProtectedEdge { edge_id } => {
+                write!(
+                    formatter,
+                    "PLC has duplicate protected edge {}",
+                    edge_id.id
+                )
+            }
+            Self::DuplicateProtectedBoundarySegment {
+                first_edge_id,
+                second_edge_id,
+                node_ids,
+            } => write!(
+                formatter,
+                "PLC protected edges {} and {} both reference boundary segment {}-{}",
+                first_edge_id.id, second_edge_id.id, node_ids[0].id, node_ids[1].id
             ),
             Self::ProtectedEdgeHasRepeatedNode { edge_id } => {
                 write!(

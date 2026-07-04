@@ -153,6 +153,52 @@ fn rejects_protected_edge_that_references_unknown_node() {
 }
 
 #[test]
+fn rejects_duplicate_protected_edge_id() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_duplicate"),
+        node_ids: [entity("0"), entity("1")],
+        source_edge_id: source_edge("source_edge_01"),
+    });
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_duplicate"),
+        node_ids: [entity("0"), entity("2")],
+        source_edge_id: source_edge("source_edge_02"),
+    });
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DuplicateProtectedEdge {
+            edge_id: entity("edge_duplicate"),
+        })
+    );
+}
+
+#[test]
+fn rejects_duplicate_protected_boundary_segment() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_01_a"),
+        node_ids: [entity("0"), entity("1")],
+        source_edge_id: source_edge("source_edge_01_a"),
+    });
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_01_b"),
+        node_ids: [entity("1"), entity("0")],
+        source_edge_id: source_edge("source_edge_01_b"),
+    });
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DuplicateProtectedBoundarySegment {
+            first_edge_id: entity("edge_01_a"),
+            second_edge_id: entity("edge_01_b"),
+            node_ids: [entity("0"), entity("1")],
+        })
+    );
+}
+
+#[test]
 fn rejects_protected_edge_that_is_not_a_boundary_edge() {
     let mut plc = octahedron_plc();
     plc.protected_edges.push(PlcProtectedEdge {
