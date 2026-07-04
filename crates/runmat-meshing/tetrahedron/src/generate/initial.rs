@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     quality::predicate::tetrahedron_signed_volume,
 };
 
+use super::evidence::record_input_plc_evidence;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
@@ -116,6 +117,7 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
     evidence
         .entity_counts
         .insert("boundary_faces".to_string(), boundary_faces.len());
+    record_input_plc_evidence(plc, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_signed_volume);
 
     Ok(TetrahedronMesh {

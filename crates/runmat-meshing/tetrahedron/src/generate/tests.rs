@@ -16,6 +16,11 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
     assert!(!mesh.recovery_complete);
     assert!(!mesh.quality_optimized);
     assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 4);
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_boundary_components"],
+        1
+    );
+    assert_eq!(mesh.evidence.entity_counts["input_plc_outer_shells"], 1);
     assert!(mesh.evidence.min_scaled_jacobian.expect("volume evidence") > 0.0);
 }
 
@@ -112,6 +117,11 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
     assert_eq!(mesh.boundary_faces.len(), 8);
     assert_eq!(mesh.evidence.entity_counts["interior_nodes"], 1);
     assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 8);
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_boundary_components"],
+        1
+    );
+    assert_eq!(mesh.evidence.entity_counts["input_plc_outer_shells"], 1);
     assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
     for element in &mesh.elements {
         let points = element.node_ids.clone().map(|node_id| {
