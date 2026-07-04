@@ -9,3 +9,7 @@ pub use discretize::{
     discretize_topology_curves, discretize_topology_curves_with_sizing, CurveDiscretization,
     CurveDiscretizationError, CurveDiscretizationOptions, CurveElement, CurveNode,
 };
+pub use validate::{
+    validate_curve_discretization, CurveValidationError, CurveValidationOptions,
+    CurveValidationReport,
+};

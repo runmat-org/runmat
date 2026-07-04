@@ -1,0 +1,190 @@
+use std::collections::BTreeMap;
+
+use runmat_meshing_cad::{SourceTopologyEdge, SourceTopologyModel};
+
+use crate::{CurveDiscretization, CurveElement, CurveNode};
+
+use super::types::{CurveValidationError, CurveValidationOptions, CurveValidationReport};
+
+pub fn validate_curve_discretization(
+    topology: &SourceTopologyModel,
+    curves: &CurveDiscretization,
+    options: CurveValidationOptions,
+) -> Result<CurveValidationReport, CurveValidationError> {
+    validate_options(options)?;
+    let nodes_by_id = nodes_by_id(curves);
+    let mut elements_by_edge = BTreeMap::<u32, Vec<&CurveElement>>::new();
+    let mut max_segment_length_m = 0.0_f64;
+
+    for element in &curves.elements {
+        let left_node = nodes_by_id.get(&element.node_ids[0]).copied().ok_or(
+            CurveValidationError::UnknownNode {
+                element_id: element.element_id,
+                node_id: element.node_ids[0],
+            },
+        )?;
+        let right_node = nodes_by_id.get(&element.node_ids[1]).copied().ok_or(
+            CurveValidationError::UnknownNode {
+                element_id: element.element_id,
+                node_id: element.node_ids[1],
+            },
+        )?;
+        if left_node.source_edge_id != element.source_edge_id
+            || right_node.source_edge_id != element.source_edge_id
+        {
+            return Err(CurveValidationError::ElementEdgeMismatch {
+                element_id: element.element_id,
+                source_edge_id: element.source_edge_id,
+                left_source_edge_id: left_node.source_edge_id,
+                right_source_edge_id: right_node.source_edge_id,
+            });
+        }
+        if !element.length_m.is_finite() || element.length_m <= 0.0 {
+            return Err(CurveValidationError::InvalidElementLength {
+                element_id: element.element_id,
+                length_m: element.length_m,
+            });
+        }
+        max_segment_length_m = max_segment_length_m.max(element.length_m);
+        elements_by_edge
+            .entry(element.source_edge_id)
+            .or_default()
+            .push(element);
+    }
+
+    let mut max_endpoint_error_m = 0.0_f64;
+    for edge in &topology.edges {
+        max_endpoint_error_m = max_endpoint_error_m.max(validate_edge_endpoint(
+            topology,
+            curves,
+            edge,
+            0,
+            0.0,
+            options.max_endpoint_error_m,
+        )?);
+        max_endpoint_error_m = max_endpoint_error_m.max(validate_edge_endpoint(
+            topology,
+            curves,
+            edge,
+            1,
+            1.0,
+            options.max_endpoint_error_m,
+        )?);
+    }
+
+    let max_adjacent_length_ratio =
+        validate_growth(&mut elements_by_edge, options.max_growth_ratio)?;
+
+    Ok(CurveValidationReport {
+        source_edge_count: topology.edges.len(),
+        curve_node_count: curves.nodes.len(),
+        curve_element_count: curves.elements.len(),
+        max_endpoint_error_m,
+        max_segment_length_m,
+        max_adjacent_length_ratio,
+    })
+}
+
+fn validate_options(options: CurveValidationOptions) -> Result<(), CurveValidationError> {
+    if !options.max_endpoint_error_m.is_finite()
+        || options.max_endpoint_error_m < 0.0
+        || !options.max_growth_ratio.is_finite()
+        || options.max_growth_ratio < 1.0
+    {
+        return Err(CurveValidationError::InvalidOptions);
+    }
+    Ok(())
+}
+
+fn nodes_by_id(curves: &CurveDiscretization) -> BTreeMap<u32, &CurveNode> {
+    curves
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node))
+        .collect()
+}
+
+fn validate_edge_endpoint(
+    topology: &SourceTopologyModel,
+    curves: &CurveDiscretization,
+    edge: &SourceTopologyEdge,
+    edge_endpoint_index: usize,
+    parameter: f64,
+    max_error_m: f64,
+) -> Result<f64, CurveValidationError> {
+    let source_vertex = topology
+        .vertices
+        .get(edge.node_ids[edge_endpoint_index] as usize);
+    let source_coordinates_m = source_vertex
+        .filter(|vertex| vertex.vertex_id == edge.node_ids[edge_endpoint_index])
+        .map(|vertex| vertex.coordinates_m)
+        .ok_or(CurveValidationError::MissingCurveEndpoint {
+            source_edge_id: edge.edge_id,
+            parameter,
+        })?;
+    let endpoint = curves
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.source_edge_id == edge.edge_id && (node.parameter - parameter).abs() <= 1.0e-12
+        })
+        .min_by(|left, right| {
+            distance(left.coordinates_m, source_coordinates_m)
+                .total_cmp(&distance(right.coordinates_m, source_coordinates_m))
+        })
+        .ok_or(CurveValidationError::MissingCurveEndpoint {
+            source_edge_id: edge.edge_id,
+            parameter,
+        })?;
+    let error_m = distance(endpoint.coordinates_m, source_coordinates_m);
+    if error_m > max_error_m {
+        return Err(CurveValidationError::EndpointDrift {
+            source_edge_id: edge.edge_id,
+            parameter,
+            error_m,
+            max_error_m,
+        });
+    }
+    Ok(error_m)
+}
+
+fn validate_growth(
+    elements_by_edge: &mut BTreeMap<u32, Vec<&CurveElement>>,
+    max_growth_ratio: f64,
+) -> Result<f64, CurveValidationError> {
+    let mut max_ratio = 1.0_f64;
+    for (source_edge_id, elements) in elements_by_edge {
+        elements.sort_by_key(|element| element.node_ids[0].min(element.node_ids[1]));
+        for pair in elements.windows(2) {
+            let left = pair[0];
+            let right = pair[1];
+            let ratio = adjacent_length_ratio(left.length_m, right.length_m);
+            max_ratio = max_ratio.max(ratio);
+            if ratio > max_growth_ratio {
+                return Err(CurveValidationError::ExcessiveGrowth {
+                    source_edge_id: *source_edge_id,
+                    left_element_id: left.element_id,
+                    right_element_id: right.element_id,
+                    ratio,
+                    max_ratio: max_growth_ratio,
+                });
+            }
+        }
+    }
+    Ok(max_ratio)
+}
+
+fn adjacent_length_ratio(left: f64, right: f64) -> f64 {
+    let min = left.min(right);
+    let max = left.max(right);
+    if min <= 0.0 {
+        f64::INFINITY
+    } else {
+        max / min
+    }
+}
+
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
+        .sqrt()
+}
