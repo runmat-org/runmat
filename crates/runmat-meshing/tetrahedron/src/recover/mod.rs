@@ -48,16 +48,6 @@ pub fn build_recovery_queue_from_plc(
     }
     validate_tetrahedron_recovery_input_mesh(tetrahedron_mesh)?;
 
-    let recovered_face_keys = tetrahedron_mesh
-        .boundary_faces
-        .iter()
-        .map(|face| {
-            (
-                face.source_face_id.clone(),
-                sorted_topology_ids(face.node_ids.clone()),
-            )
-        })
-        .collect::<BTreeSet<_>>();
     let recovered_boundary_faces = tetrahedron_mesh
         .boundary_faces
         .iter()
@@ -99,7 +89,11 @@ pub fn build_recovery_queue_from_plc(
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_face:{}", facet.facet_id.id),
             kind: TetrahedronRecoveryKind::SourceFace,
-            status: if recovered_face_keys.contains(&face_key) {
+            status: if boundary_source_face_provenance_complete(
+                tetrahedron_mesh,
+                &face_key.1,
+                &face_key.0,
+            ) {
                 TetrahedronRecoveryStatus::Recovered
             } else {
                 TetrahedronRecoveryStatus::Missing
@@ -397,6 +391,26 @@ pub fn build_recovery_queue_from_plc(
     );
 
     Ok(TetrahedronRecoveryQueue { items, evidence })
+}
+
+fn boundary_source_face_provenance_complete(
+    tetrahedron_mesh: &TetrahedronMesh,
+    face_key: &[TopologyEntityId; 3],
+    source_face_id: &TopologyEntityId,
+) -> bool {
+    let matching_source_faces = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .filter_map(|boundary_face| {
+            (sorted_topology_ids(boundary_face.node_ids.clone()) == *face_key)
+                .then_some(&boundary_face.source_face_id)
+        })
+        .collect::<Vec<_>>();
+
+    !matching_source_faces.is_empty()
+        && matching_source_faces
+            .iter()
+            .all(|boundary_source_face_id| *boundary_source_face_id == source_face_id)
 }
 
 fn protected_boundary_edge_provenance_complete(

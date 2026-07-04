@@ -1540,6 +1540,50 @@ fn recovery_queue_reports_missing_source_face() {
 }
 
 #[test]
+fn recovery_queue_reports_partial_boundary_source_face_provenance() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.push(boundary_face(
+        "extra_boundary_face",
+        ["1", "0", "2"],
+        "other",
+    ));
+
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("partial source-face provenance should be reported before recovery");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 1);
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 1);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_provenance_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_boundary_face_items"],
+        1
+    );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceFace
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
+            && item.source_face_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                ])
+            && item
+                .source_entity_id
+                .as_ref()
+                .is_some_and(|source| source.id == "face_1")
+    }));
+}
+
+#[test]
 fn recovery_queue_reports_missing_source_face_present_as_volume_face() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces.remove(0);
