@@ -1,6 +1,7 @@
 mod absent_edges;
 mod boundary_diagonal;
 mod boundary_faces;
+mod boundary_leaks;
 pub mod boundary_queue;
 mod input_validation;
 mod material_interfaces;
@@ -24,6 +25,7 @@ use boundary_faces::{
     remove_unsupported_boundary_faces, repair_boundary_face_identity,
     repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
+use boundary_leaks::remove_exterior_elements_across_interior_source_faces;
 use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
 use material_partitions::recover_absent_material_interface_partitions;
@@ -603,6 +605,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
             &initial_recovery_queue,
             TetrahedronMaterialInterfaceTopology::AbsentPartition,
         );
+    let recovered_boundary_leaks = remove_exterior_elements_across_interior_source_faces(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let recovered_material_partitions = recover_absent_material_interface_partitions(
         plc,
         &initial_recovery_queue,
@@ -739,6 +746,18 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_edge_provenance_items".to_string(),
         repaired_source_edge_provenance_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "removed_exterior_leaked_elements".to_string(),
+        recovered_boundary_leaks.removed_element_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "exposed_interior_source_faces".to_string(),
+        recovered_boundary_leaks.exposed_source_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "inserted_exposed_interior_boundary_faces".to_string(),
+        recovered_boundary_leaks.inserted_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_material_interface_elements".to_string(),

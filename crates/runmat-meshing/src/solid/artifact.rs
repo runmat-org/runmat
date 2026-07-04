@@ -327,6 +327,18 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "removed_unsupported_boundary_faces",
             ),
+            tetrahedron_removed_exterior_leaked_element_count: recovery_entity_count(
+                recovery_queue,
+                "removed_exterior_leaked_elements",
+            ),
+            tetrahedron_exposed_interior_source_face_count: recovery_entity_count(
+                recovery_queue,
+                "exposed_interior_source_faces",
+            ),
+            tetrahedron_inserted_exposed_interior_boundary_face_count: recovery_entity_count(
+                recovery_queue,
+                "inserted_exposed_interior_boundary_faces",
+            ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_source_face_provenance_items",
