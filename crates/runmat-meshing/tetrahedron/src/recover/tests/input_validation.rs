@@ -50,6 +50,26 @@ fn rejects_recovery_input_with_non_tetrahedron_element_id() {
 }
 
 #[test]
+fn rejects_recovery_input_with_duplicate_element_id() {
+    let mut mesh = tetrahedron_mesh();
+    let mut duplicate_element = mesh.elements[0].clone();
+    duplicate_element.node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+    mesh.elements.push(duplicate_element);
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(TetrahedronRecoveryError::DuplicateTetrahedronElement {
+            element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
+        })
+    );
+}
+
+#[test]
 fn rejects_recovery_input_element_that_references_unknown_node() {
     let mut mesh = tetrahedron_mesh();
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "missing");
@@ -62,6 +82,21 @@ fn rejects_recovery_input_element_that_references_unknown_node() {
                 node_id: entity(MeshingStage::ProtectedBoundaryComplex, "missing"),
             },
         )
+    );
+}
+
+#[test]
+fn rejects_recovery_input_with_duplicate_boundary_face_id() {
+    let mut mesh = tetrahedron_mesh();
+    let mut duplicate_face = boundary_face("facet_1", ["0", "3", "1"], "face_2");
+    duplicate_face.source_edge_ids = [None, None, None];
+    mesh.boundary_faces.push(duplicate_face);
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(TetrahedronRecoveryError::DuplicateTetrahedronBoundaryFace {
+            face_id: entity(MeshingStage::ProtectedBoundaryComplex, "facet_1"),
+        })
     );
 }
 

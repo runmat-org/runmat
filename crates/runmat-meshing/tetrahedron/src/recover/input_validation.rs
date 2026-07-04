@@ -33,9 +33,15 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
         }
     }
 
+    let mut element_ids = BTreeSet::<TopologyEntityId>::new();
     for element in &tetrahedron_mesh.elements {
         if element.element_id.stage != MeshingStage::TetrahedronMesh {
             return Err(TetrahedronRecoveryError::TetrahedronElementStageMismatch {
+                element_id: element.element_id.clone(),
+            });
+        }
+        if !element_ids.insert(element.element_id.clone()) {
+            return Err(TetrahedronRecoveryError::DuplicateTetrahedronElement {
                 element_id: element.element_id.clone(),
             });
         }
@@ -52,6 +58,7 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
         )?;
     }
 
+    let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();
     for boundary_face in &tetrahedron_mesh.boundary_faces {
         if !matches!(
             boundary_face.face_id.stage,
@@ -62,6 +69,11 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                     face_id: boundary_face.face_id.clone(),
                 },
             );
+        }
+        if !boundary_face_ids.insert(boundary_face.face_id.clone()) {
+            return Err(TetrahedronRecoveryError::DuplicateTetrahedronBoundaryFace {
+                face_id: boundary_face.face_id.clone(),
+            });
         }
         validate_node_references(
             &boundary_face.node_ids,

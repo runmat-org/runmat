@@ -23,6 +23,9 @@ pub enum TetrahedronRecoveryError {
     TetrahedronElementStageMismatch {
         element_id: TopologyEntityId,
     },
+    DuplicateTetrahedronElement {
+        element_id: TopologyEntityId,
+    },
     TetrahedronElementReferencesUnknownNode {
         element_id: TopologyEntityId,
         node_id: TopologyEntityId,
@@ -31,6 +34,9 @@ pub enum TetrahedronRecoveryError {
         element_id: TopologyEntityId,
     },
     TetrahedronBoundaryFaceStageMismatch {
+        face_id: TopologyEntityId,
+    },
+    DuplicateTetrahedronBoundaryFace {
         face_id: TopologyEntityId,
     },
     TetrahedronBoundaryFaceReferencesUnknownNode {
@@ -87,6 +93,11 @@ impl std::fmt::Display for TetrahedronRecoveryError {
                 "Tetrahedron element {} is not a TetrahedronMesh entity",
                 element_id.id
             ),
+            Self::DuplicateTetrahedronElement { element_id } => write!(
+                formatter,
+                "Tetrahedron mesh contains duplicate element {}",
+                element_id.id
+            ),
             Self::TetrahedronElementReferencesUnknownNode {
                 element_id,
                 node_id,
@@ -103,6 +114,11 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::TetrahedronBoundaryFaceStageMismatch { face_id } => write!(
                 formatter,
                 "Tetrahedron boundary face {} is not a PLC or TetrahedronMesh entity",
+                face_id.id
+            ),
+            Self::DuplicateTetrahedronBoundaryFace { face_id } => write!(
+                formatter,
+                "Tetrahedron mesh contains duplicate boundary face {}",
                 face_id.id
             ),
             Self::TetrahedronBoundaryFaceReferencesUnknownNode { face_id, node_id } => write!(
