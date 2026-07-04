@@ -91,6 +91,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub repaired_boundary_face_identity_count: usize,
     #[serde(default)]
+    pub removed_redundant_boundary_face_count: usize,
+    #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
@@ -368,6 +370,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         repaired_boundary_face_identity_count: mesh
             .backend
             .tetrahedron_repaired_boundary_face_identity_count,
+        removed_redundant_boundary_face_count: mesh
+            .backend
+            .tetrahedron_removed_redundant_boundary_face_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

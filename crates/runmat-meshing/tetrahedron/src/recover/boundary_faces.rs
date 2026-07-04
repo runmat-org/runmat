@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::contracts::{
-    ProtectedBoundaryComplex, TetrahedronBoundaryFace, TetrahedronMesh, TopologyEntityId,
+    PlcFacet, ProtectedBoundaryComplex, TetrahedronBoundaryFace, TetrahedronMesh, TopologyEntityId,
 };
 
 use crate::protected_edges::{face_edges, sorted_edge, source_edge_ids_for_face_edges};
@@ -140,6 +140,44 @@ pub(super) fn repair_boundary_source_face_provenance(
     repaired_count
 }
 
+pub(super) fn remove_redundant_boundary_faces(
+    plc: &ProtectedBoundaryComplex,
+    tetrahedron_mesh: &mut TetrahedronMesh,
+) -> usize {
+    let expected_faces_by_key = plc
+        .facets
+        .iter()
+        .map(|facet| (sorted_topology_ids(facet.node_ids.clone()), facet))
+        .collect::<BTreeMap<_, _>>();
+    let boundary_faces = std::mem::take(&mut tetrahedron_mesh.boundary_faces);
+    let mut retained_faces = Vec::<TetrahedronBoundaryFace>::new();
+    let mut retained_index_by_key = BTreeMap::<[TopologyEntityId; 3], usize>::new();
+    let mut removed_count = 0;
+
+    for boundary_face in boundary_faces {
+        let face_key = sorted_topology_ids(boundary_face.node_ids.clone());
+        let Some(expected_facet) = expected_faces_by_key.get(&face_key) else {
+            retained_faces.push(boundary_face);
+            continue;
+        };
+        let Some(retained_index) = retained_index_by_key.get(&face_key).copied() else {
+            retained_index_by_key.insert(face_key, retained_faces.len());
+            retained_faces.push(boundary_face);
+            continue;
+        };
+
+        if boundary_face_preference_score(plc, &boundary_face, expected_facet)
+            > boundary_face_preference_score(plc, &retained_faces[retained_index], expected_facet)
+        {
+            retained_faces[retained_index] = boundary_face;
+        }
+        removed_count += 1;
+    }
+
+    tetrahedron_mesh.boundary_faces = retained_faces;
+    removed_count
+}
+
 pub(super) fn repair_boundary_face_identity(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
@@ -167,6 +205,26 @@ pub(super) fn repair_boundary_face_identity(
         }
     }
     repaired_count
+}
+
+fn boundary_face_preference_score(
+    plc: &ProtectedBoundaryComplex,
+    boundary_face: &TetrahedronBoundaryFace,
+    expected_facet: &PlcFacet,
+) -> usize {
+    let mut score = 0;
+    if boundary_face.face_id == expected_facet.facet_id {
+        score += 4;
+    }
+    if boundary_face.source_face_id == expected_facet.source_face_id {
+        score += 2;
+    }
+    if boundary_face.source_edge_ids
+        == source_edge_ids_for_face_edges(&plc.protected_edges, boundary_face.node_ids.clone())
+    {
+        score += 1;
+    }
+    score
 }
 
 pub(super) fn repair_boundary_source_edge_provenance(

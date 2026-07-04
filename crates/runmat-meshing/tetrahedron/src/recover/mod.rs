@@ -20,8 +20,9 @@ use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 use absent_edges::recover_absent_protected_edges_by_boundary_diagonal_flip;
 use boundary_faces::{
     boundary_face_source_edges, recover_missing_protected_edge_boundary_faces,
-    recover_volume_face_source_face_boundary_faces, repair_boundary_face_identity,
-    repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
+    recover_volume_face_source_face_boundary_faces, remove_redundant_boundary_faces,
+    repair_boundary_face_identity, repair_boundary_source_edge_provenance,
+    repair_boundary_source_face_provenance,
 };
 use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
@@ -596,6 +597,8 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
+    let removed_redundant_boundary_face_count =
+        remove_redundant_boundary_faces(plc, &mut tetrahedron_mesh);
     let repaired_boundary_face_identity_count =
         repair_boundary_face_identity(plc, &mut tetrahedron_mesh);
     let repaired_source_face_provenance_count =
@@ -686,6 +689,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "repaired_boundary_face_identity_items".to_string(),
         repaired_boundary_face_identity_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "removed_redundant_boundary_faces".to_string(),
+        removed_redundant_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),
