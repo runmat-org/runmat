@@ -24,6 +24,11 @@ pub(super) struct MaterialPartitionRecovery {
     pub inserted_element_count: usize,
     pub inserted_boundary_face_count: usize,
     pub rejected_material_interface_count: usize,
+    pub topology_candidate_count: usize,
+    pub usable_candidate_count: usize,
+    pub rejected_existing_candidate_count: usize,
+    pub rejected_quality_candidate_count: usize,
+    pub rejected_interior_candidate_set_count: usize,
     pub rejection_counts: BTreeMap<&'static str, usize>,
 }
 
@@ -50,6 +55,11 @@ pub(super) fn recover_absent_material_interface_partitions(
         inserted_element_count: 0,
         inserted_boundary_face_count: 0,
         rejected_material_interface_count: 0,
+        topology_candidate_count: 0,
+        usable_candidate_count: 0,
+        rejected_existing_candidate_count: 0,
+        rejected_quality_candidate_count: 0,
+        rejected_interior_candidate_set_count: 0,
         rejection_counts: BTreeMap::new(),
     };
 
@@ -59,6 +69,7 @@ pub(super) fn recover_absent_material_interface_partitions(
             plc,
             tetrahedron_mesh,
             &material_interface_id,
+            &mut recovery,
         ) {
             Ok(inserted_partition) => {
                 recovery.inserted_material_interface_count += 1;
@@ -82,6 +93,7 @@ fn insert_absent_material_interface_partition(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
     material_interface_id: &str,
+    recovery: &mut MaterialPartitionRecovery,
 ) -> Result<InsertedMaterialPartition, MaterialPartitionRecoveryRejection> {
     let material_facets = plc
         .facets
@@ -107,6 +119,7 @@ fn insert_absent_material_interface_partition(
         tetrahedron_mesh,
         &material_facets,
         &material_facet_face_keys,
+        recovery,
     )?;
     let inserted_element_count = candidate_partition.elements.len();
 
@@ -147,6 +160,7 @@ fn select_candidate_partition(
     tetrahedron_mesh: &TetrahedronMesh,
     material_facets: &[&PlcFacet],
     material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
+    recovery: &mut MaterialPartitionRecovery,
 ) -> Result<CandidateMaterialPartition, MaterialPartitionRecoveryRejection> {
     let material_node_ids = material_partition_node_ids(material_facets)?;
     let candidate_node_sets = candidate_partition_node_sets(&material_node_ids);
@@ -176,6 +190,10 @@ fn select_candidate_partition(
             face_keys,
         });
     }
+    recovery.topology_candidate_count += topology_candidate_count;
+    recovery.usable_candidate_count += candidates.len();
+    recovery.rejected_existing_candidate_count += existing_element_candidate_count;
+    recovery.rejected_quality_candidate_count += quality_rejected_candidate_count;
 
     if candidates.is_empty() {
         if existing_element_candidate_count > 0 {
@@ -193,6 +211,7 @@ fn select_candidate_partition(
     let volume_face_counts = volume_face_counts(tetrahedron_mesh);
     for candidate_count in 1..=candidates.len().min(4) {
         let mut selected_indices = Vec::<usize>::new();
+        let mut rejected_candidate_set_count = 0;
         if let Some(partition) = select_candidate_partition_with_count(
             &candidates,
             candidate_count,
@@ -200,9 +219,12 @@ fn select_candidate_partition(
             &mut selected_indices,
             material_facet_face_keys,
             &volume_face_counts,
+            &mut rejected_candidate_set_count,
         ) {
+            recovery.rejected_interior_candidate_set_count += rejected_candidate_set_count;
             return Ok(partition);
         }
+        recovery.rejected_interior_candidate_set_count += rejected_candidate_set_count;
     }
 
     Err(MaterialPartitionRecoveryRejection::InteriorFaceTopology)
@@ -247,14 +269,19 @@ fn select_candidate_partition_with_count(
     selected_indices: &mut Vec<usize>,
     material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
     volume_face_counts: &BTreeMap<[TopologyEntityId; 3], usize>,
+    rejected_candidate_set_count: &mut usize,
 ) -> Option<CandidateMaterialPartition> {
     if selected_indices.len() == candidate_count {
-        return build_candidate_partition(
+        let partition = build_candidate_partition(
             candidates,
             selected_indices,
             material_facet_face_keys,
             volume_face_counts,
         );
+        if partition.is_none() {
+            *rejected_candidate_set_count += 1;
+        }
+        return partition;
     }
     let remaining_slots = candidate_count - selected_indices.len();
     let max_start = candidates.len().saturating_sub(remaining_slots);
@@ -267,6 +294,7 @@ fn select_candidate_partition_with_count(
             selected_indices,
             material_facet_face_keys,
             volume_face_counts,
+            rejected_candidate_set_count,
         ) {
             return Some(partition);
         }

@@ -1011,6 +1011,21 @@ fn recovery_stage_result_inserts_bounded_absent_material_interface_partition() {
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts
+            ["absent_material_partition_topology_candidate_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["absent_material_partition_usable_candidate_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_absent_material_partition_quality_candidate_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
             ["rejected_absent_material_partition_recovery_items"],
         0
     );
@@ -1075,6 +1090,74 @@ fn recovery_stage_result_inserts_two_element_absent_material_interface_partition
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_items"],
         0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["absent_material_partition_topology_candidate_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["absent_material_partition_usable_candidate_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_absent_material_partition_interior_candidate_sets"],
+        2
+    );
+}
+
+#[test]
+fn recovery_stage_result_reports_absent_material_partition_quality_rejection() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+    mesh.nodes
+        .iter_mut()
+        .find(|node| node.node_id.id == "4")
+        .expect("fixture should carry apex node")
+        .coordinates_m = [0.5, 0.5, 0.0];
+
+    let recovery_evidence = assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh)
+            .expect_err("degenerate material partition should fail the quality gate"),
+        4,
+        3,
+        0,
+        1,
+    );
+
+    assert_eq!(
+        recovery_evidence.entity_counts["attempted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["inserted_absent_material_partition_recovery_items"],
+        0
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["absent_material_partition_topology_candidate_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["absent_material_partition_usable_candidate_items"],
+        0
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts
+            ["rejected_absent_material_partition_quality_candidate_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_absent_material_partition_quality_gate"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_absent_material_partition_recovery_items"],
+        1
     );
 }
 

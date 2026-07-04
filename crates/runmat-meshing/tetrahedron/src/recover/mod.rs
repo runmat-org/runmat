@@ -691,6 +691,26 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "rejected_absent_material_partition_recovery_items".to_string(),
         recovered_material_partitions.rejected_material_interface_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "absent_material_partition_topology_candidate_items".to_string(),
+        recovered_material_partitions.topology_candidate_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "absent_material_partition_usable_candidate_items".to_string(),
+        recovered_material_partitions.usable_candidate_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_absent_material_partition_existing_candidate_items".to_string(),
+        recovered_material_partitions.rejected_existing_candidate_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_absent_material_partition_quality_candidate_items".to_string(),
+        recovered_material_partitions.rejected_quality_candidate_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_absent_material_partition_interior_candidate_sets".to_string(),
+        recovered_material_partitions.rejected_interior_candidate_set_count,
+    );
     for (reason_key, count) in recovered_material_partitions.rejection_counts {
         recovery_queue
             .evidence
