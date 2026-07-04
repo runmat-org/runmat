@@ -133,6 +133,12 @@ fn recovery_stage_result_repairs_boundary_face_identity_before_audit() {
 fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() {
     let mut mesh = tetrahedron_mesh();
     let missing_face = mesh.boundary_faces.remove(2);
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("volume-face source face should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        1
+    );
 
     let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
         .expect("missing exterior PLC facet should be recovered from Tetrahedron topology");
@@ -148,6 +154,11 @@ fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() 
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_protected_edge_boundary_faces"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_source_face_diagonal_recovery_pairs"],
         0
     );
     assert_eq!(
@@ -293,6 +304,11 @@ fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_source_face_diagonal_recovery_pairs"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
         2
     );
@@ -400,11 +416,16 @@ fn source_face_boundary_diagonal_flip_records_rejection_without_mutating_mesh() 
     let plc = source_face_boundary_diagonal_flip_plc();
     let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();
     mesh.elements[1].material_region_id = "other_body".to_string();
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing source faces should be reported before recovery");
     let original_elements = mesh.elements.clone();
     let original_boundary_faces = mesh.boundary_faces.clone();
 
-    let recovery =
-        super::source_faces::recover_source_faces_by_boundary_diagonal_flip(&plc, &mut mesh);
+    let recovery = super::source_faces::recover_source_faces_by_boundary_diagonal_flip(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
 
     assert_eq!(recovery.attempted_source_face_pair_count, 1);
     assert_eq!(recovery.source_face_pair_count, 0);
@@ -416,6 +437,33 @@ fn source_face_boundary_diagonal_flip_records_rejection_without_mutating_mesh() 
             ["rejected_source_face_diagonal_recovery_material_region_mismatch"],
         1
     );
+    assert_eq!(mesh.elements, original_elements);
+    assert_eq!(mesh.boundary_faces, original_boundary_faces);
+}
+
+#[test]
+fn source_face_boundary_diagonal_recovery_uses_absent_source_face_queue_items_only() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("source-face provenance miss should be reported before recovery");
+    let original_elements = mesh.elements.clone();
+    let original_boundary_faces = mesh.boundary_faces.clone();
+
+    let recovery = super::source_faces::recover_source_faces_by_boundary_diagonal_flip(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_boundary_face_items"],
+        1
+    );
+    assert_eq!(recovery.attempted_source_face_pair_count, 0);
+    assert_eq!(recovery.source_face_pair_count, 0);
+    assert_eq!(recovery.boundary_face_count, 0);
     assert_eq!(mesh.elements, original_elements);
     assert_eq!(mesh.boundary_faces, original_boundary_faces);
 }

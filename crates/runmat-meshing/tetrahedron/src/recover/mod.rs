@@ -390,8 +390,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
-    let recovered_source_faces =
-        recover_source_faces_by_boundary_diagonal_flip(plc, &mut tetrahedron_mesh);
+    let recovered_source_faces = recover_source_faces_by_boundary_diagonal_flip(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let recovered_protected_edge_boundary_face_count =
         recover_missing_protected_edge_boundary_faces(
             plc,
