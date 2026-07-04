@@ -228,10 +228,20 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "volume_edge_source_edge_recovery_items",
             ),
+            tetrahedron_recovered_volume_edge_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_volume_edge_source_edge_items",
+                ),
             tetrahedron_boundary_edge_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "boundary_edge_source_edge_recovery_items",
             ),
+            tetrahedron_recovered_boundary_edge_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_boundary_edge_source_edge_items",
+                ),
             tetrahedron_interior_edge_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "interior_edge_source_edge_recovery_items",
@@ -245,10 +255,20 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "absent_edge_source_edge_recovery_items",
             ),
+            tetrahedron_recovered_absent_edge_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_absent_edge_source_edge_items",
+                ),
             tetrahedron_boundary_face_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "boundary_face_source_face_recovery_items",
             ),
+            tetrahedron_recovered_boundary_face_source_face_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_boundary_face_source_face_items",
+                ),
             tetrahedron_interior_face_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "interior_face_source_face_recovery_items",
@@ -262,6 +282,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "volume_face_source_face_recovery_items",
             ),
+            tetrahedron_recovered_volume_face_source_face_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_volume_face_source_face_items",
+                ),
             tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count:
                 recovery_entity_count(
                     recovery_queue,
@@ -281,6 +306,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "absent_face_source_face_recovery_items",
             ),
+            tetrahedron_recovered_absent_face_source_face_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_absent_face_source_face_items",
+                ),
             tetrahedron_deferred_absent_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "deferred_absent_source_edge_recovery_items",

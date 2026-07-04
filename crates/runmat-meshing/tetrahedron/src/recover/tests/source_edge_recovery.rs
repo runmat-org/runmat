@@ -52,6 +52,10 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_volume_edge_source_edge_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["deferred_absent_source_edge_recovery_items"],
         0
     );
@@ -189,6 +193,10 @@ fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_absent_edge_source_edge_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_absent_source_edge_boundary_faces"],
         2
     );
@@ -280,6 +288,10 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["boundary_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_boundary_edge_source_edge_items"],
         1
     );
     assert_eq!(

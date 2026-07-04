@@ -206,20 +206,40 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(recovery.volume_edge_source_edge_recovery_item_count, 1);
+    assert_eq!(
+        recovery.recovered_volume_edge_source_edge_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.boundary_edge_source_edge_recovery_item_count, 1);
+    assert_eq!(
+        recovery.recovered_boundary_edge_source_edge_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.interior_edge_source_edge_recovery_item_count, 1);
     assert_eq!(
         recovery.recovered_interior_edge_source_edge_recovery_item_count,
         1
     );
     assert_eq!(recovery.absent_edge_source_edge_recovery_item_count, 2);
+    assert_eq!(
+        recovery.recovered_absent_edge_source_edge_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.boundary_face_source_face_recovery_item_count, 1);
+    assert_eq!(
+        recovery.recovered_boundary_face_source_face_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.interior_face_source_face_recovery_item_count, 1);
     assert_eq!(
         recovery.recovered_interior_face_source_face_recovery_item_count,
         1
     );
     assert_eq!(recovery.volume_face_source_face_recovery_item_count, 2);
+    assert_eq!(
+        recovery.recovered_volume_face_source_face_recovery_item_count,
+        1
+    );
     assert_eq!(
         recovery.attempted_volume_face_source_face_boundary_restoration_item_count,
         2
@@ -233,6 +253,10 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(recovery.absent_face_source_face_recovery_item_count, 3);
+    assert_eq!(
+        recovery.recovered_absent_face_source_face_recovery_item_count,
+        2
+    );
     assert_eq!(recovery.deferred_absent_source_edge_recovery_item_count, 0);
     assert_eq!(recovery.attempted_absent_source_edge_recovery_item_count, 1);
     assert_eq!(

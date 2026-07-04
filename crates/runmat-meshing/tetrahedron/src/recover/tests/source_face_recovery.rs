@@ -22,6 +22,10 @@ fn recovery_stage_result_repairs_boundary_source_face_provenance_before_audit() 
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_boundary_face_source_face_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["volume_face_source_face_recovery_items"],
         0
     );
@@ -72,6 +76,10 @@ fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() 
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["volume_face_source_face_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_volume_face_source_face_items"],
         1
     );
     assert_eq!(
@@ -141,6 +149,10 @@ fn recovery_stage_result_recovers_source_faces_by_boundary_diagonal_flip_without
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["absent_face_source_face_recovery_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_absent_face_source_face_items"],
         2
     );
     assert_eq!(

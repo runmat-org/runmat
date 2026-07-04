@@ -992,30 +992,64 @@ fn record_recovered_queue_item_counts(
             .entity_counts
             .insert(recovered_key.to_string(), recovered_count);
     }
-    let recovered_interior_edge_count = recovery_source_edge_item_count_by_topology(
-        initial_recovery_queue,
-        TetrahedronProtectedEdgeTopology::InteriorEdge,
-    )
-    .saturating_sub(recovery_source_edge_item_count_by_topology(
-        recovery_queue,
-        TetrahedronProtectedEdgeTopology::InteriorEdge,
-    ));
-    recovery_queue.evidence.entity_counts.insert(
-        "recovered_interior_edge_source_edge_items".to_string(),
-        recovered_interior_edge_count,
-    );
-    let recovered_interior_face_count = recovery_source_face_item_count_by_topology(
-        initial_recovery_queue,
-        TetrahedronSourceFaceTopology::InteriorFace,
-    )
-    .saturating_sub(recovery_source_face_item_count_by_topology(
-        recovery_queue,
-        TetrahedronSourceFaceTopology::InteriorFace,
-    ));
-    recovery_queue.evidence.entity_counts.insert(
-        "recovered_interior_face_source_face_items".to_string(),
-        recovered_interior_face_count,
-    );
+    for (recovered_key, topology) in [
+        (
+            "recovered_boundary_edge_source_edge_items",
+            TetrahedronProtectedEdgeTopology::BoundaryEdge,
+        ),
+        (
+            "recovered_volume_edge_source_edge_items",
+            TetrahedronProtectedEdgeTopology::VolumeEdge,
+        ),
+        (
+            "recovered_interior_edge_source_edge_items",
+            TetrahedronProtectedEdgeTopology::InteriorEdge,
+        ),
+        (
+            "recovered_absent_edge_source_edge_items",
+            TetrahedronProtectedEdgeTopology::Absent,
+        ),
+    ] {
+        let recovered_count =
+            recovery_source_edge_item_count_by_topology(initial_recovery_queue, topology)
+                .saturating_sub(recovery_source_edge_item_count_by_topology(
+                    recovery_queue,
+                    topology,
+                ));
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(recovered_key.to_string(), recovered_count);
+    }
+    for (recovered_key, topology) in [
+        (
+            "recovered_boundary_face_source_face_items",
+            TetrahedronSourceFaceTopology::BoundaryFace,
+        ),
+        (
+            "recovered_volume_face_source_face_items",
+            TetrahedronSourceFaceTopology::VolumeFace,
+        ),
+        (
+            "recovered_interior_face_source_face_items",
+            TetrahedronSourceFaceTopology::InteriorFace,
+        ),
+        (
+            "recovered_absent_face_source_face_items",
+            TetrahedronSourceFaceTopology::Absent,
+        ),
+    ] {
+        let recovered_count =
+            recovery_source_face_item_count_by_topology(initial_recovery_queue, topology)
+                .saturating_sub(recovery_source_face_item_count_by_topology(
+                    recovery_queue,
+                    topology,
+                ));
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(recovered_key.to_string(), recovered_count);
+    }
 }
 
 fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
