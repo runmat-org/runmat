@@ -43,6 +43,10 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub deferred_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub reconnected_absent_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_absent_source_edge_boundary_face_count: usize,
+    #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
@@ -188,6 +192,12 @@ pub(super) fn tetrahedron_recovery_evidence(
         deferred_absent_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_deferred_absent_source_edge_recovery_item_count,
+        reconnected_absent_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_reconnected_absent_source_edge_recovery_item_count,
+        recovered_absent_source_edge_boundary_face_count: mesh
+            .backend
+            .tetrahedron_recovered_absent_source_edge_boundary_face_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

@@ -151,6 +151,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_deferred_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_reconnected_absent_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_recovered_absent_source_edge_boundary_face_count: usize,
+    #[serde(default)]
     pub tetrahedron_repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub tetrahedron_repaired_source_edge_provenance_count: usize,

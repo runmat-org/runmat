@@ -1,3 +1,4 @@
+mod absent_edges;
 mod boundary_faces;
 pub mod boundary_queue;
 mod topology;
@@ -11,6 +12,7 @@ use runmat_meshing_core::contracts::{
 };
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
+use absent_edges::recover_absent_protected_edges_by_boundary_diagonal_flip;
 use boundary_faces::{
     boundary_face_source_edges, recover_missing_exterior_boundary_faces,
     recover_missing_protected_edge_boundary_faces, repair_boundary_source_edge_provenance,
@@ -298,6 +300,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
             &initial_recovery_queue,
             TetrahedronProtectedEdgeTopology::Absent,
         );
+    let recovered_absent_source_edges = recover_absent_protected_edges_by_boundary_diagonal_flip(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let recovered_protected_edge_boundary_face_count =
         recover_missing_protected_edge_boundary_faces(
             plc,
@@ -326,7 +333,16 @@ pub fn recover_tetrahedron_mesh_from_plc(
     );
     recovery_queue.evidence.entity_counts.insert(
         "deferred_absent_source_edge_recovery_items".to_string(),
-        deferred_absent_source_edge_recovery_item_count,
+        deferred_absent_source_edge_recovery_item_count
+            .saturating_sub(recovered_absent_source_edges.source_edge_count),
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "reconnected_absent_source_edge_items".to_string(),
+        recovered_absent_source_edges.source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "recovered_absent_source_edge_boundary_faces".to_string(),
+        recovered_absent_source_edges.boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),

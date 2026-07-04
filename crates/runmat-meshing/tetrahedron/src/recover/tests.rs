@@ -191,6 +191,79 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
 }
 
 #[test]
+fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip() {
+    let plc = boundary_diagonal_flip_plc();
+    let mesh = boundary_diagonal_flip_tetrahedron_mesh();
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("absent protected edge should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_absent_edge_items"],
+        1
+    );
+    assert!(initial_queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::Absent)
+            && item.protected_edge_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                ])
+    }));
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("boundary diagonal flip should recover the absent protected edge");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(result.tetrahedron_mesh.elements.iter().any(|element| {
+        element
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && element
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "1"))
+    }));
+    assert!(result.tetrahedron_mesh.boundary_faces.iter().any(|face| {
+        sorted_face_ids(face.node_ids.clone())
+            == sorted_face_ids([
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            ])
+            && face.source_edge_ids.iter().any(|source_edge_id| {
+                source_edge_id
+                    .as_ref()
+                    .is_some_and(|source_edge_id| source_edge_id.id == "edge_1")
+            })
+    }));
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["reconnected_absent_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_absent_source_edge_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["deferred_absent_source_edge_recovery_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() {
     let mut mesh = tetrahedron_mesh();
     for boundary_face in &mut mesh.boundary_faces {
@@ -509,6 +582,103 @@ fn tetrahedron_mesh() -> TetrahedronMesh {
             boundary_face("facet_2", ["0", "1", "3"], "face_2"),
             boundary_face("facet_3", ["1", "2", "3"], "face_3"),
             boundary_face("facet_4", ["2", "0", "3"], "face_4"),
+        ],
+        recovery_complete: false,
+        quality_optimized: false,
+        evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+    }
+}
+
+fn boundary_diagonal_flip_plc() -> ProtectedBoundaryComplex {
+    ProtectedBoundaryComplex {
+        complex_id: "boundary_diagonal_flip_plc".to_string(),
+        nodes: vec![
+            plc_node("0", [0.0, 0.0, 0.0]),
+            plc_node("1", [1.0, 0.0, 0.0]),
+            plc_node("2", [0.0, 1.0, 0.0]),
+            plc_node("3", [1.0, 1.0, 0.0]),
+            plc_node("4", [0.5, 0.5, 1.0]),
+        ],
+        facets: vec![
+            facet("facet_1", ["0", "1", "2"], "face_1"),
+            facet("facet_2", ["0", "3", "1"], "face_2"),
+            facet("facet_3", ["0", "2", "4"], "face_3"),
+            facet("facet_4", ["0", "4", "3"], "face_4"),
+            facet("facet_5", ["1", "3", "4"], "face_5"),
+            facet("facet_6", ["1", "4", "2"], "face_6"),
+        ],
+        protected_edges: vec![PlcProtectedEdge {
+            edge_id: entity(MeshingStage::ProtectedBoundaryComplex, "plc_edge_1"),
+            node_ids: [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            ],
+            source_edge_id: entity(MeshingStage::CurveMesh, "edge_1"),
+        }],
+        validation: PlcValidationSummary {
+            watertight: true,
+            manifold: true,
+            shell_nesting_classified: true,
+            material_interfaces_classified: true,
+        },
+        evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    }
+}
+
+fn boundary_diagonal_flip_tetrahedron_mesh() -> TetrahedronMesh {
+    TetrahedronMesh {
+        mesh_id: "boundary_diagonal_flip_tetrahedron".to_string(),
+        nodes: vec![
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                [0.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                [1.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                [0.0, 1.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                [1.0, 1.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                [0.5, 0.5, 1.0],
+            ),
+        ],
+        elements: vec![
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                ],
+                material_region_id: "solid_body".to_string(),
+            },
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_2"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                ],
+                material_region_id: "solid_body".to_string(),
+            },
+        ],
+        boundary_faces: vec![
+            boundary_face("old_facet_1", ["0", "2", "3"], "old_face_1"),
+            boundary_face("old_facet_2", ["1", "3", "2"], "old_face_2"),
+            boundary_face("facet_3", ["0", "2", "4"], "face_3"),
+            boundary_face("facet_4", ["0", "4", "3"], "face_4"),
+            boundary_face("facet_5", ["1", "3", "4"], "face_5"),
+            boundary_face("facet_6", ["1", "4", "2"], "face_6"),
         ],
         recovery_complete: false,
         quality_optimized: false,
