@@ -181,7 +181,7 @@ fn ignores_and_removes_recovery_input_boundary_face_that_is_not_exterior() {
     let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
         .expect("interior boundary face should be classified as missing source-face work");
     assert_eq!(
-        queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        queue.evidence.entity_counts["missing_source_face_interior_face_items"],
         1
     );
 }

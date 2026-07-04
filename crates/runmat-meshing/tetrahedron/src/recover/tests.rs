@@ -1401,7 +1401,7 @@ fn recovery_stage_result_rejects_material_repair_that_leaves_missing_source_face
     );
 
     assert_eq!(
-        recovery_evidence.entity_counts["missing_source_face_volume_face_items"],
+        recovery_evidence.entity_counts["missing_source_face_interior_face_items"],
         1
     );
     assert_eq!(

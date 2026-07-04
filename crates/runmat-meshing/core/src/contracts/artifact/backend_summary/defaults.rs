@@ -136,6 +136,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_missing_source_face_provenance_recovery_item_count: 0,
             tetrahedron_missing_source_face_boundary_face_recovery_item_count: 0,
             tetrahedron_missing_source_face_volume_face_recovery_item_count: 0,
+            tetrahedron_missing_source_face_interior_face_recovery_item_count: 0,
             tetrahedron_missing_source_face_absent_face_recovery_item_count: 0,
             tetrahedron_missing_source_face_recovery_ids: Vec::new(),
             tetrahedron_omitted_missing_source_face_recovery_id_count: 0,

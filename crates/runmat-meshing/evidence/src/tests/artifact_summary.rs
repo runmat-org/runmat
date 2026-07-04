@@ -232,6 +232,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_missing_source_face_provenance_recovery_item_count: 1,
             tetrahedron_missing_source_face_boundary_face_recovery_item_count: 1,
             tetrahedron_missing_source_face_volume_face_recovery_item_count: 1,
+            tetrahedron_missing_source_face_interior_face_recovery_item_count: 1,
             tetrahedron_missing_source_face_absent_face_recovery_item_count: 0,
             tetrahedron_missing_source_face_recovery_ids: vec!["source_face_missing_1".to_string()],
             tetrahedron_source_edge_recovery_item_count: 4,

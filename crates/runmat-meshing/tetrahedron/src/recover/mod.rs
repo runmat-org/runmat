@@ -86,8 +86,10 @@ pub fn build_recovery_queue_from_plc(
         let face_key = (facet.source_face_id.clone(), face_node_ids.clone());
         let source_face_topology = if recovered_boundary_faces.contains(&face_node_ids) {
             TetrahedronSourceFaceTopology::BoundaryFace
-        } else if recovered_volume_faces.contains(&face_node_ids) {
+        } else if element_face_counts.get(&face_node_ids).copied() == Some(1) {
             TetrahedronSourceFaceTopology::VolumeFace
+        } else if recovered_volume_faces.contains(&face_node_ids) {
+            TetrahedronSourceFaceTopology::InteriorFace
         } else {
             TetrahedronSourceFaceTopology::Absent
         };
@@ -283,6 +285,18 @@ pub fn build_recovery_queue_from_plc(
                 item.kind == TetrahedronRecoveryKind::SourceFace
                     && item.status == TetrahedronRecoveryStatus::Missing
                     && item.source_face_topology == Some(TetrahedronSourceFaceTopology::VolumeFace)
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_face_interior_face_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceFace
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item.source_face_topology
+                        == Some(TetrahedronSourceFaceTopology::InteriorFace)
             })
             .count(),
     );

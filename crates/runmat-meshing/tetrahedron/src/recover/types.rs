@@ -217,6 +217,7 @@ pub enum TetrahedronRecoveryStatus {
 pub enum TetrahedronSourceFaceTopology {
     BoundaryFace,
     VolumeFace,
+    InteriorFace,
     Absent,
 }
 

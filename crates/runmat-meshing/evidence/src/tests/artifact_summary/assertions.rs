@@ -346,6 +346,10 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(
+        recovery.missing_source_face_interior_face_recovery_item_count,
+        1
+    );
+    assert_eq!(
         recovery.missing_source_face_absent_face_recovery_item_count,
         0
     );
