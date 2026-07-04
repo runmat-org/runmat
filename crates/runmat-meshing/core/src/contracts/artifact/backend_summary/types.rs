@@ -157,6 +157,18 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_rejected_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_adjacent_facet_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_adjacent_facet_topology_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_current_boundary_face_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_element_topology_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_material_region_mismatch_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_source_edge_quality_gate_count: usize,
+    #[serde(default)]
     pub tetrahedron_recovered_absent_source_edge_boundary_face_count: usize,
     #[serde(default)]
     pub tetrahedron_repaired_source_face_provenance_count: usize,

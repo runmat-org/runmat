@@ -229,6 +229,33 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_absent_source_edge_recovery_items",
             ),
+            tetrahedron_rejected_absent_source_edge_adjacent_facet_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_absent_source_edge_recovery_adjacent_facet_count",
+            ),
+            tetrahedron_rejected_absent_source_edge_adjacent_facet_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_source_edge_recovery_adjacent_facet_topology",
+                ),
+            tetrahedron_rejected_absent_source_edge_current_boundary_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_source_edge_recovery_current_boundary_faces",
+                ),
+            tetrahedron_rejected_absent_source_edge_element_topology_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_absent_source_edge_recovery_element_topology",
+            ),
+            tetrahedron_rejected_absent_source_edge_material_region_mismatch_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_source_edge_recovery_material_region_mismatch",
+                ),
+            tetrahedron_rejected_absent_source_edge_quality_gate_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_absent_source_edge_recovery_quality_gate",
+            ),
             tetrahedron_recovered_absent_source_edge_boundary_face_count: recovery_entity_count(
                 recovery_queue,
                 "recovered_absent_source_edge_boundary_faces",

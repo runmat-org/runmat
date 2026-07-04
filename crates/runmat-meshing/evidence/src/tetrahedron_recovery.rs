@@ -49,6 +49,18 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub rejected_absent_source_edge_adjacent_facet_count: usize,
+    #[serde(default)]
+    pub rejected_absent_source_edge_adjacent_facet_topology_count: usize,
+    #[serde(default)]
+    pub rejected_absent_source_edge_current_boundary_face_count: usize,
+    #[serde(default)]
+    pub rejected_absent_source_edge_element_topology_count: usize,
+    #[serde(default)]
+    pub rejected_absent_source_edge_material_region_mismatch_count: usize,
+    #[serde(default)]
+    pub rejected_absent_source_edge_quality_gate_count: usize,
+    #[serde(default)]
     pub recovered_absent_source_edge_boundary_face_count: usize,
     #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
@@ -205,6 +217,24 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_absent_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_rejected_absent_source_edge_recovery_item_count,
+        rejected_absent_source_edge_adjacent_facet_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_adjacent_facet_count,
+        rejected_absent_source_edge_adjacent_facet_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_adjacent_facet_topology_count,
+        rejected_absent_source_edge_current_boundary_face_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_current_boundary_face_count,
+        rejected_absent_source_edge_element_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_element_topology_count,
+        rejected_absent_source_edge_material_region_mismatch_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_material_region_mismatch_count,
+        rejected_absent_source_edge_quality_gate_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_source_edge_quality_gate_count,
         recovered_absent_source_edge_boundary_face_count: mesh
             .backend
             .tetrahedron_recovered_absent_source_edge_boundary_face_count,
