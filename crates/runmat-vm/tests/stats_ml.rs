@@ -271,6 +271,22 @@ fn distribution_compatibility_surface_executes_from_scripts() {
 }
 
 #[test]
+fn mvnrnd_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng('default'); R = mvnrnd([1 2], [4 1; 1 9], 5); S = mvnrnd([0 0; 10 20], cat(3, eye(2), [4 0; 0 9])); T = mvnrnd([0 0], [1 4], 3); U = mvnrnd([0; 10; 20], 4); rcheck = 100*size(R,1)+size(R,2); scheck = 100*size(S,1)+size(S,2); tcheck = 100*size(T,1)+size(T,2); ucheck = 100*size(U,1)+size(U,2); r11 = R(1,1); s22 = S(2,2);",
+    )
+    .expect("mvnrnd script");
+    assert!(has_tensor_shape(&vars, &[5, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[3, 2]));
+    assert!(has_tensor_shape(&vars, &[3, 1]));
+    assert!(has_num(&vars, 502.0));
+    assert!(has_num(&vars, 202.0));
+    assert!(has_num(&vars, 302.0));
+    assert!(has_num(&vars, 301.0));
+}
+
+#[test]
 fn cvpartition_surface_executes_from_scripts() {
     let vars = execute_source(
         "c = cvpartition(6, 'KFold', 3); te = test(c, 2); tr = training(c, 'all'); nts = c.NumTestSets; ts = c.TestSize(1); h = cvpartition([1;1;2;2], 'Holdout', 0.5); hm = test(h); hs = h.TestSize;",

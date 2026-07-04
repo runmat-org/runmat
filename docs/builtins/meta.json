@@ -59985,6 +59985,90 @@
       ]
     },
     {
+      "name": "mvnrnd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = mvnrnd(mu, Sigma)",
+          "inputs": [
+            {
+              "name": "mu",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Mean vector or matrix with one mean vector per row."
+            },
+            {
+              "name": "Sigma",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Covariance matrix or covariance matrix pages."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random samples with observations in rows."
+            }
+          ]
+        },
+        {
+          "label": "r = mvnrnd(mu, Sigma, n)",
+          "inputs": [
+            {
+              "name": "mu",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Mean vector or matrix with one mean vector per row."
+            },
+            {
+              "name": "Sigma",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Covariance matrix or covariance matrix pages."
+            },
+            {
+              "name": "n",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of random rows to draw when mu is a single mean vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random samples with observations in rows."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MVNRND.INVALID_ARGUMENT",
+          "identifier": "RunMat:mvnrnd:InvalidArgument",
+          "when": "Inputs are malformed, dimensions are incompatible, or covariance pages are not symmetric positive semidefinite.",
+          "message": "mvnrnd: invalid argument"
+        },
+        {
+          "code": "RM.MVNRND.INTERNAL",
+          "identifier": "RunMat:mvnrnd:Internal",
+          "when": "RunMat cannot allocate or construct the requested random samples.",
+          "message": "mvnrnd: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "namedargs2cell",
       "output_mode": "Fixed",
       "completion_policy": "Public",
