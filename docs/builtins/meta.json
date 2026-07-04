@@ -28829,6 +28829,145 @@
       ]
     },
     {
+      "name": "fitlm",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mdl = fitlm(tbl)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object containing coefficients, fitted values, residuals, and summary statistics."
+            }
+          ]
+        },
+        {
+          "label": "mdl = fitlm(tbl, modelspec)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrSpec",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, model formula, or model specification."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object containing coefficients, fitted values, residuals, and summary statistics."
+            }
+          ]
+        },
+        {
+          "label": "mdl = fitlm(X, y)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrSpec",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, model formula, or model specification."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object containing coefficients, fitted values, residuals, and summary statistics."
+            }
+          ]
+        },
+        {
+          "label": "mdl = fitlm(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrSpec",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, model formula, or model specification."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Model specification and name-value options such as Intercept, ResponseVar, PredictorVars, VarNames, Exclude, and Weights."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object containing coefficients, fitted values, residuals, and summary statistics."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITLM.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitlm:InvalidArgument",
+          "when": "Inputs, model specifications, dimensions, or name-value options are malformed or unsupported.",
+          "message": "fitlm: invalid argument"
+        },
+        {
+          "code": "RM.FITLM.NUMERICAL",
+          "identifier": "RunMat:fitlm:Numerical",
+          "when": "The linear model cannot be fit numerically.",
+          "message": "fitlm: numerical failure"
+        },
+        {
+          "code": "RM.FITLM.INTERNAL",
+          "identifier": "RunMat:fitlm:Internal",
+          "when": "RunMat cannot construct a LinearModel result.",
+          "message": "fitlm: internal error"
+        }
+      ]
+    },
+    {
       "name": "fix",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -67705,6 +67844,132 @@
           "identifier": "RunMat:prctile:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "order statistics: internal error"
+        }
+      ]
+    },
+    {
+      "name": "predict",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ypred = predict(mdl, Xnew)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object returned by fitlm."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ypred",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted response values."
+            }
+          ]
+        },
+        {
+          "label": "[ypred, yci] = predict(mdl, Xnew)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object returned by fitlm."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ypred",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted response values."
+            },
+            {
+              "name": "yci",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pointwise confidence intervals for the predicted response."
+            }
+          ]
+        },
+        {
+          "label": "[ypred, yci] = predict(mdl, Xnew, Name, Value)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "LinearModel object returned by fitlm."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Prediction name-value options such as Alpha, Prediction, and Simultaneous."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ypred",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted response values."
+            },
+            {
+              "name": "yci",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Pointwise confidence intervals for the predicted response."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PREDICT.INVALID_ARGUMENT",
+          "identifier": "RunMat:predict:InvalidArgument",
+          "when": "The model, predictor data, or prediction options are malformed or unsupported.",
+          "message": "predict: invalid argument"
+        },
+        {
+          "code": "RM.PREDICT.INTERNAL",
+          "identifier": "RunMat:predict:Internal",
+          "when": "RunMat cannot construct prediction outputs.",
+          "message": "predict: internal error"
         }
       ]
     },

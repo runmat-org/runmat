@@ -1,0 +1,88 @@
+{
+  "title": "fitlm",
+  "category": "stats/ml",
+  "keywords": [
+    "fitlm",
+    "linear model",
+    "regression",
+    "least squares",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Fit an ordinary least-squares linear regression model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Linear-model fitting runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::linear_model::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`fitlm` fits an ordinary least-squares linear regression model from a numeric predictor matrix or table and returns a `LinearModel` object.",
+  "behaviors": [
+    "`fitlm(X,y)` fits a model with an intercept and one linear term per predictor column.",
+    "Table input uses the last variable as the response by default, or the response from a response name, formula, or `ResponseVar` option.",
+    "Additive table formulas such as `Y ~ A + B` are supported for numeric predictors.",
+    "Matrix model specifications `constant`, `linear`, `interactions`, `purequadratic`, and `quadratic` are supported.",
+    "Rows containing `NaN` in predictors, response, or zero weights are omitted before fitting; `Inf` values are rejected.",
+    "`Exclude` accepts logical masks or one-based numeric row indices. `Weights` accepts a numeric vector, and table input also accepts a weights variable name.",
+    "The returned model exposes `Coefficients`, `Fitted`, `Residuals.Raw`, `NumObservations`, `DFE`, `RMSE`, `Rsquared`, `Formula`, `PredictorNames`, and `ResponseName` properties.",
+    "The `Coefficients` table contains `Estimate`, `SE`, `tStat`, and `pValue` variables with coefficient names in `Properties.RowNames`.",
+    "Categorical predictors, robust regression, and Wilkinson interaction formula terms are not supported yet and raise explicit errors."
+  ],
+  "examples": [
+    {
+      "description": "Fit a matrix-input linear model",
+      "input": "X = [0; 1; 2; 3];\ny = [1; 3; 5; 7];\nmdl = fitlm(X, y);\nmdl.Coefficients.Estimate",
+      "output": "The coefficient estimates are approximately [1; 2]."
+    },
+    {
+      "description": "Fit and predict",
+      "input": "mdl = fitlm(X, y);\nyhat = predict(mdl, [4; 5])",
+      "output": "yhat is approximately [9; 11]."
+    },
+    {
+      "description": "Fit a named table formula",
+      "input": "T = table(A, B, Y, 'VariableNames', {'A','B','Y'});\nmdl = fitlm(T, 'Y ~ A + B')",
+      "output": "mdl uses A and B as predictors and Y as the response."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fitlm` add an intercept?",
+      "answer": "Yes. The default model includes an intercept. Use the `Intercept` option or a no-intercept formula to omit it."
+    },
+    {
+      "question": "How are missing rows handled?",
+      "answer": "Rows with `NaN` in any active predictor or response are omitted before fitting, matching MATLAB's complete-observation behavior."
+    }
+  ],
+  "links": [
+    {
+      "label": "predict",
+      "url": "./predict"
+    },
+    {
+      "label": "lasso",
+      "url": "./lasso"
+    },
+    {
+      "label": "ridge",
+      "url": "./ridge"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs"
+  }
+}

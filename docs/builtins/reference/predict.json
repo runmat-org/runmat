@@ -1,0 +1,65 @@
+{
+  "title": "predict",
+  "category": "stats/ml",
+  "keywords": [
+    "predict",
+    "fitlm",
+    "linear model",
+    "regression",
+    "prediction"
+  ],
+  "summary": "Predict responses from a fitted model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU predictor inputs are gathered to host for model prediction."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::linear_model::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`predict(mdl,Xnew)` evaluates a `LinearModel` returned by `fitlm` on new matrix or table predictor data.",
+  "behaviors": [
+    "`Xnew` can be a numeric matrix with the same predictor column count used during fitting.",
+    "For table input, predictor variables are selected by the model's `PredictorNames` property.",
+    "`[ypred,yci] = predict(...)` returns pointwise confidence intervals for curve predictions by default.",
+    "Name-value options `Alpha`, `Prediction`, and `Simultaneous` are accepted. `Prediction` can be `curve` or `observation`; `Simultaneous` must be false because simultaneous intervals are not supported yet."
+  ],
+  "examples": [
+    {
+      "description": "Predict from a linear model",
+      "input": "mdl = fitlm([0; 1; 2; 3], [1; 3; 5; 7]);\nyhat = predict(mdl, [4; 5])",
+      "output": "yhat is approximately [9; 11]."
+    },
+    {
+      "description": "Return confidence intervals",
+      "input": "[yhat, yci] = predict(mdl, [4; 5], 'Alpha', 0.01)",
+      "output": "yci is a two-column matrix with lower and upper bounds."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which model classes are supported?",
+      "answer": "Currently `predict` supports `LinearModel` objects returned by RunMat's `fitlm`."
+    }
+  ],
+  "links": [
+    {
+      "label": "fitlm",
+      "url": "./fitlm"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linear_model.rs"
+  }
+}
