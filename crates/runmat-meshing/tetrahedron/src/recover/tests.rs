@@ -770,8 +770,11 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     assert_eq!(recovery.global_material_interface_count, 0);
     assert_eq!(recovery.boundary_owned_material_interface_count, 1);
     assert_eq!(recovery.interior_material_interface_count, 0);
+    assert_eq!(recovery.absent_partition_material_interface_count, 0);
     assert_eq!(recovery.ambiguous_boundary_ownership_count, 1);
     assert_eq!(recovery.missing_boundary_ownership_count, 0);
+    assert_eq!(recovery.missing_interior_ownership_count, 0);
+    assert_eq!(recovery.absent_partition_rejection_count, 0);
 
     let recovery_evidence = assert_incomplete_recovery(
         recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("ambiguous repair should fail"),
@@ -783,6 +786,14 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     assert_eq!(
         recovery_evidence.entity_counts["rejected_material_interface_recovery_items"],
         1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["boundary_owned_material_interface_recovery_input_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["absent_partition_material_interface_recovery_items"],
+        0
     );
 }
 
@@ -838,6 +849,11 @@ fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
     assert_eq!(
         result.recovery_queue.evidence.entity_counts
             ["boundary_owned_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_input_items"],
         1
     );
     assert_eq!(
@@ -937,6 +953,53 @@ fn recovery_queue_classifies_absent_partition_material_interface_work() {
 }
 
 #[test]
+fn recovery_stage_result_defers_absent_material_interface_partition_work() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+
+    let recovery_evidence = assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh)
+            .expect_err("absent material partition should require partition insertion"),
+        4,
+        3,
+        0,
+        1,
+    );
+
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["absent_partition_material_interface_recovery_input_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["absent_partition_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_material_interface_absent_partition"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["boundary_owned_material_interface_recovery_input_items"],
+        0
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["interior_face_material_interface_recovery_input_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_repairs_incomplete_material_interface_ownership_from_queue() {
     let plc = two_region_bipyramid_plc();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();
@@ -965,6 +1028,11 @@ fn recovery_stage_result_repairs_incomplete_material_interface_ownership_from_qu
     assert_eq!(
         result.recovery_queue.evidence.entity_counts
             ["boundary_owned_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_input_items"],
         1
     );
     assert_eq!(
@@ -1007,8 +1075,11 @@ fn material_interface_recovery_propagates_through_interior_faces() {
     assert_eq!(recovery.global_material_interface_count, 0);
     assert_eq!(recovery.boundary_owned_material_interface_count, 1);
     assert_eq!(recovery.interior_material_interface_count, 1);
+    assert_eq!(recovery.absent_partition_material_interface_count, 0);
     assert_eq!(recovery.ambiguous_boundary_ownership_count, 0);
     assert_eq!(recovery.missing_boundary_ownership_count, 0);
+    assert_eq!(recovery.missing_interior_ownership_count, 0);
+    assert_eq!(recovery.absent_partition_rejection_count, 0);
 }
 
 #[test]

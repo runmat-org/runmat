@@ -427,7 +427,7 @@ fn material_interface_recovery_topology(
         .collect::<BTreeMap<_, _>>();
 
     for element in &tetrahedron_mesh.elements {
-        if plc_material_interfaces.contains(&element.material_region_id) {
+        if element.material_region_id == material_interface_id {
             continue;
         }
         for face in tetrahedron_faces(element.node_ids.clone()) {
@@ -521,6 +521,21 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         TetrahedronSourceFaceTopology::BoundaryFace,
     );
+    let boundary_owned_material_interface_recovery_item_count =
+        recovery_material_interface_item_count_by_topology(
+            &initial_recovery_queue,
+            TetrahedronMaterialInterfaceTopology::BoundaryOwned,
+        );
+    let interior_face_material_interface_recovery_item_count =
+        recovery_material_interface_item_count_by_topology(
+            &initial_recovery_queue,
+            TetrahedronMaterialInterfaceTopology::InteriorFace,
+        );
+    let absent_partition_material_interface_recovery_item_count =
+        recovery_material_interface_item_count_by_topology(
+            &initial_recovery_queue,
+            TetrahedronMaterialInterfaceTopology::AbsentPartition,
+        );
     let recovered_absent_source_edges = recover_absent_protected_edges_by_boundary_diagonal_flip(
         plc,
         &initial_recovery_queue,
@@ -662,12 +677,36 @@ pub fn recover_tetrahedron_mesh_from_plc(
         material_interface_recovery.interior_material_interface_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "boundary_owned_material_interface_recovery_input_items".to_string(),
+        boundary_owned_material_interface_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "interior_face_material_interface_recovery_input_items".to_string(),
+        interior_face_material_interface_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "absent_partition_material_interface_recovery_items".to_string(),
+        material_interface_recovery.absent_partition_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "absent_partition_material_interface_recovery_input_items".to_string(),
+        absent_partition_material_interface_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_missing_boundary_ownership".to_string(),
         material_interface_recovery.missing_boundary_ownership_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "rejected_material_interface_missing_interior_ownership".to_string(),
+        material_interface_recovery.missing_interior_ownership_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_ambiguous_boundary_ownership".to_string(),
         material_interface_recovery.ambiguous_boundary_ownership_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_material_interface_absent_partition".to_string(),
+        material_interface_recovery.absent_partition_rejection_count,
     );
     mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
     if !tetrahedron_mesh.recovery_complete {
@@ -750,6 +789,21 @@ fn recovery_source_face_item_count_by_topology(
             item.kind == TetrahedronRecoveryKind::SourceFace
                 && item.status == TetrahedronRecoveryStatus::Missing
                 && item.source_face_topology == Some(topology)
+        })
+        .count()
+}
+
+fn recovery_material_interface_item_count_by_topology(
+    recovery_queue: &TetrahedronRecoveryQueue,
+    topology: TetrahedronMaterialInterfaceTopology,
+) -> usize {
+    recovery_queue
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::MaterialInterface
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.material_interface_topology == Some(topology)
         })
         .count()
 }

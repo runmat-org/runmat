@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TetrahedronMesh, TopologyEntityId};
 
 use super::{
-    topology::sorted_topology_ids, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
-    TetrahedronRecoveryStatus,
+    topology::sorted_topology_ids, TetrahedronMaterialInterfaceTopology, TetrahedronRecoveryKind,
+    TetrahedronRecoveryQueue, TetrahedronRecoveryStatus,
 };
 
 pub(super) fn recover_material_interface_regions(
@@ -12,14 +12,13 @@ pub(super) fn recover_material_interface_regions(
     initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> MaterialInterfaceRecovery {
-    let missing_material_interfaces = initial_recovery_queue
-        .items
-        .iter()
-        .filter(|item| {
-            item.kind == TetrahedronRecoveryKind::MaterialInterface
-                && item.status == TetrahedronRecoveryStatus::Missing
-        })
-        .filter_map(|item| item.material_interface_id.clone())
+    let missing_material_interface_inputs =
+        missing_material_interface_inputs(initial_recovery_queue);
+    let missing_material_interfaces = missing_material_interface_inputs.all.clone();
+    let recoverable_material_interfaces = missing_material_interface_inputs
+        .boundary_owned
+        .union(&missing_material_interface_inputs.interior_face)
+        .cloned()
         .collect::<BTreeSet<_>>();
     let plc_material_interfaces = plc
         .facets
@@ -33,26 +32,47 @@ pub(super) fn recover_material_interface_regions(
         global_material_interface_count: 0,
         boundary_owned_material_interface_count: 0,
         interior_material_interface_count: 0,
+        absent_partition_material_interface_count: missing_material_interface_inputs
+            .absent_partition
+            .len(),
         missing_boundary_ownership_count: 0,
+        missing_interior_ownership_count: 0,
         ambiguous_boundary_ownership_count: 0,
+        absent_partition_rejection_count: missing_material_interface_inputs.absent_partition.len(),
     };
-    if missing_material_interfaces.len() != 1 {
+    recovery.rejected_material_interface_count +=
+        missing_material_interface_inputs.absent_partition.len();
+
+    if recoverable_material_interfaces.is_empty() {
+        return recovery;
+    }
+
+    if recoverable_material_interfaces.len() != 1
+        || !missing_material_interface_inputs
+            .absent_partition
+            .is_empty()
+    {
         recover_boundary_facet_material_interface_regions(
             plc,
             &plc_material_interfaces,
-            &missing_material_interfaces,
+            &recoverable_material_interfaces,
+            &missing_material_interface_inputs.boundary_owned,
+            &missing_material_interface_inputs.interior_face,
             tetrahedron_mesh,
             &mut recovery,
         );
         return recovery;
     }
 
-    if plc_material_interfaces.len() != 1 || plc_material_interfaces != missing_material_interfaces
+    if plc_material_interfaces.len() != 1
+        || plc_material_interfaces != recoverable_material_interfaces
     {
         recover_boundary_facet_material_interface_regions(
             plc,
             &plc_material_interfaces,
-            &missing_material_interfaces,
+            &recoverable_material_interfaces,
+            &missing_material_interface_inputs.boundary_owned,
+            &missing_material_interface_inputs.interior_face,
             tetrahedron_mesh,
             &mut recovery,
         );
@@ -80,14 +100,59 @@ pub(super) struct MaterialInterfaceRecovery {
     pub global_material_interface_count: usize,
     pub boundary_owned_material_interface_count: usize,
     pub interior_material_interface_count: usize,
+    pub absent_partition_material_interface_count: usize,
     pub missing_boundary_ownership_count: usize,
+    pub missing_interior_ownership_count: usize,
     pub ambiguous_boundary_ownership_count: usize,
+    pub absent_partition_rejection_count: usize,
+}
+
+struct MissingMaterialInterfaceInputs {
+    all: BTreeSet<String>,
+    boundary_owned: BTreeSet<String>,
+    interior_face: BTreeSet<String>,
+    absent_partition: BTreeSet<String>,
+}
+
+fn missing_material_interface_inputs(
+    initial_recovery_queue: &TetrahedronRecoveryQueue,
+) -> MissingMaterialInterfaceInputs {
+    let mut inputs = MissingMaterialInterfaceInputs {
+        all: BTreeSet::new(),
+        boundary_owned: BTreeSet::new(),
+        interior_face: BTreeSet::new(),
+        absent_partition: BTreeSet::new(),
+    };
+    for item in initial_recovery_queue.items.iter().filter(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Missing
+    }) {
+        let Some(material_interface_id) = item.material_interface_id.clone() else {
+            continue;
+        };
+        inputs.all.insert(material_interface_id.clone());
+        match item.material_interface_topology {
+            Some(TetrahedronMaterialInterfaceTopology::BoundaryOwned) => {
+                inputs.boundary_owned.insert(material_interface_id);
+            }
+            Some(TetrahedronMaterialInterfaceTopology::InteriorFace) => {
+                inputs.interior_face.insert(material_interface_id);
+            }
+            Some(TetrahedronMaterialInterfaceTopology::AbsentPartition) => {
+                inputs.absent_partition.insert(material_interface_id);
+            }
+            None => {}
+        }
+    }
+    inputs
 }
 
 fn recover_boundary_facet_material_interface_regions(
     plc: &ProtectedBoundaryComplex,
     plc_material_interfaces: &BTreeSet<String>,
-    missing_material_interfaces: &BTreeSet<String>,
+    recoverable_material_interfaces: &BTreeSet<String>,
+    boundary_owned_material_interface_inputs: &BTreeSet<String>,
+    interior_face_material_interface_inputs: &BTreeSet<String>,
     tetrahedron_mesh: &mut TetrahedronMesh,
     recovery: &mut MaterialInterfaceRecovery,
 ) {
@@ -108,21 +173,17 @@ fn recover_boundary_facet_material_interface_regions(
 
     let mut repaired_material_interfaces = BTreeSet::<String>::new();
     let mut ambiguous_material_interfaces = BTreeSet::<String>::new();
-    let mut boundary_owned_material_interfaces = BTreeSet::<String>::new();
+    recovery.boundary_owned_material_interface_count =
+        boundary_owned_material_interface_inputs.len();
     for element in &mut tetrahedron_mesh.elements {
         let boundary_material_interfaces = tetrahedron_element_faces(element.node_ids.clone())
             .iter()
             .filter_map(|face| material_interfaces_by_facet.get(face))
             .flat_map(|material_interfaces| material_interfaces.iter().cloned())
             .collect::<BTreeSet<_>>();
-        for material_interface_id in &boundary_material_interfaces {
-            if missing_material_interfaces.contains(material_interface_id) {
-                boundary_owned_material_interfaces.insert(material_interface_id.clone());
-            }
-        }
         if boundary_material_interfaces.len() != 1 {
             for material_interface_id in boundary_material_interfaces {
-                if missing_material_interfaces.contains(&material_interface_id) {
+                if boundary_owned_material_interface_inputs.contains(&material_interface_id) {
                     ambiguous_material_interfaces.insert(material_interface_id);
                 }
             }
@@ -132,7 +193,7 @@ fn recover_boundary_facet_material_interface_regions(
             .into_iter()
             .next()
             .expect("single material interface checked above");
-        if !missing_material_interfaces.contains(&material_interface_id) {
+        if !boundary_owned_material_interface_inputs.contains(&material_interface_id) {
             continue;
         }
         if element.material_region_id != material_interface_id {
@@ -143,24 +204,25 @@ fn recover_boundary_facet_material_interface_regions(
             repaired_material_interfaces.insert(material_interface_id);
         }
     }
-    recovery.boundary_owned_material_interface_count = boundary_owned_material_interfaces.len();
     recover_interior_material_interface_regions(
         plc,
         plc_material_interfaces,
-        missing_material_interfaces,
+        recoverable_material_interfaces,
         tetrahedron_mesh,
         recovery,
         &mut repaired_material_interfaces,
         &mut ambiguous_material_interfaces,
     );
-    for material_interface_id in missing_material_interfaces {
+    for material_interface_id in recoverable_material_interfaces {
         if repaired_material_interfaces.contains(material_interface_id) {
             continue;
         }
         recovery.rejected_material_interface_count += 1;
         if ambiguous_material_interfaces.contains(material_interface_id) {
             recovery.ambiguous_boundary_ownership_count += 1;
-        } else if !boundary_owned_material_interfaces.contains(material_interface_id) {
+        } else if interior_face_material_interface_inputs.contains(material_interface_id) {
+            recovery.missing_interior_ownership_count += 1;
+        } else if !boundary_owned_material_interface_inputs.contains(material_interface_id) {
             recovery.missing_boundary_ownership_count += 1;
         } else {
             recovery.ambiguous_boundary_ownership_count += 1;
@@ -171,7 +233,7 @@ fn recover_boundary_facet_material_interface_regions(
 fn recover_interior_material_interface_regions(
     plc: &ProtectedBoundaryComplex,
     plc_material_interfaces: &BTreeSet<String>,
-    missing_material_interfaces: &BTreeSet<String>,
+    recoverable_material_interfaces: &BTreeSet<String>,
     tetrahedron_mesh: &mut TetrahedronMesh,
     recovery: &mut MaterialInterfaceRecovery,
     repaired_material_interfaces: &mut BTreeSet<String>,
@@ -214,7 +276,7 @@ fn recover_interior_material_interface_regions(
                 *right_index,
                 &right_material_region,
                 plc_material_interfaces,
-                missing_material_interfaces,
+                recoverable_material_interfaces,
                 &mut candidates_by_element,
             );
             record_interior_material_candidate(
@@ -223,7 +285,7 @@ fn recover_interior_material_interface_regions(
                 *left_index,
                 &left_material_region,
                 plc_material_interfaces,
-                missing_material_interfaces,
+                recoverable_material_interfaces,
                 &mut candidates_by_element,
             );
         }
