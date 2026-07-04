@@ -7,7 +7,7 @@ use runmat_meshing_core::{
 };
 
 use super::super::TetrahedronGenerationError;
-use super::bounds_span;
+use super::bounds::bounds_span;
 
 pub(super) fn validate_convex_boundary_facets(
     plc: &ProtectedBoundaryComplex,
