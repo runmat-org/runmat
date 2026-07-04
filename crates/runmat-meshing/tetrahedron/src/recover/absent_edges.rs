@@ -19,8 +19,11 @@ const MIN_RECOVERED_TETRAHEDRON_VOLUME_M3: f64 = 1.0e-18;
 const MIN_RECOVERED_TETRAHEDRON_SCALED_JACOBIAN: f64 = 1.0e-8;
 
 pub(super) struct AbsentSourceEdgeRecovery {
+    pub attempted_source_edge_count: usize,
     pub source_edge_count: usize,
     pub boundary_face_count: usize,
+    pub rejected_source_edge_count: usize,
+    pub rejection_counts: BTreeMap<&'static str, usize>,
 }
 
 pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
@@ -45,8 +48,11 @@ pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
         .collect::<BTreeSet<_>>();
 
     let mut recovered = AbsentSourceEdgeRecovery {
+        attempted_source_edge_count: 0,
         source_edge_count: 0,
         boundary_face_count: 0,
+        rejected_source_edge_count: 0,
+        rejection_counts: BTreeMap::new(),
     };
     for protected_edge in plc.protected_edges.iter().filter(|protected_edge| {
         recoverable_source_edges.contains(&(
@@ -54,13 +60,23 @@ pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
             protected_edge.source_edge_id.clone(),
         ))
     }) {
-        if let Some(boundary_face_count) = recover_absent_protected_edge_by_boundary_diagonal_flip(
+        recovered.attempted_source_edge_count += 1;
+        match recover_absent_protected_edge_by_boundary_diagonal_flip(
             plc,
             tetrahedron_mesh,
             sorted_edge(protected_edge.node_ids.clone()),
         ) {
-            recovered.source_edge_count += 1;
-            recovered.boundary_face_count += boundary_face_count;
+            Ok(boundary_face_count) => {
+                recovered.source_edge_count += 1;
+                recovered.boundary_face_count += boundary_face_count;
+            }
+            Err(rejection) => {
+                recovered.rejected_source_edge_count += 1;
+                *recovered
+                    .rejection_counts
+                    .entry(rejection.evidence_key())
+                    .or_default() += 1;
+            }
         }
     }
 
@@ -71,14 +87,14 @@ fn recover_absent_protected_edge_by_boundary_diagonal_flip(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
     protected_edge: [TopologyEntityId; 2],
-) -> Option<usize> {
+) -> Result<usize, AbsentSourceEdgeRecoveryRejection> {
     let adjacent_facets = plc
         .facets
         .iter()
         .filter(|facet| face_contains_edge(facet.node_ids.clone(), protected_edge.clone()))
         .collect::<Vec<_>>();
     if adjacent_facets.len() != 2 {
-        return None;
+        return Err(AbsentSourceEdgeRecoveryRejection::AdjacentFacetCount);
     }
 
     let opposite_nodes = adjacent_facets
@@ -92,7 +108,7 @@ fn recover_absent_protected_edge_by_boundary_diagonal_flip(
         })
         .collect::<Vec<_>>();
     if opposite_nodes.len() != 2 || opposite_nodes[0] == opposite_nodes[1] {
-        return None;
+        return Err(AbsentSourceEdgeRecoveryRejection::AdjacentFacetTopology);
     }
 
     let current_boundary_face_keys = current_boundary_face_keys(&protected_edge, &opposite_nodes);
@@ -100,20 +116,24 @@ fn recover_absent_protected_edge_by_boundary_diagonal_flip(
         .iter()
         .all(|face_key| boundary_face_exists(tetrahedron_mesh, face_key))
     {
-        return None;
+        return Err(AbsentSourceEdgeRecoveryRejection::CurrentBoundaryFaces);
     }
 
     let element_face_index = element_index_by_face(tetrahedron_mesh);
-    let left_element_index = *element_face_index.get(&current_boundary_face_keys[0])?;
-    let right_element_index = *element_face_index.get(&current_boundary_face_keys[1])?;
+    let left_element_index = *element_face_index
+        .get(&current_boundary_face_keys[0])
+        .ok_or(AbsentSourceEdgeRecoveryRejection::ElementTopology)?;
+    let right_element_index = *element_face_index
+        .get(&current_boundary_face_keys[1])
+        .ok_or(AbsentSourceEdgeRecoveryRejection::ElementTopology)?;
     if left_element_index == right_element_index {
-        return None;
+        return Err(AbsentSourceEdgeRecoveryRejection::ElementTopology);
     }
 
     let left_element = tetrahedron_mesh.elements[left_element_index].clone();
     let right_element = tetrahedron_mesh.elements[right_element_index].clone();
     if left_element.material_region_id != right_element.material_region_id {
-        return None;
+        return Err(AbsentSourceEdgeRecoveryRejection::MaterialRegionMismatch);
     }
 
     let support_node = shared_support_node(
@@ -121,20 +141,23 @@ fn recover_absent_protected_edge_by_boundary_diagonal_flip(
         &right_element,
         &protected_edge,
         &opposite_nodes,
-    )?;
+    )
+    .ok_or(AbsentSourceEdgeRecoveryRejection::ElementTopology)?;
     let node_coordinates = node_coordinates(tetrahedron_mesh);
     let recovered_left = recovered_element_for_facet(
         adjacent_facets[0],
         support_node.clone(),
         &left_element,
         &node_coordinates,
-    )?;
+    )
+    .ok_or(AbsentSourceEdgeRecoveryRejection::QualityGate)?;
     let recovered_right = recovered_element_for_facet(
         adjacent_facets[1],
         support_node,
         &right_element,
         &node_coordinates,
-    )?;
+    )
+    .ok_or(AbsentSourceEdgeRecoveryRejection::QualityGate)?;
 
     tetrahedron_mesh.elements[left_element_index] = recovered_left;
     tetrahedron_mesh.elements[right_element_index] = recovered_right;
@@ -166,7 +189,36 @@ fn recover_absent_protected_edge_by_boundary_diagonal_flip(
         inserted_boundary_faces += 1;
     }
 
-    Some(inserted_boundary_faces)
+    Ok(inserted_boundary_faces)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AbsentSourceEdgeRecoveryRejection {
+    AdjacentFacetCount,
+    AdjacentFacetTopology,
+    CurrentBoundaryFaces,
+    ElementTopology,
+    MaterialRegionMismatch,
+    QualityGate,
+}
+
+impl AbsentSourceEdgeRecoveryRejection {
+    fn evidence_key(self) -> &'static str {
+        match self {
+            Self::AdjacentFacetCount => "rejected_absent_source_edge_recovery_adjacent_facet_count",
+            Self::AdjacentFacetTopology => {
+                "rejected_absent_source_edge_recovery_adjacent_facet_topology"
+            }
+            Self::CurrentBoundaryFaces => {
+                "rejected_absent_source_edge_recovery_current_boundary_faces"
+            }
+            Self::ElementTopology => "rejected_absent_source_edge_recovery_element_topology",
+            Self::MaterialRegionMismatch => {
+                "rejected_absent_source_edge_recovery_material_region_mismatch"
+            }
+            Self::QualityGate => "rejected_absent_source_edge_recovery_quality_gate",
+        }
+    }
 }
 
 fn current_boundary_face_keys(

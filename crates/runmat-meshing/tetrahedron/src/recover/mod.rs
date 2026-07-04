@@ -337,9 +337,23 @@ pub fn recover_tetrahedron_mesh_from_plc(
             .saturating_sub(recovered_absent_source_edges.source_edge_count),
     );
     recovery_queue.evidence.entity_counts.insert(
+        "attempted_absent_source_edge_recovery_items".to_string(),
+        recovered_absent_source_edges.attempted_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "reconnected_absent_source_edge_items".to_string(),
         recovered_absent_source_edges.source_edge_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_absent_source_edge_recovery_items".to_string(),
+        recovered_absent_source_edges.rejected_source_edge_count,
+    );
+    for (reason_key, count) in recovered_absent_source_edges.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(reason_key.to_string(), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "recovered_absent_source_edge_boundary_faces".to_string(),
         recovered_absent_source_edges.boundary_face_count,
