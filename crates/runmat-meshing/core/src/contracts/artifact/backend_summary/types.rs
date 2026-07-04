@@ -263,6 +263,12 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_missing_material_interface_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_missing_material_interface_boundary_owned_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_material_interface_interior_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_material_interface_absent_partition_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_missing_material_interface_recovery_ids: Vec<String>,
     #[serde(default)]
     pub tetrahedron_omitted_missing_material_interface_recovery_id_count: usize,

@@ -229,6 +229,9 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_material_interface_recovery_item_count: 1,
             tetrahedron_recovered_material_interface_recovery_item_count: 0,
             tetrahedron_missing_material_interface_recovery_item_count: 1,
+            tetrahedron_missing_material_interface_boundary_owned_recovery_item_count: 1,
+            tetrahedron_missing_material_interface_interior_face_recovery_item_count: 2,
+            tetrahedron_missing_material_interface_absent_partition_recovery_item_count: 3,
             tetrahedron_missing_material_interface_recovery_ids: vec![
                 "material_interface_missing_1".to_string(),
             ],

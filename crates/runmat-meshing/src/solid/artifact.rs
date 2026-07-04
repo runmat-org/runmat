@@ -438,6 +438,21 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_material_interface_items",
             ),
+            tetrahedron_missing_material_interface_boundary_owned_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "missing_material_interface_boundary_owned_items",
+                ),
+            tetrahedron_missing_material_interface_interior_face_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "missing_material_interface_interior_face_items",
+                ),
+            tetrahedron_missing_material_interface_absent_partition_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "missing_material_interface_absent_partition_items",
+                ),
             tetrahedron_missing_material_interface_recovery_ids:
                 missing_material_interface_recovery.ids,
             tetrahedron_omitted_missing_material_interface_recovery_id_count:
