@@ -46925,6 +46925,104 @@
       ]
     },
     {
+      "name": "knnsearch",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Idx = knnsearch(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second observation matrix with observations in rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Idx",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based indices of nearest rows in X, or cell array of index vectors when IncludeTies is true."
+            },
+            {
+              "name": "D",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Distances to nearest rows in X, or cell array of distance vectors when IncludeTies is true."
+            }
+          ]
+        },
+        {
+          "label": "[Idx, D] = knnsearch(X, Y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second observation matrix with observations in rows."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as K, Distance, P, Cov, Scale, IncludeTies, NSMethod, BucketSize, CacheSize, and SortIndices."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Idx",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based indices of nearest rows in X, or cell array of index vectors when IncludeTies is true."
+            },
+            {
+              "name": "D",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Distances to nearest rows in X, or cell array of distance vectors when IncludeTies is true."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
+          "message": "distance helper: invalid argument"
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "when": "RunMat cannot allocate or construct a distance output.",
+          "message": "distance helper: internal error"
+        }
+      ]
+    },
+    {
       "name": "kron",
       "output_mode": "Fixed",
       "completion_policy": "Public",

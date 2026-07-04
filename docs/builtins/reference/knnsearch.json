@@ -1,0 +1,82 @@
+{
+  "title": "knnsearch",
+  "category": "stats/ml",
+  "keywords": [
+    "knnsearch",
+    "nearest neighbor",
+    "k nearest",
+    "statistics",
+    "machine learning",
+    "distance"
+  ],
+  "summary": "Find k-nearest neighbors in an observation matrix.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Nearest-neighbor search runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::distance::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`knnsearch(X,Y)` returns one-based row indices in `X` for the nearest neighbors of each row in `Y`.",
+  "behaviors": [
+    "`X` and `Y` must be real numeric vectors or 2-D matrices with the same number of columns.",
+    "The default search is exhaustive with `K=1` and Euclidean distance.",
+    "`[Idx,D] = knnsearch(...)` returns indices first and distances second. Without `IncludeTies`, both outputs are `size(Y,1)` by `K` numeric matrices.",
+    "Supported distance metrics are `\"euclidean\"`, `\"squaredeuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"seuclidean\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"hamming\"`, `\"jaccard\"`, and `\"spearman\"`. Fast Euclidean aliases are accepted and evaluated with the exact Euclidean implementation.",
+    "`\"P\"`, `\"Scale\"`, and `\"Cov\"` provide metric parameters for Minkowski, standardized Euclidean, and Mahalanobis distances respectively.",
+    "`\"IncludeTies\",true` returns `size(Y,1)` by 1 cell arrays whose elements contain all neighbors tied at the K-th distance. Tied outputs are sorted by distance even when `\"SortIndices\",false` is supplied.",
+    "`\"NSMethod\"`, `\"BucketSize\"`, `\"CacheSize\"`, and `\"SortIndices\"` are parsed for compatibility. `\"NSMethod\",\"kdtree\"` is accepted only for Euclidean, cityblock, Chebychev, and Minkowski distances. RunMat currently evaluates nearest neighbors exhaustively and returns sorted neighbors."
+  ],
+  "examples": [
+    {
+      "description": "Find nearest rows",
+      "input": "X = [0 0; 2 0; 5 0];\nY = [1 0; 4 0];\nIdx = knnsearch(X,Y)",
+      "output": "Idx is a 2-by-1 matrix of row indices from X."
+    },
+    {
+      "description": "Request distances and two neighbors",
+      "input": "[Idx,D] = knnsearch(X,Y,\"K\",2)",
+      "output": "Idx and D are size(Y,1)-by-2 matrices."
+    },
+    {
+      "description": "Include tied neighbors",
+      "input": "Idx = knnsearch([0; 1; -1],0,\"K\",2,\"IncludeTies\",true)",
+      "output": "Idx is a cell array; each cell contains all tied neighbor indices."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat build a kd-tree?",
+      "answer": "No. RunMat accepts kd-tree-related options for compatibility but currently uses exhaustive search so results stay exact."
+    },
+    {
+      "question": "Are custom distance functions supported?",
+      "answer": "No. RunMat currently supports the standard named numeric distance metrics."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist2",
+      "url": "./pdist2"
+    },
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/distance.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance.rs"
+  }
+}

@@ -226,18 +226,22 @@ fn lhsdesign_surface_executes_from_scripts() {
 #[test]
 fn distance_helper_surface_executes_from_scripts() {
     let vars = execute_source(
-        "X = [0 0; 3 4; 4 0; 0 2]; D = pdist(X); M = squareform(D); D2 = squareform(M); Y = [1 0; 3 0]; P = pdist2(X, Y, 'squaredeuclidean'); [N,I] = pdist2(X, Y, 'euclidean', 'Smallest', 1); d12 = D(1); d14 = D(3); m14 = M(1,4); p22 = P(2,2); n2 = N(2); i2 = I(2);",
+        "X = [0 0; 3 4; 4 0; 0 2]; D = pdist(X); M = squareform(D); D2 = squareform(M); Y = [1 0; 3 0]; P = pdist2(X, Y, 'squaredeuclidean'); [N,I] = pdist2(X, Y, 'euclidean', 'Smallest', 1); [Idx,KD] = knnsearch(X, Y, 'K', 2, 'Distance', 'euclidean'); T = knnsearch(X, [0 0], 'K', 1, 'IncludeTies', true); d12 = D(1); d14 = D(3); m14 = M(1,4); p22 = P(2,2); n2 = N(2); i2 = I(2); idx21 = Idx(2,1); kd21 = KD(2,1); tie1 = T{1}(1);",
     )
     .expect("distance helper script");
     assert!(has_tensor_shape(&vars, &[1, 6]));
     assert!(has_tensor_shape(&vars, &[4, 4]));
     assert!(has_tensor_shape(&vars, &[4, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
     assert!(has_tensor_shape(&vars, &[1, 2]));
     assert!(has_num(&vars, 5.0));
     assert!(has_num(&vars, 2.0));
     assert!(has_num(&vars, 16.0));
     assert!(has_num(&vars, 1.0));
     assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 1.0));
 }
 
 #[test]

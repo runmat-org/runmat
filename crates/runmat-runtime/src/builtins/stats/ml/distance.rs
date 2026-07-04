@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    CellArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +15,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const PDIST_NAME: &str = "pdist";
 const PDIST2_NAME: &str = "pdist2";
+const KNNSEARCH_NAME: &str = "knnsearch";
 const SQUAREFORM_NAME: &str = "squareform";
 const EPS: f64 = 1.0e-12;
 
@@ -51,6 +52,23 @@ const OUTPUT_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Square symmetric matrix or condensed distance vector.",
 }];
 
+const OUTPUT_IDX_D: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Idx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based indices of nearest rows in X, or cell array of index vectors when IncludeTies is true.",
+    },
+    BuiltinParamDescriptor {
+        name: "D",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Distances to nearest rows in X, or cell array of distance vectors when IncludeTies is true.",
+    },
+];
+
 const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::NumericArray,
@@ -83,6 +101,14 @@ const PARAM_PDIST2_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Distance metric, metric parameter, or Smallest/Largest selection options.",
 };
 
+const PARAM_KNNSEARCH_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "options",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Name-value options such as K, Distance, P, Cov, Scale, IncludeTies, NSMethod, BucketSize, CacheSize, and SortIndices.",
+};
+
 const PARAM_SQUAREFORM_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Z",
     ty: BuiltinParamType::NumericArray,
@@ -103,6 +129,8 @@ const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
 const INPUTS_X_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_DISTANCE_OPTIONS];
 const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
 const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_PDIST2_OPTIONS];
+const INPUTS_X_Y_KNN_OPTIONS: [BuiltinParamDescriptor; 3] =
+    [PARAM_X, PARAM_Y, PARAM_KNNSEARCH_OPTIONS];
 const INPUTS_Z: [BuiltinParamDescriptor; 1] = [PARAM_SQUAREFORM_INPUT];
 const INPUTS_Z_OPTIONS: [BuiltinParamDescriptor; 2] =
     [PARAM_SQUAREFORM_INPUT, PARAM_SQUAREFORM_FORCE];
@@ -130,6 +158,19 @@ const PDIST2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "D = pdist2(X, Y, Distance, DistParameter, Name, Value)",
         inputs: &INPUTS_X_Y_OPTIONS,
         outputs: &OUTPUT_D_I,
+    },
+];
+
+const KNNSEARCH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Idx = knnsearch(X, Y)",
+        inputs: &INPUTS_X_Y,
+        outputs: &OUTPUT_IDX_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Idx, D] = knnsearch(X, Y, Name, Value)",
+        inputs: &INPUTS_X_Y_KNN_OPTIONS,
+        outputs: &OUTPUT_IDX_D,
     },
 ];
 
@@ -171,6 +212,13 @@ pub const PDIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 pub const PDIST2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PDIST2_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DISTANCE_ERRORS,
+};
+
+pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &KNNSEARCH_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DISTANCE_ERRORS,
@@ -238,6 +286,12 @@ enum SquareformForce {
     ToVector,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct KnnOptions {
+    k: usize,
+    include_ties: bool,
+}
+
 #[runtime_builtin(
     name = "pdist",
     category = "stats/ml",
@@ -294,6 +348,35 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
             }
         }
     }
+}
+
+#[runtime_builtin(
+    name = "knnsearch",
+    category = "stats/ml",
+    summary = "Find k-nearest neighbors in an observation matrix.",
+    keywords = "knnsearch,nearest neighbor,k nearest,statistics,machine learning,distance",
+    type_resolver(matrix_type),
+    descriptor(crate::builtins::stats::ml::distance::KNNSEARCH_DESCRIPTOR),
+    builtin_path = "crate::builtins::stats::ml::distance"
+)]
+async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
+    let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
+    if x.cols != y.cols {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: X and Y must have the same number of columns",
+        ));
+    }
+    let (metric_args, options) = parse_knnsearch_options(rest).await?;
+    if options.k > x.rows {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: K must be <= size(X,1)",
+        ));
+    }
+    let metric = parse_metric(KNNSEARCH_NAME, &x, Some(&y), metric_args).await?;
+    knnsearch_outputs(&x, &y, &metric, options)
 }
 
 #[runtime_builtin(
@@ -522,7 +605,7 @@ fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<S
                     "pdist2: Smallest or Largest must be a single name-value pair",
                 ));
             }
-            let k = parse_positive_integer(&args[idx + 1], "pdist2 selection count")?;
+            let k = parse_positive_integer(PDIST2_NAME, &args[idx + 1], "pdist2 selection count")?;
             selection = Some(if selector == "smallest" {
                 Selection::Smallest(k)
             } else {
@@ -537,25 +620,163 @@ fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<S
     Ok((metric_args, selection))
 }
 
-fn parse_positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
+fn parse_positive_integer(name: &'static str, value: &Value, label: &str) -> BuiltinResult<usize> {
     let raw = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
+        Value::Bool(value) => {
+            if *value {
+                1.0
+            } else {
+                0.0
+            }
+        }
         Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::LogicalArray(array) if array.data.len() == 1 => f64::from(array.data[0] != 0),
         other => {
             return Err(distance_error(
-                PDIST2_NAME,
-                format!("pdist2: {label} must be a positive integer scalar, got {other:?}"),
+                name,
+                format!("{name}: {label} must be a positive integer scalar, got {other:?}"),
             ))
         }
     };
-    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > EPS {
+    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > EPS || raw > usize::MAX as f64 {
         return Err(distance_error(
-            PDIST2_NAME,
-            format!("pdist2: {label} must be a positive integer scalar"),
+            name,
+            format!("{name}: {label} must be a positive integer scalar"),
         ));
     }
     Ok(raw as usize)
+}
+
+async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, KnnOptions)> {
+    let mut k = 1usize;
+    let mut include_ties = false;
+    let mut sort_indices = true;
+    let mut metric_name: Option<Value> = None;
+    let mut metric_keyword = "euclidean".to_string();
+    let mut metric_parameter: Option<Value> = None;
+    let mut ns_method: Option<String> = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let name = keyword_of(&args[idx]).ok_or_else(|| {
+            distance_error(
+                KNNSEARCH_NAME,
+                "knnsearch: options must be supplied as name-value pairs",
+            )
+        })?;
+        if idx + 1 >= args.len() {
+            return Err(distance_error(
+                KNNSEARCH_NAME,
+                format!("knnsearch: missing value for option '{name}'"),
+            ));
+        }
+        let value = args[idx + 1].clone();
+        match name.as_str() {
+            "k" => k = parse_positive_integer(KNNSEARCH_NAME, &value, "K")?,
+            "includeties" => include_ties = parse_logical_scalar(&value, "IncludeTies")?,
+            "sortindices" => sort_indices = parse_logical_scalar(&value, "SortIndices")?,
+            "distance" => {
+                let distance = keyword_of(&value).ok_or_else(|| {
+                    distance_error(KNNSEARCH_NAME, "knnsearch: Distance must be text")
+                })?;
+                let normalized = match distance.as_str() {
+                    "fasteuclidean" => "euclidean",
+                    "fastseuclidean" => "seuclidean",
+                    other => other,
+                };
+                metric_keyword = normalized.to_string();
+                metric_name = Some(Value::from(normalized));
+            }
+            "p" | "cov" | "scale" => {
+                if metric_parameter.is_some() {
+                    return Err(distance_error(
+                        KNNSEARCH_NAME,
+                        "knnsearch: only one distance parameter may be specified",
+                    ));
+                }
+                metric_parameter = Some(value);
+            }
+            "nsmethod" => {
+                let method = keyword_of(&value).ok_or_else(|| {
+                    distance_error(KNNSEARCH_NAME, "knnsearch: NSMethod must be text")
+                })?;
+                match method.as_str() {
+                    "exhaustive" | "kdtree" => ns_method = Some(method),
+                    other => {
+                        return Err(distance_error(
+                            KNNSEARCH_NAME,
+                            format!("knnsearch: unsupported NSMethod '{other}'"),
+                        ))
+                    }
+                }
+            }
+            "cachesize" => {
+                if keyword_of(&value).as_deref() != Some("maximal") {
+                    let raw = scalar_parameter(KNNSEARCH_NAME, &value, "CacheSize").await?;
+                    if !raw.is_finite() || raw <= 0.0 {
+                        return Err(distance_error(
+                            KNNSEARCH_NAME,
+                            "knnsearch: CacheSize must be positive",
+                        ));
+                    }
+                }
+            }
+            "bucketsize" => {
+                parse_positive_integer(KNNSEARCH_NAME, &value, "BucketSize")?;
+            }
+            other => {
+                return Err(distance_error(
+                    KNNSEARCH_NAME,
+                    format!("knnsearch: unsupported option '{other}'"),
+                ))
+            }
+        }
+        idx += 2;
+    }
+    if matches!(ns_method.as_deref(), Some("kdtree"))
+        && !matches!(
+            metric_keyword.as_str(),
+            "euclidean" | "cityblock" | "chebychev" | "chebyshev" | "cheby" | "minkowski"
+        )
+    {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: NSMethod='kdtree' is only valid for euclidean, cityblock, chebychev, or minkowski distances",
+        ));
+    }
+    let _ = sort_indices;
+    let mut metric_args = Vec::new();
+    if let Some(metric) = metric_name {
+        metric_args.push(metric);
+        if let Some(parameter) = metric_parameter {
+            metric_args.push(parameter);
+        }
+    } else if metric_parameter.is_some() {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: P, Cov, or Scale requires a Distance option",
+        ));
+    }
+    Ok((metric_args, KnnOptions { k, include_ties }))
+}
+
+fn parse_logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(value) => Ok(*value),
+        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
+        Value::Int(value) if value.to_i64() == 0 || value.to_i64() == 1 => Ok(value.to_i64() != 0),
+        Value::Tensor(tensor)
+            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
+        {
+            Ok(tensor.data[0] != 0.0)
+        }
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        other => Err(distance_error(
+            KNNSEARCH_NAME,
+            format!("knnsearch: {label} must be logical scalar, got {other:?}"),
+        )),
+    }
 }
 
 fn condensed_distances(
@@ -1050,18 +1271,10 @@ fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(
             .collect::<Vec<_>>();
         match selection {
             Selection::Smallest(_) => {
-                values.sort_by(|a, b| {
-                    a.0.partial_cmp(&b.0)
-                        .unwrap_or(Ordering::Greater)
-                        .then_with(|| a.1.cmp(&b.1))
-                });
+                values.sort_by(|a, b| distance_order_ascending(a.0, a.1, b.0, b.1));
             }
             Selection::Largest(_) => {
-                values.sort_by(|a, b| {
-                    b.0.partial_cmp(&a.0)
-                        .unwrap_or(Ordering::Greater)
-                        .then_with(|| a.1.cmp(&b.1))
-                });
+                values.sort_by(|a, b| distance_order_descending(a.0, a.1, b.0, b.1));
             }
         }
         for (distance, index) in values.iter().take(k) {
@@ -1074,6 +1287,176 @@ fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(
     let index_tensor = Tensor::new(indices, vec![k, distances.cols])
         .map_err(|err| internal_error(PDIST2_NAME, format!("pdist2: {err}")))?;
     Ok((distance_tensor, index_tensor))
+}
+
+fn knnsearch_outputs(
+    x: &Tensor,
+    y: &Tensor,
+    metric: &DistanceMetric,
+    options: KnnOptions,
+) -> BuiltinResult<Value> {
+    if options.include_ties {
+        let (indices, distances) = knnsearch_tie_cells(x, y, metric, options.k)?;
+        return match crate::output_count::current_output_count() {
+            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+                out_count,
+                vec![Value::Cell(indices), Value::Cell(distances)],
+            )),
+            None => Ok(Value::Cell(indices)),
+        };
+    }
+
+    let (indices, distances) = knnsearch_numeric_outputs(x, y, metric, options.k)?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![Value::Tensor(indices), Value::Tensor(distances)],
+        )),
+        None => Ok(Value::Tensor(indices)),
+    }
+}
+
+fn knnsearch_numeric_outputs(
+    x: &Tensor,
+    y: &Tensor,
+    metric: &DistanceMetric,
+    k: usize,
+) -> BuiltinResult<(Tensor, Tensor)> {
+    let len = y
+        .rows
+        .checked_mul(k)
+        .ok_or_else(|| internal_error(KNNSEARCH_NAME, "knnsearch: output size overflow"))?;
+    let mut indices = Vec::new();
+    let mut distances = Vec::new();
+    indices
+        .try_reserve(len)
+        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: index allocation failed"))?;
+    distances
+        .try_reserve(len)
+        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: distance allocation failed"))?;
+    indices.resize(len, 0.0);
+    distances.resize(len, 0.0);
+    for query in 0..y.rows {
+        let values = sorted_neighbors(x, y, metric, query)?;
+        for (rank, (distance, index)) in values.iter().take(k).enumerate() {
+            let pos = rank * y.rows + query;
+            indices[pos] = *index as f64;
+            distances[pos] = *distance;
+        }
+    }
+    let index_tensor = Tensor::new(indices, vec![y.rows, k])
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+    let distance_tensor = Tensor::new(distances, vec![y.rows, k])
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+    Ok((index_tensor, distance_tensor))
+}
+
+fn knnsearch_tie_cells(
+    x: &Tensor,
+    y: &Tensor,
+    metric: &DistanceMetric,
+    k: usize,
+) -> BuiltinResult<(CellArray, CellArray)> {
+    let mut index_cells = Vec::new();
+    let mut distance_cells = Vec::new();
+    index_cells
+        .try_reserve(y.rows)
+        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
+    distance_cells
+        .try_reserve(y.rows)
+        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
+    for query in 0..y.rows {
+        let values = sorted_neighbors(x, y, metric, query)?;
+        let cutoff = values[k - 1].0;
+        let mut selected = Vec::new();
+        for (distance, index) in values {
+            let include = if cutoff.is_nan() {
+                distance.is_nan()
+            } else {
+                !distance.is_nan() && (distance - cutoff).abs() <= EPS
+            };
+            if include || selected.len() < k {
+                selected.push((distance, index));
+            }
+            if !include && selected.len() >= k {
+                break;
+            }
+        }
+        let len = selected.len();
+        let idx_tensor = Tensor::new(
+            selected.iter().map(|(_, index)| *index as f64).collect(),
+            vec![1, len],
+        )
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+        let dist_tensor = Tensor::new(
+            selected.iter().map(|(distance, _)| *distance).collect(),
+            vec![1, len],
+        )
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+        index_cells.push(Value::Tensor(idx_tensor));
+        distance_cells.push(Value::Tensor(dist_tensor));
+    }
+    let indices = CellArray::new(index_cells, y.rows, 1)
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+    let distances = CellArray::new(distance_cells, y.rows, 1)
+        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+    Ok((indices, distances))
+}
+
+fn sorted_neighbors(
+    x: &Tensor,
+    y: &Tensor,
+    metric: &DistanceMetric,
+    query: usize,
+) -> BuiltinResult<Vec<(f64, usize)>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve(x.rows)
+        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: neighbor allocation failed"))?;
+    for row in 0..x.rows {
+        values.push((
+            row_distance(KNNSEARCH_NAME, x, row, y, query, metric)?,
+            row + 1,
+        ));
+    }
+    values.sort_by(|a, b| distance_order_ascending(a.0, a.1, b.0, b.1));
+    Ok(values)
+}
+
+fn distance_order_ascending(
+    left_distance: f64,
+    left_index: usize,
+    right_distance: f64,
+    right_index: usize,
+) -> Ordering {
+    match (left_distance.is_nan(), right_distance.is_nan()) {
+        (true, true) => left_index.cmp(&right_index),
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => left_distance
+            .partial_cmp(&right_distance)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left_index.cmp(&right_index)),
+    }
+}
+
+fn distance_order_descending(
+    left_distance: f64,
+    left_index: usize,
+    right_distance: f64,
+    right_index: usize,
+) -> Ordering {
+    match (left_distance.is_nan(), right_distance.is_nan()) {
+        (true, true) => left_index.cmp(&right_index),
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => right_distance
+            .partial_cmp(&left_distance)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left_index.cmp(&right_index)),
+    }
 }
 
 fn parse_squareform_force(args: Vec<Value>) -> BuiltinResult<SquareformForce> {
@@ -1302,6 +1685,125 @@ mod tests {
         let tensor = tensor_out(out);
         assert_eq!(tensor.shape, vec![1, 2]);
         assert_eq!(tensor.data, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn knnsearch_returns_indices_then_distances() {
+        let x = tensor(vec![0.0, 2.0, 5.0, 0.0, 0.0, 0.0], 3, 2);
+        let y = tensor(vec![1.0, 4.0, 0.0, 0.0], 2, 2);
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(knnsearch_builtin(
+            x,
+            y,
+            vec![Value::from("K"), Value::Num(2.0)],
+        ))
+        .unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        let idx = tensor_out(values[0].clone());
+        let dist = tensor_out(values[1].clone());
+        assert_eq!(idx.shape, vec![2, 2]);
+        assert_eq!(dist.shape, vec![2, 2]);
+        assert_eq!(idx.data, vec![1.0, 3.0, 2.0, 2.0]);
+        assert_eq!(dist.data, vec![1.0, 1.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn knnsearch_supports_metrics_and_ties() {
+        let x = tensor(vec![0.0, 2.0, -2.0, 0.0, 0.0, 0.0], 3, 2);
+        let y = tensor(vec![0.0, 0.0], 1, 2);
+        let out = block_on(knnsearch_builtin(
+            x.clone(),
+            y.clone(),
+            vec![
+                Value::from("Distance"),
+                Value::from("cityblock"),
+                Value::from("K"),
+                Value::Num(2.0),
+            ],
+        ))
+        .unwrap();
+        let idx = tensor_out(out);
+        assert_eq!(idx.shape, vec![1, 2]);
+        assert_eq!(idx.data, vec![1.0, 2.0]);
+
+        let out = block_on(knnsearch_builtin(
+            x,
+            y,
+            vec![
+                Value::from("K"),
+                Value::Num(2.0),
+                Value::from("IncludeTies"),
+                Value::Bool(true),
+            ],
+        ))
+        .unwrap();
+        let Value::Cell(cells) = out else {
+            panic!("expected cell output");
+        };
+        assert_eq!(cells.shape, vec![1, 1]);
+        let Value::Tensor(tied) = &cells.data[0] else {
+            panic!("expected tensor in cell");
+        };
+        assert_eq!(tied.shape, vec![1, 3]);
+        assert_eq!(tied.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(knnsearch_builtin(
+            tensor(vec![0.0, f64::NAN, 2.0], 3, 1),
+            tensor(vec![1.0], 1, 1),
+            vec![Value::from("K"), Value::Num(2.0)],
+        ))
+        .unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        assert_eq!(tensor_out(values[0].clone()).data, vec![1.0, 3.0]);
+        assert_eq!(tensor_out(values[1].clone()).data, vec![1.0, 1.0]);
+
+        let out = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 2.0], 2, 1),
+            tensor(Vec::new(), 0, 1),
+            vec![Value::from("K"), Value::Num(1.0)],
+        ))
+        .unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        assert_eq!(tensor_out(values[0].clone()).shape, vec![0, 1]);
+        assert_eq!(tensor_out(values[1].clone()).shape, vec![0, 1]);
+
+        let out = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 2.0, -2.0], 3, 1),
+            tensor(vec![0.0], 1, 1),
+            vec![
+                Value::from("K"),
+                Value::Num(2.0),
+                Value::from("IncludeTies"),
+                Value::Bool(true),
+                Value::from("SortIndices"),
+                Value::Bool(false),
+            ],
+        ))
+        .unwrap();
+        assert!(matches!(out, Value::OutputList(values) if matches!(&values[0], Value::Cell(_))));
+
+        let err = block_on(knnsearch_builtin(
+            tensor(vec![1.0, 0.0], 2, 1),
+            tensor(vec![1.0], 1, 1),
+            vec![
+                Value::from("Distance"),
+                Value::from("cosine"),
+                Value::from("NSMethod"),
+                Value::from("kdtree"),
+            ],
+        ))
+        .expect_err("kdtree should reject cosine distance");
+        assert!(err.to_string().contains("NSMethod='kdtree'"));
     }
 
     #[test]
