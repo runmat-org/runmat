@@ -51,6 +51,29 @@ fn recovery_stage_result_carries_audited_mesh_and_queue_evidence() {
 }
 
 #[test]
+fn recovery_stage_result_repairs_boundary_source_face_provenance_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("matching boundary topology should repair source-face provenance");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.tetrahedron_mesh.boundary_faces[0].source_face_id,
+        entity(MeshingStage::SurfaceMesh, "face_1")
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_source_face_provenance_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
@@ -67,7 +90,7 @@ fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
 fn recovery_stage_result_rejects_missing_queue_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
-    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+    mesh.boundary_faces.remove(0);
 
     assert_eq!(
         recover_tetrahedron_mesh_from_plc(&plc, mesh),

@@ -195,7 +195,13 @@ pub fn recover_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
     mut tetrahedron_mesh: TetrahedronMesh,
 ) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
-    let recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    let repaired_source_face_provenance_count =
+        repair_boundary_source_face_provenance(plc, &mut tetrahedron_mesh);
+    let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    recovery_queue.evidence.entity_counts.insert(
+        "repaired_source_face_provenance_items".to_string(),
+        repaired_source_face_provenance_count,
+    );
     mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
     if !tetrahedron_mesh.recovery_complete {
         return Err(TetrahedronRecoveryError::IncompleteRecovery {
@@ -218,6 +224,35 @@ pub fn recover_tetrahedron_mesh_from_plc(
         tetrahedron_mesh,
         recovery_queue,
     })
+}
+
+fn repair_boundary_source_face_provenance(
+    plc: &ProtectedBoundaryComplex,
+    tetrahedron_mesh: &mut TetrahedronMesh,
+) -> usize {
+    let expected_source_face_by_nodes = plc
+        .facets
+        .iter()
+        .map(|facet| {
+            (
+                sorted_topology_ids(facet.node_ids.clone()),
+                facet.source_face_id.clone(),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut repaired_count = 0;
+    for boundary_face in &mut tetrahedron_mesh.boundary_faces {
+        let face_key = sorted_topology_ids(boundary_face.node_ids.clone());
+        let Some(expected_source_face_id) = expected_source_face_by_nodes.get(&face_key) else {
+            continue;
+        };
+        if &boundary_face.source_face_id != expected_source_face_id {
+            boundary_face.source_face_id = expected_source_face_id.clone();
+            repaired_count += 1;
+        }
+    }
+    repaired_count
 }
 
 fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
