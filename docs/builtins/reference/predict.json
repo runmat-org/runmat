@@ -3,6 +3,8 @@
   "category": "stats/ml",
   "keywords": [
     "predict",
+    "fitctree",
+    "classification tree",
     "fitlm",
     "linear model",
     "regression",
@@ -27,12 +29,14 @@
     "unit": "builtins::stats::ml::linear_model::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`predict(mdl,Xnew)` evaluates a `LinearModel` returned by `fitlm` on new matrix or table predictor data.",
+  "description": "`predict(mdl,Xnew)` evaluates supported fitted model objects, including `LinearModel` from `fitlm` and `ClassificationTree` from `fitctree`, on new matrix or table predictor data.",
   "behaviors": [
     "`Xnew` can be a numeric matrix with the same predictor column count used during fitting.",
     "For table input, predictor variables are selected by the model's `PredictorNames` property.",
-    "`[ypred,yci] = predict(...)` returns pointwise confidence intervals for curve predictions by default.",
-    "Name-value options `Alpha`, `Prediction`, and `Simultaneous` are accepted. `Prediction` can be `curve` or `observation`; `Simultaneous` must be false because simultaneous intervals are not supported yet."
+    "For `LinearModel`, `[ypred,yci] = predict(...)` returns pointwise confidence intervals for curve predictions by default.",
+    "For `ClassificationTree`, `[label,score,node,cnum] = predict(...)` returns predicted class labels, posterior probabilities, one-based leaf node ids, and one-based class-number predictions.",
+    "Linear-model name-value options `Alpha`, `Prediction`, and `Simultaneous` are accepted. `Prediction` can be `curve` or `observation`; `Simultaneous` must be false because simultaneous intervals are not supported yet.",
+    "Classification-tree prediction currently accepts matrix or table predictor data and raises explicit errors for unsupported pruning/subtree options."
   ],
   "examples": [
     {
@@ -44,15 +48,24 @@
       "description": "Return confidence intervals",
       "input": "[yhat, yci] = predict(mdl, [4; 5], 'Alpha', 0.01)",
       "output": "yci is a two-column matrix with lower and upper bounds."
+    },
+    {
+      "description": "Predict classes from a classification tree",
+      "input": "tree = fitctree([0; 1; 2; 3], [0; 0; 1; 1], 'MaxNumSplits', 1, 'MinParentSize', 2);\n[label,score] = predict(tree, [0.5; 2.5])",
+      "output": "label is [0; 1], and score has one posterior-probability column per class."
     }
   ],
   "faqs": [
     {
       "question": "Which model classes are supported?",
-      "answer": "Currently `predict` supports `LinearModel` objects returned by RunMat's `fitlm`."
+      "answer": "Currently `predict` supports `LinearModel` objects returned by `fitlm` and `ClassificationTree` objects returned by `fitctree`."
     }
   ],
   "links": [
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    },
     {
       "label": "fitlm",
       "url": "./fitlm"

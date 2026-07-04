@@ -86,6 +86,19 @@ fn fitlm_surface_executes_from_scripts() {
 }
 
 #[test]
+fn fitctree_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0; 1; 2; 3]; y = [0; 0; 1; 1]; mdl = fitctree(X, y, 'MaxNumSplits', 1, 'MinParentSize', 2); [label,score,node,cnum] = predict(mdl, [0.5; 2.5]); a = label(1); b = label(2); s11 = score(1,1); n1 = node(1); c2 = cnum(2);",
+    )
+    .expect("fitctree script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, 0.0));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn student_t_distribution_surface_executes_from_scripts() {
     let vars = execute_source(
         "p = tcdf(0, 10); q = tcdf(10, 99, 'upper'); d = tpdf(0, 1); x = tinv(0.95, 50); r = trnd(5, 2, 3);",

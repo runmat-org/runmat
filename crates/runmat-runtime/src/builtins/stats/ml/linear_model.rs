@@ -9,6 +9,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
+use crate::builtins::stats::ml::classification_tree::{
+    predict_classification_tree_object, CLASSIFICATION_TREE_CLASS,
+};
 use crate::builtins::stats::summary::distribution_math::{student_t_cdf_upper, student_t_inv};
 use crate::builtins::table::{
     is_tabular_object, table_from_columns, table_height, table_variable_names_from_object,
@@ -54,6 +57,45 @@ const OUTPUT_YPRED_YCI: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const OUTPUT_LABEL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "label",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Predicted class labels.",
+}];
+
+const OUTPUT_LABEL_SCORE_NODE_CNUM: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "label",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Predicted class labels.",
+    },
+    BuiltinParamDescriptor {
+        name: "score",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Posterior probabilities for each class.",
+    },
+    BuiltinParamDescriptor {
+        name: "node",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based terminal node index for each prediction.",
+    },
+    BuiltinParamDescriptor {
+        name: "cnum",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based class number for each predicted label.",
+    },
+];
+
 const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "tblOrX",
     ty: BuiltinParamType::Any,
@@ -91,7 +133,7 @@ const PARAM_MDL: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "LinearModel object returned by fitlm.",
+    description: "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree.",
 };
 
 const PARAM_XNEW: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -132,7 +174,7 @@ const FITLM_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
-const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "ypred = predict(mdl, Xnew)",
         inputs: &PREDICT_INPUTS,
@@ -147,6 +189,16 @@ const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "[ypred, yci] = predict(mdl, Xnew, Name, Value)",
         inputs: &PREDICT_INPUTS_OPTIONS,
         outputs: &OUTPUT_YPRED_YCI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "label = predict(tree, Xnew)",
+        inputs: &PREDICT_INPUTS,
+        outputs: &OUTPUT_LABEL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[label,score,node,cnum] = predict(tree, Xnew)",
+        inputs: &PREDICT_INPUTS,
+        outputs: &OUTPUT_LABEL_SCORE_NODE_CNUM,
     },
 ];
 
@@ -385,7 +437,11 @@ async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     descriptor(crate::builtins::stats::ml::linear_model::PREDICT_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::ml::linear_model"
 )]
-async fn predict_builtin(model: Value, xnew: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn predict_builtin(
+    model: Value,
+    xnew: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     let model = gather(model)
         .await
         .map_err(|err| predict_invalid(err.message))?;
@@ -395,16 +451,29 @@ async fn predict_builtin(model: Value, xnew: Value, rest: Vec<Value>) -> Builtin
     let rest = gather_all(rest)
         .await
         .map_err(|err| predict_invalid(err.message))?;
-    let options = parse_predict_options(rest)?;
-    let output = predict_linear_model(model, xnew, options)?;
+    let output = match model {
+        Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
+            predict_classification_tree_object(object, xnew, rest)?
+        }
+        other => {
+            let options = parse_predict_options(rest)?;
+            let output = predict_linear_model(other, xnew, options)?;
+            vec![output.0, output.1]
+        }
+    };
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output.0])),
+        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
+        Some(out_count) if out_count > output.len() => {
+            Err(predict_invalid("predict: too many output arguments"))
+        }
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![output.0, output.1],
+            out_count, output,
         )),
-        None => Ok(output.0),
+        None => Ok(output
+            .into_iter()
+            .next()
+            .expect("predict dispatch always returns at least one output")),
     }
 }
 

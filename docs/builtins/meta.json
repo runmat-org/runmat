@@ -28829,6 +28829,146 @@
       ]
     },
     {
+      "name": "fitctree",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Mdl = fitctree(Tbl, ResponseVarName)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or numeric predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationTree object containing class names, split rules, and posterior probabilities."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitctree(Tbl, formula)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or numeric predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationTree object containing class names, split rules, and posterior probabilities."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitctree(X, Y)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or numeric predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationTree object containing class names, split rules, and posterior probabilities."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitctree(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or numeric predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as ClassNames, PredictorNames, ResponseName, MaxNumSplits, MinLeafSize, MinParentSize, SplitCriterion, and Weights."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationTree object containing class names, split rules, and posterior probabilities."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITCTREE.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitctree:InvalidArgument",
+          "when": "Inputs, response labels, dimensions, or name-value options are malformed or unsupported.",
+          "message": "fitctree: invalid argument"
+        },
+        {
+          "code": "RM.FITCTREE.INTERNAL",
+          "identifier": "RunMat:fitctree:Internal",
+          "when": "RunMat cannot construct the ClassificationTree result.",
+          "message": "fitctree: internal error"
+        }
+      ]
+    },
+    {
       "name": "fitlm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -67860,7 +68000,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "LinearModel object returned by fitlm."
+              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
             },
             {
               "name": "Xnew",
@@ -67888,7 +68028,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "LinearModel object returned by fitlm."
+              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
             },
             {
               "name": "Xnew",
@@ -67923,7 +68063,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "LinearModel object returned by fitlm."
+              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
             },
             {
               "name": "Xnew",
@@ -67954,6 +68094,83 @@
               "arity": "Required",
               "default": null,
               "description": "Pointwise confidence intervals for the predicted response."
+            }
+          ]
+        },
+        {
+          "label": "label = predict(tree, Xnew)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "label",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            }
+          ]
+        },
+        {
+          "label": "[label,score,node,cnum] = predict(tree, Xnew)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "label",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            },
+            {
+              "name": "score",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Posterior probabilities for each class."
+            },
+            {
+              "name": "node",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based terminal node index for each prediction."
+            },
+            {
+              "name": "cnum",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based class number for each predicted label."
             }
           ]
         }
