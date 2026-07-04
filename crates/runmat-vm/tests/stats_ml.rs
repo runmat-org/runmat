@@ -239,6 +239,22 @@ fn covariance_conversion_surface_executes_from_scripts() {
 }
 
 #[test]
+fn distribution_compatibility_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng('default'); b = binocdf(55,100,0.5); bu = binocdf(55,100,0.5,'upper'); c = chi2cdf(3,5); w = wblinv(0.5,3,4); gr = gamrnd(2,3,2,2); br = binornd(10,0.5,2,3); wr = wblrnd(4,3,[2 2]);",
+    )
+    .expect("distribution compatibility script");
+    assert!(has_num(&vars, 0.864_373_487_963_083));
+    assert!(has_num(&vars, 0.135_626_512_036_917));
+    assert!(has_num(&vars, 0.300_014_164_121_372));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (*value - 3.0 * std::f64::consts::LN_2.powf(0.25)).abs() < 1.0e-8)));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 3]));
+}
+
+#[test]
 fn cvpartition_surface_executes_from_scripts() {
     let vars = execute_source(
         "c = cvpartition(6, 'KFold', 3); te = test(c, 2); tr = training(c, 'all'); nts = c.NumTestSets; ts = c.TestSize(1); h = cvpartition([1;1;2;2], 'Holdout', 0.5); hm = test(h); hs = h.TestSize;",

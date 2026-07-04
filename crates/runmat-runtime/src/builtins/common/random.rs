@@ -278,6 +278,89 @@ pub(crate) fn generate_student_t(nu: &[f64], len: usize, label: &str) -> Builtin
     Ok(out)
 }
 
+pub(crate) fn generate_gamma_shape_scale(
+    shape: &[f64],
+    scale: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let a = if shape.len() == 1 {
+            shape[0]
+        } else {
+            shape[idx]
+        };
+        let b = if scale.len() == 1 {
+            scale[0]
+        } else {
+            scale[idx]
+        };
+        out.push(if a == 0.0 {
+            0.0
+        } else {
+            sample_gamma_shape_scale(&mut guard.state, a, b)
+        });
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_binomial(
+    trials: &[f64],
+    probability: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let n = if trials.len() == 1 {
+            trials[0]
+        } else {
+            trials[idx]
+        };
+        let p = if probability.len() == 1 {
+            probability[0]
+        } else {
+            probability[idx]
+        };
+        out.push(sample_binomial(&mut guard.state, n, p));
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_weibull(
+    scale: &[f64],
+    shape: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let a = if scale.len() == 1 {
+            scale[0]
+        } else {
+            scale[idx]
+        };
+        let b = if shape.len() == 1 {
+            shape[0]
+        } else {
+            shape[idx]
+        };
+        let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
+        out.push(a * (-u.ln()).powf(1.0 / b));
+    }
+    Ok(out)
+}
+
 fn sample_gamma_shape_scale(state: &mut u64, shape: f64, scale: f64) -> f64 {
     if shape < 1.0 {
         let u = next_uniform_state(state).max(MIN_UNIFORM);
@@ -299,6 +382,67 @@ fn sample_gamma_shape_scale(state: &mut u64, shape: f64, scale: f64) -> f64 {
             return scale * d * v;
         }
     }
+}
+
+fn sample_binomial(state: &mut u64, trials: f64, probability: f64) -> f64 {
+    if trials == 0.0 || probability == 0.0 {
+        return 0.0;
+    }
+    if probability == 1.0 {
+        return trials;
+    }
+
+    let effective_p = probability.min(1.0 - probability);
+    let mean = trials * effective_p;
+    let sampled = if trials <= 10_000.0 {
+        sample_binomial_direct(state, trials as u64, effective_p)
+    } else if mean < 30.0 {
+        sample_poisson_knuth(state, mean).min(trials)
+    } else {
+        sample_binomial_normal_approx(state, trials, effective_p)
+    };
+
+    if probability <= 0.5 {
+        sampled
+    } else {
+        trials - sampled
+    }
+}
+
+fn sample_binomial_direct(state: &mut u64, trials: u64, probability: f64) -> f64 {
+    let mut successes = 0_u64;
+    for _ in 0..trials {
+        if next_uniform_state(state) < probability {
+            successes += 1;
+        }
+    }
+    successes as f64
+}
+
+fn sample_poisson_knuth(state: &mut u64, lambda: f64) -> f64 {
+    if lambda <= 0.0 {
+        return 0.0;
+    }
+    let threshold = (-lambda).exp();
+    let mut product = 1.0;
+    let mut count = 0_u64;
+    loop {
+        count += 1;
+        product *= next_uniform_state(state).max(MIN_UNIFORM);
+        if product <= threshold {
+            return (count - 1) as f64;
+        }
+    }
+}
+
+fn sample_binomial_normal_approx(state: &mut u64, trials: f64, probability: f64) -> f64 {
+    let mean = trials * probability;
+    let variance = mean * (1.0 - probability);
+    if variance <= 0.0 {
+        return mean.round().clamp(0.0, trials);
+    }
+    let (z, _) = next_normal_pair(state);
+    (mean + variance.sqrt() * z).round().clamp(0.0, trials)
 }
 
 pub(crate) fn generate_uniform_scaled(

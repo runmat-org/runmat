@@ -207,6 +207,91 @@ pub(crate) fn regularized_beta(x: f64, a: f64, b: f64) -> f64 {
     }
 }
 
+pub(crate) fn regularized_gamma_p(a: f64, x: f64) -> f64 {
+    if a.is_nan() || x.is_nan() || a <= 0.0 {
+        return f64::NAN;
+    }
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x == f64::INFINITY {
+        return 1.0;
+    }
+    if x < a + 1.0 {
+        gamma_series_p(a, x)
+    } else {
+        1.0 - gamma_continued_fraction_q(a, x)
+    }
+}
+
+pub(crate) fn regularized_gamma_q(a: f64, x: f64) -> f64 {
+    if a.is_nan() || x.is_nan() || a <= 0.0 {
+        return f64::NAN;
+    }
+    if x <= 0.0 {
+        return 1.0;
+    }
+    if x == f64::INFINITY {
+        return 0.0;
+    }
+    if x < a + 1.0 {
+        1.0 - gamma_series_p(a, x)
+    } else {
+        gamma_continued_fraction_q(a, x)
+    }
+}
+
+fn gamma_series_p(a: f64, x: f64) -> f64 {
+    const MAX_ITER: usize = 512;
+    const EPS: f64 = 3.0e-14;
+
+    let gln = gammaln_nonnegative_scalar(a);
+    let mut ap = a;
+    let mut sum = 1.0 / a;
+    let mut del = sum;
+    for _ in 0..MAX_ITER {
+        ap += 1.0;
+        del *= x / ap;
+        sum += del;
+        if del.abs() <= sum.abs() * EPS {
+            break;
+        }
+    }
+    sum * (-x + a * x.ln() - gln).exp()
+}
+
+fn gamma_continued_fraction_q(a: f64, x: f64) -> f64 {
+    const MAX_ITER: usize = 512;
+    const EPS: f64 = 3.0e-14;
+    const FP_MIN: f64 = 1.0e-300;
+
+    let gln = gammaln_nonnegative_scalar(a);
+    let mut b = x + 1.0 - a;
+    let mut c = 1.0 / FP_MIN;
+    let mut d = 1.0 / b.max(FP_MIN);
+    let mut h = d;
+    for i in 1..=MAX_ITER {
+        let i_f = i as f64;
+        let an = -i_f * (i_f - a);
+        b += 2.0;
+        d = an * d + b;
+        if d.abs() < FP_MIN {
+            d = FP_MIN;
+        }
+        c = b + an / c;
+        if c.abs() < FP_MIN {
+            c = FP_MIN;
+        }
+        d = 1.0 / d;
+        let del = d * c;
+        h *= del;
+        if (del - 1.0).abs() <= EPS {
+            break;
+        }
+    }
+    (-x + a * x.ln() - gln).exp() * h
+}
+
 fn beta_continued_fraction(a: f64, b: f64, x: f64) -> f64 {
     const MAX_ITER: usize = 200;
     const EPS: f64 = 3.0e-14;

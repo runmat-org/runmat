@@ -5090,6 +5090,216 @@
       ]
     },
     {
+      "name": "binocdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = binocdf(x, n, p)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of trials."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "y = binocdf(x, n, p, \"upper\")",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of trials."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.binocdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:binocdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.binocdf.INTERNAL",
+          "identifier": "RunMat:binocdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
+      "name": "binornd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = binornd(n, p)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of Bernoulli trials."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Success probability for each trial."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = binornd(n, p, sz)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of Bernoulli trials."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Success probability for each trial."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = binornd(n, p, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of Bernoulli trials."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Success probability for each trial."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.binornd.INVALID_ARGUMENT",
+          "identifier": "RunMat:binornd:InvalidArgument",
+          "when": "Input parameters or size arguments are missing, malformed, or incompatible.",
+          "message": "distribution random: invalid argument"
+        },
+        {
+          "code": "RM.binornd.INTERNAL",
+          "identifier": "RunMat:binornd:Internal",
+          "when": "Internal tensor conversion, allocation, or RNG state access fails.",
+          "message": "distribution random: internal error"
+        }
+      ]
+    },
+    {
       "name": "bitand",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -8482,6 +8692,83 @@
           "identifier": "RunMat:cheb2ord:Internal",
           "when": "Output tensor construction fails internally.",
           "message": "cheb2ord: internal error"
+        }
+      ]
+    },
+    {
+      "name": "chi2cdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = chi2cdf(x, nu)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "p = chi2cdf(x, nu, \"upper\")",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Evaluation point."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.chi2cdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:chi2cdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.chi2cdf.INTERNAL",
+          "identifier": "RunMat:chi2cdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
         }
       ]
     },
@@ -33527,6 +33814,125 @@
           "identifier": "RunMat:gammaln:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "gammaln: internal error"
+        }
+      ]
+    },
+    {
+      "name": "gamrnd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = gamrnd(a, b)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = gamrnd(a, b, sz)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = gamrnd(a, b, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.gamrnd.INVALID_ARGUMENT",
+          "identifier": "RunMat:gamrnd:InvalidArgument",
+          "when": "Input parameters or size arguments are missing, malformed, or incompatible.",
+          "message": "distribution random: invalid argument"
+        },
+        {
+          "code": "RM.gamrnd.INTERNAL",
+          "identifier": "RunMat:gamrnd:Internal",
+          "when": "Internal tensor conversion, allocation, or RNG state access fails.",
+          "message": "distribution random: internal error"
         }
       ]
     },
@@ -95128,6 +95534,202 @@
           "identifier": "RunMat:warning",
           "when": "Warning mode is configured to promote warnings to errors.",
           "message": "warning: promoted to error"
+        }
+      ]
+    },
+    {
+      "name": "wblinv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = wblinv(p)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = wblinv(p, a, b)",
+          "inputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Scale parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Shape parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.wblinv.INVALID_ARGUMENT",
+          "identifier": "RunMat:wblinv:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "normal distribution: invalid argument"
+        },
+        {
+          "code": "RM.wblinv.INTERNAL",
+          "identifier": "RunMat:wblinv:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "normal distribution: internal error"
+        }
+      ]
+    },
+    {
+      "name": "wblrnd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = wblrnd(a, b)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = wblrnd(a, b, sz)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        },
+        {
+          "label": "r = wblrnd(a, b, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First distribution parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second distribution parameter."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.wblrnd.INVALID_ARGUMENT",
+          "identifier": "RunMat:wblrnd:InvalidArgument",
+          "when": "Input parameters or size arguments are missing, malformed, or incompatible.",
+          "message": "distribution random: invalid argument"
+        },
+        {
+          "code": "RM.wblrnd.INTERNAL",
+          "identifier": "RunMat:wblrnd:Internal",
+          "when": "Internal tensor conversion, allocation, or RNG state access fails.",
+          "message": "distribution random: internal error"
         }
       ]
     },

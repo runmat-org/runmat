@@ -1,0 +1,46 @@
+{
+  "title": "gamrnd",
+  "category": "stats/random",
+  "keywords": ["gamrnd", "gamma", "random", "statistics"],
+  "summary": "Generate gamma-distributed random samples.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "matlab",
+    "notes": "RunMat currently generates samples on the host RNG path."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 4, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::distribution_random::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`gamrnd(a,b)` generates gamma random samples with shape parameter `a` and scale parameter `b`. Size-vector and dimension-list forms are supported.",
+  "behaviors": [
+    "`a` and `b` support scalar expansion and matching array shapes.",
+    "Without explicit size arguments, the output shape is the scalar-expanded parameter shape.",
+    "With explicit size arguments, nonscalar parameters must match the requested shape.",
+    "`a` must be nonnegative and `b` must be positive."
+  ],
+  "examples": [
+    {
+      "description": "Generate a 2-by-3 gamma sample array",
+      "input": "r = gamrnd(3,7,2,3)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which RNG does gamrnd use?",
+      "answer": "It uses RunMat's shared deterministic RNG state, so `rng('default')` resets subsequent `gamrnd` output."
+    }
+  ],
+  "links": [
+    { "label": "rng", "url": "./rng" },
+    { "label": "normrnd", "url": "./normrnd" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/distribution_random.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/distribution_random.rs"
+  }
+}

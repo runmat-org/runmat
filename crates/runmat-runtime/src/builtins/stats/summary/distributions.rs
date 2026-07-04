@@ -63,6 +63,38 @@ const INPUT_NU: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Degrees of freedom parameter.",
 };
 
+const INPUT_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of trials.",
+};
+
+const INPUT_PROB: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Probability parameter.",
+};
+
+const INPUT_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "a",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("1"),
+    description: "Scale parameter.",
+};
+
+const INPUT_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "b",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("1"),
+    description: "Shape parameter.",
+};
+
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [INPUT_X];
 const INPUTS_X_MU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_MU];
 const INPUTS_X_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_MU, INPUT_SIGMA];
@@ -71,6 +103,8 @@ const INPUTS_P_MU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_MU];
 const INPUTS_P_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_MU, INPUT_SIGMA];
 const INPUTS_X_NU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_NU];
 const INPUTS_P_NU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_NU];
+const INPUTS_X_N_P: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_N, INPUT_PROB];
+const INPUTS_P_A_B: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_A, INPUT_B];
 
 const NORMAL_SIGNATURES_X: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -155,6 +189,45 @@ const T_INV_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &INPUTS_P_NU,
     outputs: &OUTPUT_Y,
 }];
+
+const BINOCDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "y = binocdf(x, n, p)",
+        inputs: &INPUTS_X_N_P,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = binocdf(x, n, p, \"upper\")",
+        inputs: &INPUTS_X_N_P,
+        outputs: &OUTPUT_Y,
+    },
+];
+
+const CHI2CDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "p = chi2cdf(x, nu)",
+        inputs: &INPUTS_X_NU,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = chi2cdf(x, nu, \"upper\")",
+        inputs: &INPUTS_X_NU,
+        outputs: &OUTPUT_Y,
+    },
+];
+
+const WBLINV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = wblinv(p)",
+        inputs: &INPUTS_P,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = wblinv(p, a, b)",
+        inputs: &INPUTS_P_A_B,
+        outputs: &OUTPUT_Y,
+    },
+];
 
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NORMAL.INVALID_ARGUMENT",
@@ -297,6 +370,14 @@ struct TArgs {
     upper: bool,
 }
 
+struct ThreeArgs {
+    x: Vec<f64>,
+    a: Vec<f64>,
+    b: Vec<f64>,
+    shape: Vec<usize>,
+    upper: bool,
+}
+
 fn broadcast_pair(
     name: &str,
     lhs: &Tensor,
@@ -336,6 +417,58 @@ async fn t_args(
     Ok(TArgs {
         x,
         nu,
+        shape,
+        upper,
+    })
+}
+
+async fn three_args(
+    name: &str,
+    first: Value,
+    rest: Vec<Value>,
+    defaults: Option<(f64, f64)>,
+    allow_upper: bool,
+) -> BuiltinResult<ThreeArgs> {
+    let mut rest = rest;
+    let mut upper = false;
+    if allow_upper {
+        if let Some(last) = rest.last() {
+            if let Some(keyword) = crate::builtins::common::random_args::keyword_of(last) {
+                if keyword.eq_ignore_ascii_case("upper") {
+                    upper = true;
+                    rest.pop();
+                }
+            }
+        }
+    }
+    let (a, b) = match (rest.as_slice(), defaults) {
+        ([], Some((a, b))) => (scalar_tensor(a), scalar_tensor(b)),
+        ([a, b], _) => (
+            value_to_tensor(name, a.clone()).await?,
+            value_to_tensor(name, b.clone()).await?,
+        ),
+        _ => {
+            return Err(normal_error(
+                name,
+                format!("{name}: expected one or three numeric arguments"),
+            ));
+        }
+    };
+    let x = value_to_tensor(name, first).await?;
+    let (x, a, shape) = broadcast_pair(name, &x, &a)?;
+    let temp = Tensor::new(vec![0.0; x.len()], shape.clone())
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+    let (b, _, shape2) = broadcast_pair(name, &b, &temp)?;
+    if shape2 != shape {
+        return Err(normal_error(
+            name,
+            format!("{name}: operands must have compatible sizes"),
+        ));
+    }
+    Ok(ThreeArgs {
+        x,
+        a,
+        b,
         shape,
         upper,
     })
@@ -392,6 +525,63 @@ fn norminv_scalar(p: f64, mu: f64, sigma: f64) -> f64 {
         return f64::NAN;
     }
     mu - sigma * SQRT_2 * erfcinv_scalar(2.0 * p)
+}
+
+fn binocdf_scalar(x: f64, n: f64, p: f64, upper: bool) -> f64 {
+    if x.is_nan()
+        || n.is_nan()
+        || p.is_nan()
+        || n < 0.0
+        || n.fract() != 0.0
+        || !(0.0..=1.0).contains(&p)
+    {
+        return f64::NAN;
+    }
+    if x < 0.0 {
+        return if upper { 1.0 } else { 0.0 };
+    }
+    let k = x.floor();
+    if k >= n {
+        return if upper { 0.0 } else { 1.0 };
+    }
+    if p == 0.0 {
+        return if upper { 0.0 } else { 1.0 };
+    }
+    if p == 1.0 {
+        return if upper { 1.0 } else { 0.0 };
+    }
+    if upper {
+        distribution_math::regularized_beta(p, k + 1.0, n - k)
+    } else {
+        distribution_math::regularized_beta(1.0 - p, n - k, k + 1.0)
+    }
+}
+
+fn chi2cdf_scalar(x: f64, nu: f64, upper: bool) -> f64 {
+    if x.is_nan() || nu.is_nan() || nu <= 0.0 {
+        return f64::NAN;
+    }
+    if x <= 0.0 {
+        return if upper { 1.0 } else { 0.0 };
+    }
+    if upper {
+        distribution_math::regularized_gamma_q(nu / 2.0, x / 2.0)
+    } else {
+        distribution_math::regularized_gamma_p(nu / 2.0, x / 2.0)
+    }
+}
+
+fn wblinv_scalar(p: f64, a: f64, b: f64) -> f64 {
+    if p.is_nan() || a.is_nan() || b.is_nan() || a <= 0.0 || b <= 0.0 || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    if p == 0.0 {
+        return 0.0;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    a * (-(-p).ln_1p()).powf(1.0 / b)
 }
 
 pub mod normpdf {
@@ -554,6 +744,83 @@ pub mod tinv {
             .iter()
             .zip(args.nu.iter())
             .map(|(p, nu)| distribution_math::student_t_inv(*p, *nu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
+pub mod binocdf {
+    use super::*;
+    normal_descriptor!("binocdf", BINOCDF_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "binocdf",
+        category = "stats/summary",
+        summary = "Evaluate the binomial cumulative distribution function.",
+        keywords = "binocdf,binomial,cdf,upper tail,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::binocdf"
+    )]
+    pub(crate) async fn binocdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("binocdf", value, rest, None, true).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((x, n), p)| super::binocdf_scalar(*x, *n, *p, args.upper))
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
+pub mod chi2cdf {
+    use super::*;
+    normal_descriptor!("chi2cdf", CHI2CDF_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "chi2cdf",
+        category = "stats/summary",
+        summary = "Evaluate the chi-square cumulative distribution function.",
+        keywords = "chi2cdf,chi-square,cdf,upper tail,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::chi2cdf"
+    )]
+    pub(crate) async fn chi2cdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("chi2cdf", value, rest, true).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(x, nu)| super::chi2cdf_scalar(*x, *nu, args.upper))
+            .collect();
+        super::finish(args.shape, data)
+    }
+}
+
+pub mod wblinv {
+    use super::*;
+    normal_descriptor!("wblinv", WBLINV_SIGNATURES);
+
+    #[runtime_builtin(
+        name = "wblinv",
+        category = "stats/summary",
+        summary = "Evaluate the inverse Weibull cumulative distribution function.",
+        keywords = "wblinv,weibull,inverse,cdf,statistics,distribution",
+        type_resolver(super::normal_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::wblinv"
+    )]
+    pub(crate) async fn wblinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("wblinv", value, rest, Some((1.0, 1.0)), false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, a), b)| super::wblinv_scalar(*p, *a, *b))
             .collect();
         super::finish(args.shape, data)
     }
@@ -794,6 +1061,123 @@ mod tests {
         match inv {
             Value::Num(value) => assert_close(value, 1.959_963_984_540_053_8, 1e-12),
             other => panic!("expected scalar inv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binomial_chi_square_and_weibull_distribution_values() {
+        let binomial = block_on(binocdf::binocdf_builtin(
+            Value::Num(55.0),
+            vec![Value::Num(100.0), Value::Num(0.5)],
+        ))
+        .unwrap();
+        match binomial {
+            Value::Num(value) => assert_close(value, 0.864_373_487_963_083, 1.0e-12),
+            other => panic!("expected scalar binocdf, got {other:?}"),
+        }
+
+        let upper = block_on(binocdf::binocdf_builtin(
+            Value::Num(55.0),
+            vec![Value::Num(100.0), Value::Num(0.5), Value::from("upper")],
+        ))
+        .unwrap();
+        match upper {
+            Value::Num(value) => assert_close(value, 0.135_626_512_036_917, 1.0e-12),
+            other => panic!("expected scalar upper binocdf, got {other:?}"),
+        }
+
+        let chi2 = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Num(3.0),
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap();
+        match chi2 {
+            Value::Num(value) => assert_close(value, 0.300_014_164_121_372, 1.0e-12),
+            other => panic!("expected scalar chi2cdf, got {other:?}"),
+        }
+
+        let weibull = block_on(wblinv::wblinv_builtin(
+            Value::Num(0.5),
+            vec![Value::Num(3.0), Value::Num(4.0)],
+        ))
+        .unwrap();
+        match weibull {
+            Value::Num(value) => {
+                assert_close(value, 3.0 * std::f64::consts::LN_2.powf(0.25), 1.0e-12)
+            }
+            other => panic!("expected scalar wblinv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn distribution_helpers_broadcast_and_return_nan_for_bad_parameters() {
+        let out = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Num(3.0),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 5.0], vec![1, 3]).unwrap(),
+            )],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_close(tensor.data[2], 0.300_014_164_121_372, 1.0e-12);
+            }
+            other => panic!("expected tensor chi2cdf, got {other:?}"),
+        }
+
+        let invalid = block_on(wblinv::wblinv_builtin(
+            Value::Num(0.5),
+            vec![Value::Num(-1.0), Value::Num(2.0)],
+        ))
+        .unwrap();
+        assert!(matches!(invalid, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn binocdf_boundaries_and_invalid_parameters_match_distribution_contract() {
+        let below = block_on(binocdf::binocdf_builtin(
+            Value::Num(-1.0),
+            vec![Value::Num(10.0), Value::Num(0.5)],
+        ))
+        .unwrap();
+        assert_eq!(below, Value::Num(0.0));
+
+        let above = block_on(binocdf::binocdf_builtin(
+            Value::Num(10.0),
+            vec![Value::Num(10.0), Value::Num(0.5)],
+        ))
+        .unwrap();
+        assert_eq!(above, Value::Num(1.0));
+
+        let always_zero = block_on(binocdf::binocdf_builtin(
+            Value::Num(0.0),
+            vec![Value::Num(10.0), Value::Num(0.0)],
+        ))
+        .unwrap();
+        assert_eq!(always_zero, Value::Num(1.0));
+
+        let impossible = block_on(binocdf::binocdf_builtin(
+            Value::Num(5.0),
+            vec![Value::Num(10.5), Value::Num(0.5)],
+        ))
+        .unwrap();
+        assert!(matches!(impossible, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn wblinv_preserves_tiny_positive_probabilities() {
+        let out = block_on(wblinv::wblinv_builtin(
+            Value::Num(1.0e-20),
+            vec![Value::Num(3.0), Value::Num(4.0)],
+        ))
+        .unwrap();
+        match out {
+            Value::Num(value) => {
+                assert!(value > 0.0);
+                assert_close(value, 3.0e-5, 1.0e-16);
+            }
+            other => panic!("expected scalar wblinv, got {other:?}"),
         }
     }
 }
