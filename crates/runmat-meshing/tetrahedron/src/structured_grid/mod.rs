@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_core::{
