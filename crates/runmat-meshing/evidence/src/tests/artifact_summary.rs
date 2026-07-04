@@ -187,6 +187,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_recovered_absent_source_edge_boundary_face_count: 2,
             tetrahedron_repaired_source_face_provenance_count: 1,
             tetrahedron_repaired_source_edge_provenance_count: 2,
+            tetrahedron_repaired_material_interface_element_count: 3,
             tetrahedron_source_face_recovery_item_count: 4,
             tetrahedron_recovered_source_face_recovery_item_count: 4,
             tetrahedron_missing_source_face_recovery_item_count: 0,

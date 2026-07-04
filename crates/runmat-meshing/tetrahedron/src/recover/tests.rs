@@ -336,6 +336,58 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
 }
 
 #[test]
+fn recovery_stage_result_repairs_single_material_interface_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.elements[0].material_region_id = "other_body".to_string();
+
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing material interface should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_material_interface_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("single material interface should repair element material ownership");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.tetrahedron_mesh.elements[0].material_region_id,
+        "solid_body"
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
+        0
+    );
+}
+
+#[test]
+fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[0].material_interface_ids = vec!["other_body".to_string()];
+    let mut mesh = tetrahedron_mesh();
+    mesh.elements[0].material_region_id = "other_body".to_string();
+
+    assert_eq!(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh),
+        Err(TetrahedronRecoveryError::IncompleteRecovery {
+            missing_item_count: 1,
+            missing_source_face_item_count: 0,
+            missing_source_edge_item_count: 0,
+            missing_material_interface_item_count: 1,
+        })
+    );
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();

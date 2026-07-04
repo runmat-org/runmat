@@ -1,6 +1,7 @@
 mod absent_edges;
 mod boundary_faces;
 pub mod boundary_queue;
+mod material_interfaces;
 mod topology;
 mod types;
 
@@ -18,6 +19,7 @@ use boundary_faces::{
     recover_missing_protected_edge_boundary_faces, repair_boundary_source_edge_provenance,
     repair_boundary_source_face_provenance,
 };
+use material_interfaces::recover_single_material_interface_region;
 use topology::sorted_topology_ids;
 pub use types::{
     TetrahedronProtectedEdgeTopology, TetrahedronRecoveryError, TetrahedronRecoveryKind,
@@ -317,6 +319,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_source_face_provenance(plc, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance_count =
         repair_boundary_source_edge_provenance(plc, &mut tetrahedron_mesh);
+    let repaired_material_interface_element_count = recover_single_material_interface_region(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
     recovery_queue.evidence.entity_counts.insert(
@@ -365,6 +372,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_edge_provenance_items".to_string(),
         repaired_source_edge_provenance_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "repaired_material_interface_elements".to_string(),
+        repaired_material_interface_element_count,
     );
     mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
     if !tetrahedron_mesh.recovery_complete {

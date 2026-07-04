@@ -91,6 +91,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_recovered_absent_source_edge_boundary_face_count: 0,
             tetrahedron_repaired_source_face_provenance_count: 0,
             tetrahedron_repaired_source_edge_provenance_count: 0,
+            tetrahedron_repaired_material_interface_element_count: 0,
             tetrahedron_source_face_recovery_item_count: 0,
             tetrahedron_recovered_source_face_recovery_item_count: 0,
             tetrahedron_missing_source_face_recovery_item_count: 0,

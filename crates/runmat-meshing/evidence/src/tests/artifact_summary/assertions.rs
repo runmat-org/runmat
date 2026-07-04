@@ -211,6 +211,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.recovered_absent_source_edge_boundary_face_count, 2);
     assert_eq!(recovery.repaired_source_face_provenance_count, 1);
     assert_eq!(recovery.repaired_source_edge_provenance_count, 2);
+    assert_eq!(recovery.repaired_material_interface_element_count, 3);
     assert_eq!(recovery.source_face_recovery_item_count, 4);
     assert_eq!(recovery.recovered_source_face_recovery_item_count, 4);
     assert_eq!(recovery.missing_source_face_recovery_item_count, 0);
