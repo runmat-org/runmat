@@ -380,6 +380,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         TetrahedronProtectedEdgeTopology::VolumeEdge,
     );
+    let boundary_edge_source_edge_recovery_item_count = recovery_source_edge_item_count_by_topology(
+        &initial_recovery_queue,
+        TetrahedronProtectedEdgeTopology::BoundaryEdge,
+    );
     let deferred_absent_source_edge_recovery_item_count =
         recovery_source_edge_item_count_by_topology(
             &initial_recovery_queue,
@@ -419,7 +423,7 @@ pub fn recover_tetrahedron_mesh_from_plc(
     let repaired_source_face_provenance_count =
         repair_boundary_source_face_provenance(&initial_recovery_queue, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance_count =
-        repair_boundary_source_edge_provenance(plc, &mut tetrahedron_mesh);
+        repair_boundary_source_edge_provenance(plc, &initial_recovery_queue, &mut tetrahedron_mesh);
     let material_interface_recovery = recover_single_material_interface_region(
         plc,
         &initial_recovery_queue,
@@ -438,6 +442,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "volume_edge_source_edge_recovery_items".to_string(),
         volume_edge_source_edge_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "boundary_edge_source_edge_recovery_items".to_string(),
+        boundary_edge_source_edge_recovery_item_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "volume_face_source_face_recovery_items".to_string(),

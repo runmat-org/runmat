@@ -565,6 +565,10 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
         2
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["boundary_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
         1
     );
@@ -624,6 +628,10 @@ fn recovery_stage_result_replaces_stale_boundary_source_edge_provenance_before_a
         12
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["boundary_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
         1
     );
@@ -631,6 +639,47 @@ fn recovery_stage_result_replaces_stale_boundary_source_edge_provenance_before_a
         result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
         0
     );
+}
+
+#[test]
+fn source_edge_provenance_repair_uses_boundary_edge_queue_items_only() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+    ];
+    plc.protected_edges[0].source_edge_id = entity(MeshingStage::CurveMesh, "edge_2");
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+    mesh.boundary_faces[3].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("volume-edge source edge should be reported before recovery");
+    let original_boundary_faces = mesh.boundary_faces.clone();
+
+    let repaired_count = super::boundary_faces::repair_boundary_source_edge_provenance(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        0
+    );
+    assert_eq!(repaired_count, 0);
+    assert_eq!(mesh.boundary_faces, original_boundary_faces);
 }
 
 #[test]
