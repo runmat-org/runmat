@@ -8,7 +8,7 @@ use crate::protected_edges::{face_edges, sorted_edge, source_edge_ids_for_face_e
 
 use super::{
     topology::sorted_topology_ids, TetrahedronProtectedEdgeTopology, TetrahedronRecoveryKind,
-    TetrahedronRecoveryQueue, TetrahedronRecoveryStatus,
+    TetrahedronRecoveryQueue, TetrahedronRecoveryStatus, TetrahedronSourceFaceTopology,
 };
 
 pub(super) fn recover_missing_protected_edge_boundary_faces(
@@ -62,15 +62,36 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
     recovered_count
 }
 
-pub(super) fn recover_missing_exterior_boundary_faces(
+pub(super) fn recover_volume_face_source_face_boundary_faces(
     plc: &ProtectedBoundaryComplex,
+    initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> usize {
     let element_face_counts = element_face_counts(tetrahedron_mesh);
     let mut boundary_face_keys = boundary_face_keys(tetrahedron_mesh);
+    let recoverable_source_faces = initial_recovery_queue
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::SourceFace
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.source_face_topology == Some(TetrahedronSourceFaceTopology::VolumeFace)
+        })
+        .filter_map(|item| {
+            Some((
+                item.source_entity_id.clone()?,
+                item.source_face_node_ids.clone()?,
+            ))
+        })
+        .collect::<BTreeSet<_>>();
     let mut recovered_count = 0;
 
-    for facet in &plc.facets {
+    for facet in plc.facets.iter().filter(|facet| {
+        recoverable_source_faces.contains(&(
+            facet.source_face_id.clone(),
+            sorted_topology_ids(facet.node_ids.clone()),
+        ))
+    }) {
         if recover_facet_boundary_face(
             plc,
             &element_face_counts,

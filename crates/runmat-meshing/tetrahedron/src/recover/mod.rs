@@ -17,8 +17,8 @@ use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
 use absent_edges::recover_absent_protected_edges_by_boundary_diagonal_flip;
 use boundary_faces::{
-    boundary_face_source_edges, recover_missing_exterior_boundary_faces,
-    recover_missing_protected_edge_boundary_faces, repair_boundary_face_identity,
+    boundary_face_source_edges, recover_missing_protected_edge_boundary_faces,
+    recover_volume_face_source_face_boundary_faces, repair_boundary_face_identity,
     repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
 use material_interfaces::recover_single_material_interface_region;
@@ -385,6 +385,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
             &initial_recovery_queue,
             TetrahedronProtectedEdgeTopology::Absent,
         );
+    let volume_face_source_face_recovery_item_count = recovery_source_face_item_count_by_topology(
+        &initial_recovery_queue,
+        TetrahedronSourceFaceTopology::VolumeFace,
+    );
     let recovered_absent_source_edges = recover_absent_protected_edges_by_boundary_diagonal_flip(
         plc,
         &initial_recovery_queue,
@@ -401,8 +405,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
             &initial_recovery_queue,
             &mut tetrahedron_mesh,
         );
-    let recovered_boundary_face_count =
-        recover_missing_exterior_boundary_faces(plc, &mut tetrahedron_mesh);
+    let recovered_boundary_face_count = recover_volume_face_source_face_boundary_faces(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let repaired_boundary_face_identity_count =
         repair_boundary_face_identity(plc, &mut tetrahedron_mesh);
     let repaired_source_face_provenance_count =
@@ -427,6 +434,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "volume_edge_source_edge_recovery_items".to_string(),
         volume_edge_source_edge_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "volume_face_source_face_recovery_items".to_string(),
+        volume_face_source_face_recovery_item_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "deferred_absent_source_edge_recovery_items".to_string(),
@@ -575,6 +586,21 @@ fn recovery_source_edge_item_count_by_topology(
             item.kind == TetrahedronRecoveryKind::SourceEdge
                 && item.status == TetrahedronRecoveryStatus::Missing
                 && item.protected_edge_topology == Some(topology)
+        })
+        .count()
+}
+
+fn recovery_source_face_item_count_by_topology(
+    recovery_queue: &TetrahedronRecoveryQueue,
+    topology: TetrahedronSourceFaceTopology,
+) -> usize {
+    recovery_queue
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::SourceFace
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.source_face_topology == Some(topology)
         })
         .count()
 }
