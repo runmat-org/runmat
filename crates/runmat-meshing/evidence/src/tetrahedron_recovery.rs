@@ -105,6 +105,16 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub missing_source_face_recovery_item_count: usize,
     #[serde(default)]
+    pub missing_source_face_topology_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_face_provenance_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_face_boundary_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_face_volume_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_face_absent_face_recovery_item_count: usize,
+    #[serde(default)]
     pub missing_source_face_recovery_ids: Vec<String>,
     #[serde(default)]
     pub omitted_missing_source_face_recovery_id_count: usize,
@@ -331,6 +341,21 @@ pub(super) fn tetrahedron_recovery_evidence(
         missing_source_face_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_face_recovery_item_count,
+        missing_source_face_topology_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_topology_recovery_item_count,
+        missing_source_face_provenance_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_provenance_recovery_item_count,
+        missing_source_face_boundary_face_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_boundary_face_recovery_item_count,
+        missing_source_face_volume_face_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_volume_face_recovery_item_count,
+        missing_source_face_absent_face_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_absent_face_recovery_item_count,
         missing_source_face_recovery_ids: mesh
             .backend
             .tetrahedron_missing_source_face_recovery_ids

@@ -257,10 +257,30 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         recovery.rejected_material_interface_ambiguous_boundary_ownership_count,
         0
     );
-    assert_eq!(recovery.source_face_recovery_item_count, 4);
-    assert_eq!(recovery.recovered_source_face_recovery_item_count, 4);
-    assert_eq!(recovery.missing_source_face_recovery_item_count, 0);
-    assert!(recovery.missing_source_face_recovery_ids.is_empty());
+    assert_eq!(recovery.source_face_recovery_item_count, 5);
+    assert_eq!(recovery.recovered_source_face_recovery_item_count, 3);
+    assert_eq!(recovery.missing_source_face_recovery_item_count, 2);
+    assert_eq!(recovery.missing_source_face_topology_recovery_item_count, 1);
+    assert_eq!(
+        recovery.missing_source_face_provenance_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.missing_source_face_boundary_face_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.missing_source_face_volume_face_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.missing_source_face_absent_face_recovery_item_count,
+        0
+    );
+    assert_eq!(
+        recovery.missing_source_face_recovery_ids,
+        vec!["source_face_missing_1"]
+    );
     assert_eq!(recovery.omitted_missing_source_face_recovery_id_count, 0);
     assert_eq!(recovery.source_edge_recovery_item_count, 4);
     assert_eq!(recovery.recovered_source_edge_recovery_item_count, 3);

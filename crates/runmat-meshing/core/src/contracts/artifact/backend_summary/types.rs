@@ -213,6 +213,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_missing_source_face_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_missing_source_face_topology_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_face_provenance_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_face_boundary_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_face_volume_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_face_absent_face_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_missing_source_face_recovery_ids: Vec<String>,
     #[serde(default)]
     pub tetrahedron_omitted_missing_source_face_recovery_id_count: usize,

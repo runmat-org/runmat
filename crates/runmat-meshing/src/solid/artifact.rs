@@ -349,6 +349,24 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_source_face_items",
             ),
+            tetrahedron_missing_source_face_topology_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_face_topology_items",
+            ),
+            tetrahedron_missing_source_face_provenance_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_face_provenance_items",
+            ),
+            tetrahedron_missing_source_face_boundary_face_recovery_item_count:
+                recovery_entity_count(recovery_queue, "missing_source_face_boundary_face_items"),
+            tetrahedron_missing_source_face_volume_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_face_volume_face_items",
+            ),
+            tetrahedron_missing_source_face_absent_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_face_absent_face_items",
+            ),
             tetrahedron_missing_source_face_recovery_ids: missing_source_face_recovery.ids,
             tetrahedron_omitted_missing_source_face_recovery_id_count: missing_source_face_recovery
                 .omitted_count,

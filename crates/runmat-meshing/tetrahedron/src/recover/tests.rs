@@ -24,6 +24,22 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
         queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         0
     );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_provenance_items"],
+        0
+    );
+    assert!(queue
+        .items
+        .iter()
+        .filter(|item| item.kind == TetrahedronRecoveryKind::SourceFace)
+        .all(|item| {
+            item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
+                && item.source_face_node_ids.is_some()
+        }));
     assert!(queue.items.iter().any(|item| {
         item.kind == TetrahedronRecoveryKind::SourceEdge
             && item.protected_edge_node_ids
@@ -654,12 +670,16 @@ fn recovery_stage_result_rejects_missing_queue_items() {
     mesh.boundary_faces.remove(0);
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
 
-    assert_incomplete_recovery(
+    let recovery_evidence = assert_incomplete_recovery(
         recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("missing face should fail"),
         1,
         1,
         0,
         0,
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_source_face_absent_face_items"],
+        1
     );
 }
 
@@ -704,9 +724,83 @@ fn recovery_queue_reports_missing_source_face() {
     assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
     assert_eq!(queue.evidence.entity_counts["missing_items"], 1);
     assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 1);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_provenance_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_boundary_face_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_absent_face_items"],
+        0
+    );
     assert!(queue.items.iter().any(|item| {
         item.kind == TetrahedronRecoveryKind::SourceFace
             && item.status == TetrahedronRecoveryStatus::Missing
+            && item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
+            && item.source_face_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                ])
+            && item
+                .source_entity_id
+                .as_ref()
+                .is_some_and(|source| source.id == "face_1")
+    }));
+}
+
+#[test]
+fn recovery_queue_reports_missing_source_face_present_as_volume_face() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.remove(0);
+
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("volume-face source faces should be reported as recovery evidence");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 1);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_provenance_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_topology_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_boundary_face_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_absent_face_items"],
+        0
+    );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceFace
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.source_face_topology == Some(TetrahedronSourceFaceTopology::VolumeFace)
+            && item.source_face_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                ])
             && item
                 .source_entity_id
                 .as_ref()

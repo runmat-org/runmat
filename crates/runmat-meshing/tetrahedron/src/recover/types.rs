@@ -68,6 +68,10 @@ pub struct TetrahedronRecoveryQueueItem {
     #[serde(default)]
     pub source_entity_id: Option<TopologyEntityId>,
     #[serde(default)]
+    pub source_face_node_ids: Option<[TopologyEntityId; 3]>,
+    #[serde(default)]
+    pub source_face_topology: Option<TetrahedronSourceFaceTopology>,
+    #[serde(default)]
     pub protected_edge_node_ids: Option<[TopologyEntityId; 2]>,
     #[serde(default)]
     pub protected_edge_topology: Option<TetrahedronProtectedEdgeTopology>,
@@ -88,6 +92,14 @@ pub enum TetrahedronRecoveryKind {
 pub enum TetrahedronRecoveryStatus {
     Recovered,
     Missing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TetrahedronSourceFaceTopology {
+    BoundaryFace,
+    VolumeFace,
+    Absent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
