@@ -357,6 +357,31 @@ fn absent_source_edge_boundary_diagonal_flip_records_rejection_without_mutating_
 }
 
 #[test]
+fn source_face_boundary_diagonal_flip_records_rejection_without_mutating_mesh() {
+    let plc = source_face_boundary_diagonal_flip_plc();
+    let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();
+    mesh.elements[1].material_region_id = "other_body".to_string();
+    let original_elements = mesh.elements.clone();
+    let original_boundary_faces = mesh.boundary_faces.clone();
+
+    let recovery =
+        super::source_faces::recover_source_faces_by_boundary_diagonal_flip(&plc, &mut mesh);
+
+    assert_eq!(recovery.attempted_source_face_pair_count, 1);
+    assert_eq!(recovery.source_face_pair_count, 0);
+    assert_eq!(recovery.source_face_count, 0);
+    assert_eq!(recovery.boundary_face_count, 0);
+    assert_eq!(recovery.rejected_source_face_pair_count, 1);
+    assert_eq!(
+        recovery.rejection_counts
+            ["rejected_source_face_diagonal_recovery_material_region_mismatch"],
+        1
+    );
+    assert_eq!(mesh.elements, original_elements);
+    assert_eq!(mesh.boundary_faces, original_boundary_faces);
+}
+
+#[test]
 fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() {
     let mut mesh = tetrahedron_mesh();
     for boundary_face in &mut mesh.boundary_faces {
