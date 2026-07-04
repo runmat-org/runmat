@@ -839,6 +839,68 @@ fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
 }
 
 #[test]
+fn recovery_queue_reports_incomplete_material_interface_ownership() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    add_unclassified_region_a_boundary_neighbor(&mut mesh);
+
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("incomplete material ownership should be reported before recovery");
+
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_items"],
+        1
+    );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.material_interface_id.as_deref() == Some("region_a")
+    }));
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Recovered
+            && item.material_interface_id.as_deref() == Some("region_b")
+    }));
+}
+
+#[test]
+fn recovery_stage_result_repairs_incomplete_material_interface_ownership_from_queue() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    add_unclassified_region_a_boundary_neighbor(&mut mesh);
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("queued incomplete material ownership should be repaired");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.tetrahedron_mesh.elements[2].material_region_id,
+        "region_a"
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["attempted_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
+        0
+    );
+}
+
+#[test]
 fn material_interface_recovery_propagates_through_interior_faces() {
     let plc = interior_material_interface_propagation_plc();
     let initial_queue = TetrahedronRecoveryQueue {
@@ -1489,6 +1551,23 @@ fn two_region_bipyramid_tetrahedron_mesh() -> TetrahedronMesh {
         quality_optimized: false,
         evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
     }
+}
+
+fn add_unclassified_region_a_boundary_neighbor(mesh: &mut TetrahedronMesh) {
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        [0.5, 0.5, -1.0],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_unclassified"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        ],
+        material_region_id: "unclassified".to_string(),
+    });
 }
 
 fn interior_material_interface_propagation_plc() -> ProtectedBoundaryComplex {

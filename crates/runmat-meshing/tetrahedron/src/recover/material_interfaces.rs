@@ -139,6 +139,8 @@ fn recover_boundary_facet_material_interface_regions(
             element.material_region_id = material_interface_id.clone();
             recovery.repaired_element_count += 1;
             repaired_material_interfaces.insert(material_interface_id);
+        } else {
+            repaired_material_interfaces.insert(material_interface_id);
         }
     }
     recovery.boundary_owned_material_interface_count = boundary_owned_material_interfaces.len();

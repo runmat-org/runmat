@@ -7,7 +7,7 @@ mod source_faces;
 mod topology;
 mod types;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::contracts::{
     MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus, TetrahedronMesh,
@@ -148,8 +148,15 @@ pub fn build_recovery_queue_from_plc(
         .iter()
         .flat_map(|facet| facet.material_interface_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
-    for material_interface_id in material_interfaces {
-        let status = if recovered_material_interfaces.contains(&material_interface_id) {
+    for material_interface_id in &material_interfaces {
+        let status = if recovered_material_interfaces.contains(material_interface_id)
+            && !material_interface_has_pending_ownership(
+                plc,
+                tetrahedron_mesh,
+                material_interface_id,
+                &recovered_material_interfaces,
+                &material_interfaces,
+            ) {
             TetrahedronRecoveryStatus::Recovered
         } else {
             TetrahedronRecoveryStatus::Missing
@@ -163,7 +170,7 @@ pub fn build_recovery_queue_from_plc(
             source_face_topology: None,
             protected_edge_node_ids: None,
             protected_edge_topology: None,
-            material_interface_id: Some(material_interface_id),
+            material_interface_id: Some(material_interface_id.clone()),
         });
     }
 
@@ -359,6 +366,73 @@ pub fn build_recovery_queue_from_plc(
     );
 
     Ok(TetrahedronRecoveryQueue { items, evidence })
+}
+
+fn material_interface_has_pending_ownership(
+    plc: &ProtectedBoundaryComplex,
+    tetrahedron_mesh: &TetrahedronMesh,
+    material_interface_id: &str,
+    recovered_material_interfaces: &BTreeSet<String>,
+    plc_material_interfaces: &BTreeSet<String>,
+) -> bool {
+    let plc_boundary_faces = plc
+        .facets
+        .iter()
+        .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
+    let material_interfaces_by_boundary_face = plc
+        .facets
+        .iter()
+        .map(|facet| {
+            (
+                sorted_topology_ids(facet.node_ids.clone()),
+                facet
+                    .material_interface_ids
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for element in &tetrahedron_mesh.elements {
+        if plc_material_interfaces.contains(&element.material_region_id) {
+            continue;
+        }
+        for face in tetrahedron_faces(element.node_ids.clone()) {
+            if material_interfaces_by_boundary_face
+                .get(&face)
+                .is_some_and(|material_interfaces| {
+                    material_interfaces.contains(material_interface_id)
+                })
+            {
+                return true;
+            }
+        }
+    }
+
+    let mut material_regions_by_interior_face = BTreeMap::<_, Vec<String>>::new();
+    for element in &tetrahedron_mesh.elements {
+        for face in tetrahedron_faces(element.node_ids.clone()) {
+            if !plc_boundary_faces.contains(&face) {
+                material_regions_by_interior_face
+                    .entry(face)
+                    .or_default()
+                    .push(element.material_region_id.clone());
+            }
+        }
+    }
+
+    material_regions_by_interior_face
+        .values()
+        .any(|material_regions| {
+            let [left, right] = material_regions.as_slice() else {
+                return false;
+            };
+            recovered_material_interfaces.contains(material_interface_id)
+                && ((left == material_interface_id && !plc_material_interfaces.contains(right))
+                    || (right == material_interface_id && !plc_material_interfaces.contains(left)))
+        })
 }
 
 pub fn mark_tetrahedron_mesh_recovery_state(
