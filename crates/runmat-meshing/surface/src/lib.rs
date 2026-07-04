@@ -18,6 +18,6 @@ pub use recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
 };
 pub use validate::{
-    validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
-    SurfaceValidationReport,
+    validate_cad_topology_surface_discretization, validate_surface_discretization,
+    SurfaceValidationError, SurfaceValidationOptions, SurfaceValidationReport,
 };

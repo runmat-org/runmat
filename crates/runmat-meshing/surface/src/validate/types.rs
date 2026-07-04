@@ -44,6 +44,20 @@ pub enum SurfaceValidationError {
     MissingSourceEdge {
         source_edge_id: u32,
     },
+    MissingCadFaceId {
+        element_id: u32,
+    },
+    MissingCadFace {
+        cad_face_id: String,
+    },
+    InvalidCadLoopEdgeId {
+        cad_face_id: String,
+        loop_edge_id: String,
+    },
+    SourceEdgeOutsideCadFace {
+        cad_face_id: String,
+        source_edge_id: u32,
+    },
     EdgeConformityFailed {
         source_edge_id: u32,
         source_edge_node_ids: [u32; 2],
@@ -71,6 +85,9 @@ pub enum SurfaceValidationError {
     UncoveredSourceFace {
         source_face_id: u32,
     },
+    UncoveredCadFace {
+        cad_face_id: String,
+    },
 }
 
 impl std::fmt::Display for SurfaceValidationError {
@@ -94,6 +111,27 @@ impl std::fmt::Display for SurfaceValidationError {
             Self::MissingSourceEdge { source_edge_id } => {
                 write!(formatter, "source edge {source_edge_id} is missing")
             }
+            Self::MissingCadFaceId { element_id } => write!(
+                formatter,
+                "surface element {element_id} does not carry CAD face provenance"
+            ),
+            Self::MissingCadFace { cad_face_id } => {
+                write!(formatter, "CAD face {cad_face_id} is missing")
+            }
+            Self::InvalidCadLoopEdgeId {
+                cad_face_id,
+                loop_edge_id,
+            } => write!(
+                formatter,
+                "CAD face {cad_face_id} has invalid loop edge id {loop_edge_id}"
+            ),
+            Self::SourceEdgeOutsideCadFace {
+                cad_face_id,
+                source_edge_id,
+            } => write!(
+                formatter,
+                "source edge {source_edge_id} is not a loop edge for CAD face {cad_face_id}"
+            ),
             Self::EdgeConformityFailed {
                 source_edge_id,
                 source_edge_node_ids,
@@ -133,6 +171,9 @@ impl std::fmt::Display for SurfaceValidationError {
             ),
             Self::UncoveredSourceFace { source_face_id } => {
                 write!(formatter, "source face {source_face_id} is not covered")
+            }
+            Self::UncoveredCadFace { cad_face_id } => {
+                write!(formatter, "CAD face {cad_face_id} is not covered")
             }
         }
     }

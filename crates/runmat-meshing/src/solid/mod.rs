@@ -5,7 +5,10 @@ use runmat_meshing_core::{
 };
 use runmat_meshing_curve::discretize_topology_curves_with_sizing;
 use runmat_meshing_plc::build::build_protected_boundary_complex;
-use runmat_meshing_surface::discretize_cad_topology_surfaces_with_curves;
+use runmat_meshing_surface::{
+    discretize_cad_topology_surfaces_with_curves, validate_cad_topology_surface_discretization,
+    SurfaceValidationOptions,
+};
 use runmat_meshing_tetrahedron::{recover::build_recovery_queue_from_plc, structured_grid};
 
 mod artifact;
@@ -91,6 +94,13 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         surface_discretization_options(),
     )
     .map_err(SolidMeshingError::Surface)?;
+    validate_cad_topology_surface_discretization(
+        &cad_topology,
+        &topology,
+        &surface,
+        SurfaceValidationOptions::default(),
+    )
+    .map_err(SolidMeshingError::SurfaceValidation)?;
     let plc = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
