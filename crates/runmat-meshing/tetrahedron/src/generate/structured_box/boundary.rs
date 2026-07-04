@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
 
 use super::super::{Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError};
-use super::structured_box_side_index;
+use super::shape::structured_box_side_index;
 
 pub(super) fn exterior_boundary_faces(
     elements: &[Tetrahedron4Element],
