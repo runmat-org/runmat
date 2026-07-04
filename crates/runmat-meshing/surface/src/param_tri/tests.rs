@@ -34,6 +34,7 @@ fn discretizes_source_faces_as_surface_elements() {
     assert_eq!(surface.elements[0].source_edge_ids, [0, 1, 2]);
     assert_eq!(surface.elements[0].parametric_node_uv, [[0.0, 0.0]; 3]);
     assert_eq!(surface.elements[0].max_projection_error_m, 0.0);
+    assert!(surface.curve_boundary_validation.is_none());
     assert_eq!(surface.elements[0].region_ids, vec!["face_a".to_string()]);
     assert!((surface.elements[0].area_m2 - 0.5).abs() < 1.0e-12);
 }

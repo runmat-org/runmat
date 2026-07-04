@@ -64,6 +64,7 @@ fn tetra_surface() -> SurfaceDiscretization {
             element(2, [1, 2, 3], [1, 5, 4]),
             element(3, [2, 0, 3], [2, 3, 5]),
         ],
+        curve_boundary_validation: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }

@@ -62,6 +62,7 @@ pub fn discretize_topology_surfaces(
     Ok(SurfaceDiscretization {
         nodes,
         elements,
+        curve_boundary_validation: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -164,6 +165,7 @@ pub fn discretize_cad_surfaces(
     Ok(SurfaceDiscretization {
         nodes,
         elements,
+        curve_boundary_validation: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -175,8 +177,9 @@ pub fn discretize_cad_surfaces_with_curves(
     curves: &CurveDiscretization,
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
-    validate_curve_discretization(topology, curves, CurveValidationOptions::default())
-        .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
+    let curve_boundary_validation =
+        validate_curve_discretization(topology, curves, CurveValidationOptions::default())
+            .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
     let mut nodes = topology
         .vertices
         .iter()
@@ -232,6 +235,7 @@ pub fn discretize_cad_surfaces_with_curves(
     Ok(SurfaceDiscretization {
         nodes,
         elements,
+        curve_boundary_validation: Some(curve_boundary_validation),
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
     })

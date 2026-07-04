@@ -1,4 +1,4 @@
-use runmat_meshing_curve::CurveValidationError;
+use runmat_meshing_curve::{CurveValidationError, CurveValidationReport};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +46,8 @@ pub struct SurfaceElement {
 pub struct SurfaceDiscretization {
     pub nodes: Vec<SurfaceNode>,
     pub elements: Vec<SurfaceElement>,
+    #[serde(default)]
+    pub curve_boundary_validation: Option<CurveValidationReport>,
     #[serde(default)]
     pub exact_cad_sample_node_count: usize,
     #[serde(default)]

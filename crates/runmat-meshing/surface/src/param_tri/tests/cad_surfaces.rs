@@ -85,6 +85,14 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
 
     assert_eq!(surface.elements.len(), 4);
     assert!(surface.nodes.len() > topology.vertices.len());
+    let curve_validation = surface
+        .curve_boundary_validation
+        .as_ref()
+        .expect("curve boundary validation evidence");
+    assert_eq!(curve_validation.source_edge_count, topology.edges.len());
+    assert_eq!(curve_validation.curve_node_count, curves.nodes.len());
+    assert_eq!(curve_validation.curve_element_count, curves.elements.len());
+    assert_eq!(curve_validation.max_endpoint_error_m, 0.0);
     assert!(surface
         .elements
         .iter()
@@ -130,6 +138,7 @@ fn curve_driven_cad_surface_preserves_single_triangle_loop_without_extra_fan_nod
 
     assert_eq!(surface.nodes.len(), topology.vertices.len());
     assert_eq!(surface.elements.len(), 1);
+    assert!(surface.curve_boundary_validation.is_some());
     assert_eq!(surface.elements[0].node_ids, [0, 1, 2]);
     assert!(surface.elements[0]
         .source_edge_ids
