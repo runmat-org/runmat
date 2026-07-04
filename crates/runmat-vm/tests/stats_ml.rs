@@ -99,6 +99,20 @@ fn fitctree_surface_executes_from_scripts() {
 }
 
 #[test]
+fn classify_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "training = [0; 0.5; 2; 2.5]; group = [1; 1; 2; 2]; [class,err,posterior,logp,coeff] = classify([0.2; 2.2], training, group, 'linear', 'empirical'); c1 = class(1); c2 = class(2); p11 = posterior(1,1); k = coeff(1,2).const;",
+    )
+    .expect("classify script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 0.0));
+}
+
+#[test]
 fn student_t_distribution_surface_executes_from_scripts() {
     let vars = execute_source(
         "p = tcdf(0, 10); q = tcdf(10, 99, 'upper'); d = tpdf(0, 1); x = tinv(0.95, 50); r = trnd(5, 2, 3);",

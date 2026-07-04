@@ -8783,6 +8783,194 @@
       "errors": []
     },
     {
+      "name": "classify",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "class = classify(sample, training, group)",
+          "inputs": [
+            {
+              "name": "sample",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample observations in rows."
+            },
+            {
+              "name": "training",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Training observations in rows."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Training group labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "class",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels for sample observations."
+            }
+          ]
+        },
+        {
+          "label": "class = classify(sample, training, group, type, prior)",
+          "inputs": [
+            {
+              "name": "sample",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample observations in rows."
+            },
+            {
+              "name": "training",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Training observations in rows."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Training group labels."
+            },
+            {
+              "name": "type",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "linear",
+              "description": "Discriminant type: linear, quadratic, diagLinear, diagQuadratic, or mahalanobis."
+            },
+            {
+              "name": "prior",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Prior probabilities as a numeric vector, 'empirical', or a struct with group and prob fields."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "class",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels for sample observations."
+            }
+          ]
+        },
+        {
+          "label": "[class,err,posterior,logp,coeff] = classify(___)",
+          "inputs": [
+            {
+              "name": "sample",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample observations in rows."
+            },
+            {
+              "name": "training",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Training observations in rows."
+            },
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Training group labels."
+            },
+            {
+              "name": "type",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "linear",
+              "description": "Discriminant type: linear, quadratic, diagLinear, diagQuadratic, or mahalanobis."
+            },
+            {
+              "name": "prior",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Prior probabilities as a numeric vector, 'empirical', or a struct with group and prob fields."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "class",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels for sample observations."
+            },
+            {
+              "name": "err",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Apparent training-set error rate."
+            },
+            {
+              "name": "posterior",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Posterior class probabilities for sample observations."
+            },
+            {
+              "name": "logp",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Log unconditional density for sample observations."
+            },
+            {
+              "name": "coeff",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pairwise discriminant boundary coefficients."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CLASSIFY.INVALID_ARGUMENT",
+          "identifier": "RunMat:classify:InvalidArgument",
+          "when": "Inputs, labels, dimensions, discriminant type, or priors are malformed.",
+          "message": "classify: invalid argument"
+        },
+        {
+          "code": "RM.CLASSIFY.NUMERICAL",
+          "identifier": "RunMat:classify:Numerical",
+          "when": "Covariance matrices cannot be solved numerically.",
+          "message": "classify: numerical failure"
+        },
+        {
+          "code": "RM.CLASSIFY.INTERNAL",
+          "identifier": "RunMat:classify:Internal",
+          "when": "RunMat cannot construct classification outputs.",
+          "message": "classify: internal error"
+        }
+      ]
+    },
+    {
       "name": "clc",
       "output_mode": "Fixed",
       "completion_policy": "Public",

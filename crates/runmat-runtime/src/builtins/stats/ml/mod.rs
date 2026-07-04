@@ -1,5 +1,6 @@
 //! Statistics and Machine Learning Toolbox modeling builtins.
 
+pub mod classification;
 pub mod classification_tree;
 pub mod cvpartition;
 pub mod distance;
