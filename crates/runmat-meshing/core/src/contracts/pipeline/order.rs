@@ -52,12 +52,15 @@ pub fn validate_meshing_stage_order(
             return Err(MeshingStageContractError::InvalidProtectedBoundaryComplex);
         }
     }
-    if artifacts.recovered_tetrahedron_mesh.is_some() {
+    if let Some(mesh) = &artifacts.recovered_tetrahedron_mesh {
         require(
             artifacts.initial_tetrahedron_mesh.is_some(),
             MeshingStage::ConstraintRecovery,
             MeshingStage::TetrahedronMesh,
         )?;
+        if !mesh.recovery_complete {
+            return Err(MeshingStageContractError::UnrecoveredTetrahedronMesh);
+        }
     }
     if let Some(mesh) = &artifacts.optimized_tetrahedron_mesh {
         require(

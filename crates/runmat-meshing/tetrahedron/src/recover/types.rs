@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use runmat_meshing_core::contracts::{StageEvidence, TopologyEntityId};
+use runmat_meshing_core::contracts::{StageEvidence, TetrahedronMesh, TopologyEntityId};
 use runmat_meshing_plc::validate::PlcValidationError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,12 @@ pub struct TetrahedronRecoveryQueue {
     #[serde(default)]
     pub items: Vec<TetrahedronRecoveryQueueItem>,
     pub evidence: StageEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TetrahedronRecoveryResult {
+    pub tetrahedron_mesh: TetrahedronMesh,
+    pub recovery_queue: TetrahedronRecoveryQueue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

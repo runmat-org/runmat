@@ -34,6 +34,23 @@ fn marks_tetrahedron_mesh_recovered_when_recovery_queue_has_no_missing_items() {
 }
 
 #[test]
+fn recovery_stage_result_carries_audited_mesh_and_queue_evidence() {
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), tetrahedron_mesh())
+        .expect("matching Tetrahedron mesh should become a recovered stage artifact");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.stage,
+        MeshingStage::ConstraintRecovery
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+    assert_eq!(result.tetrahedron_mesh.elements.len(), 1);
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
@@ -44,6 +61,26 @@ fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     mark_tetrahedron_mesh_recovery_state(&mut mesh, &queue);
 
     assert!(!mesh.recovery_complete);
+}
+
+#[test]
+fn recovery_stage_result_keeps_mesh_unrecovered_when_queue_has_missing_items() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("missing source faces should be reported as recovery evidence");
+
+    assert!(!result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.status,
+        StageEvidenceStatus::Failed
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        1
+    );
 }
 
 #[test]

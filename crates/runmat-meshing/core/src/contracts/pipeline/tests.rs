@@ -60,6 +60,18 @@ fn stage_order_rejects_solve_readiness_before_optimization() {
 }
 
 #[test]
+fn stage_order_rejects_unrecovered_tetrahedron_recovery_stage() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+    artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::UnrecoveredTetrahedronMesh)
+    );
+}
+
+#[test]
 fn stage_order_accepts_complete_meshing_sequence() {
     let mut artifacts = complete_prefix_through_plc();
     artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));

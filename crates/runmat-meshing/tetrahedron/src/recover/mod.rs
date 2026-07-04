@@ -12,7 +12,7 @@ use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 use topology::{sorted_topology_ids, topology_face_edges};
 pub use types::{
     TetrahedronRecoveryError, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
-    TetrahedronRecoveryQueueItem, TetrahedronRecoveryStatus,
+    TetrahedronRecoveryQueueItem, TetrahedronRecoveryResult, TetrahedronRecoveryStatus,
 };
 
 pub const MODULE_PURPOSE: &str = "source-edge, source-face, and material-interface recovery queues";
@@ -189,6 +189,18 @@ pub fn mark_tetrahedron_mesh_recovery_state(
         .items
         .iter()
         .all(|item| item.status == TetrahedronRecoveryStatus::Recovered);
+}
+
+pub fn recover_tetrahedron_mesh_from_plc(
+    plc: &ProtectedBoundaryComplex,
+    mut tetrahedron_mesh: TetrahedronMesh,
+) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
+    let recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
+    Ok(TetrahedronRecoveryResult {
+        tetrahedron_mesh,
+        recovery_queue,
+    })
 }
 
 #[cfg(test)]
