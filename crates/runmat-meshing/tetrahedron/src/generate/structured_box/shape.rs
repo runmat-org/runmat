@@ -15,6 +15,9 @@ pub(super) fn validate_structured_box_plc(
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
+    if !plc_nodes_are_box_corners(plc, bounds, tolerance) {
+        return Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc);
+    }
     let mut covered_sides = [false; 6];
     for facet in &plc.facets {
         let coordinates = facet
@@ -37,6 +40,26 @@ pub(super) fn validate_structured_box_plc(
     } else {
         Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc)
     }
+}
+
+fn plc_nodes_are_box_corners(
+    plc: &ProtectedBoundaryComplex,
+    bounds: [[f64; 3]; 2],
+    tolerance: f64,
+) -> bool {
+    if plc.nodes.len() != 8 {
+        return false;
+    }
+    let [min, max] = bounds;
+    plc.nodes.iter().all(|node| {
+        node.coordinates_m
+            .iter()
+            .enumerate()
+            .all(|(axis, coordinate)| {
+                (*coordinate - min[axis]).abs() <= tolerance
+                    || (*coordinate - max[axis]).abs() <= tolerance
+            })
+    })
 }
 
 pub(super) fn structured_box_side_index(

@@ -14,7 +14,7 @@ use super::{
     TetrahedronMeshNode,
 };
 use bounds::{bounds_span, plc_coordinates_and_bounds, plc_node_average};
-use shape::{validate_boundary_nodes_are_hull_nodes, validate_convex_boundary_facets};
+use shape::validate_convex_boundary_facets;
 
 pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
@@ -28,7 +28,6 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
     let tolerance = MeshingTolerance::from_bounds(bounds[0], bounds[1]);
     let interior = plc_node_average(plc)?;
     validate_convex_boundary_facets(plc, &coordinates_by_id, interior, tolerance)?;
-    validate_boundary_nodes_are_hull_nodes(plc, &coordinates_by_id, bounds, tolerance)?;
 
     let interior_id = TopologyEntityId {
         stage: MeshingStage::TetrahedronMesh,

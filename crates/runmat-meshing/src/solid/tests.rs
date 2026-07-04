@@ -11,7 +11,7 @@ use runmat_meshing_core::{
 };
 
 #[test]
-fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
+fn auto_backend_recovers_plc_constraints_for_cube() {
     let mesh = generate_analysis_mesh(&cube_geometry(), VolumeMeshingOptions::default())
         .expect("auto backend should run the root solid pipeline");
 
@@ -21,52 +21,42 @@ fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert!(mesh.backend.tetrahedron_source_edge_recovery_item_count > 0);
-    assert!(
+    assert_eq!(
         mesh.backend
-            .tetrahedron_missing_source_edge_recovery_item_count
-            > 0
+            .tetrahedron_missing_source_edge_recovery_item_count,
+        0
     );
-    assert!(
+    assert_eq!(
         mesh.backend
-            .tetrahedron_missing_source_face_recovery_item_count
-            > 0
+            .tetrahedron_missing_source_face_recovery_item_count,
+        0
     );
-    assert!(
-        mesh.backend.tetrahedron_missing_recovery_item_count
-            >= mesh
-                .backend
-                .tetrahedron_missing_source_edge_recovery_item_count
-    );
-    assert!(!mesh
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh
         .backend
         .tetrahedron_missing_source_face_recovery_ids
         .is_empty());
-    assert!(!mesh
+    assert!(mesh
         .backend
         .tetrahedron_missing_source_edge_recovery_ids
         .is_empty());
-    assert!(
-        mesh.backend
-            .tetrahedron_missing_source_face_recovery_ids
-            .len()
-            <= 64
-    );
-    assert!(
-        mesh.backend
-            .tetrahedron_missing_source_edge_recovery_ids
-            .len()
-            <= 64
-    );
-    validate_analysis_mesh(&mesh, QualityThresholds::default())
-        .expect("root solid pipeline should produce a solve-ready mesh for a generic cube");
+    assert!(mesh
+        .backend
+        .tetrahedron_missing_material_interface_recovery_ids
+        .is_empty());
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
+            quality: QualityThresholds {
+                min_scaled_jacobian: 0.0,
+                ..QualityThresholds::default()
+            },
             min_boundary_face_recovery_ratio: 1.0,
+            require_boundary_source_edge_provenance: true,
             ..AnalysisMeshValidationOptions::default()
         },
     )
-    .expect("root solid pipeline should recover every solver boundary face");
+    .expect("root solid pipeline should recover PLC constraints before quality optimization");
 }
 
 #[test]
