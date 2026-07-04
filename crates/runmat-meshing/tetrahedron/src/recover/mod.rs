@@ -25,9 +25,10 @@ use material_interfaces::recover_material_interface_regions;
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
-    TetrahedronProtectedEdgeTopology, TetrahedronRecoveryError, TetrahedronRecoveryKind,
-    TetrahedronRecoveryQueue, TetrahedronRecoveryQueueItem, TetrahedronRecoveryResult,
-    TetrahedronRecoveryStatus, TetrahedronSourceFaceTopology,
+    TetrahedronMaterialInterfaceTopology, TetrahedronProtectedEdgeTopology,
+    TetrahedronRecoveryError, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
+    TetrahedronRecoveryQueueItem, TetrahedronRecoveryResult, TetrahedronRecoveryStatus,
+    TetrahedronSourceFaceTopology,
 };
 
 pub const MODULE_PURPOSE: &str = "source-edge, source-face, and material-interface recovery queues";
@@ -111,6 +112,7 @@ pub fn build_recovery_queue_from_plc(
             source_face_topology: Some(source_face_topology),
             protected_edge_node_ids: None,
             protected_edge_topology: None,
+            material_interface_topology: None,
             material_interface_id: None,
         });
     }
@@ -139,6 +141,7 @@ pub fn build_recovery_queue_from_plc(
             source_face_topology: None,
             protected_edge_node_ids: Some(edge_key),
             protected_edge_topology: Some(protected_edge_topology),
+            material_interface_topology: None,
             material_interface_id: None,
         });
     }
@@ -149,14 +152,16 @@ pub fn build_recovery_queue_from_plc(
         .flat_map(|facet| facet.material_interface_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
     for material_interface_id in &material_interfaces {
+        let material_interface_topology = material_interface_recovery_topology(
+            plc,
+            tetrahedron_mesh,
+            material_interface_id,
+            &recovered_material_interfaces,
+            &material_interfaces,
+        );
         let status = if recovered_material_interfaces.contains(material_interface_id)
-            && !material_interface_has_pending_ownership(
-                plc,
-                tetrahedron_mesh,
-                material_interface_id,
-                &recovered_material_interfaces,
-                &material_interfaces,
-            ) {
+            && material_interface_topology == TetrahedronMaterialInterfaceTopology::AbsentPartition
+        {
             TetrahedronRecoveryStatus::Recovered
         } else {
             TetrahedronRecoveryStatus::Missing
@@ -170,6 +175,11 @@ pub fn build_recovery_queue_from_plc(
             source_face_topology: None,
             protected_edge_node_ids: None,
             protected_edge_topology: None,
+            material_interface_topology: if status == TetrahedronRecoveryStatus::Missing {
+                Some(material_interface_topology)
+            } else {
+                None
+            },
             material_interface_id: Some(material_interface_id.clone()),
         });
     }
@@ -364,17 +374,38 @@ pub fn build_recovery_queue_from_plc(
             })
             .count(),
     );
+    evidence.entity_counts.insert(
+        "missing_material_interface_boundary_owned_items".to_string(),
+        missing_material_interface_item_count_by_topology(
+            &items,
+            TetrahedronMaterialInterfaceTopology::BoundaryOwned,
+        ),
+    );
+    evidence.entity_counts.insert(
+        "missing_material_interface_interior_face_items".to_string(),
+        missing_material_interface_item_count_by_topology(
+            &items,
+            TetrahedronMaterialInterfaceTopology::InteriorFace,
+        ),
+    );
+    evidence.entity_counts.insert(
+        "missing_material_interface_absent_partition_items".to_string(),
+        missing_material_interface_item_count_by_topology(
+            &items,
+            TetrahedronMaterialInterfaceTopology::AbsentPartition,
+        ),
+    );
 
     Ok(TetrahedronRecoveryQueue { items, evidence })
 }
 
-fn material_interface_has_pending_ownership(
+fn material_interface_recovery_topology(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &TetrahedronMesh,
     material_interface_id: &str,
     recovered_material_interfaces: &BTreeSet<String>,
     plc_material_interfaces: &BTreeSet<String>,
-) -> bool {
+) -> TetrahedronMaterialInterfaceTopology {
     let plc_boundary_faces = plc
         .facets
         .iter()
@@ -406,7 +437,7 @@ fn material_interface_has_pending_ownership(
                     material_interfaces.contains(material_interface_id)
                 })
             {
-                return true;
+                return TetrahedronMaterialInterfaceTopology::BoundaryOwned;
             }
         }
     }
@@ -423,7 +454,7 @@ fn material_interface_has_pending_ownership(
         }
     }
 
-    material_regions_by_interior_face
+    if material_regions_by_interior_face
         .values()
         .any(|material_regions| {
             let [left, right] = material_regions.as_slice() else {
@@ -433,6 +464,25 @@ fn material_interface_has_pending_ownership(
                 && ((left == material_interface_id && !plc_material_interfaces.contains(right))
                     || (right == material_interface_id && !plc_material_interfaces.contains(left)))
         })
+    {
+        TetrahedronMaterialInterfaceTopology::InteriorFace
+    } else {
+        TetrahedronMaterialInterfaceTopology::AbsentPartition
+    }
+}
+
+fn missing_material_interface_item_count_by_topology(
+    items: &[TetrahedronRecoveryQueueItem],
+    topology: TetrahedronMaterialInterfaceTopology,
+) -> usize {
+    items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::MaterialInterface
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.material_interface_topology == Some(topology)
+        })
+        .count()
 }
 
 pub fn mark_tetrahedron_mesh_recovery_state(

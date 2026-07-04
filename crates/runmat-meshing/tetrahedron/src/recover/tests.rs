@@ -32,6 +32,18 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
         queue.evidence.entity_counts["missing_source_face_provenance_items"],
         0
     );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_boundary_owned_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_interior_face_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        0
+    );
     assert!(queue
         .items
         .iter()
@@ -855,12 +867,73 @@ fn recovery_queue_reports_incomplete_material_interface_ownership() {
         item.kind == TetrahedronRecoveryKind::MaterialInterface
             && item.status == TetrahedronRecoveryStatus::Missing
             && item.material_interface_id.as_deref() == Some("region_a")
+            && item.material_interface_topology
+                == Some(TetrahedronMaterialInterfaceTopology::BoundaryOwned)
     }));
     assert!(queue.items.iter().any(|item| {
         item.kind == TetrahedronRecoveryKind::MaterialInterface
             && item.status == TetrahedronRecoveryStatus::Recovered
             && item.material_interface_id.as_deref() == Some("region_b")
+            && item.material_interface_topology.is_none()
     }));
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_boundary_owned_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_interior_face_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        0
+    );
+}
+
+#[test]
+fn recovery_queue_classifies_interior_face_material_interface_ownership() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    replace_region_b_with_unclassified_region_a_interior_neighbor(&mut mesh);
+
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("interior material ownership should be classified before recovery");
+
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.material_interface_id.as_deref() == Some("region_a")
+            && item.material_interface_topology
+                == Some(TetrahedronMaterialInterfaceTopology::InteriorFace)
+    }));
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_interior_face_items"],
+        1
+    );
+}
+
+#[test]
+fn recovery_queue_classifies_absent_partition_material_interface_work() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("absent material partition should be classified before recovery");
+
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.material_interface_id.as_deref() == Some("region_a")
+            && item.material_interface_topology
+                == Some(TetrahedronMaterialInterfaceTopology::AbsentPartition)
+    }));
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        1
+    );
 }
 
 #[test]
@@ -913,6 +986,7 @@ fn material_interface_recovery_propagates_through_interior_faces() {
             source_face_topology: None,
             protected_edge_node_ids: None,
             protected_edge_topology: None,
+            material_interface_topology: Some(TetrahedronMaterialInterfaceTopology::BoundaryOwned),
             material_interface_id: Some("region_a".to_string()),
         }],
         evidence: StageEvidence::complete(MeshingStage::ConstraintRecovery),
@@ -1568,6 +1642,25 @@ fn add_unclassified_region_a_boundary_neighbor(mesh: &mut TetrahedronMesh) {
         ],
         material_region_id: "unclassified".to_string(),
     });
+}
+
+fn replace_region_b_with_unclassified_region_a_interior_neighbor(mesh: &mut TetrahedronMesh) {
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        [0.5, 0.5, -1.0],
+    ));
+    mesh.elements[1] = Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_unclassified"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        ],
+        material_region_id: "unclassified".to_string(),
+    };
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_a"));
 }
 
 fn interior_material_interface_propagation_plc() -> ProtectedBoundaryComplex {
