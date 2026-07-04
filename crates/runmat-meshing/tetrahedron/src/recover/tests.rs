@@ -1162,6 +1162,65 @@ fn recovery_stage_result_reports_absent_material_partition_quality_rejection() {
 }
 
 #[test]
+fn recovery_stage_result_rolls_back_absent_material_partition_on_post_insert_audit_failure() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+    mesh.boundary_faces.push(boundary_face(
+        "stale_facet_a_1",
+        ["0", "2", "3"],
+        "stale_face_a_1",
+    ));
+
+    let TetrahedronRecoveryError::IncompleteRecovery {
+        recovery_evidence, ..
+    } = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect_err("stale partition boundary face should roll back insertion")
+    else {
+        panic!("expected incomplete recovery error");
+    };
+
+    assert_eq!(
+        recovery_evidence.entity_counts["attempted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["inserted_absent_material_partition_recovery_items"],
+        0
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_elements"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_absent_material_partition_post_insertion_audit"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_source_face_items"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        1
+    );
+}
+
+#[test]
 fn recovery_stage_result_repairs_incomplete_material_interface_ownership_from_queue() {
     let plc = two_region_bipyramid_plc();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();

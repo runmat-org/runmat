@@ -24,6 +24,9 @@ pub(super) struct MaterialPartitionRecovery {
     pub inserted_element_count: usize,
     pub inserted_boundary_face_count: usize,
     pub rejected_material_interface_count: usize,
+    pub rolled_back_material_interface_count: usize,
+    pub rolled_back_element_count: usize,
+    pub rolled_back_boundary_face_count: usize,
     pub topology_candidate_count: usize,
     pub usable_candidate_count: usize,
     pub rejected_existing_candidate_count: usize,
@@ -55,6 +58,9 @@ pub(super) fn recover_absent_material_interface_partitions(
         inserted_element_count: 0,
         inserted_boundary_face_count: 0,
         rejected_material_interface_count: 0,
+        rolled_back_material_interface_count: 0,
+        rolled_back_element_count: 0,
+        rolled_back_boundary_face_count: 0,
         topology_candidate_count: 0,
         usable_candidate_count: 0,
         rejected_existing_candidate_count: 0,
@@ -115,6 +121,7 @@ fn insert_absent_material_interface_partition(
         .iter()
         .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
         .collect::<BTreeSet<_>>();
+    let rollback_mesh = tetrahedron_mesh.clone();
     let candidate_partition = select_candidate_partition(
         tetrahedron_mesh,
         &material_facets,
@@ -136,9 +143,35 @@ fn insert_absent_material_interface_partition(
 
     let inserted_boundary_face_count =
         insert_material_partition_boundary_faces(plc, &material_facets, tetrahedron_mesh);
+    if !material_partition_boundary_contract_is_satisfied(&material_facets, tetrahedron_mesh) {
+        *tetrahedron_mesh = rollback_mesh;
+        recovery.rolled_back_material_interface_count += 1;
+        recovery.rolled_back_element_count += inserted_element_count;
+        recovery.rolled_back_boundary_face_count += inserted_boundary_face_count;
+        return Err(MaterialPartitionRecoveryRejection::PostInsertionAudit);
+    }
     Ok(InsertedMaterialPartition {
         element_count: inserted_element_count,
         boundary_face_count: inserted_boundary_face_count,
+    })
+}
+
+fn material_partition_boundary_contract_is_satisfied(
+    material_facets: &[&PlcFacet],
+    tetrahedron_mesh: &TetrahedronMesh,
+) -> bool {
+    let boundary_faces_by_key = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| (sorted_topology_ids(face.node_ids.clone()), face))
+        .collect::<BTreeMap<_, _>>();
+    material_facets.iter().all(|facet| {
+        boundary_faces_by_key
+            .get(&sorted_topology_ids(facet.node_ids.clone()))
+            .is_some_and(|boundary_face| {
+                boundary_face.face_id == facet.facet_id
+                    && boundary_face.source_face_id == facet.source_face_id
+            })
     })
 }
 
@@ -481,6 +514,7 @@ enum MaterialPartitionRecoveryRejection {
     ElementAlreadyExists,
     InteriorFaceTopology,
     QualityGate,
+    PostInsertionAudit,
 }
 
 impl MaterialPartitionRecoveryRejection {
@@ -493,6 +527,7 @@ impl MaterialPartitionRecoveryRejection {
                 "rejected_absent_material_partition_interior_face_topology"
             }
             Self::QualityGate => "rejected_absent_material_partition_quality_gate",
+            Self::PostInsertionAudit => "rejected_absent_material_partition_post_insertion_audit",
         }
     }
 }
