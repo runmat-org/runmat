@@ -148,21 +148,15 @@ pub(super) fn repair_boundary_source_edge_provenance(
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> usize {
     let mut repaired_count = 0;
-    for protected_edge in &plc.protected_edges {
-        let expected_edge = sorted_edge(protected_edge.node_ids.clone());
-        for boundary_face in &mut tetrahedron_mesh.boundary_faces {
-            for (edge_index, face_edge) in face_edges(boundary_face.node_ids.clone())
-                .into_iter()
-                .enumerate()
-            {
-                if face_edge != expected_edge {
-                    continue;
-                }
-                if boundary_face.source_edge_ids[edge_index].is_none() {
-                    boundary_face.source_edge_ids[edge_index] =
-                        Some(protected_edge.source_edge_id.clone());
-                    repaired_count += 1;
-                }
+    for boundary_face in &mut tetrahedron_mesh.boundary_faces {
+        let expected_source_edge_ids =
+            source_edge_ids_for_face_edges(&plc.protected_edges, boundary_face.node_ids.clone());
+        for (edge_index, expected_source_edge_id) in
+            expected_source_edge_ids.into_iter().enumerate()
+        {
+            if boundary_face.source_edge_ids[edge_index] != expected_source_edge_id {
+                boundary_face.source_edge_ids[edge_index] = expected_source_edge_id;
+                repaired_count += 1;
             }
         }
     }

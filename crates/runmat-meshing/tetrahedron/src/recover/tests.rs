@@ -449,6 +449,65 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
 }
 
 #[test]
+fn recovery_stage_result_replaces_stale_boundary_source_edge_provenance_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    for boundary_face in &mut mesh.boundary_faces {
+        boundary_face.source_edge_ids = [
+            Some(entity(MeshingStage::CurveMesh, "stale_edge")),
+            Some(entity(MeshingStage::CurveMesh, "stale_edge")),
+            Some(entity(MeshingStage::CurveMesh, "stale_edge")),
+        ];
+    }
+
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("stale protected source-edge provenance should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("matching boundary topology should replace stale source-edge provenance");
+
+    let protected_edge = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+    ];
+    for boundary_face in &result.tetrahedron_mesh.boundary_faces {
+        for (edge_index, face_edge) in
+            crate::protected_edges::face_edges(boundary_face.node_ids.clone())
+                .into_iter()
+                .enumerate()
+        {
+            if face_edge == protected_edge {
+                assert_eq!(
+                    boundary_face.source_edge_ids[edge_index],
+                    Some(entity(MeshingStage::CurveMesh, "edge_1"))
+                );
+            } else {
+                assert_eq!(boundary_face.source_edge_ids[edge_index], None);
+            }
+        }
+    }
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_source_edge_provenance_items"],
+        12
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_repairs_single_material_interface_before_audit() {
     let mut mesh = tetrahedron_mesh();
     mesh.elements[0].material_region_id = "other_body".to_string();
