@@ -39,6 +39,12 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub recovered_protected_edge_boundary_face_count: usize,
     #[serde(default)]
+    pub attempted_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub rejected_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub rejected_protected_edge_boundary_face_restoration_volume_face_topology_count: usize,
+    #[serde(default)]
     pub volume_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub boundary_edge_source_edge_recovery_item_count: usize,
@@ -52,6 +58,12 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub interior_face_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub volume_face_source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub attempted_volume_face_source_face_boundary_restoration_item_count: usize,
+    #[serde(default)]
+    pub rejected_volume_face_source_face_boundary_restoration_item_count: usize,
+    #[serde(default)]
+    pub rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count: usize,
     #[serde(default)]
     pub absent_face_source_face_recovery_item_count: usize,
     #[serde(default)]
@@ -328,6 +340,15 @@ pub(super) fn tetrahedron_recovery_evidence(
         recovered_protected_edge_boundary_face_count: mesh
             .backend
             .tetrahedron_recovered_protected_edge_boundary_face_count,
+        attempted_protected_edge_boundary_face_restoration_item_count: mesh
+            .backend
+            .tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+        rejected_protected_edge_boundary_face_restoration_item_count: mesh
+            .backend
+            .tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
+        rejected_protected_edge_boundary_face_restoration_volume_face_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count,
         volume_edge_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_volume_edge_source_edge_recovery_item_count,
@@ -349,6 +370,15 @@ pub(super) fn tetrahedron_recovery_evidence(
         volume_face_source_face_recovery_item_count: mesh
             .backend
             .tetrahedron_volume_face_source_face_recovery_item_count,
+        attempted_volume_face_source_face_boundary_restoration_item_count: mesh
+            .backend
+            .tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count,
+        rejected_volume_face_source_face_boundary_restoration_item_count: mesh
+            .backend
+            .tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count,
+        rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count,
         absent_face_source_face_recovery_item_count: mesh
             .backend
             .tetrahedron_absent_face_source_face_recovery_item_count,

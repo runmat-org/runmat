@@ -147,6 +147,13 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_recovered_protected_edge_boundary_face_count: usize,
     #[serde(default)]
+    pub tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count:
+        usize,
+    #[serde(default)]
     pub tetrahedron_volume_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_boundary_edge_source_edge_recovery_item_count: usize,
@@ -160,6 +167,13 @@ pub struct MeshBackendSummary {
     pub tetrahedron_interior_face_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_volume_face_source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count:
+        usize,
     #[serde(default)]
     pub tetrahedron_absent_face_source_face_recovery_item_count: usize,
     #[serde(default)]

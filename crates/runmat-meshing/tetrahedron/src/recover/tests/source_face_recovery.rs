@@ -274,7 +274,7 @@ fn source_face_boundary_face_recovery_uses_volume_face_queue_items_only() {
         .expect("source-face provenance miss should be reported before recovery");
     let original_boundary_faces = mesh.boundary_faces.clone();
 
-    let recovered_count =
+    let restoration =
         crate::recover::boundary_faces::recover_volume_face_source_face_boundary_faces(
             &plc,
             &initial_queue,
@@ -289,8 +289,51 @@ fn source_face_boundary_face_recovery_uses_volume_face_queue_items_only() {
         initial_queue.evidence.entity_counts["missing_source_face_volume_face_items"],
         0
     );
-    assert_eq!(recovered_count, 0);
+    assert_eq!(restoration.recovered_boundary_face_count, 0);
+    assert_eq!(restoration.attempted_boundary_face_count, 0);
     assert_eq!(mesh.boundary_faces, original_boundary_faces);
+}
+
+#[test]
+fn source_face_boundary_restoration_reports_rejected_non_exterior_volume_face() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.remove(0);
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("volume-face source face should be reported before recovery");
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "face_support"),
+        [0.25, 0.25, -1.0],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "face_support_element"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::TetrahedronMesh, "face_support"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+
+    let restoration =
+        crate::recover::boundary_faces::recover_volume_face_source_face_boundary_faces(
+            &plc,
+            &initial_queue,
+            &mut mesh,
+        );
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        1
+    );
+    assert_eq!(restoration.attempted_boundary_face_count, 1);
+    assert_eq!(restoration.recovered_boundary_face_count, 0);
+    assert_eq!(restoration.rejected_boundary_face_count, 1);
+    assert_eq!(
+        restoration.rejection_counts["rejected_boundary_face_restoration_volume_face_topology"],
+        1
+    );
 }
 
 #[test]

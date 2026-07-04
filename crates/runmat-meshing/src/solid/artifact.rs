@@ -209,6 +209,21 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "recovered_protected_edge_boundary_faces",
             ),
+            tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_protected_edge_boundary_face_restoration_items",
+                ),
+            tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_protected_edge_boundary_face_restoration_items",
+                ),
+            tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "protected_edge_rejected_boundary_face_restoration_volume_face_topology",
+                ),
             tetrahedron_volume_edge_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "volume_edge_source_edge_recovery_items",
@@ -237,6 +252,21 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "volume_face_source_face_recovery_items",
             ),
+            tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_volume_face_source_face_boundary_restoration_items",
+                ),
+            tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_volume_face_source_face_boundary_restoration_items",
+                ),
+            tetrahedron_rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "source_face_rejected_boundary_face_restoration_volume_face_topology",
+                ),
             tetrahedron_absent_face_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "absent_face_source_face_recovery_items",

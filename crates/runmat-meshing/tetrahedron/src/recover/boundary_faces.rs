@@ -11,11 +11,51 @@ use super::{
     TetrahedronRecoveryQueue, TetrahedronRecoveryStatus, TetrahedronSourceFaceTopology,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct BoundaryFaceRestoration {
+    pub attempted_boundary_face_count: usize,
+    pub recovered_boundary_face_count: usize,
+    pub rejected_boundary_face_count: usize,
+    pub rejection_counts: BTreeMap<&'static str, usize>,
+}
+
+impl BoundaryFaceRestoration {
+    fn empty() -> Self {
+        Self {
+            attempted_boundary_face_count: 0,
+            recovered_boundary_face_count: 0,
+            rejected_boundary_face_count: 0,
+            rejection_counts: BTreeMap::new(),
+        }
+    }
+
+    fn record_rejection(&mut self, reason: BoundaryFaceRestorationRejection) {
+        self.rejected_boundary_face_count += 1;
+        *self
+            .rejection_counts
+            .entry(reason.evidence_key())
+            .or_default() += 1;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryFaceRestorationRejection {
+    VolumeFaceTopology,
+}
+
+impl BoundaryFaceRestorationRejection {
+    fn evidence_key(self) -> &'static str {
+        match self {
+            Self::VolumeFaceTopology => "rejected_boundary_face_restoration_volume_face_topology",
+        }
+    }
+}
+
 pub(super) fn recover_missing_protected_edge_boundary_faces(
     plc: &ProtectedBoundaryComplex,
     initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
-) -> usize {
+) -> BoundaryFaceRestoration {
     let element_face_counts = element_face_counts(tetrahedron_mesh);
     let mut boundary_face_keys = boundary_face_keys(tetrahedron_mesh);
     let recoverable_source_edges = initial_recovery_queue
@@ -35,7 +75,7 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
         })
         .collect::<BTreeSet<_>>();
 
-    let mut recovered_count = 0;
+    let mut restoration = BoundaryFaceRestoration::empty();
     for protected_edge in plc.protected_edges.iter().filter(|protected_edge| {
         recoverable_source_edges.contains(&(
             sorted_edge(protected_edge.node_ids.clone()),
@@ -47,26 +87,34 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
             if !facet_contains_edge(facet.node_ids.clone(), protected_edge_key.clone()) {
                 continue;
             }
-            if recover_facet_boundary_face(
+            match recover_facet_boundary_face(
                 plc,
                 &element_face_counts,
                 &mut boundary_face_keys,
                 tetrahedron_mesh,
                 facet,
             ) {
-                recovered_count += 1;
+                BoundaryFaceRestorationStatus::AlreadyPresent => {}
+                BoundaryFaceRestorationStatus::Recovered => {
+                    restoration.attempted_boundary_face_count += 1;
+                    restoration.recovered_boundary_face_count += 1;
+                }
+                BoundaryFaceRestorationStatus::Rejected { reason } => {
+                    restoration.attempted_boundary_face_count += 1;
+                    restoration.record_rejection(reason);
+                }
             }
         }
     }
 
-    recovered_count
+    restoration
 }
 
 pub(super) fn recover_volume_face_source_face_boundary_faces(
     plc: &ProtectedBoundaryComplex,
     initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
-) -> usize {
+) -> BoundaryFaceRestoration {
     let element_face_counts = element_face_counts(tetrahedron_mesh);
     let mut boundary_face_keys = boundary_face_keys(tetrahedron_mesh);
     let recoverable_source_faces = initial_recovery_queue
@@ -84,7 +132,7 @@ pub(super) fn recover_volume_face_source_face_boundary_faces(
             ))
         })
         .collect::<BTreeSet<_>>();
-    let mut recovered_count = 0;
+    let mut restoration = BoundaryFaceRestoration::empty();
 
     for facet in plc.facets.iter().filter(|facet| {
         recoverable_source_faces.contains(&(
@@ -92,18 +140,26 @@ pub(super) fn recover_volume_face_source_face_boundary_faces(
             sorted_topology_ids(facet.node_ids.clone()),
         ))
     }) {
-        if recover_facet_boundary_face(
+        match recover_facet_boundary_face(
             plc,
             &element_face_counts,
             &mut boundary_face_keys,
             tetrahedron_mesh,
             facet,
         ) {
-            recovered_count += 1;
+            BoundaryFaceRestorationStatus::AlreadyPresent => {}
+            BoundaryFaceRestorationStatus::Recovered => {
+                restoration.attempted_boundary_face_count += 1;
+                restoration.recovered_boundary_face_count += 1;
+            }
+            BoundaryFaceRestorationStatus::Rejected { reason } => {
+                restoration.attempted_boundary_face_count += 1;
+                restoration.record_rejection(reason);
+            }
         }
     }
 
-    recovered_count
+    restoration
 }
 
 pub(super) fn repair_boundary_source_face_provenance(
@@ -274,13 +330,15 @@ fn recover_facet_boundary_face(
     boundary_face_keys: &mut BTreeSet<[TopologyEntityId; 3]>,
     tetrahedron_mesh: &mut TetrahedronMesh,
     facet: &runmat_meshing_core::contracts::PlcFacet,
-) -> bool {
+) -> BoundaryFaceRestorationStatus {
     let face_key = sorted_topology_ids(facet.node_ids.clone());
     if boundary_face_keys.contains(&face_key) {
-        return false;
+        return BoundaryFaceRestorationStatus::AlreadyPresent;
     }
     if element_face_counts.get(&face_key).copied() != Some(1) {
-        return false;
+        return BoundaryFaceRestorationStatus::Rejected {
+            reason: BoundaryFaceRestorationRejection::VolumeFaceTopology,
+        };
     }
     tetrahedron_mesh
         .boundary_faces
@@ -294,7 +352,16 @@ fn recover_facet_boundary_face(
             ),
         });
     boundary_face_keys.insert(face_key);
-    true
+    BoundaryFaceRestorationStatus::Recovered
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryFaceRestorationStatus {
+    AlreadyPresent,
+    Recovered,
+    Rejected {
+        reason: BoundaryFaceRestorationRejection,
+    },
 }
 
 fn facet_contains_edge(node_ids: [TopologyEntityId; 3], edge_key: [TopologyEntityId; 2]) -> bool {

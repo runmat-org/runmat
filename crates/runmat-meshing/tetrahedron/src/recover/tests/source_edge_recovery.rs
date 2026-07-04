@@ -70,6 +70,70 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
 }
 
 #[test]
+fn protected_edge_boundary_restoration_reports_rejected_non_exterior_volume_face() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "1")))
+    });
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "face_support"),
+        [0.25, 0.25, -1.0],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "face_support_element"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::TetrahedronMesh, "face_support"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("volume-edge source edge should be reported before recovery");
+
+    let restoration = crate::recover::boundary_faces::recover_missing_protected_edge_boundary_faces(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
+        1
+    );
+    assert_eq!(restoration.attempted_boundary_face_count, 2);
+    assert_eq!(restoration.recovered_boundary_face_count, 1);
+    assert_eq!(restoration.rejected_boundary_face_count, 1);
+    assert_eq!(
+        restoration.rejection_counts["rejected_boundary_face_restoration_volume_face_topology"],
+        1
+    );
+    assert!(mesh.boundary_faces.iter().any(|face| {
+        sorted_face_ids(face.node_ids.clone())
+            == sorted_face_ids([
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ])
+    }));
+    assert!(!mesh.boundary_faces.iter().any(|face| {
+        sorted_face_ids(face.node_ids.clone())
+            == sorted_face_ids([
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            ])
+    }));
+}
+
+#[test]
 fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip() {
     let plc = boundary_diagonal_flip_plc();
     let mesh = boundary_diagonal_flip_tetrahedron_mesh();

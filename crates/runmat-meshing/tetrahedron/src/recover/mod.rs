@@ -638,13 +638,12 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
-    let recovered_protected_edge_boundary_face_count =
-        recover_missing_protected_edge_boundary_faces(
-            plc,
-            &initial_recovery_queue,
-            &mut tetrahedron_mesh,
-        );
-    let recovered_boundary_face_count = recover_volume_face_source_face_boundary_faces(
+    let protected_edge_boundary_faces = recover_missing_protected_edge_boundary_faces(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
+    let source_face_boundary_faces = recover_volume_face_source_face_boundary_faces(
         plc,
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
@@ -669,12 +668,27 @@ pub fn recover_tetrahedron_mesh_from_plc(
     record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
     recovery_queue.evidence.entity_counts.insert(
         "recovered_missing_boundary_faces".to_string(),
-        recovered_protected_edge_boundary_face_count + recovered_boundary_face_count,
+        protected_edge_boundary_faces.recovered_boundary_face_count
+            + source_face_boundary_faces.recovered_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "recovered_protected_edge_boundary_faces".to_string(),
-        recovered_protected_edge_boundary_face_count,
+        protected_edge_boundary_faces.recovered_boundary_face_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_protected_edge_boundary_face_restoration_items".to_string(),
+        protected_edge_boundary_faces.attempted_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_protected_edge_boundary_face_restoration_items".to_string(),
+        protected_edge_boundary_faces.rejected_boundary_face_count,
+    );
+    for (reason_key, count) in protected_edge_boundary_faces.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(format!("protected_edge_{reason_key}"), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "volume_edge_source_edge_recovery_items".to_string(),
         volume_edge_source_edge_recovery_item_count,
@@ -695,6 +709,20 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "volume_face_source_face_recovery_items".to_string(),
         volume_face_source_face_recovery_item_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_volume_face_source_face_boundary_restoration_items".to_string(),
+        source_face_boundary_faces.attempted_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_volume_face_source_face_boundary_restoration_items".to_string(),
+        source_face_boundary_faces.rejected_boundary_face_count,
+    );
+    for (reason_key, count) in source_face_boundary_faces.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(format!("source_face_{reason_key}"), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "boundary_face_source_face_recovery_items".to_string(),
         boundary_face_source_face_recovery_item_count,
