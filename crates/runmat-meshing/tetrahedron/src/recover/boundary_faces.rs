@@ -241,7 +241,6 @@ fn boundary_face_preference_score(
 
 pub(super) fn repair_boundary_source_edge_provenance(
     plc: &ProtectedBoundaryComplex,
-    _initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> usize {
     let mut repaired_count = 0;

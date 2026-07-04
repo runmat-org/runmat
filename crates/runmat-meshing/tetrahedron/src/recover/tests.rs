@@ -512,11 +512,8 @@ fn source_edge_provenance_repair_normalizes_boundary_slots_without_recovering_vo
     let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
         .expect("volume-edge source edge should be reported before recovery");
 
-    let repaired_count = super::boundary_faces::repair_boundary_source_edge_provenance(
-        &plc,
-        &initial_queue,
-        &mut mesh,
-    );
+    let repaired_count =
+        super::boundary_faces::repair_boundary_source_edge_provenance(&plc, &mut mesh);
 
     assert_eq!(
         initial_queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
