@@ -5,7 +5,7 @@ mod types;
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, StageEvidence, TetrahedronMesh,
+    MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus, TetrahedronMesh,
 };
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
@@ -54,15 +54,14 @@ pub fn build_recovery_queue_from_plc(
             facet.source_face_id.clone(),
             sorted_topology_ids(facet.node_ids.clone()),
         );
-        if !recovered_face_keys.contains(&face_key) {
-            return Err(TetrahedronRecoveryError::MissingSourceFaceRecovery {
-                face_id: facet.source_face_id.id.clone(),
-            });
-        }
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_face:{}", facet.facet_id.id),
             kind: TetrahedronRecoveryKind::SourceFace,
-            status: TetrahedronRecoveryStatus::Recovered,
+            status: if recovered_face_keys.contains(&face_key) {
+                TetrahedronRecoveryStatus::Recovered
+            } else {
+                TetrahedronRecoveryStatus::Missing
+            },
             source_entity_id: Some(facet.source_face_id.clone()),
             material_interface_id: None,
         });
@@ -70,15 +69,14 @@ pub fn build_recovery_queue_from_plc(
 
     for protected_edge in &plc.protected_edges {
         let edge_key = sorted_topology_ids(protected_edge.node_ids.clone());
-        if !recovered_boundary_edges.contains(&edge_key) {
-            return Err(TetrahedronRecoveryError::MissingSourceEdgeRecovery {
-                edge_id: protected_edge.source_edge_id.id.clone(),
-            });
-        }
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_edge:{}", protected_edge.edge_id.id),
             kind: TetrahedronRecoveryKind::SourceEdge,
-            status: TetrahedronRecoveryStatus::Recovered,
+            status: if recovered_boundary_edges.contains(&edge_key) {
+                TetrahedronRecoveryStatus::Recovered
+            } else {
+                TetrahedronRecoveryStatus::Missing
+            },
             source_entity_id: Some(protected_edge.source_edge_id.clone()),
             material_interface_id: None,
         });
@@ -90,21 +88,27 @@ pub fn build_recovery_queue_from_plc(
         .flat_map(|facet| facet.material_interface_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
     for material_interface_id in material_interfaces {
-        if !recovered_material_interfaces.contains(&material_interface_id) {
-            return Err(TetrahedronRecoveryError::MissingMaterialInterfaceRecovery {
-                material_interface_id,
-            });
-        }
+        let status = if recovered_material_interfaces.contains(&material_interface_id) {
+            TetrahedronRecoveryStatus::Recovered
+        } else {
+            TetrahedronRecoveryStatus::Missing
+        };
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("material_interface:{material_interface_id}"),
             kind: TetrahedronRecoveryKind::MaterialInterface,
-            status: TetrahedronRecoveryStatus::Recovered,
+            status,
             source_entity_id: None,
             material_interface_id: Some(material_interface_id),
         });
     }
 
     let mut evidence = StageEvidence::complete(MeshingStage::ConstraintRecovery);
+    if items
+        .iter()
+        .any(|item| item.status == TetrahedronRecoveryStatus::Missing)
+    {
+        evidence.status = StageEvidenceStatus::Failed;
+    }
     evidence
         .entity_counts
         .insert("recovery_items".to_string(), items.len());
@@ -127,6 +131,50 @@ pub fn build_recovery_queue_from_plc(
         items
             .iter()
             .filter(|item| item.kind == TetrahedronRecoveryKind::MaterialInterface)
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "recovered_items".to_string(),
+        items
+            .iter()
+            .filter(|item| item.status == TetrahedronRecoveryStatus::Recovered)
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_items".to_string(),
+        items
+            .iter()
+            .filter(|item| item.status == TetrahedronRecoveryStatus::Missing)
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_face_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceFace
+                    && item.status == TetrahedronRecoveryStatus::Missing
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_material_interface_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::MaterialInterface
+                    && item.status == TetrahedronRecoveryStatus::Missing
+            })
             .count(),
     );
 

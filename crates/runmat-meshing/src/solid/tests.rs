@@ -20,6 +20,23 @@ fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    assert!(mesh.backend.tetrahedron_source_edge_recovery_item_count > 0);
+    assert!(
+        mesh.backend
+            .tetrahedron_missing_source_edge_recovery_item_count
+            > 0
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_missing_source_face_recovery_item_count
+            > 0
+    );
+    assert!(
+        mesh.backend.tetrahedron_missing_recovery_item_count
+            >= mesh
+                .backend
+                .tetrahedron_missing_source_edge_recovery_item_count
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("root solid pipeline should produce a solve-ready mesh for a generic cube");
     validate_analysis_mesh_with_options(
@@ -72,6 +89,14 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
         source_edge_count,
         mesh.backend.plc_input_protected_edge_count
     );
+    assert_eq!(mesh.backend.tetrahedron_source_face_recovery_item_count, 4);
+    assert_eq!(mesh.backend.tetrahedron_source_edge_recovery_item_count, 6);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_missing_source_edge_recovery_item_count,
+        0
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("single Tetrahedron solid mesh should be solve-ready");
     validate_analysis_mesh_with_options(
@@ -98,6 +123,8 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.volume_elements.len(), 8);
     assert_eq!(mesh.boundary_faces.len(), 8);
+    assert_eq!(mesh.backend.tetrahedron_source_face_recovery_item_count, 8);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("convex octahedron solid mesh should be solve-ready");
 }

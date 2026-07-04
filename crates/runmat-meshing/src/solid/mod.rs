@@ -6,7 +6,7 @@ use runmat_meshing_core::{
 use runmat_meshing_curve::discretize_topology_curves;
 use runmat_meshing_plc::build::build_protected_boundary_complex;
 use runmat_meshing_surface::discretize_cad_surfaces_with_curves;
-use runmat_meshing_tetrahedron::structured_grid;
+use runmat_meshing_tetrahedron::{recover::build_recovery_queue_from_plc, structured_grid};
 
 mod artifact;
 mod error;
@@ -93,11 +93,14 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let plc = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
+    let recovery_queue = build_recovery_queue_from_plc(&plc, &tetrahedron_mesh)
+        .map_err(SolidMeshingError::TetrahedronRecovery)?;
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,
         sizing,
         &surface,
+        &recovery_queue,
         tetrahedron_mesh,
     ))
 }

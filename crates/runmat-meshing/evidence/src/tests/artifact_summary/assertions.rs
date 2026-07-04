@@ -177,6 +177,15 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.element_count, 12);
     assert_eq!(recovery.recovered_component_ratio, 1.0);
     assert_eq!(recovery.volume_coverage_ratio, 0.99);
+    assert_eq!(recovery.recovery_item_count, 9);
+    assert_eq!(recovery.recovered_item_count, 7);
+    assert_eq!(recovery.missing_recovery_item_count, 2);
+    assert_eq!(recovery.source_face_recovery_item_count, 4);
+    assert_eq!(recovery.missing_source_face_recovery_item_count, 0);
+    assert_eq!(recovery.source_edge_recovery_item_count, 4);
+    assert_eq!(recovery.missing_source_edge_recovery_item_count, 1);
+    assert_eq!(recovery.material_interface_recovery_item_count, 1);
+    assert_eq!(recovery.missing_material_interface_recovery_item_count, 1);
     assert_eq!(recovery.refinement_pass_count, 2);
     assert_eq!(recovery.refinement_point_count, 5);
     assert_eq!(recovery.optimization_pass_count, 1);

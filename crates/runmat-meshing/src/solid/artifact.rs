@@ -17,7 +17,7 @@ use runmat_meshing_core::{
     size::field::MeshSizingField,
 };
 use runmat_meshing_surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID};
-use runmat_meshing_tetrahedron::generate::TetrahedronMesh;
+use runmat_meshing_tetrahedron::{generate::TetrahedronMesh, recover::TetrahedronRecoveryQueue};
 
 const SOLID_PLC_TETRAHEDRON_ALGORITHM: &str = "plc_tetrahedron/v1";
 
@@ -25,6 +25,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     geometry: &GeometryAsset,
     sizing: &MeshSizingField,
     surface: &SurfaceDiscretization,
+    recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: TetrahedronMesh,
 ) -> AnalysisMeshArtifact {
     let node_id_map = tetrahedron_mesh
@@ -162,6 +163,42 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             volume_component_count: 1,
             tetrahedron_recovered_component_ratio: 1.0,
             tetrahedron_volume_coverage_ratio: 1.0,
+            tetrahedron_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "recovery_items",
+            ),
+            tetrahedron_recovered_item_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_items",
+            ),
+            tetrahedron_missing_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_items",
+            ),
+            tetrahedron_source_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "source_face_items",
+            ),
+            tetrahedron_missing_source_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_face_items",
+            ),
+            tetrahedron_source_edge_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "source_edge_items",
+            ),
+            tetrahedron_missing_source_edge_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_source_edge_items",
+            ),
+            tetrahedron_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "material_interface_items",
+            ),
+            tetrahedron_missing_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "missing_material_interface_items",
+            ),
             ..MeshBackendSummary::default()
         },
         adaptive_iterations: Vec::new(),
@@ -176,6 +213,15 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
 
 fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> usize {
     tetrahedron_mesh
+        .evidence
+        .entity_counts
+        .get(key)
+        .copied()
+        .unwrap_or_default()
+}
+
+fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
+    recovery_queue
         .evidence
         .entity_counts
         .get(key)

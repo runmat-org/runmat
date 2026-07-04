@@ -137,6 +137,24 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_volume_coverage_ratio: f64,
     #[serde(default)]
+    pub tetrahedron_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_recovered_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_material_interface_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_refinement_pass_count: usize,
     #[serde(default)]
     pub tetrahedron_refinement_point_count: usize,

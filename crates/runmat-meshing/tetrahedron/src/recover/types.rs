@@ -7,9 +7,6 @@ use runmat_meshing_plc::validate::PlcValidationError;
 pub enum TetrahedronRecoveryError {
     InvalidProtectedBoundaryComplex { error: PlcValidationError },
     EmptyTetrahedronMesh,
-    MissingSourceFaceRecovery { face_id: String },
-    MissingSourceEdgeRecovery { edge_id: String },
-    MissingMaterialInterfaceRecovery { material_interface_id: String },
 }
 
 impl std::fmt::Display for TetrahedronRecoveryError {
@@ -24,18 +21,6 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::EmptyTetrahedronMesh => write!(
                 formatter,
                 "Tetrahedron recovery requires a non-empty Tetrahedron mesh"
-            ),
-            Self::MissingSourceFaceRecovery { face_id } => {
-                write!(formatter, "source face {face_id} is not recovered")
-            }
-            Self::MissingSourceEdgeRecovery { edge_id } => {
-                write!(formatter, "source edge {edge_id} is not recovered")
-            }
-            Self::MissingMaterialInterfaceRecovery {
-                material_interface_id,
-            } => write!(
-                formatter,
-                "material interface {material_interface_id} is not recovered"
             ),
         }
     }
@@ -73,4 +58,5 @@ pub enum TetrahedronRecoveryKind {
 #[serde(rename_all = "snake_case")]
 pub enum TetrahedronRecoveryStatus {
     Recovered,
+    Missing,
 }

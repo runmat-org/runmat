@@ -28,6 +28,24 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub recovered_component_ratio: f64,
     pub unrecovered_tetrahedron_component_count: usize,
     pub volume_coverage_ratio: f64,
+    #[serde(default)]
+    pub recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_item_count: usize,
+    #[serde(default)]
+    pub missing_recovery_item_count: usize,
+    #[serde(default)]
+    pub source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_face_recovery_item_count: usize,
+    #[serde(default)]
+    pub source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_material_interface_recovery_item_count: usize,
     pub refinement_pass_count: usize,
     pub refinement_point_count: usize,
     pub optimization_pass_count: usize,
@@ -119,6 +137,23 @@ pub(super) fn tetrahedron_recovery_evidence(
             .backend
             .tetrahedron_unrecovered_component_count,
         volume_coverage_ratio: mesh.backend.tetrahedron_volume_coverage_ratio,
+        recovery_item_count: mesh.backend.tetrahedron_recovery_item_count,
+        recovered_item_count: mesh.backend.tetrahedron_recovered_item_count,
+        missing_recovery_item_count: mesh.backend.tetrahedron_missing_recovery_item_count,
+        source_face_recovery_item_count: mesh.backend.tetrahedron_source_face_recovery_item_count,
+        missing_source_face_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_face_recovery_item_count,
+        source_edge_recovery_item_count: mesh.backend.tetrahedron_source_edge_recovery_item_count,
+        missing_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_edge_recovery_item_count,
+        material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_material_interface_recovery_item_count,
+        missing_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_material_interface_recovery_item_count,
         refinement_pass_count: mesh.backend.tetrahedron_refinement_pass_count,
         refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
         optimization_pass_count: mesh.backend.tetrahedron_optimization_pass_count,

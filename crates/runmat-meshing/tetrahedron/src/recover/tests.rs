@@ -14,6 +14,8 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
     assert_eq!(queue.evidence.entity_counts["source_face_items"], 4);
     assert_eq!(queue.evidence.entity_counts["source_edge_items"], 1);
     assert_eq!(queue.evidence.entity_counts["material_interface_items"], 1);
+    assert_eq!(queue.evidence.entity_counts["recovered_items"], 6);
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
     assert!(queue
         .items
         .iter()
@@ -21,16 +23,24 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
 }
 
 #[test]
-fn recovery_queue_rejects_missing_source_face() {
+fn recovery_queue_reports_missing_source_face() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
 
-    assert_eq!(
-        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
-        Err(TetrahedronRecoveryError::MissingSourceFaceRecovery {
-            face_id: "face_1".to_string()
-        })
-    );
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing source faces should be reported as recovery evidence");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 1);
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 1);
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceFace
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item
+                .source_entity_id
+                .as_ref()
+                .is_some_and(|source| source.id == "face_1")
+    }));
 }
 
 #[test]
@@ -46,16 +56,59 @@ fn recovery_queue_rejects_invalid_protected_edge_before_recovery() {
 }
 
 #[test]
-fn recovery_queue_rejects_missing_material_interface() {
+fn recovery_queue_reports_missing_source_edge() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+    ];
+    plc.protected_edges[0].source_edge_id = entity(MeshingStage::CurveMesh, "edge_2");
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+    mesh.boundary_faces[3].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing source edges should be reported as recovery evidence");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
+    assert_eq!(queue.evidence.entity_counts["missing_source_edge_items"], 1);
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item
+                .source_entity_id
+                .as_ref()
+                .is_some_and(|source| source.id == "edge_2")
+    }));
+}
+
+#[test]
+fn recovery_queue_reports_missing_material_interface() {
     let mut mesh = tetrahedron_mesh();
     mesh.elements[0].material_region_id = "other_body".to_string();
 
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing material interfaces should be reported as recovery evidence");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 1);
     assert_eq!(
-        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
-        Err(TetrahedronRecoveryError::MissingMaterialInterfaceRecovery {
-            material_interface_id: "solid_body".to_string()
-        })
+        queue.evidence.entity_counts["missing_material_interface_items"],
+        1
     );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::MaterialInterface
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.material_interface_id.as_deref() == Some("solid_body")
+    }));
 }
 
 #[test]
