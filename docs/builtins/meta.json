@@ -47921,6 +47921,188 @@
       ]
     },
     {
+      "name": "linkage",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Z = linkage(X)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        },
+        {
+          "label": "Z = linkage(X, method)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Linkage method, distance metric, pdist metric parameters, and SaveMemory option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        },
+        {
+          "label": "Z = linkage(X, method, metric)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Linkage method, distance metric, pdist metric parameters, and SaveMemory option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        },
+        {
+          "label": "Z = linkage(X, method, metric, 'savememory', value)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Linkage method, distance metric, pdist metric parameters, and SaveMemory option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        },
+        {
+          "label": "Z = linkage(X, method, pdist_inputs)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Linkage method, distance metric, pdist metric parameters, and SaveMemory option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        },
+        {
+          "label": "Z = linkage(Y, method)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix X or condensed distance vector Y."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Linkage method, distance metric, pdist metric parameters, and SaveMemory option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hierarchical cluster tree with one merge per row."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LINKAGE.INVALID_ARGUMENT",
+          "identifier": "RunMat:linkage:InvalidArgument",
+          "when": "Inputs, linkage methods, distance metrics, or name-value options are malformed.",
+          "message": "linkage: invalid argument"
+        },
+        {
+          "code": "RM.LINKAGE.INTERNAL",
+          "identifier": "RunMat:linkage:Internal",
+          "when": "RunMat cannot allocate or construct the linkage output.",
+          "message": "linkage: internal error"
+        }
+      ]
+    },
+    {
       "name": "linprog",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

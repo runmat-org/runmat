@@ -312,6 +312,15 @@ async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
     Ok(Value::Tensor(output))
 }
 
+pub(super) async fn condensed_distances_from_metric_args(
+    name: &'static str,
+    x: &Tensor,
+    args: Vec<Value>,
+) -> BuiltinResult<Tensor> {
+    let metric = parse_metric(name, x, None, args).await?;
+    condensed_distances(name, x, &metric)
+}
+
 async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await

@@ -241,6 +241,18 @@ fn distance_helper_surface_executes_from_scripts() {
 }
 
 #[test]
+fn linkage_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0 0; 3 4; 4 0; 0 2]; Z = linkage(X, 'single'); D = pdist(X); Zc = linkage(D, 'complete'); Za = linkage(X, 'average', {'minkowski', 3}, 'savememory', 'off'); zcheck = 100*Z(1,1) + 10*Z(1,2) + Z(1,3); zccheck = 100*Zc(3,1) + 10*Zc(3,2) + Zc(3,3); za13 = Za(1,3);",
+    )
+    .expect("linkage script");
+    assert!(has_tensor_shape(&vars, &[3, 3]));
+    assert!(has_num(&vars, 142.0));
+    assert!(has_num(&vars, 565.0));
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn covariance_conversion_surface_executes_from_scripts() {
     let vars = execute_source(
         "C = [4 2; 2 9]; [R,s] = corrcov(C); Q = cov2corr(C); r12 = R(1,2); s2 = s(2); q21 = Q(2,1);",
