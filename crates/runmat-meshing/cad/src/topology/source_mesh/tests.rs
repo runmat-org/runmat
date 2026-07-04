@@ -24,7 +24,7 @@ fn extracts_deterministic_closed_shell_topology() {
     assert!(topology
         .faces
         .iter()
-        .all(|face| norm(face.unit_normal) > 0.999999));
+        .all(|face| super::geometry::norm(face.unit_normal) > 0.999999));
 }
 
 #[test]
