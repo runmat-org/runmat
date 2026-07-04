@@ -496,6 +496,8 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_source_edge_volume_edge_items",
             ),
+            tetrahedron_missing_source_edge_interior_edge_recovery_item_count:
+                recovery_entity_count(recovery_queue, "missing_source_edge_interior_edge_items"),
             tetrahedron_missing_source_edge_absent_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "missing_source_edge_absent_edge_items",

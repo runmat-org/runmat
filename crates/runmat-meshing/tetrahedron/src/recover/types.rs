@@ -226,6 +226,7 @@ pub enum TetrahedronSourceFaceTopology {
 pub enum TetrahedronProtectedEdgeTopology {
     BoundaryEdge,
     VolumeEdge,
+    InteriorEdge,
     Absent,
 }
 

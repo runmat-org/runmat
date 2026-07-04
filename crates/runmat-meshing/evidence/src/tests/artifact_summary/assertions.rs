@@ -371,6 +371,10 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(
+        recovery.missing_source_edge_interior_edge_recovery_item_count,
+        1
+    );
+    assert_eq!(
         recovery.missing_source_edge_absent_edge_recovery_item_count,
         0
     );

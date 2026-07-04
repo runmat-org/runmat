@@ -177,6 +177,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub missing_source_edge_volume_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub missing_source_edge_interior_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub missing_source_edge_absent_edge_recovery_item_count: usize,
     #[serde(default)]
     pub missing_source_edge_recovery_ids: Vec<String>,
@@ -500,6 +502,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         missing_source_edge_volume_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_edge_volume_edge_recovery_item_count,
+        missing_source_edge_interior_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_source_edge_interior_edge_recovery_item_count,
         missing_source_edge_absent_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_edge_absent_edge_recovery_item_count,

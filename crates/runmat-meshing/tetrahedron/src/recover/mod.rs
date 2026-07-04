@@ -119,8 +119,12 @@ pub fn build_recovery_queue_from_plc(
         let edge_key = sorted_topology_ids(protected_edge.node_ids.clone());
         let protected_edge_topology = if recovered_boundary_edges.contains(&edge_key) {
             TetrahedronProtectedEdgeTopology::BoundaryEdge
-        } else if recovered_volume_edges.contains(&edge_key) {
+        } else if recovered_volume_edges.contains(&edge_key)
+            && plc_facets_adjacent_to_edge_have_exterior_face(plc, &edge_key, &element_face_counts)
+        {
             TetrahedronProtectedEdgeTopology::VolumeEdge
+        } else if recovered_volume_edges.contains(&edge_key) {
+            TetrahedronProtectedEdgeTopology::InteriorEdge
         } else {
             TetrahedronProtectedEdgeTopology::Absent
         };
@@ -362,6 +366,18 @@ pub fn build_recovery_queue_from_plc(
                     && item.status == TetrahedronRecoveryStatus::Missing
                     && item.protected_edge_topology
                         == Some(TetrahedronProtectedEdgeTopology::VolumeEdge)
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_interior_edge_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item.protected_edge_topology
+                        == Some(TetrahedronProtectedEdgeTopology::InteriorEdge)
             })
             .count(),
     );
@@ -946,6 +962,25 @@ fn boundary_face_is_exterior(
         .get(&sorted_topology_ids(boundary_face.node_ids.clone()))
         .copied()
         == Some(1)
+}
+
+fn plc_facets_adjacent_to_edge_have_exterior_face(
+    plc: &ProtectedBoundaryComplex,
+    edge_key: &[TopologyEntityId; 2],
+    element_face_counts: &BTreeMap<[TopologyEntityId; 3], usize>,
+) -> bool {
+    plc.facets
+        .iter()
+        .filter(|facet| {
+            let face_node_ids = sorted_topology_ids(facet.node_ids.clone());
+            face_node_ids.contains(&edge_key[0]) && face_node_ids.contains(&edge_key[1])
+        })
+        .any(|facet| {
+            element_face_counts
+                .get(&sorted_topology_ids(facet.node_ids.clone()))
+                .copied()
+                == Some(1)
+        })
 }
 
 fn element_face_counts(
