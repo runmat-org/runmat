@@ -362,6 +362,54 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     recovery_queue,
                     "rejected_material_interface_ambiguous_boundary_ownership",
                 ),
+            tetrahedron_attempted_absent_material_partition_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_absent_material_partition_recovery_items",
+                ),
+            tetrahedron_inserted_absent_material_partition_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "inserted_absent_material_partition_recovery_items",
+                ),
+            tetrahedron_inserted_absent_material_partition_element_count: recovery_entity_count(
+                recovery_queue,
+                "inserted_absent_material_partition_elements",
+            ),
+            tetrahedron_inserted_absent_material_partition_boundary_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "inserted_absent_material_partition_boundary_faces",
+                ),
+            tetrahedron_rejected_absent_material_partition_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_recovery_items",
+                ),
+            tetrahedron_rejected_absent_material_partition_facet_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_absent_material_partition_facet_count",
+            ),
+            tetrahedron_rejected_absent_material_partition_facet_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_facet_topology",
+                ),
+            tetrahedron_rejected_absent_material_partition_element_exists_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_element_exists",
+                ),
+            tetrahedron_rejected_absent_material_partition_interior_face_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_interior_face_topology",
+                ),
+            tetrahedron_rejected_absent_material_partition_quality_gate_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_quality_gate",
+                ),
             tetrahedron_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "source_face_items",

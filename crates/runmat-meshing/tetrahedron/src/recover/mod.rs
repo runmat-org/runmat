@@ -3,6 +3,7 @@ mod boundary_diagonal;
 mod boundary_faces;
 pub mod boundary_queue;
 mod material_interfaces;
+mod material_partitions;
 mod source_faces;
 mod topology;
 mod types;
@@ -22,6 +23,7 @@ use boundary_faces::{
     repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
 use material_interfaces::recover_material_interface_regions;
+use material_partitions::recover_absent_material_interface_partitions;
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
@@ -536,6 +538,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
             &initial_recovery_queue,
             TetrahedronMaterialInterfaceTopology::AbsentPartition,
         );
+    let recovered_material_partitions = recover_absent_material_interface_partitions(
+        plc,
+        &initial_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let recovered_absent_source_edges = recover_absent_protected_edges_by_boundary_diagonal_flip(
         plc,
         &initial_recovery_queue,
@@ -563,8 +570,12 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_source_face_provenance(&initial_recovery_queue, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance_count =
         repair_boundary_source_edge_provenance(plc, &initial_recovery_queue, &mut tetrahedron_mesh);
-    let material_interface_recovery =
-        recover_material_interface_regions(plc, &initial_recovery_queue, &mut tetrahedron_mesh);
+    let material_interface_recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    let material_interface_recovery = recover_material_interface_regions(
+        plc,
+        &material_interface_recovery_queue,
+        &mut tetrahedron_mesh,
+    );
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
     recovery_queue.evidence.entity_counts.insert(
@@ -660,6 +671,32 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "attempted_material_interface_recovery_items".to_string(),
         material_interface_recovery.attempted_material_interface_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_absent_material_partition_recovery_items".to_string(),
+        recovered_material_partitions.attempted_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "inserted_absent_material_partition_recovery_items".to_string(),
+        recovered_material_partitions.inserted_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "inserted_absent_material_partition_elements".to_string(),
+        recovered_material_partitions.inserted_element_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "inserted_absent_material_partition_boundary_faces".to_string(),
+        recovered_material_partitions.inserted_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_absent_material_partition_recovery_items".to_string(),
+        recovered_material_partitions.rejected_material_interface_count,
+    );
+    for (reason_key, count) in recovered_material_partitions.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(reason_key.to_string(), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_recovery_items".to_string(),
         material_interface_recovery.rejected_material_interface_count,

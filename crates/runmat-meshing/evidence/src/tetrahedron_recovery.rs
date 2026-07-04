@@ -111,6 +111,26 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_material_interface_ambiguous_boundary_ownership_count: usize,
     #[serde(default)]
+    pub attempted_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub inserted_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub inserted_absent_material_partition_element_count: usize,
+    #[serde(default)]
+    pub inserted_absent_material_partition_boundary_face_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_facet_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_facet_topology_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_element_exists_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_interior_face_topology_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_quality_gate_count: usize,
+    #[serde(default)]
     pub source_face_recovery_item_count: usize,
     #[serde(default)]
     pub recovered_source_face_recovery_item_count: usize,
@@ -370,6 +390,36 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_material_interface_ambiguous_boundary_ownership_count: mesh
             .backend
             .tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count,
+        attempted_absent_material_partition_recovery_item_count: mesh
+            .backend
+            .tetrahedron_attempted_absent_material_partition_recovery_item_count,
+        inserted_absent_material_partition_recovery_item_count: mesh
+            .backend
+            .tetrahedron_inserted_absent_material_partition_recovery_item_count,
+        inserted_absent_material_partition_element_count: mesh
+            .backend
+            .tetrahedron_inserted_absent_material_partition_element_count,
+        inserted_absent_material_partition_boundary_face_count: mesh
+            .backend
+            .tetrahedron_inserted_absent_material_partition_boundary_face_count,
+        rejected_absent_material_partition_recovery_item_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_recovery_item_count,
+        rejected_absent_material_partition_facet_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_facet_count,
+        rejected_absent_material_partition_facet_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_facet_topology_count,
+        rejected_absent_material_partition_element_exists_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_element_exists_count,
+        rejected_absent_material_partition_interior_face_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_interior_face_topology_count,
+        rejected_absent_material_partition_quality_gate_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_quality_gate_count,
         source_face_recovery_item_count: mesh.backend.tetrahedron_source_face_recovery_item_count,
         recovered_source_face_recovery_item_count: mesh
             .backend

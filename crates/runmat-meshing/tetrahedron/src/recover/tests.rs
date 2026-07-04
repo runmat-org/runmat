@@ -953,48 +953,70 @@ fn recovery_queue_classifies_absent_partition_material_interface_work() {
 }
 
 #[test]
-fn recovery_stage_result_defers_absent_material_interface_partition_work() {
+fn recovery_stage_result_inserts_bounded_absent_material_interface_partition() {
     let plc = two_region_bipyramid_plc();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();
     mesh.elements.remove(0);
     mesh.boundary_faces
         .retain(|face| face.source_face_id.id.starts_with("face_b"));
 
-    let recovery_evidence = assert_incomplete_recovery(
-        recover_tetrahedron_mesh_from_plc(&plc, mesh)
-            .expect_err("absent material partition should require partition insertion"),
-        4,
-        3,
-        0,
-        1,
-    );
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("bounded absent material partition should be inserted");
 
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(result
+        .tetrahedron_mesh
+        .elements
+        .iter()
+        .any(|element| element.material_region_id == "region_a"));
     assert_eq!(
-        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["absent_partition_material_interface_recovery_input_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["absent_partition_material_interface_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rejected_material_interface_absent_partition"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rejected_material_interface_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["boundary_owned_material_interface_recovery_input_items"],
+        result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
         0
     );
     assert_eq!(
-        recovery_evidence.entity_counts["interior_face_material_interface_recovery_input_items"],
+        result.recovery_queue.evidence.entity_counts["missing_source_face_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["absent_partition_material_interface_recovery_input_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["inserted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["inserted_absent_material_partition_elements"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["inserted_absent_material_partition_boundary_faces"],
+        3
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
+        3
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_absent_material_partition_recovery_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_material_interface_absent_partition"],
         0
     );
 }

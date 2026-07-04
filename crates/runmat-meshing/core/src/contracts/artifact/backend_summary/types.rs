@@ -219,6 +219,26 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count: usize,
     #[serde(default)]
+    pub tetrahedron_attempted_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_inserted_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_inserted_absent_material_partition_element_count: usize,
+    #[serde(default)]
+    pub tetrahedron_inserted_absent_material_partition_boundary_face_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_facet_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_facet_topology_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_element_exists_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_interior_face_topology_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_absent_material_partition_quality_gate_count: usize,
+    #[serde(default)]
     pub tetrahedron_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_recovered_source_face_recovery_item_count: usize,
