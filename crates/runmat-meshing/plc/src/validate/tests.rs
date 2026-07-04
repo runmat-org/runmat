@@ -14,6 +14,7 @@ fn validates_closed_manifold_plc() {
 #[test]
 fn reports_boundary_component_evidence_for_closed_shell() {
     let report = classify_boundary_components(&tetrahedron_plc());
+    let shell_classification = classify_shell_nesting(&report);
 
     assert_eq!(
         report,
@@ -22,6 +23,15 @@ fn reports_boundary_component_evidence_for_closed_shell() {
             referenced_node_count: 4,
             min_component_node_count: 4,
             max_component_node_count: 4,
+        }
+    );
+    assert_eq!(
+        shell_classification,
+        PlcShellClassificationReport {
+            shell_nesting_classified: true,
+            outer_shell_count: 1,
+            nested_shell_count: 0,
+            max_nesting_depth: 0,
         }
     );
 }
@@ -195,6 +205,15 @@ fn rejects_disconnected_boundary_components_until_shell_nesting_is_classified() 
     assert_eq!(report.component_count, 2);
     assert_eq!(report.min_component_node_count, 4);
     assert_eq!(report.max_component_node_count, 4);
+    assert_eq!(
+        classify_shell_nesting(&report),
+        PlcShellClassificationReport {
+            shell_nesting_classified: false,
+            outer_shell_count: 0,
+            nested_shell_count: 0,
+            max_nesting_depth: 0,
+        }
+    );
 
     assert!(matches!(
         validate_protected_boundary_complex(&plc),

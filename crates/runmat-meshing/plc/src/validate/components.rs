@@ -10,6 +10,14 @@ pub struct PlcBoundaryComponentReport {
     pub max_component_node_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlcShellClassificationReport {
+    pub shell_nesting_classified: bool,
+    pub outer_shell_count: usize,
+    pub nested_shell_count: usize,
+    pub max_nesting_depth: usize,
+}
+
 pub fn classify_boundary_components(plc: &ProtectedBoundaryComplex) -> PlcBoundaryComponentReport {
     let mut adjacency = BTreeMap::<TopologyEntityId, BTreeSet<TopologyEntityId>>::new();
     for facet in &plc.facets {
@@ -65,5 +73,25 @@ pub fn classify_boundary_components(plc: &ProtectedBoundaryComplex) -> PlcBounda
         referenced_node_count: adjacency.len(),
         min_component_node_count,
         max_component_node_count,
+    }
+}
+
+pub fn classify_shell_nesting(
+    component_report: &PlcBoundaryComponentReport,
+) -> PlcShellClassificationReport {
+    if component_report.component_count == 1 {
+        return PlcShellClassificationReport {
+            shell_nesting_classified: true,
+            outer_shell_count: 1,
+            nested_shell_count: 0,
+            max_nesting_depth: 0,
+        };
+    }
+
+    PlcShellClassificationReport {
+        shell_nesting_classified: false,
+        outer_shell_count: 0,
+        nested_shell_count: 0,
+        max_nesting_depth: 0,
     }
 }

@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod components;
 mod errors;
-pub use components::{classify_boundary_components, PlcBoundaryComponentReport};
+pub use components::{
+    classify_boundary_components, classify_shell_nesting, PlcBoundaryComponentReport,
+    PlcShellClassificationReport,
+};
 pub use errors::PlcValidationError;
 pub use runmat_meshing_core::contracts::PlcValidationSummary;
 use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
@@ -132,7 +135,8 @@ pub fn validate_protected_boundary_complex(
         }
     }
     let component_report = classify_boundary_components(plc);
-    if component_report.component_count > 1 {
+    let shell_classification = classify_shell_nesting(&component_report);
+    if !shell_classification.shell_nesting_classified {
         return Err(PlcValidationError::DisconnectedBoundaryComponents {
             component_count: component_report.component_count,
         });
@@ -141,7 +145,7 @@ pub fn validate_protected_boundary_complex(
     Ok(PlcValidationSummary {
         watertight: true,
         manifold: true,
-        shell_nesting_classified: true,
+        shell_nesting_classified: shell_classification.shell_nesting_classified,
         material_interfaces_classified: true,
     })
 }

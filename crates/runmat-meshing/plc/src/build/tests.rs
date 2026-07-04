@@ -26,6 +26,9 @@ fn builds_valid_plc_from_closed_tetra_surface() {
         plc.evidence.entity_counts["max_boundary_component_nodes"],
         4
     );
+    assert_eq!(plc.evidence.entity_counts["shell_nesting_classified"], 1);
+    assert_eq!(plc.evidence.entity_counts["outer_shells"], 1);
+    assert_eq!(plc.evidence.entity_counts["nested_shells"], 0);
 }
 
 #[test]

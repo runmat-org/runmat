@@ -10,7 +10,9 @@ use runmat_meshing_core::{
     surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID},
 };
 
-use crate::validate::{classify_boundary_components, validate_protected_boundary_complex};
+use crate::validate::{
+    classify_boundary_components, classify_shell_nesting, validate_protected_boundary_complex,
+};
 
 pub const MODULE_PURPOSE: &str = "oriented protected boundary complex construction";
 
@@ -235,6 +237,23 @@ pub fn build_protected_boundary_complex(
     plc.evidence.entity_counts.insert(
         "max_boundary_component_nodes".to_string(),
         component_report.max_component_node_count,
+    );
+    let shell_classification = classify_shell_nesting(&component_report);
+    plc.evidence.entity_counts.insert(
+        "shell_nesting_classified".to_string(),
+        usize::from(shell_classification.shell_nesting_classified),
+    );
+    plc.evidence.entity_counts.insert(
+        "outer_shells".to_string(),
+        shell_classification.outer_shell_count,
+    );
+    plc.evidence.entity_counts.insert(
+        "nested_shells".to_string(),
+        shell_classification.nested_shell_count,
+    );
+    plc.evidence.entity_counts.insert(
+        "max_shell_nesting_depth".to_string(),
+        shell_classification.max_nesting_depth,
     );
     plc.validation = validate_protected_boundary_complex(&plc)
         .map_err(PlcBuildError::ProtectedBoundaryValidation)?;
