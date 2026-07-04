@@ -1,4 +1,5 @@
 use super::*;
+use runmat_meshing_core::contracts::{MeshingStage, PlcProtectedEdge, TopologyEntityId};
 use runmat_meshing_core::quality::predicate::tetrahedron_signed_volume;
 
 mod fixtures;
@@ -76,6 +77,24 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 }
 
 #[test]
+fn structured_box_generation_rejects_protected_source_edges() {
+    let mut plc = box_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity(MeshingStage::ProtectedBoundaryComplex, "protected_edge_0"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        ],
+        source_edge_id: entity(MeshingStage::CurveMesh, "source_edge_0"),
+    });
+
+    assert!(matches!(
+        generate_structured_box_tetrahedron_mesh_from_plc(&plc),
+        Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc)
+    ));
+}
+
+#[test]
 fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
     let mesh = generate_single_tetrahedron_mesh_from_plc(&tetra_plc())
         .expect("tetrahedron PLC should generate one solver Tetrahedron4");
@@ -94,6 +113,13 @@ fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
             .coordinates_m
     });
     assert!(tetrahedron_signed_volume(points) > 0.0);
+}
+
+fn entity(stage: MeshingStage, id: &str) -> TopologyEntityId {
+    TopologyEntityId {
+        stage,
+        id: id.to_string(),
+    }
 }
 
 #[test]

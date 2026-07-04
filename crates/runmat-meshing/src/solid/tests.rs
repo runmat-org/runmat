@@ -7,7 +7,8 @@ use runmat_geometry_core::{
 };
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationOptions,
-    MeshBackendKind, MeshTargetSize, QualityThresholds, SourceEntityKind, VolumeMeshingOptions,
+    MeshBackendKind, MeshSizingField, MeshTargetSize, QualityThresholds, SizingSample,
+    SourceEntityKind, VolumeMeshingOptions,
 };
 
 #[test]
@@ -37,6 +38,7 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         .len();
     assert_eq!(source_face_count, 6);
     assert_eq!(source_edge_count, 12);
+    assert_eq!(mesh.backend.plc_input_protected_edge_count, 12);
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert_eq!(
         mesh.backend
@@ -49,17 +51,13 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         0
     );
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
-    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian < 0.15);
-    assert!(
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
+    assert_eq!(
         mesh.backend
-            .tetrahedron_exact_scaled_jacobian_below_threshold_count
-            > 0
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count,
+        0
     );
-    assert!(mesh
-        .backend
-        .tetrahedron_exact_scaled_jacobian_bins
-        .contains_key("0_00_to_0_15"));
-    assert!(mesh.backend.tetrahedron_optimization_target_seed_count > 0);
+    assert_eq!(mesh.backend.tetrahedron_optimization_target_seed_count, 0);
     assert!(mesh
         .backend
         .tetrahedron_missing_source_face_recovery_ids
@@ -73,19 +71,45 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         .tetrahedron_missing_material_interface_recovery_ids
         .is_empty());
     assert_eq!(mesh.backend.tetrahedron_sliver_removed_count, 0);
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("default auto cube should be solve-ready after healed CAD face loops");
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
-            quality: QualityThresholds {
-                min_scaled_jacobian: 0.0,
-                ..QualityThresholds::default()
-            },
             min_boundary_face_recovery_ratio: 1.0,
             require_boundary_source_edge_provenance: true,
             ..AnalysisMeshValidationOptions::default()
         },
     )
     .expect("root solid pipeline should recover PLC constraints before quality optimization");
+}
+
+#[test]
+fn explicit_sizing_refines_recovered_cube_source_edges() {
+    let sizing = MeshSizingField {
+        samples: vec![SizingSample {
+            position_m: [0.5, 0.0, 0.0],
+            target_size_m: 0.2,
+            reason: Some("feature_edge".to_string()),
+        }],
+        ..MeshSizingField::default()
+    };
+
+    let mesh = generate_analysis_mesh_with_sizing(
+        &cube_geometry(),
+        VolumeMeshingOptions::default(),
+        &sizing,
+    )
+    .expect("sizing-aware solid pipeline should refine source-edge curves");
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert!(mesh.backend.plc_input_protected_edge_count > 12);
+    assert!(mesh.backend.tetrahedron_source_edge_recovery_item_count > 12);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_missing_source_edge_recovery_item_count,
+        0
+    );
 }
 
 #[test]

@@ -9,6 +9,9 @@ pub(super) fn validate_structured_box_plc(
     bounds: [[f64; 3]; 2],
     tolerance: f64,
 ) -> Result<(), TetrahedronGenerationError> {
+    if !plc.protected_edges.is_empty() {
+        return Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc);
+    }
     let [min, max] = bounds;
     let coordinates_by_id = plc
         .nodes

@@ -4,7 +4,7 @@ use runmat_meshing_core::{MeshTargetSize, VolumeMeshingOptions};
 pub(super) fn target_curve_size_m(options: &VolumeMeshingOptions, geometry: &GeometryAsset) -> f64 {
     match options.target_size {
         MeshTargetSize::LengthM(length) if length.is_finite() && length > 0.0 => length,
-        MeshTargetSize::Auto => geometry_span_m(geometry).unwrap_or(1.0) / 8.0,
+        MeshTargetSize::Auto => geometry_span_m(geometry).unwrap_or(1.0),
         _ => 0.05,
     }
     .max(options.min_size_m.unwrap_or(f64::EPSILON))

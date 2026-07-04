@@ -3,7 +3,7 @@ use runmat_meshing_cad::{build_cad_evaluation_model, build_cad_topology, extract
 use runmat_meshing_core::{
     AnalysisMeshArtifact, MeshBackendKind, MeshSizingField, VolumeMeshingOptions,
 };
-use runmat_meshing_curve::discretize_topology_curves;
+use runmat_meshing_curve::discretize_topology_curves_with_sizing;
 use runmat_meshing_plc::build::build_protected_boundary_complex;
 use runmat_meshing_surface::discretize_cad_topology_surfaces_with_curves;
 use runmat_meshing_tetrahedron::{recover::build_recovery_queue_from_plc, structured_grid};
@@ -81,8 +81,8 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let cad_evaluation = build_cad_evaluation_model(&cad_topology, &topology)
         .map_err(SolidMeshingError::CadEvaluation)?;
     let curve_options = curve_discretization_options(options, geometry);
-    let curves =
-        discretize_topology_curves(&topology, curve_options).map_err(SolidMeshingError::Curve)?;
+    let curves = discretize_topology_curves_with_sizing(&topology, curve_options, Some(sizing))
+        .map_err(SolidMeshingError::Curve)?;
     let surface = discretize_cad_topology_surfaces_with_curves(
         &cad_topology,
         &topology,
