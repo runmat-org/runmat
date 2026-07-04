@@ -191,6 +191,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_rejected_source_face_diagonal_quality_gate_count: usize,
     #[serde(default)]
+    pub tetrahedron_repaired_boundary_face_identity_count: usize,
+    #[serde(default)]
     pub tetrahedron_repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub tetrahedron_repaired_source_edge_provenance_count: usize,

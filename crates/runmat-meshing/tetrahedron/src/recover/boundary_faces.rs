@@ -114,6 +114,35 @@ pub(super) fn repair_boundary_source_face_provenance(
     repaired_count
 }
 
+pub(super) fn repair_boundary_face_identity(
+    plc: &ProtectedBoundaryComplex,
+    tetrahedron_mesh: &mut TetrahedronMesh,
+) -> usize {
+    let expected_face_id_by_nodes = plc
+        .facets
+        .iter()
+        .map(|facet| {
+            (
+                sorted_topology_ids(facet.node_ids.clone()),
+                facet.facet_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut repaired_count = 0;
+    for boundary_face in &mut tetrahedron_mesh.boundary_faces {
+        let face_key = sorted_topology_ids(boundary_face.node_ids.clone());
+        let Some(expected_face_id) = expected_face_id_by_nodes.get(&face_key) else {
+            continue;
+        };
+        if &boundary_face.face_id != expected_face_id {
+            boundary_face.face_id = expected_face_id.clone();
+            repaired_count += 1;
+        }
+    }
+    repaired_count
+}
+
 pub(super) fn repair_boundary_source_edge_provenance(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,

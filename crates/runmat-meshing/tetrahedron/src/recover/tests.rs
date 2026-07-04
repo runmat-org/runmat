@@ -91,6 +91,29 @@ fn recovery_stage_result_repairs_boundary_source_face_provenance_before_audit() 
 }
 
 #[test]
+fn recovery_stage_result_repairs_boundary_face_identity_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].face_id = entity(MeshingStage::ProtectedBoundaryComplex, "stale_facet");
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("matching boundary topology should repair boundary-face identity");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.tetrahedron_mesh.boundary_faces[0].face_id,
+        entity(MeshingStage::ProtectedBoundaryComplex, "facet_1")
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_boundary_face_identity_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() {
     let mut mesh = tetrahedron_mesh();
     let missing_face = mesh.boundary_faces.remove(2);

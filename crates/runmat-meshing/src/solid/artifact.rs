@@ -303,6 +303,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_source_face_diagonal_recovery_quality_gate",
             ),
+            tetrahedron_repaired_boundary_face_identity_count: recovery_entity_count(
+                recovery_queue,
+                "repaired_boundary_face_identity_items",
+            ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_source_face_provenance_items",

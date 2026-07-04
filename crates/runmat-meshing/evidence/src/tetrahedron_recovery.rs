@@ -83,6 +83,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_source_face_diagonal_quality_gate_count: usize,
     #[serde(default)]
+    pub repaired_boundary_face_identity_count: usize,
+    #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
@@ -298,6 +300,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_source_face_diagonal_quality_gate_count: mesh
             .backend
             .tetrahedron_rejected_source_face_diagonal_quality_gate_count,
+        repaired_boundary_face_identity_count: mesh
+            .backend
+            .tetrahedron_repaired_boundary_face_identity_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

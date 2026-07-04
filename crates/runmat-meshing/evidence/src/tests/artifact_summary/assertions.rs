@@ -243,6 +243,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         0
     );
     assert_eq!(recovery.rejected_source_face_diagonal_quality_gate_count, 0);
+    assert_eq!(recovery.repaired_boundary_face_identity_count, 1);
     assert_eq!(recovery.repaired_source_face_provenance_count, 1);
     assert_eq!(recovery.repaired_source_edge_provenance_count, 2);
     assert_eq!(recovery.repaired_material_interface_element_count, 3);

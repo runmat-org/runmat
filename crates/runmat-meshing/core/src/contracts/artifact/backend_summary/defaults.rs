@@ -99,6 +99,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_rejected_source_face_diagonal_element_topology_count: 0,
             tetrahedron_rejected_source_face_diagonal_material_region_mismatch_count: 0,
             tetrahedron_rejected_source_face_diagonal_quality_gate_count: 0,
+            tetrahedron_repaired_boundary_face_identity_count: 0,
             tetrahedron_repaired_source_face_provenance_count: 0,
             tetrahedron_repaired_source_edge_provenance_count: 0,
             tetrahedron_repaired_material_interface_element_count: 0,
