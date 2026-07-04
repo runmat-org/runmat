@@ -111,7 +111,9 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    let interior = bounds_center(bounds);
+    let interior_selection =
+        select_boundary_conforming_box_interior(plc, &coordinates_by_id, bounds, tolerance)?;
+    let interior = interior_selection.point;
     let interior_id = TopologyEntityId {
         stage: MeshingStage::TetrahedronMesh,
         id: "structured_box_interior_0".to_string(),
@@ -218,6 +220,14 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
         "boundary_conforming_box_facets".to_string(),
         plc.facets.len(),
     );
+    evidence.entity_counts.insert(
+        "interior_smoothing_candidate_points".to_string(),
+        interior_selection.candidate_count,
+    );
+    evidence.entity_counts.insert(
+        "interior_smoothing_accepted_points".to_string(),
+        usize::from(interior_selection.improved),
+    );
     record_input_plc_evidence(plc, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
 
@@ -230,6 +240,111 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
         quality_optimized: false,
         evidence,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InteriorPointSelection {
+    point: [f64; 3],
+    min_scaled_jacobian: f64,
+    candidate_count: usize,
+    improved: bool,
+}
+
+fn select_boundary_conforming_box_interior(
+    plc: &ProtectedBoundaryComplex,
+    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    bounds: [[f64; 3]; 2],
+    tolerance: f64,
+) -> Result<InteriorPointSelection, TetrahedronGenerationError> {
+    let center = bounds_center(bounds);
+    let volume_epsilon = tolerance.powi(3).max(f64::EPSILON);
+    let baseline_quality = min_scaled_jacobian_for_boundary_conforming_interior(
+        plc,
+        coordinates_by_id,
+        center,
+        volume_epsilon,
+    )?;
+    let mut best = InteriorPointSelection {
+        point: center,
+        min_scaled_jacobian: baseline_quality,
+        candidate_count: 0,
+        improved: false,
+    };
+    let mut candidates = Vec::<[f64; 3]>::new();
+    for x_fraction in [0.25, 0.35, 0.5, 0.65, 0.75] {
+        for y_fraction in [0.25, 0.35, 0.5, 0.65, 0.75] {
+            for z_fraction in [0.25, 0.35, 0.5, 0.65, 0.75] {
+                candidates.push([
+                    lerp(bounds[0][0], bounds[1][0], x_fraction),
+                    lerp(bounds[0][1], bounds[1][1], y_fraction),
+                    lerp(bounds[0][2], bounds[1][2], z_fraction),
+                ]);
+            }
+        }
+    }
+    candidates.sort_by(|left, right| {
+        left[0]
+            .total_cmp(&right[0])
+            .then_with(|| left[1].total_cmp(&right[1]))
+            .then_with(|| left[2].total_cmp(&right[2]))
+    });
+    candidates
+        .dedup_by(|left, right| (0..3).all(|axis| (left[axis] - right[axis]).abs() <= tolerance));
+    best.candidate_count = candidates.len();
+
+    for candidate in candidates {
+        let Ok(min_scaled_jacobian) = min_scaled_jacobian_for_boundary_conforming_interior(
+            plc,
+            coordinates_by_id,
+            candidate,
+            volume_epsilon,
+        ) else {
+            continue;
+        };
+        if min_scaled_jacobian > best.min_scaled_jacobian {
+            best.point = candidate;
+            best.min_scaled_jacobian = min_scaled_jacobian;
+            best.improved = min_scaled_jacobian > baseline_quality + 1.0e-12;
+        }
+    }
+
+    Ok(best)
+}
+
+fn min_scaled_jacobian_for_boundary_conforming_interior(
+    plc: &ProtectedBoundaryComplex,
+    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    interior: [f64; 3],
+    volume_epsilon: f64,
+) -> Result<f64, TetrahedronGenerationError> {
+    let mut min_scaled_jacobian = f64::INFINITY;
+    for facet in &plc.facets {
+        let points = [
+            *coordinates_by_id.get(&facet.node_ids[0]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[0].id.clone(),
+                }
+            })?,
+            *coordinates_by_id.get(&facet.node_ids[1]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[1].id.clone(),
+                }
+            })?,
+            *coordinates_by_id.get(&facet.node_ids[2]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[2].id.clone(),
+                }
+            })?,
+            interior,
+        ];
+        if tetrahedron_signed_volume(points).abs() <= volume_epsilon {
+            return Err(TetrahedronGenerationError::DegenerateBoundaryFacet {
+                facet_id: facet.facet_id.id.clone(),
+            });
+        }
+        min_scaled_jacobian = min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
+    }
+    Ok(min_scaled_jacobian)
 }
 
 fn plc_bounds(plc: &ProtectedBoundaryComplex) -> Result<[[f64; 3]; 2], TetrahedronGenerationError> {
@@ -325,6 +440,10 @@ fn bounds_center(bounds: [[f64; 3]; 2]) -> [f64; 3] {
         (bounds[0][1] + bounds[1][1]) * 0.5,
         (bounds[0][2] + bounds[1][2]) * 0.5,
     ]
+}
+
+fn lerp(min: f64, max: f64, fraction: f64) -> f64 {
+    min + (max - min) * fraction
 }
 
 fn same_point(left: [f64; 3], right: [f64; 3], tolerance: f64) -> bool {
