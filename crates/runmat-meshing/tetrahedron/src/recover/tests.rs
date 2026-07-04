@@ -488,14 +488,16 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     assert_eq!(recovery.ambiguous_boundary_ownership_count, 1);
     assert_eq!(recovery.missing_boundary_ownership_count, 0);
 
+    let recovery_evidence = assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("ambiguous repair should fail"),
+        1,
+        0,
+        0,
+        1,
+    );
     assert_eq!(
-        recover_tetrahedron_mesh_from_plc(&plc, mesh),
-        Err(TetrahedronRecoveryError::IncompleteRecovery {
-            missing_item_count: 1,
-            missing_source_face_item_count: 0,
-            missing_source_edge_item_count: 0,
-            missing_material_interface_item_count: 1,
-        })
+        recovery_evidence.entity_counts["rejected_material_interface_recovery_items"],
+        1
     );
 }
 
@@ -570,14 +572,42 @@ fn recovery_stage_result_rejects_missing_queue_items() {
     mesh.boundary_faces.remove(0);
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
 
+    assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("missing face should fail"),
+        1,
+        1,
+        0,
+        0,
+    );
+}
+
+#[test]
+fn incomplete_recovery_error_carries_source_face_diagonal_rejection_evidence() {
+    let plc = source_face_boundary_diagonal_flip_plc();
+    let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();
+    mesh.elements[1].material_region_id = "other_body".to_string();
+
+    let recovery_evidence = assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh)
+            .expect_err("material-region mismatch should reject source-face diagonal recovery"),
+        2,
+        2,
+        0,
+        0,
+    );
+
     assert_eq!(
-        recover_tetrahedron_mesh_from_plc(&plc, mesh),
-        Err(TetrahedronRecoveryError::IncompleteRecovery {
-            missing_item_count: 1,
-            missing_source_face_item_count: 1,
-            missing_source_edge_item_count: 0,
-            missing_material_interface_item_count: 0,
-        })
+        recovery_evidence.entity_counts["attempted_source_face_diagonal_recovery_pairs"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_source_face_diagonal_recovery_pairs"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts
+            ["rejected_source_face_diagonal_recovery_material_region_mismatch"],
+        1
     );
 }
 
@@ -754,6 +784,40 @@ fn recovery_queue_rejects_open_plc_even_when_summary_claims_ready() {
         build_recovery_queue_from_plc(&plc, &tetrahedron_mesh()),
         Err(TetrahedronRecoveryError::InvalidProtectedBoundaryComplex { .. })
     ));
+}
+
+fn assert_incomplete_recovery(
+    error: TetrahedronRecoveryError,
+    expected_missing_item_count: usize,
+    expected_missing_source_face_item_count: usize,
+    expected_missing_source_edge_item_count: usize,
+    expected_missing_material_interface_item_count: usize,
+) -> StageEvidence {
+    let TetrahedronRecoveryError::IncompleteRecovery {
+        missing_item_count,
+        missing_source_face_item_count,
+        missing_source_edge_item_count,
+        missing_material_interface_item_count,
+        recovery_evidence,
+    } = error
+    else {
+        panic!("expected incomplete recovery error, got {error:?}");
+    };
+
+    assert_eq!(missing_item_count, expected_missing_item_count);
+    assert_eq!(
+        missing_source_face_item_count,
+        expected_missing_source_face_item_count
+    );
+    assert_eq!(
+        missing_source_edge_item_count,
+        expected_missing_source_edge_item_count
+    );
+    assert_eq!(
+        missing_material_interface_item_count,
+        expected_missing_material_interface_item_count
+    );
+    recovery_evidence
 }
 
 fn tetrahedron_plc() -> ProtectedBoundaryComplex {

@@ -436,6 +436,7 @@ pub fn recover_tetrahedron_mesh_from_plc(
                 &recovery_queue,
                 "missing_material_interface_items",
             ),
+            recovery_evidence: recovery_queue.evidence.clone(),
         });
     }
     Ok(TetrahedronRecoveryResult {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use runmat_meshing_core::contracts::{StageEvidence, TetrahedronMesh, TopologyEntityId};
 use runmat_meshing_plc::validate::PlcValidationError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TetrahedronRecoveryError {
     InvalidProtectedBoundaryComplex {
         error: PlcValidationError,
@@ -14,6 +14,7 @@ pub enum TetrahedronRecoveryError {
         missing_source_face_item_count: usize,
         missing_source_edge_item_count: usize,
         missing_material_interface_item_count: usize,
+        recovery_evidence: StageEvidence,
     },
 }
 
@@ -35,6 +36,7 @@ impl std::fmt::Display for TetrahedronRecoveryError {
                 missing_source_face_item_count,
                 missing_source_edge_item_count,
                 missing_material_interface_item_count,
+                ..
             } => write!(
                 formatter,
                 "Tetrahedron recovery is incomplete: {missing_item_count} missing constraints ({missing_source_face_item_count} source faces, {missing_source_edge_item_count} source edges, {missing_material_interface_item_count} material interfaces)"
