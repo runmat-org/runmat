@@ -33,6 +33,7 @@ pub fn validate_protected_boundary_complex(
 
     let mut node_ids = BTreeSet::<TopologyEntityId>::new();
     for node in &plc.nodes {
+        validate_plc_entity_stage(&node.node_id)?;
         if !node_ids.insert(node.node_id.clone()) {
             return Err(PlcValidationError::DuplicateNode {
                 node_id: node.node_id.clone(),
@@ -55,6 +56,7 @@ pub fn validate_protected_boundary_complex(
     let mut facet_ids = BTreeSet::<TopologyEntityId>::new();
     let mut facet_id_by_nodes = BTreeMap::<[TopologyEntityId; 3], TopologyEntityId>::new();
     for facet in &plc.facets {
+        validate_plc_entity_stage(&facet.facet_id)?;
         if !facet_ids.insert(facet.facet_id.clone()) {
             return Err(PlcValidationError::DuplicateFacet {
                 facet_id: facet.facet_id.clone(),
@@ -96,6 +98,7 @@ pub fn validate_protected_boundary_complex(
     let mut protected_edge_id_by_segment =
         BTreeMap::<[TopologyEntityId; 2], TopologyEntityId>::new();
     for protected_edge in &plc.protected_edges {
+        validate_plc_entity_stage(&protected_edge.edge_id)?;
         if !protected_edge_ids.insert(protected_edge.edge_id.clone()) {
             return Err(PlcValidationError::DuplicateProtectedEdge {
                 edge_id: protected_edge.edge_id.clone(),
@@ -118,6 +121,7 @@ pub fn validate_protected_boundary_complex(
             });
         }
         for node_id in &protected_edge.node_ids {
+            validate_plc_entity_stage(node_id)?;
             if !node_ids.contains(node_id) {
                 return Err(PlcValidationError::ProtectedEdgeReferencesUnknownNode {
                     edge_id: protected_edge.edge_id.clone(),
@@ -191,6 +195,7 @@ fn validate_facet_nodes(
 ) -> Result<(), PlcValidationError> {
     let mut unique_node_ids = BTreeSet::<TopologyEntityId>::new();
     for node_id in facet_node_ids {
+        validate_plc_entity_stage(node_id)?;
         if !known_node_ids.contains(node_id) {
             return Err(PlcValidationError::FacetReferencesUnknownNode {
                 facet_id,
@@ -200,6 +205,15 @@ fn validate_facet_nodes(
         if !unique_node_ids.insert(node_id.clone()) {
             return Err(PlcValidationError::FacetHasRepeatedNode { facet_id });
         }
+    }
+    Ok(())
+}
+
+fn validate_plc_entity_stage(entity_id: &TopologyEntityId) -> Result<(), PlcValidationError> {
+    if entity_id.stage != MeshingStage::ProtectedBoundaryComplex {
+        return Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: entity_id.clone(),
+        });
     }
     Ok(())
 }

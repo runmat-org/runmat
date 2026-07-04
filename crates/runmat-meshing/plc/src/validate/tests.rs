@@ -50,6 +50,19 @@ fn rejects_not_volume_ready_validation_summary() {
 }
 
 #[test]
+fn rejects_node_with_non_plc_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.nodes[0].node_id = source_face("wrong_stage_node");
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: source_face("wrong_stage_node"),
+        })
+    );
+}
+
+#[test]
 fn rejects_open_boundary_edge() {
     let mut plc = tetrahedron_plc();
     plc.facets.pop();
@@ -72,6 +85,19 @@ fn rejects_inconsistent_boundary_edge_orientation() {
 }
 
 #[test]
+fn rejects_facet_id_with_non_plc_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[0].facet_id = source_face("wrong_stage_facet");
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: source_face("wrong_stage_facet"),
+        })
+    );
+}
+
+#[test]
 fn rejects_facet_that_references_unknown_node() {
     let mut plc = tetrahedron_plc();
     plc.facets[0].node_ids[0] = entity("missing");
@@ -80,6 +106,19 @@ fn rejects_facet_that_references_unknown_node() {
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::FacetReferencesUnknownNode { .. })
     ));
+}
+
+#[test]
+fn rejects_facet_node_with_non_plc_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[0].node_ids[0] = source_face("wrong_stage_node");
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: source_face("wrong_stage_node"),
+        })
+    );
 }
 
 #[test]
@@ -178,6 +217,40 @@ fn rejects_protected_edge_that_references_unknown_node() {
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::ProtectedEdgeReferencesUnknownNode { .. })
     ));
+}
+
+#[test]
+fn rejects_protected_edge_id_with_non_plc_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: source_edge("wrong_stage_edge"),
+        node_ids: [entity("0"), entity("1")],
+        source_edge_id: source_edge("source_edge_01"),
+    });
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: source_edge("wrong_stage_edge"),
+        })
+    );
+}
+
+#[test]
+fn rejects_protected_edge_node_with_non_plc_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.push(PlcProtectedEdge {
+        edge_id: entity("edge_wrong_stage_node"),
+        node_ids: [entity("0"), source_face("wrong_stage_node")],
+        source_edge_id: source_edge("source_edge_01"),
+    });
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::PlcEntityStageMismatch {
+            entity_id: source_face("wrong_stage_node"),
+        })
+    );
 }
 
 #[test]

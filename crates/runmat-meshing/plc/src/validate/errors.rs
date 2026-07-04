@@ -13,6 +13,9 @@ pub enum PlcValidationError {
     NonFiniteNode {
         node_id: TopologyEntityId,
     },
+    PlcEntityStageMismatch {
+        entity_id: TopologyEntityId,
+    },
     FacetReferencesUnknownNode {
         facet_id: TopologyEntityId,
         node_id: TopologyEntityId,
@@ -105,6 +108,11 @@ impl std::fmt::Display for PlcValidationError {
                     node_id.id
                 )
             }
+            Self::PlcEntityStageMismatch { entity_id } => write!(
+                formatter,
+                "PLC entity {} is not a ProtectedBoundaryComplex entity",
+                entity_id.id
+            ),
             Self::FacetReferencesUnknownNode { facet_id, node_id } => write!(
                 formatter,
                 "PLC facet {} references unknown node {}",
