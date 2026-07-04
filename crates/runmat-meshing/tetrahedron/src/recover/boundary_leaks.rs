@@ -37,20 +37,29 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
         return empty_recovery();
     }
     let node_coordinates = node_coordinates(tetrahedron_mesh);
+    let mut recovery = empty_recovery();
+    let recoverable_facets = plc
+        .facets
+        .iter()
+        .filter(|facet| {
+            recoverable_source_faces.contains(&(
+                facet.source_face_id.clone(),
+                sorted_topology_ids(facet.node_ids.clone()),
+            ))
+        })
+        .collect::<Vec<_>>();
     let Some(plc_triangles) = plc_boundary_triangles(plc, &node_coordinates) else {
-        return empty_recovery();
+        for _ in &recoverable_facets {
+            recovery.attempted_source_face_count += 1;
+            recovery.reject(BoundaryLeakRecoveryRejection::ClosedSurfaceCoordinates);
+        }
+        return recovery;
     };
     let element_indices_by_face = element_indices_by_face(tetrahedron_mesh);
     let mut leaked_element_indices = BTreeSet::<usize>::new();
     let mut exposed_facets = BTreeMap::<[TopologyEntityId; 3], PlcFacet>::new();
-    let mut recovery = empty_recovery();
 
-    for facet in plc.facets.iter().filter(|facet| {
-        recoverable_source_faces.contains(&(
-            facet.source_face_id.clone(),
-            sorted_topology_ids(facet.node_ids.clone()),
-        ))
-    }) {
+    for facet in recoverable_facets {
         recovery.attempted_source_face_count += 1;
         let face_key = sorted_topology_ids(facet.node_ids.clone());
         let Some(element_indices) = element_indices_by_face.get(&face_key) else {
@@ -139,6 +148,7 @@ enum BoundaryLeakRecoveryRejection {
     AdjacentElementCount,
     MaterialRegionMismatch,
     OutsideClassification,
+    ClosedSurfaceCoordinates,
 }
 
 impl BoundaryLeakRecoveryRejection {
@@ -147,6 +157,7 @@ impl BoundaryLeakRecoveryRejection {
             Self::AdjacentElementCount => "rejected_boundary_leak_adjacent_element_count",
             Self::MaterialRegionMismatch => "rejected_boundary_leak_material_region_mismatch",
             Self::OutsideClassification => "rejected_boundary_leak_outside_classification",
+            Self::ClosedSurfaceCoordinates => "rejected_boundary_leak_closed_surface_coordinates",
         }
     }
 }

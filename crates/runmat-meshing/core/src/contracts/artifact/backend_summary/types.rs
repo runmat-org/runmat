@@ -227,6 +227,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_rejected_boundary_leak_outside_classification_count: usize,
     #[serde(default)]
+    pub tetrahedron_rejected_boundary_leak_closed_surface_coordinate_count: usize,
+    #[serde(default)]
     pub tetrahedron_repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub tetrahedron_repaired_source_edge_provenance_count: usize,

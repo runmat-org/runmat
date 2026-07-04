@@ -119,6 +119,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_boundary_leak_outside_classification_count: usize,
     #[serde(default)]
+    pub rejected_boundary_leak_closed_surface_coordinate_count: usize,
+    #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
@@ -442,6 +444,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_boundary_leak_outside_classification_count: mesh
             .backend
             .tetrahedron_rejected_boundary_leak_outside_classification_count,
+        rejected_boundary_leak_closed_surface_coordinate_count: mesh
+            .backend
+            .tetrahedron_rejected_boundary_leak_closed_surface_coordinate_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

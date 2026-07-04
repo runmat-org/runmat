@@ -376,6 +376,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_boundary_leak_outside_classification",
             ),
+            tetrahedron_rejected_boundary_leak_closed_surface_coordinate_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_boundary_leak_closed_surface_coordinates",
+                ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_source_face_provenance_items",

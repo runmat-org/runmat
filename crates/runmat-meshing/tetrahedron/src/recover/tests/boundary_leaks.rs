@@ -90,6 +90,38 @@ fn recovery_stage_result_removes_exterior_elements_across_interior_source_faces(
     );
 }
 
+#[test]
+fn boundary_leak_recovery_rejects_when_closed_surface_coordinates_are_missing() {
+    let error = recover_tetrahedron_mesh_from_plc(
+        &split_opposite_face_plc_with_missing_generated_node(),
+        interior_source_edge_leak_mesh(),
+    )
+    .expect_err("missing generated coordinates should leave recovery incomplete");
+    let TetrahedronRecoveryError::IncompleteRecovery {
+        recovery_evidence, ..
+    } = error
+    else {
+        panic!("expected incomplete recovery with boundary-leak rejection evidence");
+    };
+
+    assert_eq!(
+        recovery_evidence.entity_counts["attempted_boundary_leak_recovery_items"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_boundary_leak_recovery_items"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_boundary_leak_closed_surface_coordinates"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["removed_exterior_leaked_elements"],
+        0
+    );
+}
+
 fn interior_source_edge_leak_mesh() -> TetrahedronMesh {
     let mut mesh = tetrahedron_mesh();
     mesh.nodes.push(tetrahedron_node(
@@ -121,4 +153,20 @@ fn interior_source_edge_leak_mesh() -> TetrahedronMesh {
         material_region_id: "solid_body".to_string(),
     });
     mesh
+}
+
+fn split_opposite_face_plc_with_missing_generated_node() -> ProtectedBoundaryComplex {
+    let mut plc = tetrahedron_plc();
+    plc.complex_id = "split_opposite_face_plc".to_string();
+    plc.nodes
+        .push(plc_node("4", [0.25_f64, 0.25_f64, 0.75_f64]));
+    plc.facets = vec![
+        facet("facet_1", ["0", "2", "1"], "face_1"),
+        facet("facet_2", ["0", "1", "3"], "face_2"),
+        facet("facet_3a", ["1", "2", "4"], "face_3a"),
+        facet("facet_3b", ["2", "3", "4"], "face_3b"),
+        facet("facet_3c", ["3", "1", "4"], "face_3c"),
+        facet("facet_4", ["2", "0", "3"], "face_4"),
+    ];
+    plc
 }
