@@ -4,8 +4,8 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
-    validate_analysis_mesh, MeshBackendKind, MeshTargetSize, QualityThresholds,
-    VolumeMeshingOptions,
+    validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationOptions,
+    MeshBackendKind, MeshTargetSize, QualityThresholds, VolumeMeshingOptions,
 };
 
 #[test]
@@ -20,6 +20,14 @@ fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("root solid pipeline should produce a solve-ready mesh for a generic cube");
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            min_boundary_face_recovery_ratio: 1.0,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("root solid pipeline should recover every solver boundary face");
 }
 
 #[test]

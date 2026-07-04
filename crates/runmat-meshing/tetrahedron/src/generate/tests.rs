@@ -48,6 +48,7 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
     let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&box_plc())
         .expect("validated box PLC should generate structured Tetrahedron mesh");
 
+    assert_eq!(mesh.nodes.len(), 8);
     assert_eq!(mesh.elements.len(), 6);
     assert_eq!(mesh.boundary_faces.len(), 12);
     assert_eq!(mesh.evidence.entity_counts["plc_boundary_nodes"], 8);
@@ -62,6 +63,13 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
         });
         assert!(tetrahedron_signed_volume(points) > 0.0);
     }
+    assert!(mesh.boundary_faces.iter().all(|face| {
+        mesh.elements.iter().any(|element| {
+            face.node_ids
+                .iter()
+                .all(|node_id| element.node_ids.contains(node_id))
+        })
+    }));
 }
 
 #[test]
