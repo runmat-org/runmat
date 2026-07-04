@@ -46,6 +46,24 @@ fn rejects_surface_with_protected_edges_without_loop_coverage_evidence() {
 }
 
 #[test]
+fn rejects_surface_with_inconsistent_loop_coverage_evidence() {
+    let mut surface = tetra_surface();
+    let mut loop_coverage = loop_coverage();
+    loop_coverage.recovered_source_edge_count = 5;
+    surface.loop_coverage = Some(loop_coverage);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
+            recovered_face_count: 4,
+            surface_source_face_count: 4,
+            recovered_source_edge_count: 5,
+            protected_source_edge_count: 6,
+        })
+    );
+}
+
+#[test]
 fn rejects_open_surface_before_volume_meshing() {
     let mut surface = tetra_surface();
     surface.elements.pop();

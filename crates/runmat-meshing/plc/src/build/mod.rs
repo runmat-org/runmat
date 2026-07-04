@@ -23,12 +23,20 @@ pub fn build_protected_boundary_complex(
     if surface.elements.is_empty() {
         return Err(PlcBuildError::EmptySurface);
     }
-    let has_protected_source_edges = surface.elements.iter().any(|element| {
-        element
-            .source_edge_ids
-            .iter()
-            .any(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
-    });
+    let surface_source_face_count = surface
+        .elements
+        .iter()
+        .map(|element| element.source_face_id)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let protected_source_edge_count = surface
+        .elements
+        .iter()
+        .flat_map(|element| element.source_edge_ids)
+        .filter(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let has_protected_source_edges = protected_source_edge_count > 0;
     if has_protected_source_edges && surface.curve_boundary_validation.is_none() {
         return Err(PlcBuildError::MissingCurveBoundaryValidation);
     }
@@ -132,6 +140,18 @@ pub fn build_protected_boundary_complex(
             return Err(PlcBuildError::NonManifoldBoundaryEdge {
                 node_ids: edge,
                 incidence_count,
+            });
+        }
+    }
+    if let Some(loop_coverage) = &surface.loop_coverage {
+        if loop_coverage.recovered_face_count != surface_source_face_count
+            || loop_coverage.recovered_source_edge_count < protected_source_edge_count
+        {
+            return Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
+                recovered_face_count: loop_coverage.recovered_face_count,
+                surface_source_face_count,
+                recovered_source_edge_count: loop_coverage.recovered_source_edge_count,
+                protected_source_edge_count,
             });
         }
     }
