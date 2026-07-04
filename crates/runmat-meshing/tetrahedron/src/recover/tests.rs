@@ -264,6 +264,71 @@ fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip
 }
 
 #[test]
+fn recovery_stage_result_recovers_source_faces_by_boundary_diagonal_flip_without_protected_edge() {
+    let plc = source_face_boundary_diagonal_flip_plc();
+    let mesh = boundary_diagonal_flip_tetrahedron_mesh();
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing source faces should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_items"],
+        2
+    );
+    assert_eq!(initial_queue.evidence.entity_counts["source_edge_items"], 0);
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        0
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("boundary diagonal flip should recover missing source faces");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(result.tetrahedron_mesh.boundary_faces.iter().any(|face| {
+        sorted_face_ids(face.node_ids.clone())
+            == sorted_face_ids([
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            ])
+            && face.source_face_id == entity(MeshingStage::SurfaceMesh, "face_1")
+            && face.source_edge_ids == [None, None, None]
+    }));
+    assert!(result.tetrahedron_mesh.boundary_faces.iter().any(|face| {
+        sorted_face_ids(face.node_ids.clone())
+            == sorted_face_ids([
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            ])
+            && face.source_face_id == entity(MeshingStage::SurfaceMesh, "face_2")
+            && face.source_edge_ids == [None, None, None]
+    }));
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_source_face_diagonal_recovery_pairs"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_diagonal_pairs"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_source_face_diagonal_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+}
+
+#[test]
 fn absent_source_edge_boundary_diagonal_flip_records_rejection_without_mutating_mesh() {
     let plc = boundary_diagonal_flip_plc();
     let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();
@@ -776,6 +841,13 @@ fn boundary_diagonal_flip_plc() -> ProtectedBoundaryComplex {
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
+}
+
+fn source_face_boundary_diagonal_flip_plc() -> ProtectedBoundaryComplex {
+    let mut plc = boundary_diagonal_flip_plc();
+    plc.complex_id = "source_face_boundary_diagonal_flip_plc".to_string();
+    plc.protected_edges = Vec::new();
+    plc
 }
 
 fn boundary_diagonal_flip_tetrahedron_mesh() -> TetrahedronMesh {

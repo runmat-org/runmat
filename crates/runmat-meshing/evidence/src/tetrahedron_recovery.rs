@@ -63,6 +63,26 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub recovered_absent_source_edge_boundary_face_count: usize,
     #[serde(default)]
+    pub attempted_source_face_diagonal_recovery_pair_count: usize,
+    #[serde(default)]
+    pub recovered_source_face_diagonal_pair_count: usize,
+    #[serde(default)]
+    pub recovered_source_face_diagonal_boundary_face_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_recovery_pair_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_adjacent_facet_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_adjacent_facet_topology_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_current_boundary_face_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_element_topology_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_material_region_mismatch_count: usize,
+    #[serde(default)]
+    pub rejected_source_face_diagonal_quality_gate_count: usize,
+    #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
@@ -248,6 +268,36 @@ pub(super) fn tetrahedron_recovery_evidence(
         recovered_absent_source_edge_boundary_face_count: mesh
             .backend
             .tetrahedron_recovered_absent_source_edge_boundary_face_count,
+        attempted_source_face_diagonal_recovery_pair_count: mesh
+            .backend
+            .tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
+        recovered_source_face_diagonal_pair_count: mesh
+            .backend
+            .tetrahedron_recovered_source_face_diagonal_pair_count,
+        recovered_source_face_diagonal_boundary_face_count: mesh
+            .backend
+            .tetrahedron_recovered_source_face_diagonal_boundary_face_count,
+        rejected_source_face_diagonal_recovery_pair_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_recovery_pair_count,
+        rejected_source_face_diagonal_adjacent_facet_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_adjacent_facet_count,
+        rejected_source_face_diagonal_adjacent_facet_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_adjacent_facet_topology_count,
+        rejected_source_face_diagonal_current_boundary_face_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_current_boundary_face_count,
+        rejected_source_face_diagonal_element_topology_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_element_topology_count,
+        rejected_source_face_diagonal_material_region_mismatch_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_material_region_mismatch_count,
+        rejected_source_face_diagonal_quality_gate_count: mesh
+            .backend
+            .tetrahedron_rejected_source_face_diagonal_quality_gate_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

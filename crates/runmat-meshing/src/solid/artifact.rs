@@ -260,6 +260,49 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "recovered_absent_source_edge_boundary_faces",
             ),
+            tetrahedron_attempted_source_face_diagonal_recovery_pair_count: recovery_entity_count(
+                recovery_queue,
+                "attempted_source_face_diagonal_recovery_pairs",
+            ),
+            tetrahedron_recovered_source_face_diagonal_pair_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_source_face_diagonal_pairs",
+            ),
+            tetrahedron_recovered_source_face_diagonal_boundary_face_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_source_face_diagonal_boundary_faces",
+            ),
+            tetrahedron_rejected_source_face_diagonal_recovery_pair_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_face_diagonal_recovery_pairs",
+            ),
+            tetrahedron_rejected_source_face_diagonal_adjacent_facet_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_face_diagonal_recovery_adjacent_facet_count",
+            ),
+            tetrahedron_rejected_source_face_diagonal_adjacent_facet_topology_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_source_face_diagonal_recovery_adjacent_facet_topology",
+                ),
+            tetrahedron_rejected_source_face_diagonal_current_boundary_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_source_face_diagonal_recovery_current_boundary_faces",
+                ),
+            tetrahedron_rejected_source_face_diagonal_element_topology_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_face_diagonal_recovery_element_topology",
+            ),
+            tetrahedron_rejected_source_face_diagonal_material_region_mismatch_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_source_face_diagonal_recovery_material_region_mismatch",
+                ),
+            tetrahedron_rejected_source_face_diagonal_quality_gate_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_face_diagonal_recovery_quality_gate",
+            ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_source_face_provenance_items",

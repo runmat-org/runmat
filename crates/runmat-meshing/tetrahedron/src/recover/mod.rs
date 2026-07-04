@@ -1,7 +1,9 @@
 mod absent_edges;
+mod boundary_diagonal;
 mod boundary_faces;
 pub mod boundary_queue;
 mod material_interfaces;
+mod source_faces;
 mod topology;
 mod types;
 
@@ -20,6 +22,7 @@ use boundary_faces::{
     repair_boundary_source_face_provenance,
 };
 use material_interfaces::recover_single_material_interface_region;
+use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
     TetrahedronProtectedEdgeTopology, TetrahedronRecoveryError, TetrahedronRecoveryKind,
@@ -307,6 +310,8 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
+    let recovered_source_faces =
+        recover_source_faces_by_boundary_diagonal_flip(plc, &mut tetrahedron_mesh);
     let recovered_protected_edge_boundary_face_count =
         recover_missing_protected_edge_boundary_faces(
             plc,
@@ -365,6 +370,28 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "recovered_absent_source_edge_boundary_faces".to_string(),
         recovered_absent_source_edges.boundary_face_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_source_face_diagonal_recovery_pairs".to_string(),
+        recovered_source_faces.attempted_source_face_pair_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "recovered_source_face_diagonal_pairs".to_string(),
+        recovered_source_faces.source_face_pair_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "recovered_source_face_diagonal_boundary_faces".to_string(),
+        recovered_source_faces.boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_source_face_diagonal_recovery_pairs".to_string(),
+        recovered_source_faces.rejected_source_face_pair_count,
+    );
+    for (reason_key, count) in recovered_source_faces.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(reason_key.to_string(), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),
         repaired_source_face_provenance_count,
