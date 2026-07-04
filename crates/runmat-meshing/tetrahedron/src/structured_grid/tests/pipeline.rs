@@ -119,7 +119,7 @@ fn structured_tetrahedron_mesher_carves_cells_outside_closed_surface() {
             &mesh.nodes,
         );
         point_inside_closed_surface(
-            &BoundaryMeshInput::from_geometry(&geometry).expect("boundary input"),
+            &boundary_input_from_geometry(&geometry).expect("boundary input"),
             centroid,
         )
     }));

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use runmat_meshing_core::{
     contracts::{
         AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
-        BoundaryElementKind, BoundaryMeshInput, BoundaryMeshInputError, MeshBackendKind,
-        MeshEntityProvenance, MeshKindRequest, MeshProfile, MeshTargetSize, SourceEntityKind,
-        VolumeElementKind, VolumeMeshingOptions,
+        BoundaryElementKind, BoundaryMeshInput, MeshBackendKind, MeshEntityProvenance,
+        MeshKindRequest, MeshProfile, MeshTargetSize, SourceEntityKind, VolumeElementKind,
+        VolumeMeshingOptions,
     },
     quality::boundary::{
         evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,
@@ -94,6 +94,9 @@ use boundary::{
     point_inside_closed_surface,
 };
 use boundary::{grid_boundary_faces, occupied_cells};
+
+mod boundary_input;
+use boundary_input::{boundary_input_from_geometry, BoundaryMeshInputError};
 
 mod geometry;
 use geometry::{
@@ -182,7 +185,7 @@ pub fn generate_analysis_mesh(
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
     validate_structured_backend(options.backend)?;
     validate_volume_meshing_options(&options)?;
-    let input = BoundaryMeshInput::from_geometry(geometry)?;
+    let input = boundary_input_from_geometry(geometry)?;
     validate_boundary_regions(&input)?;
     StructuredTetrahedronMesher.mesh(&input, &options)
 }
@@ -194,7 +197,7 @@ pub fn generate_analysis_mesh_with_sizing(
 ) -> Result<AnalysisMeshArtifact, MeshingError> {
     validate_structured_backend(options.backend)?;
     validate_volume_meshing_options(&options)?;
-    let input = BoundaryMeshInput::from_geometry(geometry)?;
+    let input = boundary_input_from_geometry(geometry)?;
     validate_boundary_regions(&input)?;
     StructuredTetrahedronMesher.mesh_with_sizing(&input, &options, Some(sizing))
 }

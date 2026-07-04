@@ -32,7 +32,7 @@ pub use contracts::artifact::{
     AnalysisVolumeElement, MeshBackendSummary,
 };
 pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
-pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
 pub use contracts::options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,

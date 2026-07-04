@@ -21,7 +21,7 @@ pub use artifact::{
     AnalysisVolumeElement, MeshBackendSummary,
 };
 pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
-pub use boundary::{BoundaryMeshInput, BoundaryMeshInputError, BoundaryMeshTriangle};
+pub use boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
 pub use cad::{
     CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract, CadModel, CadShellContract,
     CadVertexContract, CadVolumeContract,
