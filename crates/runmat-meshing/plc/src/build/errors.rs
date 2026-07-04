@@ -4,6 +4,7 @@ use crate::validate::PlcValidationError;
 pub enum PlcBuildError {
     EmptySurface,
     MissingCurveBoundaryValidation,
+    MissingSurfaceLoopCoverage,
     MissingSurfaceNode {
         element_id: u32,
         node_id: u32,
@@ -35,6 +36,10 @@ impl std::fmt::Display for PlcBuildError {
             Self::MissingCurveBoundaryValidation => write!(
                 formatter,
                 "surface mesh has protected source edges but no curve-boundary validation evidence"
+            ),
+            Self::MissingSurfaceLoopCoverage => write!(
+                formatter,
+                "surface mesh has protected source edges but no surface loop coverage evidence"
             ),
             Self::MissingSurfaceNode {
                 element_id,

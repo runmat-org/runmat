@@ -35,6 +35,17 @@ fn rejects_surface_with_protected_edges_without_curve_boundary_evidence() {
 }
 
 #[test]
+fn rejects_surface_with_protected_edges_without_loop_coverage_evidence() {
+    let mut surface = tetra_surface();
+    surface.loop_coverage = None;
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::MissingSurfaceLoopCoverage)
+    );
+}
+
+#[test]
 fn rejects_open_surface_before_volume_meshing() {
     let mut surface = tetra_surface();
     surface.elements.pop();

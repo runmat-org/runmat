@@ -32,6 +32,9 @@ pub fn build_protected_boundary_complex(
     if has_protected_source_edges && surface.curve_boundary_validation.is_none() {
         return Err(PlcBuildError::MissingCurveBoundaryValidation);
     }
+    if has_protected_source_edges && surface.loop_coverage.is_none() {
+        return Err(PlcBuildError::MissingSurfaceLoopCoverage);
+    }
 
     let surface_nodes = surface
         .nodes
