@@ -64,22 +64,19 @@ fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
 }
 
 #[test]
-fn recovery_stage_result_keeps_mesh_unrecovered_when_queue_has_missing_items() {
+fn recovery_stage_result_rejects_missing_queue_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
 
-    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
-        .expect("missing source faces should be reported as recovery evidence");
-
-    assert!(!result.tetrahedron_mesh.recovery_complete);
     assert_eq!(
-        result.recovery_queue.evidence.status,
-        StageEvidenceStatus::Failed
-    );
-    assert_eq!(
-        result.recovery_queue.evidence.entity_counts["missing_items"],
-        1
+        recover_tetrahedron_mesh_from_plc(&plc, mesh),
+        Err(TetrahedronRecoveryError::IncompleteRecovery {
+            missing_item_count: 1,
+            missing_source_face_item_count: 1,
+            missing_source_edge_item_count: 0,
+            missing_material_interface_item_count: 0,
+        })
     );
 }
 

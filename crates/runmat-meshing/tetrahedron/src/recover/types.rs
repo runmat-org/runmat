@@ -5,8 +5,16 @@ use runmat_meshing_plc::validate::PlcValidationError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TetrahedronRecoveryError {
-    InvalidProtectedBoundaryComplex { error: PlcValidationError },
+    InvalidProtectedBoundaryComplex {
+        error: PlcValidationError,
+    },
     EmptyTetrahedronMesh,
+    IncompleteRecovery {
+        missing_item_count: usize,
+        missing_source_face_item_count: usize,
+        missing_source_edge_item_count: usize,
+        missing_material_interface_item_count: usize,
+    },
 }
 
 impl std::fmt::Display for TetrahedronRecoveryError {
@@ -21,6 +29,15 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::EmptyTetrahedronMesh => write!(
                 formatter,
                 "Tetrahedron recovery requires a non-empty Tetrahedron mesh"
+            ),
+            Self::IncompleteRecovery {
+                missing_item_count,
+                missing_source_face_item_count,
+                missing_source_edge_item_count,
+                missing_material_interface_item_count,
+            } => write!(
+                formatter,
+                "Tetrahedron recovery is incomplete: {missing_item_count} missing constraints ({missing_source_face_item_count} source faces, {missing_source_edge_item_count} source edges, {missing_material_interface_item_count} material interfaces)"
             ),
         }
     }

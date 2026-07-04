@@ -197,10 +197,36 @@ pub fn recover_tetrahedron_mesh_from_plc(
 ) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
     let recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
+    if !tetrahedron_mesh.recovery_complete {
+        return Err(TetrahedronRecoveryError::IncompleteRecovery {
+            missing_item_count: recovery_entity_count(&recovery_queue, "missing_items"),
+            missing_source_face_item_count: recovery_entity_count(
+                &recovery_queue,
+                "missing_source_face_items",
+            ),
+            missing_source_edge_item_count: recovery_entity_count(
+                &recovery_queue,
+                "missing_source_edge_items",
+            ),
+            missing_material_interface_item_count: recovery_entity_count(
+                &recovery_queue,
+                "missing_material_interface_items",
+            ),
+        });
+    }
     Ok(TetrahedronRecoveryResult {
         tetrahedron_mesh,
         recovery_queue,
     })
+}
+
+fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
+    recovery_queue
+        .evidence
+        .entity_counts
+        .get(key)
+        .copied()
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
