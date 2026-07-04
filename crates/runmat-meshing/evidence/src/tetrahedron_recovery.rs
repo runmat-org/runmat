@@ -121,6 +121,12 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_absent_material_partition_recovery_item_count: usize,
     #[serde(default)]
+    pub rolled_back_absent_material_partition_recovery_item_count: usize,
+    #[serde(default)]
+    pub rolled_back_absent_material_partition_element_count: usize,
+    #[serde(default)]
+    pub rolled_back_absent_material_partition_boundary_face_count: usize,
+    #[serde(default)]
     pub rejected_absent_material_partition_facet_count: usize,
     #[serde(default)]
     pub rejected_absent_material_partition_facet_topology_count: usize,
@@ -130,6 +136,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub rejected_absent_material_partition_interior_face_topology_count: usize,
     #[serde(default)]
     pub rejected_absent_material_partition_quality_gate_count: usize,
+    #[serde(default)]
+    pub rejected_absent_material_partition_post_insertion_audit_count: usize,
     #[serde(default)]
     pub source_face_recovery_item_count: usize,
     #[serde(default)]
@@ -405,6 +413,15 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_absent_material_partition_recovery_item_count: mesh
             .backend
             .tetrahedron_rejected_absent_material_partition_recovery_item_count,
+        rolled_back_absent_material_partition_recovery_item_count: mesh
+            .backend
+            .tetrahedron_rolled_back_absent_material_partition_recovery_item_count,
+        rolled_back_absent_material_partition_element_count: mesh
+            .backend
+            .tetrahedron_rolled_back_absent_material_partition_element_count,
+        rolled_back_absent_material_partition_boundary_face_count: mesh
+            .backend
+            .tetrahedron_rolled_back_absent_material_partition_boundary_face_count,
         rejected_absent_material_partition_facet_count: mesh
             .backend
             .tetrahedron_rejected_absent_material_partition_facet_count,
@@ -420,6 +437,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         rejected_absent_material_partition_quality_gate_count: mesh
             .backend
             .tetrahedron_rejected_absent_material_partition_quality_gate_count,
+        rejected_absent_material_partition_post_insertion_audit_count: mesh
+            .backend
+            .tetrahedron_rejected_absent_material_partition_post_insertion_audit_count,
         source_face_recovery_item_count: mesh.backend.tetrahedron_source_face_recovery_item_count,
         recovered_source_face_recovery_item_count: mesh
             .backend

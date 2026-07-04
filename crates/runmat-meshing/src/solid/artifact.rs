@@ -386,6 +386,20 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     recovery_queue,
                     "rejected_absent_material_partition_recovery_items",
                 ),
+            tetrahedron_rolled_back_absent_material_partition_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rolled_back_absent_material_partition_recovery_items",
+                ),
+            tetrahedron_rolled_back_absent_material_partition_element_count: recovery_entity_count(
+                recovery_queue,
+                "rolled_back_absent_material_partition_elements",
+            ),
+            tetrahedron_rolled_back_absent_material_partition_boundary_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rolled_back_absent_material_partition_boundary_faces",
+                ),
             tetrahedron_rejected_absent_material_partition_facet_count: recovery_entity_count(
                 recovery_queue,
                 "rejected_absent_material_partition_facet_count",
@@ -409,6 +423,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_entity_count(
                     recovery_queue,
                     "rejected_absent_material_partition_quality_gate",
+                ),
+            tetrahedron_rejected_absent_material_partition_post_insertion_audit_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_absent_material_partition_post_insertion_audit",
                 ),
             tetrahedron_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
