@@ -196,11 +196,13 @@ pub fn recover_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
     mut tetrahedron_mesh: TetrahedronMesh,
 ) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
+    let initial_recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     let recovered_boundary_face_count =
         recover_missing_exterior_boundary_faces(plc, &mut tetrahedron_mesh);
     let repaired_source_face_provenance_count =
         repair_boundary_source_face_provenance(plc, &mut tetrahedron_mesh);
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
     recovery_queue.evidence.entity_counts.insert(
         "recovered_missing_boundary_faces".to_string(),
         recovered_boundary_face_count,
@@ -231,6 +233,27 @@ pub fn recover_tetrahedron_mesh_from_plc(
         tetrahedron_mesh,
         recovery_queue,
     })
+}
+
+fn record_recovered_queue_item_counts(
+    initial_recovery_queue: &TetrahedronRecoveryQueue,
+    recovery_queue: &mut TetrahedronRecoveryQueue,
+) {
+    for (recovered_key, missing_key) in [
+        ("recovered_source_face_items", "missing_source_face_items"),
+        ("recovered_source_edge_items", "missing_source_edge_items"),
+        (
+            "recovered_material_interface_items",
+            "missing_material_interface_items",
+        ),
+    ] {
+        let recovered_count = recovery_entity_count(initial_recovery_queue, missing_key)
+            .saturating_sub(recovery_entity_count(recovery_queue, missing_key));
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(recovered_key.to_string(), recovered_count);
+    }
 }
 
 fn recover_missing_exterior_boundary_faces(

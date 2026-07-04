@@ -91,7 +91,52 @@ fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() 
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_items"],
+        0
+    );
+}
+
+#[test]
+fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_faces() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "1")))
+    });
+
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing protected edge should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("missing protected edge should recover with its exterior boundary faces");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_missing_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
         0
     );
 }
