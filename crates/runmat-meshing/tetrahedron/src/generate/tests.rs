@@ -116,6 +116,18 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
     assert_eq!(mesh.elements.len(), 8);
     assert_eq!(mesh.boundary_faces.len(), 8);
     assert_eq!(mesh.evidence.entity_counts["interior_nodes"], 1);
+    assert!(
+        mesh.evidence
+            .entity_counts
+            .get("interior_smoothing_candidate_points")
+            .copied()
+            .unwrap_or_default()
+            > 1
+    );
+    assert!(mesh
+        .evidence
+        .entity_counts
+        .contains_key("interior_smoothing_accepted_points"));
     assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 8);
     assert_eq!(
         mesh.evidence.entity_counts["input_plc_boundary_components"],
