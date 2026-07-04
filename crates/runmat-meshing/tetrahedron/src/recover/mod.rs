@@ -5,7 +5,8 @@ mod types;
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus, TetrahedronMesh,
+    MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus,
+    TetrahedronBoundaryFace, TetrahedronMesh, TopologyEntityId,
 };
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
@@ -195,9 +196,15 @@ pub fn recover_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
     mut tetrahedron_mesh: TetrahedronMesh,
 ) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
+    let recovered_boundary_face_count =
+        recover_missing_exterior_boundary_faces(plc, &mut tetrahedron_mesh);
     let repaired_source_face_provenance_count =
         repair_boundary_source_face_provenance(plc, &mut tetrahedron_mesh);
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    recovery_queue.evidence.entity_counts.insert(
+        "recovered_missing_boundary_faces".to_string(),
+        recovered_boundary_face_count,
+    );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),
         repaired_source_face_provenance_count,
@@ -224,6 +231,75 @@ pub fn recover_tetrahedron_mesh_from_plc(
         tetrahedron_mesh,
         recovery_queue,
     })
+}
+
+fn recover_missing_exterior_boundary_faces(
+    plc: &ProtectedBoundaryComplex,
+    tetrahedron_mesh: &mut TetrahedronMesh,
+) -> usize {
+    let element_face_counts = tetrahedron_mesh
+        .elements
+        .iter()
+        .flat_map(|element| tetrahedron_element_faces(element.node_ids.clone()))
+        .fold(
+            std::collections::BTreeMap::<[TopologyEntityId; 3], usize>::new(),
+            |mut counts, face| {
+                *counts.entry(face).or_default() += 1;
+                counts
+            },
+        );
+    let mut boundary_face_keys = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_topology_ids(face.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
+    let mut recovered_count = 0;
+
+    for facet in &plc.facets {
+        let face_key = sorted_topology_ids(facet.node_ids.clone());
+        if boundary_face_keys.contains(&face_key) {
+            continue;
+        }
+        if element_face_counts.get(&face_key).copied() != Some(1) {
+            continue;
+        }
+        tetrahedron_mesh
+            .boundary_faces
+            .push(TetrahedronBoundaryFace {
+                face_id: facet.facet_id.clone(),
+                node_ids: facet.node_ids.clone(),
+                source_face_id: facet.source_face_id.clone(),
+            });
+        boundary_face_keys.insert(face_key);
+        recovered_count += 1;
+    }
+
+    recovered_count
+}
+
+fn tetrahedron_element_faces(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 3]; 4] {
+    [
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[1].clone(),
+            node_ids[2].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[1].clone(),
+            node_ids[3].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[2].clone(),
+            node_ids[3].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[1].clone(),
+            node_ids[2].clone(),
+            node_ids[3].clone(),
+        ]),
+    ]
 }
 
 fn repair_boundary_source_face_provenance(
