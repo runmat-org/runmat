@@ -101,6 +101,10 @@ fn recovery_stage_result_repairs_boundary_source_face_provenance_before_audit() 
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["boundary_face_source_face_recovery_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_items"],
         0
     );
@@ -497,6 +501,33 @@ fn source_face_boundary_face_recovery_uses_volume_face_queue_items_only() {
     );
     assert_eq!(recovered_count, 0);
     assert_eq!(mesh.boundary_faces, original_boundary_faces);
+}
+
+#[test]
+fn source_face_provenance_repair_uses_boundary_face_queue_items_only() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.remove(0);
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("volume-face source face should be reported before recovery");
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+
+    let repaired_count =
+        super::boundary_faces::repair_boundary_source_face_provenance(&initial_queue, &mut mesh);
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_boundary_face_items"],
+        0
+    );
+    assert_eq!(repaired_count, 0);
+    assert_eq!(
+        mesh.boundary_faces[0].source_face_id,
+        entity(MeshingStage::SurfaceMesh, "other")
+    );
 }
 
 #[test]

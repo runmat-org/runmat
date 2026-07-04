@@ -107,24 +107,29 @@ pub(super) fn recover_volume_face_source_face_boundary_faces(
 }
 
 pub(super) fn repair_boundary_source_face_provenance(
-    plc: &ProtectedBoundaryComplex,
+    initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
 ) -> usize {
-    let expected_source_face_by_nodes = plc
-        .facets
+    let recoverable_source_faces = initial_recovery_queue
+        .items
         .iter()
-        .map(|facet| {
-            (
-                sorted_topology_ids(facet.node_ids.clone()),
-                facet.source_face_id.clone(),
-            )
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::SourceFace
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
+        })
+        .filter_map(|item| {
+            Some((
+                item.source_face_node_ids.clone()?,
+                item.source_entity_id.clone()?,
+            ))
         })
         .collect::<BTreeMap<_, _>>();
 
     let mut repaired_count = 0;
     for boundary_face in &mut tetrahedron_mesh.boundary_faces {
         let face_key = sorted_topology_ids(boundary_face.node_ids.clone());
-        let Some(expected_source_face_id) = expected_source_face_by_nodes.get(&face_key) else {
+        let Some(expected_source_face_id) = recoverable_source_faces.get(&face_key) else {
             continue;
         };
         if &boundary_face.source_face_id != expected_source_face_id {
