@@ -20,6 +20,39 @@ pub(super) fn validate_no_unrecovered_tetrahedron_components(
     Ok(())
 }
 
+pub(super) fn validate_no_rolled_back_material_interface_partitions(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let recovery_item_count = mesh
+        .backend
+        .tetrahedron_rolled_back_absent_material_partition_recovery_item_count;
+    let element_count = mesh
+        .backend
+        .tetrahedron_rolled_back_absent_material_partition_element_count;
+    let boundary_face_count = mesh
+        .backend
+        .tetrahedron_rolled_back_absent_material_partition_boundary_face_count;
+    let post_insertion_audit_rejection_count = mesh
+        .backend
+        .tetrahedron_rejected_absent_material_partition_post_insertion_audit_count;
+
+    if recovery_item_count > 0
+        || element_count > 0
+        || boundary_face_count > 0
+        || post_insertion_audit_rejection_count > 0
+    {
+        return Err(
+            AnalysisMeshValidationError::RolledBackMaterialInterfacePartitionRecoveryPresent {
+                recovery_item_count,
+                element_count,
+                boundary_face_count,
+                post_insertion_audit_rejection_count,
+            },
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn validate_no_unrepaired_exact_quality(
     mesh: &AnalysisMeshArtifact,
     require_no_unrepaired_exact_quality: bool,

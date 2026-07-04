@@ -321,7 +321,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
     };
     let evidence = build_mesh_evidence_artifact(&mesh, &validation);
 
-    assert_schema_and_solve_readiness(&evidence);
+    assert_schema_and_rolled_back_partition_readiness_failure(&evidence);
     assert_cad_evidence(&evidence.cad);
     assert_topology_and_adaptive_evidence(&evidence);
     assert_validation_evidence(&evidence.validation);

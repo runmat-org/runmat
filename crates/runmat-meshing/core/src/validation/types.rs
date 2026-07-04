@@ -182,6 +182,12 @@ pub enum AnalysisMeshValidationError {
         interior_seed_count: usize,
         edge_star_count: usize,
     },
+    RolledBackMaterialInterfacePartitionRecoveryPresent {
+        recovery_item_count: usize,
+        element_count: usize,
+        boundary_face_count: usize,
+        post_insertion_audit_rejection_count: usize,
+    },
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
@@ -272,6 +278,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::UnrepairedExactQualityPresent { .. } => {
             "unrepaired_exact_quality_present"
         }
+        AnalysisMeshValidationError::RolledBackMaterialInterfacePartitionRecoveryPresent {
+            ..
+        } => "rolled_back_material_interface_partition_recovery_present",
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
         }

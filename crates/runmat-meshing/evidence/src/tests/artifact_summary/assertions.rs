@@ -4,11 +4,22 @@ use crate::{
     MeshValidationEvidence, MESH_EVIDENCE_SCHEMA_VERSION,
 };
 
-pub(super) fn assert_schema_and_solve_readiness(evidence: &MeshEvidenceArtifact) {
+pub(super) fn assert_schema_and_rolled_back_partition_readiness_failure(
+    evidence: &MeshEvidenceArtifact,
+) {
     assert_eq!(evidence.schema_version, MESH_EVIDENCE_SCHEMA_VERSION);
-    assert!(evidence.validation.solve_ready);
-    assert_eq!(evidence.validation.validation_error_code, None);
-    assert_eq!(evidence.validation.validation_error_message, None);
+    assert!(!evidence.validation.solve_ready);
+    assert_eq!(
+        evidence.validation.validation_error_code.as_deref(),
+        Some("rolled_back_material_interface_partition_recovery_present")
+    );
+    assert!(evidence
+        .validation
+        .validation_error_message
+        .as_deref()
+        .is_some_and(
+            |message| message.contains("RolledBackMaterialInterfacePartitionRecoveryPresent")
+        ));
 }
 
 pub(super) fn assert_cad_evidence(cad: &MeshCadEvidence) {
@@ -526,8 +537,14 @@ pub(super) fn assert_validation_refresh(
 
     let refreshed_evidence =
         build_mesh_evidence_artifact_with_validation_evidence(mesh, stale_validation);
-    assert!(refreshed_evidence.validation.solve_ready);
-    assert_eq!(refreshed_evidence.validation.validation_error_code, None);
+    assert!(!refreshed_evidence.validation.solve_ready);
+    assert_eq!(
+        refreshed_evidence
+            .validation
+            .validation_error_code
+            .as_deref(),
+        Some("rolled_back_material_interface_partition_recovery_present")
+    );
     assert_eq!(refreshed_evidence.validation.volume_element_count, 1);
     assert_eq!(refreshed_evidence.validation.volume_component_count, 1);
     assert_eq!(

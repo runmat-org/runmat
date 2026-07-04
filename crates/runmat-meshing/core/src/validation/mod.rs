@@ -39,6 +39,7 @@ use quality::validate_quality;
 mod recovery;
 use recovery::{
     validate_boundary_edge_recovery, validate_boundary_face_recovery,
+    validate_no_rolled_back_material_interface_partitions,
     validate_no_unrecovered_tetrahedron_components, validate_no_unrepaired_exact_quality,
 };
 
@@ -106,6 +107,7 @@ pub fn validate_analysis_mesh_with_options(
         mesh,
         options.require_no_unrecovered_tetrahedron_components,
     )?;
+    validate_no_rolled_back_material_interface_partitions(mesh)?;
     validate_no_unrepaired_exact_quality(mesh, options.require_no_unrepaired_exact_quality)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_coverage_samples(
