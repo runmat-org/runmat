@@ -143,7 +143,7 @@ fn insert_absent_material_interface_partition(
 
     let inserted_boundary_face_count =
         insert_material_partition_boundary_faces(plc, &material_facets, tetrahedron_mesh);
-    if !material_partition_boundary_contract_is_satisfied(&material_facets, tetrahedron_mesh) {
+    if !material_partition_boundary_contract_is_satisfied(plc, &material_facets, tetrahedron_mesh) {
         *tetrahedron_mesh = rollback_mesh;
         recovery.rolled_back_material_interface_count += 1;
         recovery.rolled_back_element_count += inserted_element_count;
@@ -157,6 +157,7 @@ fn insert_absent_material_interface_partition(
 }
 
 fn material_partition_boundary_contract_is_satisfied(
+    plc: &ProtectedBoundaryComplex,
     material_facets: &[&PlcFacet],
     tetrahedron_mesh: &TetrahedronMesh,
 ) -> bool {
@@ -169,8 +170,11 @@ fn material_partition_boundary_contract_is_satisfied(
         boundary_faces_by_key
             .get(&sorted_topology_ids(facet.node_ids.clone()))
             .is_some_and(|boundary_face| {
+                let expected_source_edge_ids =
+                    source_edge_ids_for_face_edges(&plc.protected_edges, facet.node_ids.clone());
                 boundary_face.face_id == facet.facet_id
                     && boundary_face.source_face_id == facet.source_face_id
+                    && boundary_face.source_edge_ids == expected_source_edge_ids
             })
     })
 }

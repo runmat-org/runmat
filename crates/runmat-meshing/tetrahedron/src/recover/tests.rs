@@ -1037,6 +1037,39 @@ fn recovery_stage_result_inserts_bounded_absent_material_interface_partition() {
 }
 
 #[test]
+fn recovery_stage_result_preserves_protected_source_edge_on_inserted_material_partition() {
+    let plc = two_region_bipyramid_plc_with_region_a_protected_edge();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("bounded absent material partition should preserve protected edge provenance");
+
+    let protected_source_edge_id = entity(MeshingStage::CurveMesh, "edge_region_a_0_2");
+    assert!(result
+        .tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| face.source_face_id.id.starts_with("face_a"))
+        .any(|face| face
+            .source_edge_ids
+            .iter()
+            .any(|source_edge_id| source_edge_id.as_ref() == Some(&protected_source_edge_id))));
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["inserted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rolled_back_absent_material_partition_recovery_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_inserts_two_element_absent_material_interface_partition() {
     let plc = two_element_material_partition_plc();
     let mesh = two_element_material_partition_seed_mesh();
@@ -1212,6 +1245,54 @@ fn recovery_stage_result_rolls_back_absent_material_partition_on_post_insert_aud
     );
     assert_eq!(
         recovery_evidence.entity_counts["missing_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        1
+    );
+}
+
+#[test]
+fn recovery_stage_result_rolls_back_material_partition_with_stale_source_edge_provenance() {
+    let plc = two_region_bipyramid_plc_with_region_a_protected_edge();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements.remove(0);
+    mesh.boundary_faces
+        .retain(|face| face.source_face_id.id.starts_with("face_b"));
+    mesh.boundary_faces
+        .push(boundary_face("facet_a_1", ["0", "2", "3"], "face_a_1"));
+
+    let TetrahedronRecoveryError::IncompleteRecovery {
+        recovery_evidence, ..
+    } = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect_err("stale source-edge provenance should roll back partition insertion")
+    else {
+        panic!("expected incomplete recovery error");
+    };
+
+    assert_eq!(
+        recovery_evidence.entity_counts["attempted_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["inserted_absent_material_partition_recovery_items"],
+        0
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_elements"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rolled_back_absent_material_partition_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_absent_material_partition_post_insertion_audit"],
         1
     );
     assert_eq!(
@@ -1856,6 +1937,23 @@ fn two_region_bipyramid_plc() -> ProtectedBoundaryComplex {
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
+}
+
+fn two_region_bipyramid_plc_with_region_a_protected_edge() -> ProtectedBoundaryComplex {
+    let mut plc = two_region_bipyramid_plc();
+    plc.complex_id = "two_region_bipyramid_with_protected_edge_plc".to_string();
+    plc.protected_edges = vec![PlcProtectedEdge {
+        edge_id: entity(
+            MeshingStage::ProtectedBoundaryComplex,
+            "plc_edge_region_a_0_2",
+        ),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        ],
+        source_edge_id: entity(MeshingStage::CurveMesh, "edge_region_a_0_2"),
+    }];
+    plc
 }
 
 fn two_region_bipyramid_tetrahedron_mesh() -> TetrahedronMesh {
