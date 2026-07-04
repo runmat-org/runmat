@@ -7,6 +7,7 @@ use crate::{
 mod basics;
 mod coverage;
 mod fixtures;
+mod plc_input;
 mod quality;
 mod recovery;
 mod regions;

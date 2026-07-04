@@ -30,6 +30,9 @@ pub use geometry::mesh_contains_point;
 mod nodes;
 use nodes::validate_nodes;
 
+mod plc_input;
+use plc_input::validate_plc_input_evidence;
+
 mod quality;
 use quality::validate_quality;
 
@@ -94,6 +97,7 @@ pub fn validate_analysis_mesh_with_options(
 
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
+    validate_plc_input_evidence(mesh)?;
     validate_no_unrecovered_tetrahedron_components(
         mesh,
         options.require_no_unrecovered_tetrahedron_components,

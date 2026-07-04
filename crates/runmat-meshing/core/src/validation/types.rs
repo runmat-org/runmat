@@ -159,6 +159,9 @@ pub enum AnalysisMeshValidationError {
         recovery_ratio: String,
         required_ratio: String,
     },
+    MissingPlcInputEvidence {
+        reason: String,
+    },
     UnrecoveredTetrahedronComponentsPresent {
         component_count: usize,
     },
@@ -247,6 +250,7 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed { .. } => {
             "boundary_edge_recovery_failed"
         }
+        AnalysisMeshValidationError::MissingPlcInputEvidence { .. } => "missing_plc_input_evidence",
         AnalysisMeshValidationError::UnrecoveredTetrahedronComponentsPresent { .. } => {
             "unrecovered_tetrahedron_components_present"
         }
