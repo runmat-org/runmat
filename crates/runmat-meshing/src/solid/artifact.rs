@@ -339,6 +339,15 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_material_interface_recovery_items",
             ),
+            tetrahedron_global_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "global_material_interface_recovery_items",
+            ),
+            tetrahedron_boundary_owned_material_interface_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "boundary_owned_material_interface_recovery_items",
+                ),
             tetrahedron_rejected_material_interface_missing_boundary_ownership_count:
                 recovery_entity_count(
                     recovery_queue,

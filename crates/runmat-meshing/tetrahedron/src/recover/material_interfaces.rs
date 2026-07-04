@@ -7,7 +7,7 @@ use super::{
     TetrahedronRecoveryStatus,
 };
 
-pub(super) fn recover_single_material_interface_region(
+pub(super) fn recover_material_interface_regions(
     plc: &ProtectedBoundaryComplex,
     initial_recovery_queue: &TetrahedronRecoveryQueue,
     tetrahedron_mesh: &mut TetrahedronMesh,
@@ -25,6 +25,8 @@ pub(super) fn recover_single_material_interface_region(
         attempted_material_interface_count: missing_material_interfaces.len(),
         repaired_element_count: 0,
         rejected_material_interface_count: 0,
+        global_material_interface_count: 0,
+        boundary_owned_material_interface_count: 0,
         missing_boundary_ownership_count: 0,
         ambiguous_boundary_ownership_count: 0,
     };
@@ -58,6 +60,7 @@ pub(super) fn recover_single_material_interface_region(
         .into_iter()
         .next()
         .expect("single material interface checked above");
+    recovery.global_material_interface_count = 1;
     for element in &mut tetrahedron_mesh.elements {
         if element.material_region_id != material_interface_id {
             element.material_region_id = material_interface_id.clone();
@@ -71,6 +74,8 @@ pub(super) struct MaterialInterfaceRecovery {
     pub attempted_material_interface_count: usize,
     pub repaired_element_count: usize,
     pub rejected_material_interface_count: usize,
+    pub global_material_interface_count: usize,
+    pub boundary_owned_material_interface_count: usize,
     pub missing_boundary_ownership_count: usize,
     pub ambiguous_boundary_ownership_count: usize,
 }
@@ -131,6 +136,7 @@ fn recover_boundary_facet_material_interface_regions(
             repaired_material_interfaces.insert(material_interface_id);
         }
     }
+    recovery.boundary_owned_material_interface_count = boundary_owned_material_interfaces.len();
     for material_interface_id in missing_material_interfaces {
         if repaired_material_interfaces.contains(material_interface_id) {
             continue;

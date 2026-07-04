@@ -715,6 +715,15 @@ fn recovery_stage_result_repairs_single_material_interface_before_audit() {
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["global_material_interface_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["rejected_material_interface_recovery_items"],
         0
     );
@@ -733,7 +742,7 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
         .expect("ambiguous material interface should be reported before recovery");
     let mut direct_recovery_mesh = mesh.clone();
-    let recovery = super::material_interfaces::recover_single_material_interface_region(
+    let recovery = super::material_interfaces::recover_material_interface_regions(
         &plc,
         &initial_queue,
         &mut direct_recovery_mesh,
@@ -742,6 +751,8 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     assert_eq!(recovery.attempted_material_interface_count, 1);
     assert_eq!(recovery.repaired_element_count, 0);
     assert_eq!(recovery.rejected_material_interface_count, 1);
+    assert_eq!(recovery.global_material_interface_count, 0);
+    assert_eq!(recovery.boundary_owned_material_interface_count, 1);
     assert_eq!(recovery.ambiguous_boundary_ownership_count, 1);
     assert_eq!(recovery.missing_boundary_ownership_count, 0);
 
@@ -802,6 +813,15 @@ fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["rejected_material_interface_recovery_items"],
         0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["global_material_interface_recovery_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_items"],
+        1
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],

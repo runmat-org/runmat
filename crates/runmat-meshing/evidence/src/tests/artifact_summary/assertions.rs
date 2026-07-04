@@ -252,6 +252,11 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.repaired_material_interface_element_count, 3);
     assert_eq!(recovery.attempted_material_interface_recovery_item_count, 2);
     assert_eq!(recovery.rejected_material_interface_recovery_item_count, 1);
+    assert_eq!(recovery.global_material_interface_recovery_item_count, 1);
+    assert_eq!(
+        recovery.boundary_owned_material_interface_recovery_item_count,
+        1
+    );
     assert_eq!(
         recovery.rejected_material_interface_missing_boundary_ownership_count,
         1

@@ -21,7 +21,7 @@ use boundary_faces::{
     recover_volume_face_source_face_boundary_faces, repair_boundary_face_identity,
     repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
-use material_interfaces::recover_single_material_interface_region;
+use material_interfaces::recover_material_interface_regions;
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
@@ -424,11 +424,8 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_source_face_provenance(&initial_recovery_queue, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance_count =
         repair_boundary_source_edge_provenance(plc, &initial_recovery_queue, &mut tetrahedron_mesh);
-    let material_interface_recovery = recover_single_material_interface_region(
-        plc,
-        &initial_recovery_queue,
-        &mut tetrahedron_mesh,
-    );
+    let material_interface_recovery =
+        recover_material_interface_regions(plc, &initial_recovery_queue, &mut tetrahedron_mesh);
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
     recovery_queue.evidence.entity_counts.insert(
@@ -527,6 +524,14 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_recovery_items".to_string(),
         material_interface_recovery.rejected_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "global_material_interface_recovery_items".to_string(),
+        material_interface_recovery.global_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "boundary_owned_material_interface_recovery_items".to_string(),
+        material_interface_recovery.boundary_owned_material_interface_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_missing_boundary_ownership".to_string(),
