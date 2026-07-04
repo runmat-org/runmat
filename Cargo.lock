@@ -5672,6 +5672,7 @@ name = "runmat-meshing-curve"
 version = "0.5.0"
 dependencies = [
  "runmat-meshing-cad",
+ "runmat-meshing-size",
  "serde",
 ]
 

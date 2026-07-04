@@ -6,6 +6,6 @@ pub mod discretize;
 pub mod validate;
 
 pub use discretize::{
-    discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
-    CurveDiscretizationOptions, CurveElement, CurveNode,
+    discretize_topology_curves, discretize_topology_curves_with_sizing, CurveDiscretization,
+    CurveDiscretizationError, CurveDiscretizationOptions, CurveElement, CurveNode,
 };

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_cad::{SourceTopologyEdge, SourceTopologyModel};
+use runmat_meshing_size::field::{MeshSizingField, SegmentSizingQuery};
 
 pub const MODULE_PURPOSE: &str = "CAD edge discretization before surface or volume meshing";
 
@@ -74,6 +75,14 @@ pub fn discretize_topology_curves(
     topology: &SourceTopologyModel,
     options: CurveDiscretizationOptions,
 ) -> Result<CurveDiscretization, CurveDiscretizationError> {
+    discretize_topology_curves_with_sizing(topology, options, None)
+}
+
+pub fn discretize_topology_curves_with_sizing(
+    topology: &SourceTopologyModel,
+    options: CurveDiscretizationOptions,
+    sizing: Option<&MeshSizingField>,
+) -> Result<CurveDiscretization, CurveDiscretizationError> {
     validate_curve_options(options)?;
     let mut nodes = Vec::<CurveNode>::new();
     let mut elements = Vec::<CurveElement>::new();
@@ -97,7 +106,23 @@ pub fn discretize_topology_curves(
                 edge_id: edge.edge_id,
                 node_id: edge.node_ids[1],
             })?;
-        append_edge_discretization(edge, left, right, options, &mut nodes, &mut elements);
+        let target_size_m = sizing
+            .and_then(|sizing| {
+                sizing.target_size_for_segment(SegmentSizingQuery {
+                    start_m: left,
+                    end_m: right,
+                })
+            })
+            .unwrap_or(options.target_size_m);
+        append_edge_discretization(
+            edge,
+            left,
+            right,
+            options,
+            target_size_m,
+            &mut nodes,
+            &mut elements,
+        );
     }
 
     Ok(CurveDiscretization { nodes, elements })
@@ -122,10 +147,11 @@ fn append_edge_discretization(
     left: [f64; 3],
     right: [f64; 3],
     options: CurveDiscretizationOptions,
+    target_size_m: f64,
     nodes: &mut Vec<CurveNode>,
     elements: &mut Vec<CurveElement>,
 ) {
-    let segment_count = ((edge.length_m / options.target_size_m).ceil() as usize)
+    let segment_count = ((edge.length_m / target_size_m).ceil() as usize)
         .max(options.min_segments_per_edge)
         .min(options.max_segments_per_edge);
     let first_node_id = nodes.len() as u32;
@@ -169,6 +195,7 @@ fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
 mod tests {
     use super::*;
     use runmat_meshing_cad::{SourceTopologyEdge, SourceTopologyModel, SourceTopologyVertex};
+    use runmat_meshing_size::field::{MeshSizingField, SizingSample};
 
     #[test]
     fn discretizes_topology_edges_by_target_size() {
@@ -207,6 +234,65 @@ mod tests {
         .expect("curves should discretize");
 
         assert_eq!(curves.elements.len(), 4);
+    }
+
+    #[test]
+    fn sizing_field_refines_recovered_curve_edges_before_surface_meshing() {
+        let topology = line_topology(1.0);
+        let sizing = MeshSizingField {
+            global_target_size_m: Some(1.0),
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.0, 0.0],
+                target_size_m: 0.2,
+                reason: Some("cad.feature_edge".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let curves = discretize_topology_curves_with_sizing(
+            &topology,
+            CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 16,
+            },
+            Some(&sizing),
+        )
+        .expect("sizing-aware curves should discretize");
+
+        assert_eq!(curves.nodes.len(), 6);
+        assert_eq!(curves.elements.len(), 5);
+        assert!(curves
+            .elements
+            .iter()
+            .all(|element| { element.source_edge_id == 0 && element.length_m <= 0.200000000001 }));
+    }
+
+    #[test]
+    fn sizing_samples_off_curve_do_not_refine_curve_edges() {
+        let topology = line_topology(1.0);
+        let sizing = MeshSizingField {
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.5, 0.0],
+                target_size_m: 0.1,
+                reason: Some("surface_only".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let curves = discretize_topology_curves_with_sizing(
+            &topology,
+            CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 16,
+            },
+            Some(&sizing),
+        )
+        .expect("sizing-aware curves should discretize");
+
+        assert_eq!(curves.nodes.len(), 2);
+        assert_eq!(curves.elements.len(), 1);
     }
 
     #[test]
