@@ -1,12 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{
-    CadFaceEvaluationSample, CadFaceEvaluator, CadSemanticKind, EntityKind, GeometryAsset,
-    SourceGeometryKind,
-};
+use runmat_geometry_core::{CadFaceEvaluationSample, GeometryAsset};
 use serde::{Deserialize, Serialize};
 
 use super::SourceTopologyModel;
+
+mod semantics;
+
+use semantics::{
+    cad_topology_source, evaluator_faces_by_imported_id, face_regions_by_source_face,
+    imported_face_id_for_regions, imported_face_ids_by_region, semantic_face_regions,
+    stable_face_id,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -314,61 +319,6 @@ pub fn build_cad_topology(
     })
 }
 
-fn cad_topology_source(geometry: &GeometryAsset) -> CadTopologySource {
-    if geometry.source_geometry.kind != SourceGeometryKind::Cad {
-        return CadTopologySource::MeshFallback;
-    }
-    if geometry
-        .regions
-        .iter()
-        .any(|region| region.cad_ownership.is_some())
-    {
-        CadTopologySource::SemanticCad
-    } else {
-        CadTopologySource::GenericCadMesh
-    }
-}
-
-fn semantic_face_regions(geometry: &GeometryAsset) -> BTreeSet<String> {
-    geometry
-        .regions
-        .iter()
-        .filter(|region| {
-            region.cad_ownership.as_ref().is_some_and(|ownership| {
-                ownership.face_id.is_some()
-                    || ownership
-                        .label
-                        .as_ref()
-                        .is_some_and(|label| label.kind == CadSemanticKind::Face)
-            })
-        })
-        .map(|region| region.region_id.clone())
-        .collect()
-}
-
-fn imported_face_ids_by_region(geometry: &GeometryAsset) -> BTreeMap<String, u64> {
-    geometry
-        .regions
-        .iter()
-        .filter_map(|region| {
-            region
-                .cad_ownership
-                .as_ref()
-                .and_then(|ownership| ownership.face_id)
-                .map(|face_id| (region.region_id.clone(), face_id))
-        })
-        .collect()
-}
-
-fn imported_face_id_for_regions(
-    imported_face_ids_by_region: &BTreeMap<String, u64>,
-    region_ids: &[String],
-) -> Option<u64> {
-    region_ids
-        .iter()
-        .find_map(|region_id| imported_face_ids_by_region.get(region_id).copied())
-}
-
 fn merge_stable_cad_faces(face_seeds: Vec<CadFace>) -> Vec<CadFace> {
     let mut merged = BTreeMap::<String, (CadFace, BTreeMap<u32, usize>)>::new();
     for face in face_seeds {
@@ -445,61 +395,15 @@ fn area_weighted_normal(
     }
 }
 
-fn evaluator_faces_by_imported_id(geometry: &GeometryAsset) -> BTreeMap<u64, &CadFaceEvaluator> {
-    geometry
-        .source_geometry
-        .cad_evaluators
-        .iter()
-        .flat_map(|evaluator| {
-            evaluator
-                .faces
-                .iter()
-                .map(|face| (face.imported_face_id, face))
-        })
-        .collect()
-}
-
-fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<u32, Vec<String>> {
-    let mut regions = BTreeMap::<u32, BTreeSet<String>>::new();
-    for mapping in &geometry.region_entity_mappings {
-        if !matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element) {
-            continue;
-        }
-        for range in &mapping.ranges {
-            for entity_id in range.start..range.start.saturating_add(range.count) {
-                regions
-                    .entry(entity_id as u32)
-                    .or_default()
-                    .insert(mapping.region_id.clone());
-            }
-        }
-    }
-    regions
-        .into_iter()
-        .map(|(face_id, region_ids)| (face_id, region_ids.into_iter().collect()))
-        .collect()
-}
-
-fn stable_face_id(
-    semantic_face_regions: &BTreeSet<String>,
-    region_ids: &[String],
-    fallback_face_id: u32,
-) -> String {
-    region_ids
-        .iter()
-        .find(|region_id| semantic_face_regions.contains(*region_id))
-        .cloned()
-        .unwrap_or_else(|| format!("cad_face_{fallback_face_id}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::extract_source_topology;
     use runmat_geometry_core::{
         CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership, CadSemanticKind,
-        EntityIdRange, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-        SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+        EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
+        RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+        UnitSystem,
     };
 
     #[test]
