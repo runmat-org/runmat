@@ -111,6 +111,20 @@ fn fitclinear_surface_executes_from_scripts() {
 }
 
 #[test]
+fn tsne_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng('default'); X = [0 0; 0.2 0.1; 9.8 9.9; NaN 1]; [Y,loss] = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'NumDimensions', 2, 'Options', struct('MaxIter', 5)); s = size(Y); rows = s(1); cols = s(2);",
+    )
+    .expect("tsne script");
+    assert!(has_tensor_shape(&vars, &[3, 2]));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if value.is_finite())));
+}
+
+#[test]
 fn classify_surface_executes_from_scripts() {
     let vars = execute_source(
         "training = [0; 0.5; 2; 2.5]; group = [1; 1; 2; 2]; [class,err,posterior,logp,coeff] = classify([0.2; 2.2], training, group, 'linear', 'empirical'); c1 = class(1); c2 = class(2); p11 = posterior(1,1); k = coeff(1,2).const;",

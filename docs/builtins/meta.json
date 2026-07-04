@@ -93110,6 +93110,111 @@
       ]
     },
     {
+      "name": "tsne",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = tsne(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Low-dimensional embedding matrix."
+            }
+          ]
+        },
+        {
+          "label": "Y = tsne(X, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Algorithm, Distance, NumDimensions, NumPCAComponents, Perplexity, Standardize, InitialY, LearnRate, Options, Theta, and Verbose."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Low-dimensional embedding matrix."
+            }
+          ]
+        },
+        {
+          "label": "[Y, loss] = tsne(___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Algorithm, Distance, NumDimensions, NumPCAComponents, Perplexity, Standardize, InitialY, LearnRate, Options, Theta, and Verbose."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Low-dimensional embedding matrix."
+            },
+            {
+              "name": "loss",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Kullback-Leibler divergence for the final embedding."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TSNE.INVALID_ARGUMENT",
+          "identifier": "RunMat:tsne:InvalidArgument",
+          "when": "Inputs, dimensions, distances, initialization, or name-value options are malformed or unsupported.",
+          "message": "tsne: invalid argument"
+        },
+        {
+          "code": "RM.TSNE.INTERNAL",
+          "identifier": "RunMat:tsne:Internal",
+          "when": "RunMat cannot allocate or construct the t-SNE result.",
+          "message": "tsne: internal error"
+        }
+      ]
+    },
+    {
       "name": "ttest2",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

@@ -1,0 +1,88 @@
+{
+  "title": "tsne",
+  "category": "stats/ml",
+  "keywords": [
+    "tsne",
+    "t-SNE",
+    "dimensionality reduction",
+    "embedding",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Embed high-dimensional observations using t-distributed stochastic neighbor embedding.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. t-SNE runs on CPU because it is iterative, dense, and metadata-heavy."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::tsne::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`tsne(X)` embeds the rows of a numeric observation matrix into a lower-dimensional numeric matrix. `[Y,loss] = tsne(...)` also returns the final Kullback-Leibler divergence.",
+  "behaviors": [
+    "`X` must be a real numeric vector or 2-D matrix. Matrix rows are observations; a column vector has one predictor per row, while a row vector is one observation with multiple predictors.",
+    "Rows containing `NaN` are omitted before fitting. `Inf` values are rejected.",
+    "`NumDimensions` selects the output dimension and defaults to 2. `InitialY` can match either all input rows or the complete rows that remain after `NaN` omission.",
+    "`Algorithm` accepts `\"barneshut\"` and `\"exact\"`. RunMat computes a bounded exact CPU embedding for both modes so scripts receive compatible outputs without silent shape changes.",
+    "`Distance` supports `\"euclidean\"`, `\"fasteuclidean\"`, `\"seuclidean\"`, `\"fastseuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"spearman\"`, `\"hamming\"`, and `\"jaccard\"`. The `\"minkowski\"` option uses the default exponent 2. Custom function-handle distances are rejected explicitly.",
+    "`Standardize` centers and scales each predictor column before distance computation. `NumPCAComponents` applies PCA before pairwise distance computation when it is positive and smaller than the predictor count.",
+    "`Perplexity`, `Exaggeration`, `LearnRate`, `Theta`, `Verbose`, `NumPrint`, and `CacheSize` are parsed and validated for MATLAB-style script compatibility. `Theta`, `Verbose`, `NumPrint`, and `CacheSize` do not affect the exact CPU optimizer.",
+    "`Options` accepts a statset-style struct with `MaxIter`, `TolFun`, and empty `OutputFcn`. Nonempty `OutputFcn` is rejected because RunMat does not invoke iteration callbacks from builtins yet.",
+    "RunMat rejects very large dense exact workloads before allocation to avoid unbounded pairwise, PCA, and Mahalanobis memory use."
+  ],
+  "examples": [
+    {
+      "description": "Embed observations into two dimensions",
+      "input": "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1];\nY = tsne(X, 'Perplexity', 2)",
+      "output": "`Y` is a 4-by-2 embedding matrix."
+    },
+    {
+      "description": "Request the final loss",
+      "input": "[Y,loss] = tsne(X, 'Algorithm', 'exact', 'Options', struct('MaxIter', 250))",
+      "output": "`loss` is the final Kullback-Leibler divergence for the embedding."
+    },
+    {
+      "description": "Omit incomplete rows",
+      "input": "Y = tsne([1 2; NaN 3; 10 11])",
+      "output": "`Y` has two rows because the incomplete observation is omitted."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat implement Barnes-Hut acceleration?",
+      "answer": "No. `Algorithm=\"barneshut\"` is accepted for compatibility, but RunMat currently uses its bounded exact CPU optimizer for both algorithm names."
+    },
+    {
+      "question": "Are stochastic results bit-for-bit identical to MATLAB?",
+      "answer": "No. RunMat uses its own RNG stream behind `rng`, so output shape and semantics are compatible but random initial embeddings are not bit-for-bit identical."
+    }
+  ],
+  "links": [
+    {
+      "label": "svd",
+      "url": "./svd"
+    },
+    {
+      "label": "kmeans",
+      "url": "./kmeans"
+    },
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/tsne.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/tsne.rs"
+  }
+}
