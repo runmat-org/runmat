@@ -181,5 +181,15 @@ pub fn build_recovery_queue_from_plc(
     Ok(TetrahedronRecoveryQueue { items, evidence })
 }
 
+pub fn mark_tetrahedron_mesh_recovery_state(
+    tetrahedron_mesh: &mut TetrahedronMesh,
+    recovery_queue: &TetrahedronRecoveryQueue,
+) {
+    tetrahedron_mesh.recovery_complete = recovery_queue
+        .items
+        .iter()
+        .all(|item| item.status == TetrahedronRecoveryStatus::Recovered);
+}
+
 #[cfg(test)]
 mod tests;

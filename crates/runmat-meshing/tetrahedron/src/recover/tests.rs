@@ -23,6 +23,30 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
 }
 
 #[test]
+fn marks_tetrahedron_mesh_recovered_when_recovery_queue_has_no_missing_items() {
+    let mut mesh = tetrahedron_mesh();
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("matching Tetrahedron mesh should recover PLC constraints");
+
+    mark_tetrahedron_mesh_recovery_state(&mut mesh, &queue);
+
+    assert!(mesh.recovery_complete);
+}
+
+#[test]
+fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
+    let plc = tetrahedron_plc();
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing source faces should be reported as recovery evidence");
+
+    mark_tetrahedron_mesh_recovery_state(&mut mesh, &queue);
+
+    assert!(!mesh.recovery_complete);
+}
+
+#[test]
 fn recovery_queue_reports_missing_source_face() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
