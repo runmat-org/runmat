@@ -2,6 +2,47 @@ use super::*;
 use fixtures::*;
 
 #[test]
+fn rejects_missing_boundary_edge_recovery_when_required() {
+    let mesh = valid_tetrahedron_mesh();
+    let err = validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            min_boundary_edge_recovery_ratio: 1.0,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect_err("missing boundary edge recovery should fail");
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::BoundaryEdgeRecoveryFailed {
+            recovery_ratio: "0.000000".to_string(),
+            required_ratio: "1.000000".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_unrecovered_boundary_faces_when_required() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.boundary_faces[0].adjacent_volume_element_ids.clear();
+    let err = validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            min_boundary_face_recovery_ratio: 1.0,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect_err("missing boundary recovery should fail");
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::BoundaryFaceRecoveryFailed {
+            recovery_ratio: "0.000000".to_string(),
+            required_ratio: "1.000000".to_string(),
+        }
+    );
+}
+
+#[test]
 fn rejects_unrecovered_tetrahedron_components_recovery_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend.tetrahedron_unrecovered_component_count = 1;
