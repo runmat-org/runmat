@@ -31,6 +31,7 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
                     entity(MeshingStage::ProtectedBoundaryComplex, "0"),
                     entity(MeshingStage::ProtectedBoundaryComplex, "1"),
                 ])
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::BoundaryEdge)
     }));
     assert!(queue
         .items
@@ -146,6 +147,14 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         0
     );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_absent_edge_items"],
+        0
+    );
 
     let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
         .expect("missing protected edge should recover with its exterior boundary faces");
@@ -194,6 +203,10 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
         initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         1
     );
+    assert!(initial_queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::BoundaryEdge)
+    }));
 
     let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
         .expect("matching boundary topology should repair source-edge provenance");
@@ -310,13 +323,80 @@ fn recovery_queue_reports_missing_source_edge() {
         queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         0
     );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_absent_edge_items"],
+        0
+    );
     assert!(queue.items.iter().any(|item| {
         item.kind == TetrahedronRecoveryKind::SourceEdge
             && item.status == TetrahedronRecoveryStatus::Missing
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::VolumeEdge)
             && item
                 .source_entity_id
                 .as_ref()
                 .is_some_and(|source| source.id == "edge_2")
+    }));
+}
+
+#[test]
+fn recovery_queue_reports_missing_source_edge_absent_from_volume_edges() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+    ];
+    plc.protected_edges[0].source_edge_id = entity(MeshingStage::CurveMesh, "edge_2");
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+        [2.0, 0.0, 0.0],
+    ));
+    mesh.elements[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+    ];
+    mesh.boundary_faces[0].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+    mesh.boundary_faces[3].node_ids = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    ];
+
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("absent volume source edges should be reported as recovery evidence");
+
+    assert_eq!(queue.evidence.entity_counts["missing_source_edge_items"], 1);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_volume_edge_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_absent_edge_items"],
+        1
+    );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.status == TetrahedronRecoveryStatus::Missing
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::Absent)
+            && item.protected_edge_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                ])
     }));
 }
 

@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use runmat_meshing_core::contracts::{
     MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus, TetrahedronMesh,
+    TopologyEntityId,
 };
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
@@ -17,8 +18,9 @@ use boundary_faces::{
 };
 use topology::sorted_topology_ids;
 pub use types::{
-    TetrahedronRecoveryError, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
-    TetrahedronRecoveryQueueItem, TetrahedronRecoveryResult, TetrahedronRecoveryStatus,
+    TetrahedronProtectedEdgeTopology, TetrahedronRecoveryError, TetrahedronRecoveryKind,
+    TetrahedronRecoveryQueue, TetrahedronRecoveryQueueItem, TetrahedronRecoveryResult,
+    TetrahedronRecoveryStatus,
 };
 
 pub const MODULE_PURPOSE: &str = "source-edge, source-face, and material-interface recovery queues";
@@ -57,6 +59,11 @@ pub fn build_recovery_queue_from_plc(
         .flat_map(boundary_face_source_edges)
         .map(|(edge_key, _)| edge_key)
         .collect::<BTreeSet<_>>();
+    let recovered_volume_edges = tetrahedron_mesh
+        .elements
+        .iter()
+        .flat_map(|element| tetrahedron_edges(element.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
     let recovered_material_interfaces = tetrahedron_mesh
         .elements
         .iter()
@@ -79,12 +86,20 @@ pub fn build_recovery_queue_from_plc(
             },
             source_entity_id: Some(facet.source_face_id.clone()),
             protected_edge_node_ids: None,
+            protected_edge_topology: None,
             material_interface_id: None,
         });
     }
 
     for protected_edge in &plc.protected_edges {
         let edge_key = sorted_topology_ids(protected_edge.node_ids.clone());
+        let protected_edge_topology = if recovered_boundary_edges.contains(&edge_key) {
+            TetrahedronProtectedEdgeTopology::BoundaryEdge
+        } else if recovered_volume_edges.contains(&edge_key) {
+            TetrahedronProtectedEdgeTopology::VolumeEdge
+        } else {
+            TetrahedronProtectedEdgeTopology::Absent
+        };
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_edge:{}", protected_edge.edge_id.id),
             kind: TetrahedronRecoveryKind::SourceEdge,
@@ -97,6 +112,7 @@ pub fn build_recovery_queue_from_plc(
             },
             source_entity_id: Some(protected_edge.source_edge_id.clone()),
             protected_edge_node_ids: Some(edge_key),
+            protected_edge_topology: Some(protected_edge_topology),
             material_interface_id: None,
         });
     }
@@ -118,6 +134,7 @@ pub fn build_recovery_queue_from_plc(
             status,
             source_entity_id: None,
             protected_edge_node_ids: None,
+            protected_edge_topology: None,
             material_interface_id: Some(material_interface_id),
         });
     }
@@ -195,9 +212,11 @@ pub fn build_recovery_queue_from_plc(
                 item.kind == TetrahedronRecoveryKind::SourceEdge
                     && item.status == TetrahedronRecoveryStatus::Missing
                     && item
-                        .protected_edge_node_ids
+                        .protected_edge_topology
                         .as_ref()
-                        .is_some_and(|node_ids| !recovered_boundary_edges.contains(node_ids))
+                        .is_some_and(|topology| {
+                            *topology != TetrahedronProtectedEdgeTopology::BoundaryEdge
+                        })
             })
             .count(),
     );
@@ -209,9 +228,35 @@ pub fn build_recovery_queue_from_plc(
                 item.kind == TetrahedronRecoveryKind::SourceEdge
                     && item.status == TetrahedronRecoveryStatus::Missing
                     && item
-                        .protected_edge_node_ids
+                        .protected_edge_topology
                         .as_ref()
-                        .is_some_and(|node_ids| recovered_boundary_edges.contains(node_ids))
+                        .is_some_and(|topology| {
+                            *topology == TetrahedronProtectedEdgeTopology::BoundaryEdge
+                        })
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_volume_edge_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item.protected_edge_topology
+                        == Some(TetrahedronProtectedEdgeTopology::VolumeEdge)
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_absent_edge_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item.protected_edge_topology
+                        == Some(TetrahedronProtectedEdgeTopology::Absent)
             })
             .count(),
     );
@@ -326,6 +371,17 @@ fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+fn tetrahedron_edges(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 2]; 6] {
+    [
+        sorted_topology_ids([node_ids[0].clone(), node_ids[1].clone()]),
+        sorted_topology_ids([node_ids[0].clone(), node_ids[2].clone()]),
+        sorted_topology_ids([node_ids[0].clone(), node_ids[3].clone()]),
+        sorted_topology_ids([node_ids[1].clone(), node_ids[2].clone()]),
+        sorted_topology_ids([node_ids[1].clone(), node_ids[3].clone()]),
+        sorted_topology_ids([node_ids[2].clone(), node_ids[3].clone()]),
+    ]
 }
 
 #[cfg(test)]

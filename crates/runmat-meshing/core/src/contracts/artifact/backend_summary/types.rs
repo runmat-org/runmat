@@ -171,6 +171,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_missing_source_edge_provenance_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_missing_source_edge_volume_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_source_edge_absent_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_missing_source_edge_recovery_ids: Vec<String>,
     #[serde(default)]
     pub tetrahedron_omitted_missing_source_edge_recovery_id_count: usize,

@@ -183,6 +183,8 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_missing_source_edge_recovery_item_count: 1,
             tetrahedron_missing_source_edge_topology_recovery_item_count: 1,
             tetrahedron_missing_source_edge_provenance_recovery_item_count: 0,
+            tetrahedron_missing_source_edge_volume_edge_recovery_item_count: 1,
+            tetrahedron_missing_source_edge_absent_edge_recovery_item_count: 0,
             tetrahedron_missing_source_edge_recovery_ids: vec!["source_edge_missing_1".to_string()],
             tetrahedron_material_interface_recovery_item_count: 1,
             tetrahedron_recovered_material_interface_recovery_item_count: 0,
