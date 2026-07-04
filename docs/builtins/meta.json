@@ -29929,6 +29929,216 @@
       ]
     },
     {
+      "name": "fitclinear",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Mdl = fitclinear(X, Y)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object containing coefficients, class names, and fit metadata."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitclinear(Tbl, ResponseVarName)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object containing coefficients, class names, and fit metadata."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitclinear(Tbl, formula)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object containing coefficients, class names, and fit metadata."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitclinear(Tbl, Y)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object containing coefficients, class names, and fit metadata."
+            }
+          ]
+        },
+        {
+          "label": "Mdl = fitclinear(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Learner, Lambda, Regularization, Solver, ObservationsIn, FitBias, ClassNames, PredictorNames, ResponseName, Weights, Prior, and ScoreTransform."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object containing coefficients, class names, and fit metadata."
+            }
+          ]
+        },
+        {
+          "label": "[Mdl, FitInfo] = fitclinear(___)",
+          "inputs": [
+            {
+              "name": "tblOrX",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or predictor matrix."
+            },
+            {
+              "name": "yOrResponse",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Response vector, response variable name, or table formula."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Learner, Lambda, Regularization, Solver, ObservationsIn, FitBias, ClassNames, PredictorNames, ResponseName, Weights, Prior, and ScoreTransform."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ClassificationLinear object."
+            },
+            {
+              "name": "FitInfo",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Training diagnostics for each Lambda value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITCLINEAR.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitclinear:InvalidArgument",
+          "when": "Inputs, binary response labels, dimensions, or name-value options are malformed or unsupported.",
+          "message": "fitclinear: invalid argument"
+        },
+        {
+          "code": "RM.FITCLINEAR.INTERNAL",
+          "identifier": "RunMat:fitclinear:Internal",
+          "when": "RunMat cannot construct the ClassificationLinear result.",
+          "message": "fitclinear: internal error"
+        }
+      ]
+    },
+    {
       "name": "fitctree",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -69814,7 +70024,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
             },
             {
               "name": "Xnew",
@@ -69842,7 +70052,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
             },
             {
               "name": "Xnew",
@@ -69877,7 +70087,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
             },
             {
               "name": "Xnew",
@@ -69919,7 +70129,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
             },
             {
               "name": "Xnew",
@@ -69947,7 +70157,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree."
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
             },
             {
               "name": "Xnew",
@@ -69985,6 +70195,48 @@
               "arity": "Required",
               "default": null,
               "description": "One-based class number for each predicted label."
+            }
+          ]
+        },
+        {
+          "label": "[label,score] = predict(linearClassifier, Xnew)",
+          "inputs": [
+            {
+              "name": "mdl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear."
+            },
+            {
+              "name": "Xnew",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "New predictor table or matrix."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Prediction name-value options such as Alpha, Prediction, and Simultaneous."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "label",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            },
+            {
+              "name": "score",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Classification scores or posterior probabilities."
             }
           ]
         }

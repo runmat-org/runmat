@@ -99,6 +99,18 @@ fn fitctree_surface_executes_from_scripts() {
 }
 
 #[test]
+fn fitclinear_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0; 1; 2; 3]; y = [0; 0; 1; 1]; [mdl,FitInfo] = fitclinear(X, y, 'Learner', 'logistic', 'Lambda', 0, 'Solver', 'sgd'); [label,score] = predict(mdl, [0.2; 2.8]); a = label(1); b = label(2); beta = mdl.Beta(1); bias = mdl.Bias(1); obj = FitInfo.Objective(1);",
+    )
+    .expect("fitclinear script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, 0.0));
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
 fn classify_surface_executes_from_scripts() {
     let vars = execute_source(
         "training = [0; 0.5; 2; 2.5]; group = [1; 1; 2; 2]; [class,err,posterior,logp,coeff] = classify([0.2; 2.2], training, group, 'linear', 'empirical'); c1 = class(1); c2 = class(2); p11 = posterior(1,1); k = coeff(1,2).const;",

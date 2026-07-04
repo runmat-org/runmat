@@ -9,6 +9,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
+use crate::builtins::stats::ml::classification_linear::{
+    predict_classification_linear_object, CLASSIFICATION_LINEAR_CLASS,
+};
 use crate::builtins::stats::ml::classification_tree::{
     predict_classification_tree_object, CLASSIFICATION_TREE_CLASS,
 };
@@ -96,6 +99,23 @@ const OUTPUT_LABEL_SCORE_NODE_CNUM: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
+const OUTPUT_LABEL_SCORE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "label",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Predicted class labels.",
+    },
+    BuiltinParamDescriptor {
+        name: "score",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Classification scores or posterior probabilities.",
+    },
+];
+
 const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "tblOrX",
     ty: BuiltinParamType::Any,
@@ -133,7 +153,7 @@ const PARAM_MDL: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Supported fitted model object, such as LinearModel from fitlm or ClassificationTree from fitctree.",
+    description: "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear.",
 };
 
 const PARAM_XNEW: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -174,7 +194,7 @@ const FITLM_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
-const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "ypred = predict(mdl, Xnew)",
         inputs: &PREDICT_INPUTS,
@@ -199,6 +219,11 @@ const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         label: "[label,score,node,cnum] = predict(tree, Xnew)",
         inputs: &PREDICT_INPUTS,
         outputs: &OUTPUT_LABEL_SCORE_NODE_CNUM,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[label,score] = predict(linearClassifier, Xnew)",
+        inputs: &PREDICT_INPUTS_OPTIONS,
+        outputs: &OUTPUT_LABEL_SCORE,
     },
 ];
 
@@ -454,6 +479,9 @@ pub(crate) async fn predict_builtin(
     let output = match model {
         Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
             predict_classification_tree_object(object, xnew, rest)?
+        }
+        Value::Object(object) if object.class_name == CLASSIFICATION_LINEAR_CLASS => {
+            predict_classification_linear_object(object, xnew, rest)?
         }
         other => {
             let options = parse_predict_options(rest)?;
