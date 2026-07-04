@@ -169,6 +169,14 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         2
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["volume_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["deferred_absent_source_edge_recovery_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
         2
     );

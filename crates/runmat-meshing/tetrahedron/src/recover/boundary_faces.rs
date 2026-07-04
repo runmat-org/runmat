@@ -7,8 +7,8 @@ use runmat_meshing_core::contracts::{
 use crate::protected_edges::{face_edges, sorted_edge, source_edge_ids_for_face_edges};
 
 use super::{
-    topology::sorted_topology_ids, TetrahedronRecoveryKind, TetrahedronRecoveryQueue,
-    TetrahedronRecoveryStatus,
+    topology::sorted_topology_ids, TetrahedronProtectedEdgeTopology, TetrahedronRecoveryKind,
+    TetrahedronRecoveryQueue, TetrahedronRecoveryStatus,
 };
 
 pub(super) fn recover_missing_protected_edge_boundary_faces(
@@ -18,22 +18,30 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
 ) -> usize {
     let element_face_counts = element_face_counts(tetrahedron_mesh);
     let mut boundary_face_keys = boundary_face_keys(tetrahedron_mesh);
-    let missing_source_edge_ids = initial_recovery_queue
+    let recoverable_source_edges = initial_recovery_queue
         .items
         .iter()
         .filter(|item| {
             item.kind == TetrahedronRecoveryKind::SourceEdge
                 && item.status == TetrahedronRecoveryStatus::Missing
+                && item.protected_edge_topology
+                    == Some(TetrahedronProtectedEdgeTopology::VolumeEdge)
         })
-        .filter_map(|item| item.source_entity_id.clone())
+        .filter_map(|item| {
+            Some((
+                item.protected_edge_node_ids.clone()?,
+                item.source_entity_id.clone()?,
+            ))
+        })
         .collect::<BTreeSet<_>>();
 
     let mut recovered_count = 0;
-    for protected_edge in plc
-        .protected_edges
-        .iter()
-        .filter(|protected_edge| missing_source_edge_ids.contains(&protected_edge.source_edge_id))
-    {
+    for protected_edge in plc.protected_edges.iter().filter(|protected_edge| {
+        recoverable_source_edges.contains(&(
+            sorted_edge(protected_edge.node_ids.clone()),
+            protected_edge.source_edge_id.clone(),
+        ))
+    }) {
         let protected_edge_key = sorted_edge(protected_edge.node_ids.clone());
         for facet in &plc.facets {
             if !facet_contains_edge(facet.node_ids.clone(), protected_edge_key.clone()) {

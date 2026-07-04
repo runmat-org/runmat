@@ -289,6 +289,15 @@ pub fn recover_tetrahedron_mesh_from_plc(
     mut tetrahedron_mesh: TetrahedronMesh,
 ) -> Result<TetrahedronRecoveryResult, TetrahedronRecoveryError> {
     let initial_recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    let volume_edge_source_edge_recovery_item_count = recovery_source_edge_item_count_by_topology(
+        &initial_recovery_queue,
+        TetrahedronProtectedEdgeTopology::VolumeEdge,
+    );
+    let deferred_absent_source_edge_recovery_item_count =
+        recovery_source_edge_item_count_by_topology(
+            &initial_recovery_queue,
+            TetrahedronProtectedEdgeTopology::Absent,
+        );
     let recovered_protected_edge_boundary_face_count =
         recover_missing_protected_edge_boundary_faces(
             plc,
@@ -310,6 +319,14 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "recovered_protected_edge_boundary_faces".to_string(),
         recovered_protected_edge_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "volume_edge_source_edge_recovery_items".to_string(),
+        volume_edge_source_edge_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "deferred_absent_source_edge_recovery_items".to_string(),
+        deferred_absent_source_edge_recovery_item_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),
@@ -371,6 +388,21 @@ fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+fn recovery_source_edge_item_count_by_topology(
+    recovery_queue: &TetrahedronRecoveryQueue,
+    topology: TetrahedronProtectedEdgeTopology,
+) -> usize {
+    recovery_queue
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::SourceEdge
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.protected_edge_topology == Some(topology)
+        })
+        .count()
 }
 
 fn tetrahedron_edges(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 2]; 6] {
