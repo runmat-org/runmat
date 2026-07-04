@@ -97,15 +97,3 @@ pub(super) fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<
         .map(|(face_id, region_ids)| (face_id, region_ids.into_iter().collect()))
         .collect()
 }
-
-pub(super) fn stable_face_id(
-    semantic_face_regions: &BTreeSet<String>,
-    region_ids: &[String],
-    fallback_face_id: u32,
-) -> String {
-    region_ids
-        .iter()
-        .find(|region_id| semantic_face_regions.contains(*region_id))
-        .cloned()
-        .unwrap_or_else(|| format!("cad_face_{fallback_face_id}"))
-}

@@ -4,15 +4,16 @@ use runmat_geometry_core::GeometryAsset;
 
 use super::SourceTopologyModel;
 
+mod generic;
 mod merge;
 mod semantics;
 mod types;
 
+use generic::generic_coplanar_face_ids;
 use merge::merge_stable_cad_faces;
 use semantics::{
     cad_topology_source, evaluator_faces_by_imported_id, face_regions_by_source_face,
     imported_face_id_for_regions, imported_face_ids_by_region, semantic_face_regions,
-    stable_face_id,
 };
 pub use types::{
     CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError, CadTopologyModel,
@@ -32,6 +33,11 @@ pub fn build_cad_topology(
     let imported_face_ids_by_region = imported_face_ids_by_region(geometry);
     let evaluator_faces = evaluator_faces_by_imported_id(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
+    let generic_face_ids_by_source_face = if source == CadTopologySource::GenericCadMesh {
+        generic_coplanar_face_ids(topology, &face_region_by_source_face)
+    } else {
+        BTreeMap::new()
+    };
 
     let vertices = topology
         .vertices
@@ -58,14 +64,16 @@ pub fn build_cad_topology(
             let imported_face_id =
                 imported_face_id_for_regions(&imported_face_ids_by_region, &identity_region_ids);
             let evaluator_face = imported_face_id.and_then(|face_id| evaluator_faces.get(&face_id));
+            let entity_id = identity_region_ids
+                .iter()
+                .find(|region_id| semantic_face_regions.contains(*region_id))
+                .cloned()
+                .or_else(|| generic_face_ids_by_source_face.get(&face.face_id).cloned())
+                .unwrap_or_else(|| format!("cad_face_{}", face.face_id));
             CadFace {
                 entity_id: CadEntityId {
                     kind: CadEntityKind::Face,
-                    id: stable_face_id(
-                        &semantic_face_regions,
-                        identity_region_ids.as_slice(),
-                        face.face_id,
-                    ),
+                    id: entity_id,
                 },
                 imported_face_id,
                 evaluator_id: evaluator_face.map(|face| face.evaluator_id.clone()),

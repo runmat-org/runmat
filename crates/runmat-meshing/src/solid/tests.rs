@@ -19,8 +19,25 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
     assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
+    let source_face_count = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.provenance.iter())
+        .filter(|provenance| provenance.source_entity_kind == SourceEntityKind::Face)
+        .map(|provenance| provenance.source_entity_id.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let source_edge_count = mesh
+        .boundary_edges
+        .iter()
+        .flat_map(|edge| edge.provenance.iter())
+        .filter(|provenance| provenance.source_entity_kind == SourceEntityKind::Edge)
+        .map(|provenance| provenance.source_entity_id.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+    assert_eq!(source_face_count, 6);
+    assert_eq!(source_edge_count, 12);
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
-    assert!(mesh.backend.tetrahedron_source_edge_recovery_item_count > 0);
     assert_eq!(
         mesh.backend
             .tetrahedron_missing_source_edge_recovery_item_count,

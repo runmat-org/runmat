@@ -17,13 +17,17 @@ fn builds_generic_cad_topology_from_source_triangles() {
     assert_eq!(cad.source, CadTopologySource::GenericCadMesh);
     assert_eq!(cad.report.vertex_count, 8);
     assert_eq!(cad.report.edge_count, 18);
-    assert_eq!(cad.report.face_count, 12);
+    assert_eq!(cad.report.face_count, 6);
     assert_eq!(cad.report.closed_shell_count, 1);
     assert_eq!(cad.report.volume_count, 1);
     assert_eq!(cad.report.semantic_face_count, 0);
     assert_eq!(cad.report.imported_face_count, 0);
     assert_eq!(cad.report.evaluator_face_count, 0);
-    assert_eq!(cad.report.generic_face_count, 12);
+    assert_eq!(cad.report.generic_face_count, 6);
+    assert!(cad
+        .faces
+        .iter()
+        .all(|face| { face.source_face_ids.len() == 2 && face.loop_edge_ids.len() == 4 }));
 }
 
 #[test]
