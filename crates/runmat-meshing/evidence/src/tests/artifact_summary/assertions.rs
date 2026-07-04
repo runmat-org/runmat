@@ -182,10 +182,25 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.missing_recovery_item_count, 2);
     assert_eq!(recovery.source_face_recovery_item_count, 4);
     assert_eq!(recovery.missing_source_face_recovery_item_count, 0);
+    assert!(recovery.missing_source_face_recovery_ids.is_empty());
+    assert_eq!(recovery.omitted_missing_source_face_recovery_id_count, 0);
     assert_eq!(recovery.source_edge_recovery_item_count, 4);
     assert_eq!(recovery.missing_source_edge_recovery_item_count, 1);
+    assert_eq!(
+        recovery.missing_source_edge_recovery_ids,
+        vec!["source_edge_missing_1".to_string()]
+    );
+    assert_eq!(recovery.omitted_missing_source_edge_recovery_id_count, 0);
     assert_eq!(recovery.material_interface_recovery_item_count, 1);
     assert_eq!(recovery.missing_material_interface_recovery_item_count, 1);
+    assert_eq!(
+        recovery.missing_material_interface_recovery_ids,
+        vec!["material_interface_missing_1".to_string()]
+    );
+    assert_eq!(
+        recovery.omitted_missing_material_interface_recovery_id_count,
+        0
+    );
     assert_eq!(recovery.refinement_pass_count, 2);
     assert_eq!(recovery.refinement_point_count, 5);
     assert_eq!(recovery.optimization_pass_count, 1);

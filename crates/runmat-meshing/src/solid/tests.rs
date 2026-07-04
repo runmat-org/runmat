@@ -37,6 +37,26 @@ fn auto_backend_runs_plc_tetrahedron_solid_pipeline() {
                 .backend
                 .tetrahedron_missing_source_edge_recovery_item_count
     );
+    assert!(!mesh
+        .backend
+        .tetrahedron_missing_source_face_recovery_ids
+        .is_empty());
+    assert!(!mesh
+        .backend
+        .tetrahedron_missing_source_edge_recovery_ids
+        .is_empty());
+    assert!(
+        mesh.backend
+            .tetrahedron_missing_source_face_recovery_ids
+            .len()
+            <= 64
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_missing_source_edge_recovery_ids
+            .len()
+            <= 64
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("root solid pipeline should produce a solve-ready mesh for a generic cube");
     validate_analysis_mesh_with_options(
@@ -97,6 +117,18 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
             .tetrahedron_missing_source_edge_recovery_item_count,
         0
     );
+    assert!(mesh
+        .backend
+        .tetrahedron_missing_source_face_recovery_ids
+        .is_empty());
+    assert!(mesh
+        .backend
+        .tetrahedron_missing_source_edge_recovery_ids
+        .is_empty());
+    assert!(mesh
+        .backend
+        .tetrahedron_missing_material_interface_recovery_ids
+        .is_empty());
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("single Tetrahedron solid mesh should be solve-ready");
     validate_analysis_mesh_with_options(

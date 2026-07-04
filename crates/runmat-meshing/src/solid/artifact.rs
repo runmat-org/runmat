@@ -17,9 +17,13 @@ use runmat_meshing_core::{
     size::field::MeshSizingField,
 };
 use runmat_meshing_surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID};
-use runmat_meshing_tetrahedron::{generate::TetrahedronMesh, recover::TetrahedronRecoveryQueue};
+use runmat_meshing_tetrahedron::{
+    generate::TetrahedronMesh,
+    recover::{TetrahedronRecoveryKind, TetrahedronRecoveryQueue, TetrahedronRecoveryStatus},
+};
 
 const SOLID_PLC_TETRAHEDRON_ALGORITHM: &str = "plc_tetrahedron/v1";
+const MAX_REPORTED_RECOVERY_IDS: usize = 64;
 
 pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     geometry: &GeometryAsset,
@@ -109,6 +113,12 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         &source_edge_provenance_by_edge,
     );
     let quality = quality_report(&volume_elements, &coordinates_by_node_id);
+    let missing_source_face_recovery =
+        bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::SourceFace);
+    let missing_source_edge_recovery =
+        bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::SourceEdge);
+    let missing_material_interface_recovery =
+        bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::MaterialInterface);
 
     AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
@@ -183,6 +193,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_source_face_items",
             ),
+            tetrahedron_missing_source_face_recovery_ids: missing_source_face_recovery.ids,
+            tetrahedron_omitted_missing_source_face_recovery_id_count: missing_source_face_recovery
+                .omitted_count,
             tetrahedron_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "source_edge_items",
@@ -191,6 +204,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_source_edge_items",
             ),
+            tetrahedron_missing_source_edge_recovery_ids: missing_source_edge_recovery.ids,
+            tetrahedron_omitted_missing_source_edge_recovery_id_count: missing_source_edge_recovery
+                .omitted_count,
             tetrahedron_material_interface_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "material_interface_items",
@@ -199,6 +215,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_material_interface_items",
             ),
+            tetrahedron_missing_material_interface_recovery_ids:
+                missing_material_interface_recovery.ids,
+            tetrahedron_omitted_missing_material_interface_recovery_id_count:
+                missing_material_interface_recovery.omitted_count,
             ..MeshBackendSummary::default()
         },
         adaptive_iterations: Vec::new(),
@@ -227,6 +247,38 @@ fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+struct BoundedRecoveryIds {
+    ids: Vec<String>,
+    omitted_count: usize,
+}
+
+fn bounded_missing_recovery_ids(
+    recovery_queue: &TetrahedronRecoveryQueue,
+    kind: TetrahedronRecoveryKind,
+) -> BoundedRecoveryIds {
+    let all_ids = recovery_queue
+        .items
+        .iter()
+        .filter(|item| item.kind == kind && item.status == TetrahedronRecoveryStatus::Missing)
+        .filter_map(|item| match kind {
+            TetrahedronRecoveryKind::SourceFace | TetrahedronRecoveryKind::SourceEdge => item
+                .source_entity_id
+                .as_ref()
+                .map(|source_id| source_id.id.clone()),
+            TetrahedronRecoveryKind::MaterialInterface => item.material_interface_id.clone(),
+        })
+        .collect::<BTreeSet<_>>();
+    let total_count = all_ids.len();
+    let ids = all_ids
+        .into_iter()
+        .take(MAX_REPORTED_RECOVERY_IDS)
+        .collect::<Vec<_>>();
+    BoundedRecoveryIds {
+        omitted_count: total_count.saturating_sub(ids.len()),
+        ids,
+    }
 }
 
 fn source_edge_provenance_by_boundary_edge(

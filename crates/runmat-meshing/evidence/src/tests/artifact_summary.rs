@@ -175,8 +175,12 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_missing_source_face_recovery_item_count: 0,
             tetrahedron_source_edge_recovery_item_count: 4,
             tetrahedron_missing_source_edge_recovery_item_count: 1,
+            tetrahedron_missing_source_edge_recovery_ids: vec!["source_edge_missing_1".to_string()],
             tetrahedron_material_interface_recovery_item_count: 1,
             tetrahedron_missing_material_interface_recovery_item_count: 1,
+            tetrahedron_missing_material_interface_recovery_ids: vec![
+                "material_interface_missing_1".to_string(),
+            ],
             tetrahedron_refinement_pass_count: 2,
             tetrahedron_refinement_point_count: 5,
             tetrahedron_requested_refinement_point_count: 5,

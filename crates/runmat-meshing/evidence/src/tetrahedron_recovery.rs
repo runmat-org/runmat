@@ -39,13 +39,25 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub missing_source_face_recovery_item_count: usize,
     #[serde(default)]
+    pub missing_source_face_recovery_ids: Vec<String>,
+    #[serde(default)]
+    pub omitted_missing_source_face_recovery_id_count: usize,
+    #[serde(default)]
     pub source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub missing_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub missing_source_edge_recovery_ids: Vec<String>,
+    #[serde(default)]
+    pub omitted_missing_source_edge_recovery_id_count: usize,
+    #[serde(default)]
     pub material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub missing_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_material_interface_recovery_ids: Vec<String>,
+    #[serde(default)]
+    pub omitted_missing_material_interface_recovery_id_count: usize,
     pub refinement_pass_count: usize,
     pub refinement_point_count: usize,
     pub optimization_pass_count: usize,
@@ -144,16 +156,37 @@ pub(super) fn tetrahedron_recovery_evidence(
         missing_source_face_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_face_recovery_item_count,
+        missing_source_face_recovery_ids: mesh
+            .backend
+            .tetrahedron_missing_source_face_recovery_ids
+            .clone(),
+        omitted_missing_source_face_recovery_id_count: mesh
+            .backend
+            .tetrahedron_omitted_missing_source_face_recovery_id_count,
         source_edge_recovery_item_count: mesh.backend.tetrahedron_source_edge_recovery_item_count,
         missing_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_edge_recovery_item_count,
+        missing_source_edge_recovery_ids: mesh
+            .backend
+            .tetrahedron_missing_source_edge_recovery_ids
+            .clone(),
+        omitted_missing_source_edge_recovery_id_count: mesh
+            .backend
+            .tetrahedron_omitted_missing_source_edge_recovery_id_count,
         material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_material_interface_recovery_item_count,
         missing_material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_material_interface_recovery_item_count,
+        missing_material_interface_recovery_ids: mesh
+            .backend
+            .tetrahedron_missing_material_interface_recovery_ids
+            .clone(),
+        omitted_missing_material_interface_recovery_id_count: mesh
+            .backend
+            .tetrahedron_omitted_missing_material_interface_recovery_id_count,
         refinement_pass_count: mesh.backend.tetrahedron_refinement_pass_count,
         refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
         optimization_pass_count: mesh.backend.tetrahedron_optimization_pass_count,
