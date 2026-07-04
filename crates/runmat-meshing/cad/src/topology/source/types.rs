@@ -1,0 +1,131 @@
+use runmat_geometry_core::CadFaceEvaluationSample;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CadTopologySource {
+    SemanticCad,
+    GenericCadMesh,
+    MeshFallback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CadEntityKind {
+    Vertex,
+    Edge,
+    Face,
+    Shell,
+    Volume,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CadEntityId {
+    pub kind: CadEntityKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadVertex {
+    pub entity_id: CadEntityId,
+    pub source_vertex_id: u32,
+    pub coordinates_m: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadEdge {
+    pub entity_id: CadEntityId,
+    pub source_edge_id: u32,
+    pub vertex_ids: [String; 2],
+    pub adjacent_face_ids: Vec<String>,
+    pub length_m: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadFace {
+    pub entity_id: CadEntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_face_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_id: Option<String>,
+    #[serde(default)]
+    pub evaluator_supports_point_evaluation: bool,
+    #[serde(default)]
+    pub evaluator_supports_projection: bool,
+    #[serde(default)]
+    pub evaluator_supports_normal: bool,
+    #[serde(default)]
+    pub evaluator_supports_derivatives: bool,
+    #[serde(default)]
+    pub evaluator_supports_curvature: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_reference_point_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_unit_normal: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evaluator_samples: Vec<CadFaceEvaluationSample>,
+    pub source_face_ids: Vec<u32>,
+    pub source_edge_ids: Vec<u32>,
+    pub loop_edge_ids: Vec<String>,
+    pub region_ids: Vec<String>,
+    pub area_m2: f64,
+    pub unit_normal: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadShell {
+    pub entity_id: CadEntityId,
+    pub face_ids: Vec<String>,
+    pub closed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadVolume {
+    pub entity_id: CadEntityId,
+    pub shell_ids: Vec<String>,
+    pub region_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadTopologyReport {
+    pub source: CadTopologySource,
+    pub vertex_count: usize,
+    pub edge_count: usize,
+    pub face_count: usize,
+    pub shell_count: usize,
+    pub volume_count: usize,
+    pub semantic_face_count: usize,
+    pub imported_face_count: usize,
+    pub evaluator_face_count: usize,
+    pub generic_face_count: usize,
+    pub closed_shell_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadTopologyModel {
+    pub source_geometry_id: String,
+    pub source_geometry_revision: u32,
+    pub source_geometry_sha256: Option<String>,
+    pub source: CadTopologySource,
+    pub vertices: Vec<CadVertex>,
+    pub edges: Vec<CadEdge>,
+    pub faces: Vec<CadFace>,
+    pub shells: Vec<CadShell>,
+    pub volumes: Vec<CadVolume>,
+    pub report: CadTopologyReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CadTopologyError {
+    EmptyTopology,
+}
+
+impl std::fmt::Display for CadTopologyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyTopology => write!(formatter, "source topology has no vertices or faces"),
+        }
+    }
+}
+
+impl std::error::Error for CadTopologyError {}
