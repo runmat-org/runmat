@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+mod components;
 mod errors;
+pub use components::{classify_boundary_components, PlcBoundaryComponentReport};
 pub use errors::PlcValidationError;
 pub use runmat_meshing_core::contracts::PlcValidationSummary;
 use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
@@ -129,9 +131,11 @@ pub fn validate_protected_boundary_complex(
             return Err(PlcValidationError::InconsistentBoundaryEdgeOrientation { node_ids: edge });
         }
     }
-    let component_count = boundary_component_count(&referenced_node_ids, plc);
-    if component_count > 1 {
-        return Err(PlcValidationError::DisconnectedBoundaryComponents { component_count });
+    let component_report = classify_boundary_components(plc);
+    if component_report.component_count > 1 {
+        return Err(PlcValidationError::DisconnectedBoundaryComponents {
+            component_count: component_report.component_count,
+        });
     }
 
     Ok(PlcValidationSummary {
@@ -176,51 +180,6 @@ fn validate_facet_source_face(
         });
     }
     Ok(())
-}
-
-fn boundary_component_count(
-    referenced_node_ids: &BTreeSet<TopologyEntityId>,
-    plc: &ProtectedBoundaryComplex,
-) -> usize {
-    let mut adjacency = BTreeMap::<TopologyEntityId, BTreeSet<TopologyEntityId>>::new();
-    for node_id in referenced_node_ids {
-        adjacency.entry(node_id.clone()).or_default();
-    }
-    for facet in &plc.facets {
-        for edge_index in 0..3 {
-            let left = facet.node_ids[edge_index].clone();
-            let right = facet.node_ids[(edge_index + 1) % 3].clone();
-            adjacency
-                .entry(left.clone())
-                .or_default()
-                .insert(right.clone());
-            adjacency.entry(right).or_default().insert(left);
-        }
-    }
-
-    let mut component_count = 0_usize;
-    let mut visited = BTreeSet::<TopologyEntityId>::new();
-    for start in adjacency.keys() {
-        if visited.contains(start) {
-            continue;
-        }
-        component_count += 1;
-        let mut stack = vec![start.clone()];
-        while let Some(node_id) = stack.pop() {
-            if !visited.insert(node_id.clone()) {
-                continue;
-            }
-            if let Some(neighbors) = adjacency.get(&node_id) {
-                stack.extend(
-                    neighbors
-                        .iter()
-                        .filter(|neighbor| !visited.contains(*neighbor))
-                        .cloned(),
-                );
-            }
-        }
-    }
-    component_count
 }
 
 fn validate_facet_material_interfaces(

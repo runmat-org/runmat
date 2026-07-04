@@ -10,7 +10,7 @@ use runmat_meshing_core::{
     surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID},
 };
 
-use crate::validate::validate_protected_boundary_complex;
+use crate::validate::{classify_boundary_components, validate_protected_boundary_complex};
 
 pub const MODULE_PURPOSE: &str = "oriented protected boundary complex construction";
 
@@ -219,6 +219,23 @@ pub fn build_protected_boundary_complex(
         },
         evidence,
     };
+    let component_report = classify_boundary_components(&plc);
+    plc.evidence.entity_counts.insert(
+        "boundary_components".to_string(),
+        component_report.component_count,
+    );
+    plc.evidence.entity_counts.insert(
+        "boundary_component_nodes".to_string(),
+        component_report.referenced_node_count,
+    );
+    plc.evidence.entity_counts.insert(
+        "min_boundary_component_nodes".to_string(),
+        component_report.min_component_node_count,
+    );
+    plc.evidence.entity_counts.insert(
+        "max_boundary_component_nodes".to_string(),
+        component_report.max_component_node_count,
+    );
     plc.validation = validate_protected_boundary_complex(&plc)
         .map_err(PlcBuildError::ProtectedBoundaryValidation)?;
     Ok(plc)

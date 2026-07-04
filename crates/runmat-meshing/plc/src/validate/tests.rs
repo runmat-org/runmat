@@ -12,6 +12,21 @@ fn validates_closed_manifold_plc() {
 }
 
 #[test]
+fn reports_boundary_component_evidence_for_closed_shell() {
+    let report = classify_boundary_components(&tetrahedron_plc());
+
+    assert_eq!(
+        report,
+        PlcBoundaryComponentReport {
+            component_count: 1,
+            referenced_node_count: 4,
+            min_component_node_count: 4,
+            max_component_node_count: 4,
+        }
+    );
+}
+
+#[test]
 fn rejects_not_volume_ready_validation_summary() {
     let mut plc = tetrahedron_plc();
     plc.validation.watertight = false;
@@ -175,6 +190,11 @@ fn rejects_protected_edge_with_non_curve_source_edge_id() {
 #[test]
 fn rejects_disconnected_boundary_components_until_shell_nesting_is_classified() {
     let plc = disconnected_tetrahedra_plc();
+    let report = classify_boundary_components(&plc);
+
+    assert_eq!(report.component_count, 2);
+    assert_eq!(report.min_component_node_count, 4);
+    assert_eq!(report.max_component_node_count, 4);
 
     assert!(matches!(
         validate_protected_boundary_complex(&plc),

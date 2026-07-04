@@ -21,6 +21,11 @@ fn builds_valid_plc_from_closed_tetra_surface() {
         plc.evidence.entity_counts["recovered_surface_source_edges"],
         6
     );
+    assert_eq!(plc.evidence.entity_counts["boundary_components"], 1);
+    assert_eq!(
+        plc.evidence.entity_counts["max_boundary_component_nodes"],
+        4
+    );
 }
 
 #[test]
