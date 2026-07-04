@@ -323,6 +323,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "removed_redundant_boundary_faces",
             ),
+            tetrahedron_removed_unsupported_boundary_face_count: recovery_entity_count(
+                recovery_queue,
+                "removed_unsupported_boundary_faces",
+            ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_source_face_provenance_items",

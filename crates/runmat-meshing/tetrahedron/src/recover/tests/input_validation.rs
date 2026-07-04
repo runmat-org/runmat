@@ -1,8 +1,10 @@
-use runmat_meshing_core::contracts::{MeshingStage, StageEvidence, Tetrahedron4Element};
+use runmat_meshing_core::contracts::{
+    MeshingStage, StageEvidence, Tetrahedron4Element, TetrahedronBoundaryFace,
+};
 
 use super::{
-    boundary_face, build_recovery_queue_from_plc, entity, tetrahedron_mesh, tetrahedron_node,
-    tetrahedron_plc, TetrahedronRecoveryError,
+    boundary_face, build_recovery_queue_from_plc, entity, recover_tetrahedron_mesh_from_plc,
+    tetrahedron_mesh, tetrahedron_node, tetrahedron_plc, TetrahedronRecoveryError,
 };
 
 #[test]
@@ -131,30 +133,87 @@ fn rejects_recovery_input_boundary_face_with_bad_source_stages() {
 }
 
 #[test]
-fn accepts_recovery_input_with_generated_tetrahedron_boundary_entities() {
+fn ignores_and_removes_recovery_input_boundary_face_that_is_not_exterior() {
     let mut mesh = tetrahedron_mesh();
-    let generated_node_id = entity(MeshingStage::TetrahedronMesh, "generated_boundary_node");
-    mesh.nodes
-        .push(tetrahedron_node(generated_node_id.clone(), [0.5, 0.0, 0.0]));
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+        [2.0, 2.0, 2.0],
+    ));
+    mesh.boundary_faces.push(boundary_face(
+        "unsupported_boundary_face",
+        ["0", "1", "4"],
+        "face_2",
+    ));
+
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("unsupported boundary face should not block queue classification");
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("unsupported boundary face should be removed before final audit");
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(!result
+        .tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .any(|face| face.face_id.id == "unsupported_boundary_face"));
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["removed_unsupported_boundary_faces"],
+        1
+    );
+
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "4"),
+        [0.0, 0.0, -1.0],
+    ));
     mesh.elements.push(Tetrahedron4Element {
-        element_id: entity(MeshingStage::TetrahedronMesh, "generated_element"),
+        element_id: entity(MeshingStage::TetrahedronMesh, "interior_neighbor"),
         node_ids: [
             entity(MeshingStage::ProtectedBoundaryComplex, "0"),
             entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-            generated_node_id.clone(),
-            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::TetrahedronMesh, "4"),
         ],
         material_region_id: "solid_body".to_string(),
     });
-    mesh.boundary_faces.push(boundary_face(
-        "generated_boundary_face",
-        ["0", "1", "3"],
-        "face_2",
-    ));
-    mesh.boundary_faces
-        .last_mut()
-        .expect("generated boundary face should exist")
-        .face_id = entity(MeshingStage::TetrahedronMesh, "generated_boundary_face");
+
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("interior boundary face should be classified as missing source-face work");
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_volume_face_items"],
+        1
+    );
+}
+
+#[test]
+fn accepts_recovery_input_with_generated_tetrahedron_boundary_entities() {
+    let mut mesh = tetrahedron_mesh();
+    let generated_node_ids = ["generated_0", "generated_1", "generated_2", "generated_3"]
+        .map(|id| entity(MeshingStage::TetrahedronMesh, id));
+    for (node_id, coordinates_m) in generated_node_ids.clone().into_iter().zip([
+        [2.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [2.0, 1.0, 0.0],
+        [2.0, 0.0, 1.0],
+    ]) {
+        mesh.nodes.push(tetrahedron_node(node_id, coordinates_m));
+    }
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "generated_element"),
+        node_ids: generated_node_ids.clone(),
+        material_region_id: "solid_body".to_string(),
+    });
+    mesh.boundary_faces.push(TetrahedronBoundaryFace {
+        face_id: entity(MeshingStage::TetrahedronMesh, "generated_boundary_face"),
+        node_ids: [
+            generated_node_ids[0].clone(),
+            generated_node_ids[1].clone(),
+            generated_node_ids[2].clone(),
+        ],
+        source_face_id: entity(MeshingStage::SurfaceMesh, "generated_source_face"),
+        source_edge_ids: [None, None, None],
+    });
 
     assert!(build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh).is_ok());
 }

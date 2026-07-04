@@ -1325,7 +1325,7 @@ fn recovery_stage_result_rolls_back_absent_material_partition_on_post_insert_aud
     );
     assert_eq!(
         recovery_evidence.entity_counts["missing_source_face_items"],
-        2
+        3
     );
     assert_eq!(
         recovery_evidence.entity_counts["missing_material_interface_items"],
@@ -1386,44 +1386,43 @@ fn recovery_stage_result_rolls_back_material_partition_with_stale_source_edge_pr
 }
 
 #[test]
-fn recovery_stage_result_repairs_incomplete_material_interface_ownership_from_queue() {
+fn recovery_stage_result_rejects_material_repair_that_leaves_missing_source_face() {
     let plc = two_region_bipyramid_plc();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();
     add_unclassified_region_a_boundary_neighbor(&mut mesh);
 
-    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
-        .expect("queued incomplete material ownership should be repaired");
+    let recovery_evidence = assert_incomplete_recovery(
+        recover_tetrahedron_mesh_from_plc(&plc, mesh)
+            .expect_err("material ownership repair should not hide a missing source face"),
+        1,
+        1,
+        0,
+        0,
+    );
 
-    assert!(result.tetrahedron_mesh.recovery_complete);
     assert_eq!(
-        result.tetrahedron_mesh.elements[2].material_region_id,
-        "region_a"
-    );
-    assert_eq!(
-        result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        recovery_evidence.entity_counts["missing_source_face_volume_face_items"],
         1
     );
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        recovery_evidence.entity_counts["removed_unsupported_boundary_faces"],
         1
     );
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts["attempted_material_interface_recovery_items"],
+        recovery_evidence.entity_counts["recovered_material_interface_items"],
         1
     );
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts
-            ["boundary_owned_material_interface_recovery_items"],
+        recovery_evidence.entity_counts["repaired_material_interface_elements"],
         1
     );
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts
-            ["boundary_owned_material_interface_recovery_input_items"],
+        recovery_evidence.entity_counts["attempted_material_interface_recovery_items"],
         1
     );
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
-        0
+        recovery_evidence.entity_counts["boundary_owned_material_interface_recovery_items"],
+        1
     );
 }
 
@@ -1494,14 +1493,22 @@ fn recovery_stage_result_rejects_missing_queue_items() {
 
     let recovery_evidence = assert_incomplete_recovery(
         recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("missing face should fail"),
+        4,
+        3,
         1,
-        1,
-        0,
         0,
     );
     assert_eq!(
         recovery_evidence.entity_counts["missing_source_face_absent_face_items"],
+        3
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["missing_source_edge_absent_edge_items"],
         1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["removed_unsupported_boundary_faces"],
+        2
     );
 }
 

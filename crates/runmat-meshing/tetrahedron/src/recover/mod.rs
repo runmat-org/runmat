@@ -12,8 +12,8 @@ mod types;
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus, TetrahedronMesh,
-    TopologyEntityId,
+    MeshingStage, ProtectedBoundaryComplex, StageEvidence, StageEvidenceStatus,
+    TetrahedronBoundaryFace, TetrahedronMesh, TopologyEntityId,
 };
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
@@ -21,8 +21,8 @@ use absent_edges::recover_absent_protected_edges_by_boundary_diagonal_flip;
 use boundary_faces::{
     boundary_face_source_edges, recover_missing_protected_edge_boundary_faces,
     recover_volume_face_source_face_boundary_faces, remove_redundant_boundary_faces,
-    repair_boundary_face_identity, repair_boundary_source_edge_provenance,
-    repair_boundary_source_face_provenance,
+    remove_unsupported_boundary_faces, repair_boundary_face_identity,
+    repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
 use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
@@ -49,8 +49,13 @@ pub fn build_recovery_queue_from_plc(
     }
     validate_tetrahedron_recovery_input_mesh(tetrahedron_mesh)?;
 
-    let recovered_boundary_faces = tetrahedron_mesh
+    let element_face_counts = element_face_counts(tetrahedron_mesh);
+    let exterior_boundary_faces = tetrahedron_mesh
         .boundary_faces
+        .iter()
+        .filter(|face| boundary_face_is_exterior(face, &element_face_counts))
+        .collect::<Vec<_>>();
+    let recovered_boundary_faces = exterior_boundary_faces
         .iter()
         .map(|face| sorted_topology_ids(face.node_ids.clone()))
         .collect::<BTreeSet<_>>();
@@ -59,10 +64,9 @@ pub fn build_recovery_queue_from_plc(
         .iter()
         .flat_map(|element| tetrahedron_faces(element.node_ids.clone()))
         .collect::<BTreeSet<_>>();
-    let recovered_boundary_edges = tetrahedron_mesh
-        .boundary_faces
+    let recovered_boundary_edges = exterior_boundary_faces
         .iter()
-        .flat_map(boundary_face_source_edges)
+        .flat_map(|face| boundary_face_source_edges(face))
         .map(|(edge_key, _)| edge_key)
         .collect::<BTreeSet<_>>();
     let recovered_volume_edges = tetrahedron_mesh
@@ -91,7 +95,7 @@ pub fn build_recovery_queue_from_plc(
             item_id: format!("source_face:{}", facet.facet_id.id),
             kind: TetrahedronRecoveryKind::SourceFace,
             status: if boundary_source_face_provenance_complete(
-                tetrahedron_mesh,
+                &exterior_boundary_faces,
                 &face_key.1,
                 &face_key.0,
             ) {
@@ -119,7 +123,7 @@ pub fn build_recovery_queue_from_plc(
             TetrahedronProtectedEdgeTopology::Absent
         };
         let status = if protected_boundary_edge_provenance_complete(
-            tetrahedron_mesh,
+            &exterior_boundary_faces,
             &edge_key,
             &protected_edge.source_edge_id,
         ) {
@@ -395,12 +399,11 @@ pub fn build_recovery_queue_from_plc(
 }
 
 fn boundary_source_face_provenance_complete(
-    tetrahedron_mesh: &TetrahedronMesh,
+    exterior_boundary_faces: &[&TetrahedronBoundaryFace],
     face_key: &[TopologyEntityId; 3],
     source_face_id: &TopologyEntityId,
 ) -> bool {
-    let matching_source_faces = tetrahedron_mesh
-        .boundary_faces
+    let matching_source_faces = exterior_boundary_faces
         .iter()
         .filter_map(|boundary_face| {
             (sorted_topology_ids(boundary_face.node_ids.clone()) == *face_key)
@@ -415,14 +418,13 @@ fn boundary_source_face_provenance_complete(
 }
 
 fn protected_boundary_edge_provenance_complete(
-    tetrahedron_mesh: &TetrahedronMesh,
+    exterior_boundary_faces: &[&TetrahedronBoundaryFace],
     edge_key: &[TopologyEntityId; 2],
     source_edge_id: &TopologyEntityId,
 ) -> bool {
-    let matching_edge_sources = tetrahedron_mesh
-        .boundary_faces
+    let matching_edge_sources = exterior_boundary_faces
         .iter()
-        .flat_map(boundary_face_source_edges)
+        .flat_map(|face| boundary_face_source_edges(face))
         .filter_map(|(boundary_edge_key, boundary_source_edge_id)| {
             (boundary_edge_key == *edge_key).then_some(boundary_source_edge_id)
         })
@@ -597,6 +599,8 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
+    let removed_unsupported_boundary_face_count =
+        remove_unsupported_boundary_faces(&mut tetrahedron_mesh);
     let removed_redundant_boundary_face_count =
         remove_redundant_boundary_faces(plc, &mut tetrahedron_mesh);
     let repaired_boundary_face_identity_count =
@@ -693,6 +697,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "removed_redundant_boundary_faces".to_string(),
         removed_redundant_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "removed_unsupported_boundary_faces".to_string(),
+        removed_unsupported_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_face_provenance_items".to_string(),
@@ -914,6 +922,32 @@ fn recovery_material_interface_item_count_by_topology(
                 && item.material_interface_topology == Some(topology)
         })
         .count()
+}
+
+fn boundary_face_is_exterior(
+    boundary_face: &TetrahedronBoundaryFace,
+    element_face_counts: &BTreeMap<[TopologyEntityId; 3], usize>,
+) -> bool {
+    element_face_counts
+        .get(&sorted_topology_ids(boundary_face.node_ids.clone()))
+        .copied()
+        == Some(1)
+}
+
+fn element_face_counts(
+    tetrahedron_mesh: &TetrahedronMesh,
+) -> BTreeMap<[TopologyEntityId; 3], usize> {
+    tetrahedron_mesh
+        .elements
+        .iter()
+        .flat_map(|element| tetrahedron_faces(element.node_ids.clone()))
+        .fold(
+            BTreeMap::<[TopologyEntityId; 3], usize>::new(),
+            |mut counts, face| {
+                *counts.entry(face).or_default() += 1;
+                counts
+            },
+        )
 }
 
 fn tetrahedron_edges(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 2]; 6] {

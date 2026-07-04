@@ -178,6 +178,18 @@ pub(super) fn remove_redundant_boundary_faces(
     removed_count
 }
 
+pub(super) fn remove_unsupported_boundary_faces(tetrahedron_mesh: &mut TetrahedronMesh) -> usize {
+    let element_face_counts = element_face_counts(tetrahedron_mesh);
+    let original_count = tetrahedron_mesh.boundary_faces.len();
+    tetrahedron_mesh.boundary_faces.retain(|boundary_face| {
+        element_face_counts
+            .get(&sorted_topology_ids(boundary_face.node_ids.clone()))
+            .copied()
+            == Some(1)
+    });
+    original_count - tetrahedron_mesh.boundary_faces.len()
+}
+
 pub(super) fn repair_boundary_face_identity(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
