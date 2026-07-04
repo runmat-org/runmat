@@ -57,6 +57,10 @@ fn recovery_stage_result_removes_exterior_elements_across_interior_source_faces(
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["interior_face_source_face_recovery_items"],
+        2
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["removed_exterior_leaked_elements"],
         2
     );

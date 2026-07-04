@@ -177,6 +177,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_boundary_edge_source_edge_recovery_item_count: 1,
             tetrahedron_interior_edge_source_edge_recovery_item_count: 1,
             tetrahedron_boundary_face_source_face_recovery_item_count: 1,
+            tetrahedron_interior_face_source_face_recovery_item_count: 1,
             tetrahedron_volume_face_source_face_recovery_item_count: 2,
             tetrahedron_deferred_absent_source_edge_recovery_item_count: 0,
             tetrahedron_attempted_absent_source_edge_recovery_item_count: 1,
