@@ -8,7 +8,9 @@ use super::{
 use crate::math::{cross, dot, sub};
 use runmat_geometry_core::{CadFaceEvaluationSample, CadFaceEvaluationSampleSource};
 use runmat_meshing_cad::{build_cad_evaluation_model, build_cad_topology, SourceTopologyFace};
-use runmat_meshing_curve::{discretize_topology_curves, CurveDiscretizationOptions};
+use runmat_meshing_curve::{
+    discretize_topology_curves, CurveDiscretizationOptions, CurveValidationError,
+};
 
 mod cad_surfaces;
 mod exact_samples;
@@ -101,4 +103,45 @@ fn rejects_missing_face_vertices() {
             node_id: 2,
         }
     );
+}
+
+#[test]
+fn rejects_invalid_curve_boundary_before_surface_triangulation() {
+    let topology = single_triangle_topology();
+    let geometry = geometry_with_face_domain_sample();
+    let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+    let cad_evaluation =
+        build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+    let mut curves = discretize_topology_curves(
+        &topology,
+        CurveDiscretizationOptions {
+            target_size_m: 0.5,
+            min_segments_per_edge: 1,
+            max_segments_per_edge: 8,
+        },
+    )
+    .expect("curves should discretize");
+    curves
+        .nodes
+        .iter_mut()
+        .find(|node| node.source_edge_id == 0 && node.parameter == 0.0)
+        .expect("source edge endpoint")
+        .coordinates_m = [0.01, 0.0, 0.0];
+
+    let err = discretize_cad_surfaces_with_curves(
+        &topology,
+        &cad_evaluation,
+        &curves,
+        SurfaceDiscretizationOptions::default(),
+    )
+    .expect_err("invalid curve boundary should fail before surface triangulation");
+
+    assert!(matches!(
+        err,
+        SurfaceDiscretizationError::InvalidCurveBoundary(CurveValidationError::EndpointDrift {
+            source_edge_id: 0,
+            parameter: 0.0,
+            ..
+        })
+    ));
 }

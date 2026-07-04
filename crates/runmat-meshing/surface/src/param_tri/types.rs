@@ -1,3 +1,4 @@
+use runmat_meshing_curve::CurveValidationError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,8 +52,9 @@ pub struct SurfaceDiscretization {
     pub rejected_exact_cad_sample_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceDiscretizationError {
+    InvalidCurveBoundary(CurveValidationError),
     MissingFaceVertex {
         face_id: u32,
         node_id: u32,
@@ -94,6 +96,9 @@ pub enum SurfaceDiscretizationError {
 impl std::fmt::Display for SurfaceDiscretizationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidCurveBoundary(source) => {
+                write!(formatter, "invalid recovered curve boundary: {source}")
+            }
             Self::MissingFaceVertex { face_id, node_id } => write!(
                 formatter,
                 "source face {face_id} references missing topology vertex {node_id}"
@@ -142,4 +147,11 @@ impl std::fmt::Display for SurfaceDiscretizationError {
     }
 }
 
-impl std::error::Error for SurfaceDiscretizationError {}
+impl std::error::Error for SurfaceDiscretizationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidCurveBoundary(source) => Some(source),
+            _ => None,
+        }
+    }
+}

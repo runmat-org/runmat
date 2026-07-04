@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use runmat_meshing_cad::{
     project_to_face, CadEvaluationModel, SourceTopologyFace, SourceTopologyModel,
 };
-use runmat_meshing_curve::CurveDiscretization;
+use runmat_meshing_curve::{
+    validate_curve_discretization, CurveDiscretization, CurveValidationOptions,
+};
 
 mod boundary;
 mod elements;
@@ -173,6 +175,8 @@ pub fn discretize_cad_surfaces_with_curves(
     curves: &CurveDiscretization,
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
+    validate_curve_discretization(topology, curves, CurveValidationOptions::default())
+        .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
     let mut nodes = topology
         .vertices
         .iter()
