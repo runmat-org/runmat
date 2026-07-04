@@ -6,14 +6,15 @@ mod shape;
 use super::evidence::record_input_plc_evidence;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
-    Tetrahedron4Element, TetrahedronGenerationError, TetrahedronMesh, TetrahedronMeshNode,
+    Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
+    TetrahedronMeshNode,
 };
 use boundary::exterior_boundary_faces;
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
-use shape::validate_structured_box_plc;
+use shape::{plc_nodes_are_box_corners, validate_structured_box_plc};
 
 pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
@@ -23,6 +24,9 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     let bounds = plc_bounds(plc)?;
     let tolerance = structured_box_tolerance(bounds);
     validate_structured_box_plc(plc, bounds, tolerance)?;
+    if !plc.protected_edges.is_empty() || !plc_nodes_are_box_corners(plc, bounds, tolerance) {
+        return generate_boundary_conforming_box_tetrahedron_mesh(plc, bounds, tolerance);
+    }
     let material_region_ids = plc_material_region_ids(plc);
 
     let mut nodes = plc
@@ -88,6 +92,137 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "structured_box_tetrahedron_mesh".to_string(),
+        nodes,
+        elements,
+        boundary_faces,
+        recovery_complete: false,
+        quality_optimized: false,
+        evidence,
+    })
+}
+
+fn generate_boundary_conforming_box_tetrahedron_mesh(
+    plc: &ProtectedBoundaryComplex,
+    bounds: [[f64; 3]; 2],
+    tolerance: f64,
+) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
+    let coordinates_by_id = plc
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let interior = bounds_center(bounds);
+    let interior_id = TopologyEntityId {
+        stage: MeshingStage::TetrahedronMesh,
+        id: "structured_box_interior_0".to_string(),
+    };
+    let mut nodes = plc
+        .nodes
+        .iter()
+        .map(|node| TetrahedronMeshNode {
+            node_id: node.node_id.clone(),
+            coordinates_m: node.coordinates_m,
+        })
+        .collect::<Vec<_>>();
+    nodes.push(TetrahedronMeshNode {
+        node_id: interior_id.clone(),
+        coordinates_m: interior,
+    });
+
+    let volume_epsilon = tolerance.powi(3).max(f64::EPSILON);
+    let mut elements = Vec::<Tetrahedron4Element>::with_capacity(plc.facets.len());
+    let mut min_scaled_jacobian = f64::INFINITY;
+    for (element_index, facet) in plc.facets.iter().enumerate() {
+        let mut node_ids = [
+            facet.node_ids[0].clone(),
+            facet.node_ids[1].clone(),
+            facet.node_ids[2].clone(),
+            interior_id.clone(),
+        ];
+        let points = [
+            *coordinates_by_id.get(&facet.node_ids[0]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[0].id.clone(),
+                }
+            })?,
+            *coordinates_by_id.get(&facet.node_ids[1]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[1].id.clone(),
+                }
+            })?,
+            *coordinates_by_id.get(&facet.node_ids[2]).ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: facet.node_ids[2].id.clone(),
+                }
+            })?,
+            interior,
+        ];
+        let signed_volume = tetrahedron_signed_volume(points);
+        if signed_volume.abs() <= volume_epsilon {
+            return Err(TetrahedronGenerationError::DegenerateBoundaryFacet {
+                facet_id: facet.facet_id.id.clone(),
+            });
+        }
+        if signed_volume < 0.0 {
+            node_ids.swap(1, 2);
+        }
+        let points = node_ids.clone().map(|node_id| {
+            if node_id == interior_id {
+                interior
+            } else {
+                coordinates_by_id[&node_id]
+            }
+        });
+        min_scaled_jacobian = min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
+        elements.push(Tetrahedron4Element {
+            element_id: TopologyEntityId {
+                stage: MeshingStage::TetrahedronMesh,
+                id: format!("structured_box_boundary_conforming_tetrahedron_{element_index}"),
+            },
+            node_ids,
+            material_region_id: facet
+                .material_interface_ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "solid_body".to_string()),
+        });
+    }
+
+    let boundary_faces = plc
+        .facets
+        .iter()
+        .map(|facet| TetrahedronBoundaryFace {
+            face_id: facet.facet_id.clone(),
+            node_ids: facet.node_ids.clone(),
+            source_face_id: facet.source_face_id.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut evidence = StageEvidence::complete(MeshingStage::TetrahedronMesh);
+    evidence
+        .entity_counts
+        .insert("nodes".to_string(), nodes.len());
+    evidence
+        .entity_counts
+        .insert("interior_nodes".to_string(), 1);
+    evidence
+        .entity_counts
+        .insert("tetrahedron4_elements".to_string(), elements.len());
+    evidence
+        .entity_counts
+        .insert("boundary_faces".to_string(), boundary_faces.len());
+    evidence
+        .entity_counts
+        .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
+    evidence.entity_counts.insert(
+        "boundary_conforming_box_facets".to_string(),
+        plc.facets.len(),
+    );
+    record_input_plc_evidence(plc, &mut evidence);
+    evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
+
+    Ok(TetrahedronMesh {
+        mesh_id: "structured_box_boundary_conforming_tetrahedron_mesh".to_string(),
         nodes,
         elements,
         boundary_faces,
@@ -182,6 +317,14 @@ fn structured_box_tolerance(bounds: [[f64; 3]; 2]) -> f64 {
         .max((max[2] - min[2]).abs())
         * 1.0e-9)
         .max(1.0e-12)
+}
+
+fn bounds_center(bounds: [[f64; 3]; 2]) -> [f64; 3] {
+    [
+        (bounds[0][0] + bounds[1][0]) * 0.5,
+        (bounds[0][1] + bounds[1][1]) * 0.5,
+        (bounds[0][2] + bounds[1][2]) * 0.5,
+    ]
 }
 
 fn same_point(left: [f64; 3], right: [f64; 3], tolerance: f64) -> bool {

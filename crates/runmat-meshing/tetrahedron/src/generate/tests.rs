@@ -1,5 +1,5 @@
 use super::*;
-use runmat_meshing_core::contracts::{MeshingStage, PlcProtectedEdge, TopologyEntityId};
+use runmat_meshing_core::contracts::TopologyEntityId;
 use runmat_meshing_core::quality::predicate::tetrahedron_signed_volume;
 
 mod fixtures;
@@ -77,21 +77,42 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 }
 
 #[test]
-fn structured_box_generation_rejects_protected_source_edges() {
-    let mut plc = box_plc();
-    plc.protected_edges.push(PlcProtectedEdge {
-        edge_id: entity(MeshingStage::ProtectedBoundaryComplex, "protected_edge_0"),
-        node_ids: [
-            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        ],
-        source_edge_id: entity(MeshingStage::CurveMesh, "source_edge_0"),
-    });
+fn structured_box_generation_preserves_split_protected_source_edges() {
+    let plc = split_edge_box_plc();
 
-    assert!(matches!(
-        generate_structured_box_tetrahedron_mesh_from_plc(&plc),
-        Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc)
-    ));
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("subdivided box PLC should generate boundary-conforming Tetrahedron mesh");
+
+    assert_eq!(
+        mesh.mesh_id,
+        "structured_box_boundary_conforming_tetrahedron_mesh"
+    );
+    assert_eq!(mesh.nodes.len(), plc.nodes.len() + 1);
+    assert_eq!(mesh.elements.len(), plc.facets.len());
+    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
+    assert_eq!(
+        mesh.evidence.entity_counts["boundary_conforming_box_facets"],
+        plc.facets.len()
+    );
+    for protected_edge in &plc.protected_edges {
+        let recovered = mesh.boundary_faces.iter().any(|face| {
+            protected_edge
+                .node_ids
+                .iter()
+                .all(|node_id| face.node_ids.contains(node_id))
+        });
+        assert!(
+            recovered,
+            "protected edge {} should be represented by a solver boundary face",
+            protected_edge.edge_id.id
+        );
+    }
+    for facet in &plc.facets {
+        assert!(mesh.boundary_faces.iter().any(|face| {
+            face.source_face_id == facet.source_face_id
+                && sorted_face_ids(face.node_ids.clone()) == sorted_face_ids(facet.node_ids.clone())
+        }));
+    }
 }
 
 #[test]
@@ -115,11 +136,9 @@ fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
     assert!(tetrahedron_signed_volume(points) > 0.0);
 }
 
-fn entity(stage: MeshingStage, id: &str) -> TopologyEntityId {
-    TopologyEntityId {
-        stage,
-        id: id.to_string(),
-    }
+fn sorted_face_ids(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
+    node_ids.sort();
+    node_ids
 }
 
 #[test]

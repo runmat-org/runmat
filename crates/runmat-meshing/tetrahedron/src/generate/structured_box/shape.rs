@@ -9,16 +9,13 @@ pub(super) fn validate_structured_box_plc(
     bounds: [[f64; 3]; 2],
     tolerance: f64,
 ) -> Result<(), TetrahedronGenerationError> {
-    if !plc.protected_edges.is_empty() {
-        return Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc);
-    }
     let [min, max] = bounds;
     let coordinates_by_id = plc
         .nodes
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    if !plc_nodes_are_box_corners(plc, bounds, tolerance) {
+    if !plc_nodes_are_on_box_boundary(plc, bounds, tolerance) {
         return Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc);
     }
     let mut covered_sides = [false; 6];
@@ -45,7 +42,7 @@ pub(super) fn validate_structured_box_plc(
     }
 }
 
-fn plc_nodes_are_box_corners(
+pub(super) fn plc_nodes_are_box_corners(
     plc: &ProtectedBoundaryComplex,
     bounds: [[f64; 3]; 2],
     tolerance: f64,
@@ -59,6 +56,23 @@ fn plc_nodes_are_box_corners(
             .iter()
             .enumerate()
             .all(|(axis, coordinate)| {
+                (*coordinate - min[axis]).abs() <= tolerance
+                    || (*coordinate - max[axis]).abs() <= tolerance
+            })
+    })
+}
+
+fn plc_nodes_are_on_box_boundary(
+    plc: &ProtectedBoundaryComplex,
+    bounds: [[f64; 3]; 2],
+    tolerance: f64,
+) -> bool {
+    let [min, max] = bounds;
+    plc.nodes.iter().all(|node| {
+        node.coordinates_m
+            .iter()
+            .enumerate()
+            .any(|(axis, coordinate)| {
                 (*coordinate - min[axis]).abs() <= tolerance
                     || (*coordinate - max[axis]).abs() <= tolerance
             })

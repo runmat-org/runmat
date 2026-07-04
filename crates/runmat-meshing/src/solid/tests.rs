@@ -110,6 +110,28 @@ fn explicit_sizing_refines_recovered_cube_source_edges() {
             .tetrahedron_missing_source_edge_recovery_item_count,
         0
     );
+    assert_eq!(
+        mesh.volume_elements.len(),
+        mesh.backend.surface_element_count
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count
+            > 0
+    );
+    assert!(mesh.backend.tetrahedron_optimization_target_seed_count > 0);
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            quality: QualityThresholds {
+                min_scaled_jacobian: 0.0,
+                ..QualityThresholds::default()
+            },
+            require_boundary_source_edge_provenance: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("refined protected-edge cube should preserve strict source-edge provenance");
 }
 
 #[test]

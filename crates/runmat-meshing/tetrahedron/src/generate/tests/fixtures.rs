@@ -106,6 +106,33 @@ pub(super) fn box_plc() -> ProtectedBoundaryComplex {
     }
 }
 
+pub(super) fn split_edge_box_plc() -> ProtectedBoundaryComplex {
+    let mut plc = box_plc();
+    plc.complex_id = "split_edge_box".to_string();
+    plc.nodes.push(node("8", [0.5, 0.0, 0.0]));
+    plc.facets = vec![
+        facet("0a", ["0", "8", "2"]),
+        facet("0b", ["8", "1", "2"]),
+        facet("1", ["0", "2", "3"]),
+        facet("2", ["4", "6", "5"]),
+        facet("3", ["4", "7", "6"]),
+        facet("4", ["0", "4", "5"]),
+        facet("5a", ["0", "5", "8"]),
+        facet("5b", ["8", "5", "1"]),
+        facet("6", ["1", "5", "6"]),
+        facet("7", ["1", "6", "2"]),
+        facet("8", ["2", "6", "7"]),
+        facet("9", ["2", "7", "3"]),
+        facet("10", ["3", "7", "4"]),
+        facet("11", ["3", "4", "0"]),
+    ];
+    plc.protected_edges = vec![
+        protected_edge("protected_edge_0", ["0", "8"], "source_edge_0"),
+        protected_edge("protected_edge_1", ["8", "1"], "source_edge_0"),
+    ];
+    plc
+}
+
 fn node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
     PlcNode {
         node_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
@@ -123,6 +150,17 @@ fn facet(id: &str, node_ids: [&str; 3]) -> PlcFacet {
         ],
         source_face_id: entity(MeshingStage::SurfaceMesh, id),
         material_interface_ids: vec!["body".to_string()],
+    }
+}
+
+fn protected_edge(id: &str, node_ids: [&str; 2], source_edge_id: &str) -> PlcProtectedEdge {
+    PlcProtectedEdge {
+        edge_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
+            entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
+        ],
+        source_edge_id: entity(MeshingStage::CurveMesh, source_edge_id),
     }
 }
 
