@@ -6103,6 +6103,190 @@
       ]
     },
     {
+      "name": "boxplot",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "boxplot(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "boxplot(x, g)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            },
+            {
+              "name": "g",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grouping vector or cell array of grouping vectors."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "boxplot(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Box plot name-value options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "boxplot(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "boxplot(ax, x, g, Name, Value)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            },
+            {
+              "name": "g",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grouping vector or cell array of grouping vectors."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Box plot name-value options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = boxplot(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of graphics handles for created box plot primitives."
+            }
+          ]
+        },
+        {
+          "label": "h = boxplot(x, g, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric vector or matrix data."
+            },
+            {
+              "name": "g",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grouping vector or cell array of grouping vectors."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Box plot name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of graphics handles for created box plot primitives."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BOXPLOT.INVALID_ARGUMENT",
+          "identifier": "RunMat:boxplot:InvalidArgument",
+          "when": "Inputs, grouping variables, or name-value options are malformed.",
+          "message": "boxplot: invalid argument"
+        },
+        {
+          "code": "RM.BOXPLOT.INTERNAL",
+          "identifier": "RunMat:boxplot:Internal",
+          "when": "RunMat cannot construct box statistics or plotting primitives.",
+          "message": "boxplot: internal error"
+        }
+      ]
+    },
+    {
       "name": "bsxfun",
       "output_mode": "Fixed",
       "completion_policy": "Public",

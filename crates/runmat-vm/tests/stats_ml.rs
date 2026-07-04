@@ -199,6 +199,17 @@ fn ecdf_and_cdfplot_surface_executes_from_scripts() {
 }
 
 #[test]
+fn boxplot_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h = boxplot([1;2;10;20], {'A';'A';'B';'B'}, 'Labels', {'First','Second'}, 'GroupOrder', {'A','B'}, 'Orientation', 'horizontal', 'Whisker', 1, 'Symbol', '+r'); n = numel(h); first = h(1);",
+    )
+    .expect("boxplot script");
+    assert!(has_tensor_shape(&vars, &[1, 12]));
+    assert!(has_num(&vars, 12.0));
+}
+
+#[test]
 fn outlier_cleanup_surface_executes_from_scripts() {
     let vars = execute_source(
         "A = [1;2;100;4;5]; [tf,L,U,C] = isoutlier(A); B = filloutliers(A, 'linear'); C2 = filloutliers(A, -1); b3 = B(3); c3 = C2(3);",

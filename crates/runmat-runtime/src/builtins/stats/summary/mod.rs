@@ -1,5 +1,6 @@
 //! Summary statistics builtins.
 
+pub(crate) mod boxplot;
 pub(crate) mod corr;
 pub(crate) mod corrcoef;
 pub(crate) mod cov;
