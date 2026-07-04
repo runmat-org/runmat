@@ -68,14 +68,6 @@ pub fn build_recovery_queue_from_plc(
         .iter()
         .flat_map(|element| tetrahedron_faces(element.node_ids.clone()))
         .collect::<BTreeSet<_>>();
-    let recovered_boundary_source_edges = tetrahedron_mesh
-        .boundary_faces
-        .iter()
-        .flat_map(boundary_face_source_edges)
-        .filter_map(|(edge_key, source_edge_id)| {
-            source_edge_id.map(|source_edge_id| (edge_key, source_edge_id))
-        })
-        .collect::<BTreeSet<_>>();
     let recovered_boundary_edges = tetrahedron_mesh
         .boundary_faces
         .iter()
@@ -131,16 +123,19 @@ pub fn build_recovery_queue_from_plc(
         } else {
             TetrahedronProtectedEdgeTopology::Absent
         };
+        let status = if protected_boundary_edge_provenance_complete(
+            tetrahedron_mesh,
+            &edge_key,
+            &protected_edge.source_edge_id,
+        ) {
+            TetrahedronRecoveryStatus::Recovered
+        } else {
+            TetrahedronRecoveryStatus::Missing
+        };
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_edge:{}", protected_edge.edge_id.id),
             kind: TetrahedronRecoveryKind::SourceEdge,
-            status: if recovered_boundary_source_edges
-                .contains(&(edge_key.clone(), protected_edge.source_edge_id.clone()))
-            {
-                TetrahedronRecoveryStatus::Recovered
-            } else {
-                TetrahedronRecoveryStatus::Missing
-            },
+            status,
             source_entity_id: Some(protected_edge.source_edge_id.clone()),
             source_face_node_ids: None,
             source_face_topology: None,
@@ -402,6 +397,26 @@ pub fn build_recovery_queue_from_plc(
     );
 
     Ok(TetrahedronRecoveryQueue { items, evidence })
+}
+
+fn protected_boundary_edge_provenance_complete(
+    tetrahedron_mesh: &TetrahedronMesh,
+    edge_key: &[TopologyEntityId; 2],
+    source_edge_id: &TopologyEntityId,
+) -> bool {
+    let matching_edge_sources = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .flat_map(boundary_face_source_edges)
+        .filter_map(|(boundary_edge_key, boundary_source_edge_id)| {
+            (boundary_edge_key == *edge_key).then_some(boundary_source_edge_id)
+        })
+        .collect::<Vec<_>>();
+
+    !matching_edge_sources.is_empty()
+        && matching_edge_sources
+            .iter()
+            .all(|boundary_source_edge_id| boundary_source_edge_id.as_ref() == Some(source_edge_id))
 }
 
 fn material_interface_recovery_topology(

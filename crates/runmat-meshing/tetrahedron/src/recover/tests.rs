@@ -593,6 +593,44 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
 }
 
 #[test]
+fn recovery_stage_result_repairs_partial_boundary_source_edge_provenance_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces[0].source_edge_ids[2] = None;
+
+    let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("partial protected source-edge provenance should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        0
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
+        .expect("partial protected source-edge provenance should be repaired");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_source_edge_provenance_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_replaces_stale_boundary_source_edge_provenance_before_audit() {
     let mut mesh = tetrahedron_mesh();
     for boundary_face in &mut mesh.boundary_faces {
