@@ -2573,6 +2573,7 @@ fn generated_solid_mesh_validation_requires_strict_recovery() {
     let mut mesh = minimal_analysis_mesh();
     mesh.backend.backend = "solid".to_string();
     mesh.backend.volume_component_count = 2;
+    mesh.backend.plc_input_protected_edge_count = 6;
     mesh.nodes[0].provenance.push(MeshEntityProvenance {
         source_geometry_id: "geo:test".to_string(),
         source_geometry_revision: 1,
@@ -2585,9 +2586,27 @@ fn generated_solid_mesh_validation_requires_strict_recovery() {
 
     assert!(options.require_no_unrecovered_tetrahedron_components);
     assert!(options.require_no_unrepaired_exact_quality);
+    assert!(options.require_boundary_source_edge_provenance);
     assert_eq!(options.max_volume_component_count, Some(2));
     assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
     assert_eq!(options.min_coverage_sample_ratio, 1.0);
+}
+
+#[test]
+fn loaded_solid_mesh_validation_requires_source_edge_provenance_for_protected_plc_edges() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "solid".to_string();
+    mesh.backend.plc_input_protected_edge_count = 6;
+    let payload = serde_json::json!({
+        "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+    });
+
+    let options = analysis_mesh_validation_options_for_loaded_artifact(&payload, &mesh)
+        .expect("loaded validation options should parse");
+
+    assert!(options.require_no_unrecovered_tetrahedron_components);
+    assert!(options.require_no_unrepaired_exact_quality);
+    assert!(options.require_boundary_source_edge_provenance);
 }
 
 #[test]

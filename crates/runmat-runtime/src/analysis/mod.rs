@@ -13833,6 +13833,8 @@ fn analysis_mesh_validation_options_for_generated_mesh(
     if is_solid_mesh_backend(mesh) {
         validation.require_no_unrecovered_tetrahedron_components = true;
         validation.require_no_unrepaired_exact_quality = true;
+        validation.require_boundary_source_edge_provenance =
+            mesh.backend.plc_input_protected_edge_count > 0;
         validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
     }
@@ -13871,6 +13873,8 @@ fn analysis_mesh_validation_options_for_loaded_artifact(
     if is_solid_mesh_backend(mesh) {
         validation.require_no_unrecovered_tetrahedron_components = true;
         validation.require_no_unrepaired_exact_quality = true;
+        validation.require_boundary_source_edge_provenance =
+            mesh.backend.plc_input_protected_edge_count > 0;
         validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
         validation.min_coverage_sample_ratio = 1.0;
     }
