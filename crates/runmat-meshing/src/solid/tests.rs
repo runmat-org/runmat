@@ -47,7 +47,22 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
     );
     assert_eq!(
         mesh.backend
+            .tetrahedron_recovered_source_edge_recovery_item_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
             .tetrahedron_missing_source_face_recovery_item_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_recovered_source_face_recovery_item_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_recovered_material_interface_recovery_item_count,
         0
     );
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);

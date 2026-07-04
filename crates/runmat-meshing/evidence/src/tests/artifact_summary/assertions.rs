@@ -181,10 +181,12 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.recovered_item_count, 7);
     assert_eq!(recovery.missing_recovery_item_count, 2);
     assert_eq!(recovery.source_face_recovery_item_count, 4);
+    assert_eq!(recovery.recovered_source_face_recovery_item_count, 4);
     assert_eq!(recovery.missing_source_face_recovery_item_count, 0);
     assert!(recovery.missing_source_face_recovery_ids.is_empty());
     assert_eq!(recovery.omitted_missing_source_face_recovery_id_count, 0);
     assert_eq!(recovery.source_edge_recovery_item_count, 4);
+    assert_eq!(recovery.recovered_source_edge_recovery_item_count, 3);
     assert_eq!(recovery.missing_source_edge_recovery_item_count, 1);
     assert_eq!(
         recovery.missing_source_edge_recovery_ids,
@@ -192,6 +194,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     );
     assert_eq!(recovery.omitted_missing_source_edge_recovery_id_count, 0);
     assert_eq!(recovery.material_interface_recovery_item_count, 1);
+    assert_eq!(recovery.recovered_material_interface_recovery_item_count, 0);
     assert_eq!(recovery.missing_material_interface_recovery_item_count, 1);
     assert_eq!(
         recovery.missing_material_interface_recovery_ids,

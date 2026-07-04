@@ -37,6 +37,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub source_face_recovery_item_count: usize,
     #[serde(default)]
+    pub recovered_source_face_recovery_item_count: usize,
+    #[serde(default)]
     pub missing_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub missing_source_face_recovery_ids: Vec<String>,
@@ -45,6 +47,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub recovered_source_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub missing_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub missing_source_edge_recovery_ids: Vec<String>,
@@ -52,6 +56,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub omitted_missing_source_edge_recovery_id_count: usize,
     #[serde(default)]
     pub material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub missing_material_interface_recovery_item_count: usize,
     #[serde(default)]
@@ -153,6 +159,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         recovered_item_count: mesh.backend.tetrahedron_recovered_item_count,
         missing_recovery_item_count: mesh.backend.tetrahedron_missing_recovery_item_count,
         source_face_recovery_item_count: mesh.backend.tetrahedron_source_face_recovery_item_count,
+        recovered_source_face_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_source_face_recovery_item_count,
         missing_source_face_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_face_recovery_item_count,
@@ -164,6 +173,9 @@ pub(super) fn tetrahedron_recovery_evidence(
             .backend
             .tetrahedron_omitted_missing_source_face_recovery_id_count,
         source_edge_recovery_item_count: mesh.backend.tetrahedron_source_edge_recovery_item_count,
+        recovered_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_source_edge_recovery_item_count,
         missing_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_source_edge_recovery_item_count,
@@ -177,6 +189,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_material_interface_recovery_item_count,
+        recovered_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_material_interface_recovery_item_count,
         missing_material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_missing_material_interface_recovery_item_count,

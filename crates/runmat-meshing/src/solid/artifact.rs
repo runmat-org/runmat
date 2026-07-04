@@ -197,6 +197,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "source_face_items",
             ),
+            tetrahedron_recovered_source_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_source_face_items",
+            ),
             tetrahedron_missing_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "missing_source_face_items",
@@ -208,6 +212,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "source_edge_items",
             ),
+            tetrahedron_recovered_source_edge_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_source_edge_items",
+            ),
             tetrahedron_missing_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "missing_source_edge_items",
@@ -218,6 +226,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_material_interface_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "material_interface_items",
+            ),
+            tetrahedron_recovered_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_material_interface_items",
             ),
             tetrahedron_missing_material_interface_recovery_item_count: recovery_entity_count(
                 recovery_queue,

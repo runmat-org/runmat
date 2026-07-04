@@ -145,6 +145,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_source_face_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_recovered_source_face_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_missing_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_missing_source_face_recovery_ids: Vec<String>,
@@ -153,6 +155,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_recovered_source_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_missing_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_missing_source_edge_recovery_ids: Vec<String>,
@@ -160,6 +164,8 @@ pub struct MeshBackendSummary {
     pub tetrahedron_omitted_missing_source_edge_recovery_id_count: usize,
     #[serde(default)]
     pub tetrahedron_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_recovered_material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_missing_material_interface_recovery_item_count: usize,
     #[serde(default)]
