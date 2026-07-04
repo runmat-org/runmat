@@ -241,6 +241,10 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(
+        recovery.rejected_source_face_diagonal_recovery_item_count,
+        1
+    );
+    assert_eq!(
         recovery.rejected_source_face_diagonal_adjacent_facet_count,
         0
     );
@@ -261,6 +265,10 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         0
     );
     assert_eq!(recovery.rejected_source_face_diagonal_quality_gate_count, 0);
+    assert_eq!(
+        recovery.rejected_source_face_diagonal_unpaired_source_face_count,
+        1
+    );
     assert_eq!(recovery.repaired_boundary_face_identity_count, 1);
     assert_eq!(recovery.removed_redundant_boundary_face_count, 1);
     assert_eq!(recovery.removed_unsupported_boundary_face_count, 1);

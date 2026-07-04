@@ -193,6 +193,48 @@ fn source_face_boundary_diagonal_flip_records_rejection_without_mutating_mesh() 
 }
 
 #[test]
+fn source_face_boundary_diagonal_recovery_reports_unpaired_absent_source_face() {
+    let plc = source_face_boundary_diagonal_flip_plc();
+    let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "face_2_support"),
+        [0.5, 0.5, -1.0],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "face_2_support_element"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::TetrahedronMesh, "face_2_support"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+    mesh.boundary_faces
+        .push(boundary_face("facet_2", ["0", "3", "1"], "face_2"));
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("single absent source face should be reported before recovery");
+
+    let recovery = crate::recover::source_faces::recover_source_faces_by_boundary_diagonal_flip(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_face_absent_face_items"],
+        1
+    );
+    assert_eq!(recovery.attempted_source_face_pair_count, 0);
+    assert_eq!(recovery.rejected_source_face_pair_count, 0);
+    assert_eq!(recovery.rejected_source_face_count, 1);
+    assert_eq!(
+        recovery.rejection_counts["rejected_source_face_diagonal_recovery_unpaired_source_face"],
+        1
+    );
+}
+
+#[test]
 fn source_face_boundary_diagonal_recovery_uses_absent_source_face_queue_items_only() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();

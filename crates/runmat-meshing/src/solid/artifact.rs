@@ -304,6 +304,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_source_face_diagonal_recovery_pairs",
             ),
+            tetrahedron_rejected_source_face_diagonal_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_face_diagonal_recovery_items",
+            ),
             tetrahedron_rejected_source_face_diagonal_adjacent_facet_count: recovery_entity_count(
                 recovery_queue,
                 "rejected_source_face_diagonal_recovery_adjacent_facet_count",
@@ -331,6 +335,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "rejected_source_face_diagonal_recovery_quality_gate",
             ),
+            tetrahedron_rejected_source_face_diagonal_unpaired_source_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_source_face_diagonal_recovery_unpaired_source_face",
+                ),
             tetrahedron_repaired_boundary_face_identity_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_boundary_face_identity_items",

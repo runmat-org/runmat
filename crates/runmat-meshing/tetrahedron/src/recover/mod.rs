@@ -750,6 +750,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "rejected_source_face_diagonal_recovery_pairs".to_string(),
         recovered_source_faces.rejected_source_face_pair_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_source_face_diagonal_recovery_items".to_string(),
+        recovered_source_faces.rejected_source_face_count,
+    );
     for (reason_key, count) in recovered_source_faces.rejection_counts {
         recovery_queue
             .evidence
