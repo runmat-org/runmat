@@ -1,7 +1,9 @@
 use super::*;
 use crate::validate::PlcValidationError;
 use runmat_meshing_core::curve::CurveValidationReport;
-use runmat_meshing_core::surface::{SurfaceDiscretization, SurfaceElement, SurfaceNode};
+use runmat_meshing_core::surface::{
+    SurfaceDiscretization, SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
+};
 
 #[test]
 fn builds_valid_plc_from_closed_tetra_surface() {
@@ -14,6 +16,11 @@ fn builds_valid_plc_from_closed_tetra_surface() {
     assert_eq!(plc.protected_edges.len(), 6);
     assert_eq!(plc.evidence.entity_counts["facets"], 4);
     assert_eq!(plc.evidence.entity_counts["validated_curve_elements"], 6);
+    assert_eq!(plc.evidence.entity_counts["surface_boundary_loops"], 4);
+    assert_eq!(
+        plc.evidence.entity_counts["recovered_surface_source_edges"],
+        6
+    );
 }
 
 #[test]
@@ -85,8 +92,20 @@ fn tetra_surface() -> SurfaceDiscretization {
             max_segment_length_m: 1.0,
             max_adjacent_length_ratio: 1.0,
         }),
+        loop_coverage: Some(loop_coverage()),
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
+    }
+}
+
+fn loop_coverage() -> SurfaceLoopCoverageReport {
+    SurfaceLoopCoverageReport {
+        source_face_count: 4,
+        recovered_face_count: 4,
+        boundary_loop_count: 4,
+        recovered_source_edge_count: 6,
+        boundary_segment_count: 12,
+        max_loops_per_face: 1,
     }
 }
 

@@ -8,6 +8,7 @@ use runmat_meshing_curve::{
 };
 
 mod boundary;
+mod coverage;
 mod elements;
 mod geometry;
 mod sampling;
@@ -18,11 +19,12 @@ mod types;
 use boundary::{
     curve_nodes_by_source_edge, face_curve_segment_loops, oriented_face_curve_segments,
 };
+use coverage::SurfaceLoopCoverageAccumulator;
 use elements::append_curve_driven_face_elements;
 use subdivision::{append_centroid_subdivision, triangle_centroid};
 pub use types::{
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
-    SurfaceElement, SurfaceNode,
+    SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
 };
 
 pub const MODULE_PURPOSE: &str = "face-domain triangulation from recovered curve boundaries";
@@ -63,6 +65,7 @@ pub fn discretize_topology_surfaces(
         nodes,
         elements,
         curve_boundary_validation: None,
+        loop_coverage: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -166,6 +169,7 @@ pub fn discretize_cad_surfaces(
         nodes,
         elements,
         curve_boundary_validation: None,
+        loop_coverage: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -203,6 +207,7 @@ pub fn discretize_cad_surfaces_with_curves(
     let mut curve_node_to_surface_node = BTreeMap::<u32, u32>::new();
 
     let mut elements = Vec::<SurfaceElement>::new();
+    let mut loop_coverage = SurfaceLoopCoverageAccumulator::new(topology.faces.len());
     let mut exact_cad_sample_node_count = 0_usize;
     let mut rejected_exact_cad_sample_count = 0_usize;
     for face in &topology.faces {
@@ -221,6 +226,7 @@ pub fn discretize_cad_surfaces_with_curves(
             &mut curve_node_to_surface_node,
         )?;
         let segment_loops = face_curve_segment_loops(face.face_id, &segments)?;
+        loop_coverage.record_face(face, &segment_loops);
         let sample_report = append_curve_driven_face_elements(
             face,
             frame,
@@ -236,6 +242,7 @@ pub fn discretize_cad_surfaces_with_curves(
         nodes,
         elements,
         curve_boundary_validation: Some(curve_boundary_validation),
+        loop_coverage: Some(loop_coverage.finish()),
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
     })

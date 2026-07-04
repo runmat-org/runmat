@@ -93,6 +93,19 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
     assert_eq!(curve_validation.curve_node_count, curves.nodes.len());
     assert_eq!(curve_validation.curve_element_count, curves.elements.len());
     assert_eq!(curve_validation.max_endpoint_error_m, 0.0);
+    let loop_coverage = surface
+        .loop_coverage
+        .as_ref()
+        .expect("surface loop coverage evidence");
+    assert_eq!(loop_coverage.source_face_count, topology.faces.len());
+    assert_eq!(loop_coverage.recovered_face_count, topology.faces.len());
+    assert_eq!(loop_coverage.boundary_loop_count, topology.faces.len());
+    assert_eq!(
+        loop_coverage.recovered_source_edge_count,
+        topology.edges.len()
+    );
+    assert_eq!(loop_coverage.boundary_segment_count, curves.elements.len());
+    assert_eq!(loop_coverage.max_loops_per_face, 1);
     assert!(surface
         .elements
         .iter()
@@ -139,6 +152,14 @@ fn curve_driven_cad_surface_preserves_single_triangle_loop_without_extra_fan_nod
     assert_eq!(surface.nodes.len(), topology.vertices.len());
     assert_eq!(surface.elements.len(), 1);
     assert!(surface.curve_boundary_validation.is_some());
+    assert_eq!(
+        surface
+            .loop_coverage
+            .as_ref()
+            .expect("surface loop coverage evidence")
+            .boundary_segment_count,
+        3
+    );
     assert_eq!(surface.elements[0].node_ids, [0, 1, 2]);
     assert!(surface.elements[0]
         .source_edge_ids

@@ -49,9 +49,21 @@ pub struct SurfaceDiscretization {
     #[serde(default)]
     pub curve_boundary_validation: Option<CurveValidationReport>,
     #[serde(default)]
+    pub loop_coverage: Option<SurfaceLoopCoverageReport>,
+    #[serde(default)]
     pub exact_cad_sample_node_count: usize,
     #[serde(default)]
     pub rejected_exact_cad_sample_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceLoopCoverageReport {
+    pub source_face_count: usize,
+    pub recovered_face_count: usize,
+    pub boundary_loop_count: usize,
+    pub recovered_source_edge_count: usize,
+    pub boundary_segment_count: usize,
+    pub max_loops_per_face: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -157,6 +157,24 @@ pub fn build_protected_boundary_complex(
             curve_boundary_validation.curve_element_count,
         );
     }
+    if let Some(loop_coverage) = &surface.loop_coverage {
+        evidence.entity_counts.insert(
+            "surface_loop_faces".to_string(),
+            loop_coverage.recovered_face_count,
+        );
+        evidence.entity_counts.insert(
+            "surface_boundary_loops".to_string(),
+            loop_coverage.boundary_loop_count,
+        );
+        evidence.entity_counts.insert(
+            "surface_boundary_segments".to_string(),
+            loop_coverage.boundary_segment_count,
+        );
+        evidence.entity_counts.insert(
+            "recovered_surface_source_edges".to_string(),
+            loop_coverage.recovered_source_edge_count,
+        );
+    }
 
     let mut plc = ProtectedBoundaryComplex {
         complex_id: "plc_surface_boundary".to_string(),
