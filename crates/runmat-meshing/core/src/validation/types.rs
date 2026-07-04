@@ -188,6 +188,12 @@ pub enum AnalysisMeshValidationError {
         boundary_face_count: usize,
         post_insertion_audit_rejection_count: usize,
     },
+    IncompleteTetrahedronRecoveryPresent {
+        missing_item_count: usize,
+        missing_source_face_item_count: usize,
+        missing_source_edge_item_count: usize,
+        missing_material_interface_item_count: usize,
+    },
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
@@ -281,6 +287,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::RolledBackMaterialInterfacePartitionRecoveryPresent {
             ..
         } => "rolled_back_material_interface_partition_recovery_present",
+        AnalysisMeshValidationError::IncompleteTetrahedronRecoveryPresent { .. } => {
+            "incomplete_tetrahedron_recovery_present"
+        }
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
         }

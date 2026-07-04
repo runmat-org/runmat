@@ -115,6 +115,56 @@ fn rejects_material_interface_partition_post_insertion_audit_rejection() {
 }
 
 #[test]
+fn rejects_incomplete_tetrahedron_recovery() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_missing_recovery_item_count = 3;
+    mesh.backend
+        .tetrahedron_missing_source_face_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_missing_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_missing_material_interface_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("remaining Tetrahedron recovery items should fail readiness");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::IncompleteTetrahedronRecoveryPresent {
+            missing_item_count: 3,
+            missing_source_face_item_count: 1,
+            missing_source_edge_item_count: 1,
+            missing_material_interface_item_count: 1,
+        }
+    );
+    assert_eq!(
+        analysis_mesh_validation_error_code(&err),
+        "incomplete_tetrahedron_recovery_present"
+    );
+}
+
+#[test]
+fn rejects_incomplete_tetrahedron_recovery_from_aggregate_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_missing_recovery_item_count = 4;
+    mesh.backend
+        .tetrahedron_missing_source_face_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh_with_options(&mesh, AnalysisMeshValidationOptions::default())
+        .expect_err("aggregate missing recovery evidence should fail readiness");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::IncompleteTetrahedronRecoveryPresent {
+            missing_item_count: 4,
+            missing_source_face_item_count: 1,
+            missing_source_edge_item_count: 0,
+            missing_material_interface_item_count: 0,
+        }
+    );
+}
+
+#[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

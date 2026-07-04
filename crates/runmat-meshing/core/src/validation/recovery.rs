@@ -53,6 +53,36 @@ pub(super) fn validate_no_rolled_back_material_interface_partitions(
     Ok(())
 }
 
+pub(super) fn validate_tetrahedron_recovery_complete(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let source_face_item_count = mesh
+        .backend
+        .tetrahedron_missing_source_face_recovery_item_count;
+    let source_edge_item_count = mesh
+        .backend
+        .tetrahedron_missing_source_edge_recovery_item_count;
+    let material_interface_item_count = mesh
+        .backend
+        .tetrahedron_missing_material_interface_recovery_item_count;
+    let total_item_count = mesh
+        .backend
+        .tetrahedron_missing_recovery_item_count
+        .max(source_face_item_count + source_edge_item_count + material_interface_item_count);
+
+    if total_item_count > 0 {
+        return Err(
+            AnalysisMeshValidationError::IncompleteTetrahedronRecoveryPresent {
+                missing_item_count: total_item_count,
+                missing_source_face_item_count: source_face_item_count,
+                missing_source_edge_item_count: source_edge_item_count,
+                missing_material_interface_item_count: material_interface_item_count,
+            },
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn validate_no_unrepaired_exact_quality(
     mesh: &AnalysisMeshArtifact,
     require_no_unrepaired_exact_quality: bool,
