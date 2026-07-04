@@ -233,6 +233,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "volume_face_source_face_recovery_items",
             ),
+            tetrahedron_absent_face_source_face_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "absent_face_source_face_recovery_items",
+            ),
             tetrahedron_deferred_absent_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "deferred_absent_source_edge_recovery_items",

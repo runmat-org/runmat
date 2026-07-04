@@ -140,6 +140,10 @@ fn recovery_stage_result_recovers_source_faces_by_boundary_diagonal_flip_without
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["absent_face_source_face_recovery_items"],
+        2
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_face_diagonal_pairs"],
         1
     );
