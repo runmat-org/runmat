@@ -30,12 +30,20 @@ impl SurfaceLoopCoverageAccumulator {
         face: &SourceTopologyFace,
         segment_loops: &[Vec<FaceCurveSegment>],
     ) {
+        self.record_face_edges(&face.edge_ids, segment_loops);
+    }
+
+    pub(super) fn record_face_edges(
+        &mut self,
+        source_edge_ids: &[u32],
+        segment_loops: &[Vec<FaceCurveSegment>],
+    ) {
         self.recovered_face_count += 1;
         self.boundary_loop_count += segment_loops.len();
         self.max_loops_per_face = self.max_loops_per_face.max(segment_loops.len());
         for segment in segment_loops.iter().flatten() {
             self.boundary_segment_count += 1;
-            if face.edge_ids.contains(&segment.source_edge_id) {
+            if source_edge_ids.contains(&segment.source_edge_id) {
                 self.recovered_source_edge_ids
                     .insert(segment.source_edge_id);
             }

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use runmat_meshing_cad::{
-    project_to_face, CadEvaluationModel, SourceTopologyFace, SourceTopologyModel,
+    project_to_face, CadEvaluationModel, CadFace, CadTopologyModel, SourceTopologyEdge,
+    SourceTopologyFace, SourceTopologyModel,
 };
 use runmat_meshing_curve::{
     validate_curve_discretization, CurveDiscretization, CurveValidationOptions,
@@ -17,7 +18,8 @@ mod triangulation;
 mod types;
 
 use boundary::{
-    curve_nodes_by_source_edge, face_curve_segment_loops, oriented_face_curve_segments,
+    curve_nodes_by_source_edge, curve_segments_for_source_edges, face_curve_segment_loops,
+    oriented_face_curve_segments,
 };
 use coverage::SurfaceLoopCoverageAccumulator;
 use elements::append_curve_driven_face_elements;
@@ -246,6 +248,142 @@ pub fn discretize_cad_surfaces_with_curves(
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
     })
+}
+
+pub fn discretize_cad_topology_surfaces_with_curves(
+    cad_topology: &CadTopologyModel,
+    topology: &SourceTopologyModel,
+    cad_evaluation: &CadEvaluationModel,
+    curves: &CurveDiscretization,
+    options: SurfaceDiscretizationOptions,
+) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
+    let curve_boundary_validation =
+        validate_curve_discretization(topology, curves, CurveValidationOptions::default())
+            .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
+    let mut nodes = topology
+        .vertices
+        .iter()
+        .map(|vertex| SurfaceNode {
+            node_id: vertex.vertex_id,
+            source_vertex_id: vertex.vertex_id,
+            coordinates_m: vertex.coordinates_m,
+        })
+        .collect::<Vec<_>>();
+    let frames_by_cad_face = cad_evaluation
+        .face_frames
+        .iter()
+        .map(|frame| (frame.face_id.clone(), frame))
+        .collect::<BTreeMap<_, _>>();
+    let topology_edges = topology
+        .edges
+        .iter()
+        .map(|edge| (edge.edge_id, edge))
+        .collect::<BTreeMap<_, _>>();
+    let curve_nodes_by_edge = curve_nodes_by_source_edge(curves);
+    let mut curve_node_to_surface_node = BTreeMap::<u32, u32>::new();
+
+    let mut elements = Vec::<SurfaceElement>::new();
+    let mut loop_coverage = SurfaceLoopCoverageAccumulator::new(cad_topology.faces.len());
+    let mut exact_cad_sample_node_count = 0_usize;
+    let mut rejected_exact_cad_sample_count = 0_usize;
+    for cad_face in &cad_topology.faces {
+        let face = cad_face_surface_seed(cad_face, &topology_edges)?;
+        validate_face_vertices(topology, &face)?;
+        let frame = frames_by_cad_face.get(&cad_face.entity_id.id).ok_or(
+            SurfaceDiscretizationError::MissingCadFaceFrame {
+                source_face_id: face.face_id,
+            },
+        )?;
+        let source_edge_ids = cad_face_loop_source_edge_ids(cad_face)?;
+        let segments = curve_segments_for_source_edges(
+            &topology_edges,
+            &curve_nodes_by_edge,
+            face.face_id,
+            &source_edge_ids,
+            options.max_curve_segments_per_edge.max(1),
+            &mut nodes,
+            &mut curve_node_to_surface_node,
+        )?;
+        let segment_loops = face_curve_segment_loops(face.face_id, &segments)?;
+        loop_coverage.record_face_edges(&source_edge_ids, &segment_loops);
+        let sample_report = append_curve_driven_face_elements(
+            &face,
+            frame,
+            &segment_loops,
+            &mut nodes,
+            &mut elements,
+        );
+        exact_cad_sample_node_count += sample_report.accepted_count;
+        rejected_exact_cad_sample_count += sample_report.rejected_count;
+    }
+
+    Ok(SurfaceDiscretization {
+        nodes,
+        elements,
+        curve_boundary_validation: Some(curve_boundary_validation),
+        loop_coverage: Some(loop_coverage.finish()),
+        exact_cad_sample_node_count,
+        rejected_exact_cad_sample_count,
+    })
+}
+
+fn cad_face_surface_seed(
+    cad_face: &CadFace,
+    topology_edges: &BTreeMap<u32, &SourceTopologyEdge>,
+) -> Result<SourceTopologyFace, SurfaceDiscretizationError> {
+    let face_id = cad_face.source_face_ids.first().copied().ok_or_else(|| {
+        SurfaceDiscretizationError::CadFaceWithoutSourceFaces {
+            cad_face_id: cad_face.entity_id.id.clone(),
+        }
+    })?;
+    let source_edge_ids = cad_face_loop_source_edge_ids(cad_face)?;
+    if source_edge_ids.len() < 3 {
+        return Err(SurfaceDiscretizationError::EmptyFaceLoop { face_id });
+    }
+    let mut node_ids = Vec::<u32>::new();
+    for source_edge_id in &source_edge_ids {
+        let edge = topology_edges.get(source_edge_id).ok_or(
+            SurfaceDiscretizationError::MissingFaceEdge {
+                face_id,
+                edge_id: *source_edge_id,
+            },
+        )?;
+        for node_id in edge.node_ids {
+            if !node_ids.contains(&node_id) {
+                node_ids.push(node_id);
+            }
+        }
+    }
+    if node_ids.len() < 3 {
+        return Err(SurfaceDiscretizationError::EmptyFaceLoop { face_id });
+    }
+    Ok(SourceTopologyFace {
+        face_id,
+        source_triangle_id: face_id,
+        node_ids: [node_ids[0], node_ids[1], node_ids[2]],
+        edge_ids: [source_edge_ids[0], source_edge_ids[1], source_edge_ids[2]],
+        region_ids: cad_face.region_ids.clone(),
+        area_m2: cad_face.area_m2,
+        unit_normal: cad_face.unit_normal,
+    })
+}
+
+fn cad_face_loop_source_edge_ids(
+    cad_face: &CadFace,
+) -> Result<Vec<u32>, SurfaceDiscretizationError> {
+    cad_face
+        .loop_edge_ids
+        .iter()
+        .map(|loop_edge_id| {
+            loop_edge_id
+                .strip_prefix("cad_edge_")
+                .and_then(|edge_id| edge_id.parse::<u32>().ok())
+                .ok_or_else(|| SurfaceDiscretizationError::InvalidCadLoopEdgeId {
+                    cad_face_id: cad_face.entity_id.id.clone(),
+                    loop_edge_id: loop_edge_id.clone(),
+                })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

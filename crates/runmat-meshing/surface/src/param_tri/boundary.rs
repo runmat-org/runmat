@@ -81,6 +81,54 @@ pub(super) fn oriented_face_curve_segments(
     Ok(segments)
 }
 
+pub(super) fn curve_segments_for_source_edges(
+    topology_edges: &BTreeMap<u32, &SourceTopologyEdge>,
+    curve_nodes_by_edge: &BTreeMap<u32, Vec<&CurveNode>>,
+    face_id: u32,
+    source_edge_ids: &[u32],
+    max_curve_segments_per_edge: usize,
+    nodes: &mut Vec<SurfaceNode>,
+    curve_node_to_surface_node: &mut BTreeMap<u32, u32>,
+) -> Result<Vec<FaceCurveSegment>, SurfaceDiscretizationError> {
+    let mut segments = Vec::<FaceCurveSegment>::new();
+    for source_edge_id in source_edge_ids {
+        let edge = topology_edges.get(source_edge_id).ok_or(
+            SurfaceDiscretizationError::MissingFaceEdge {
+                face_id,
+                edge_id: *source_edge_id,
+            },
+        )?;
+        let curve_nodes = curve_nodes_by_edge.get(source_edge_id).ok_or(
+            SurfaceDiscretizationError::MissingCurveEdge {
+                source_edge_id: *source_edge_id,
+            },
+        )?;
+        let capped_nodes =
+            capped_curve_nodes(curve_nodes.clone(), max_curve_segments_per_edge.max(1));
+        for pair in capped_nodes.windows(2) {
+            let left = surface_node_for_curve_node(
+                edge.node_ids,
+                pair[0],
+                nodes,
+                curve_node_to_surface_node,
+            )?;
+            let right = surface_node_for_curve_node(
+                edge.node_ids,
+                pair[1],
+                nodes,
+                curve_node_to_surface_node,
+            )?;
+            if left != right {
+                segments.push(FaceCurveSegment {
+                    node_ids: [left, right],
+                    source_edge_id: *source_edge_id,
+                });
+            }
+        }
+    }
+    Ok(segments)
+}
+
 #[cfg(test)]
 pub(super) fn single_face_curve_segment_loop(
     face_id: u32,

@@ -9,7 +9,8 @@ pub mod recovery;
 pub mod validate;
 
 pub use param_tri::{
-    discretize_cad_surfaces, discretize_cad_surfaces_with_curves, discretize_topology_surfaces,
+    discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
+    discretize_cad_topology_surfaces_with_curves, discretize_topology_surfaces,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
     SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };

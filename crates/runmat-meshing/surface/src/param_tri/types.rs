@@ -80,6 +80,13 @@ pub enum SurfaceDiscretizationError {
     MissingCadFaceFrame {
         source_face_id: u32,
     },
+    CadFaceWithoutSourceFaces {
+        cad_face_id: String,
+    },
+    InvalidCadLoopEdgeId {
+        cad_face_id: String,
+        loop_edge_id: String,
+    },
     MissingCurveEdge {
         source_edge_id: u32,
     },
@@ -124,6 +131,17 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             Self::MissingCadFaceFrame { source_face_id } => write!(
                 formatter,
                 "source face {source_face_id} does not have a CAD evaluation frame"
+            ),
+            Self::CadFaceWithoutSourceFaces { cad_face_id } => write!(
+                formatter,
+                "CAD face {cad_face_id} does not reference any source faces"
+            ),
+            Self::InvalidCadLoopEdgeId {
+                cad_face_id,
+                loop_edge_id,
+            } => write!(
+                formatter,
+                "CAD face {cad_face_id} has invalid loop edge id {loop_edge_id}"
             ),
             Self::MissingCurveEdge { source_edge_id } => write!(
                 formatter,
