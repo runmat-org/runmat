@@ -151,6 +151,9 @@ pub(super) fn append_face_lattice_points(
     nodes: &mut Vec<SurfaceNode>,
     points: &mut Vec<FaceTriangulationPoint>,
 ) {
+    if !has_exact_face_domain_samples(frame) {
+        return;
+    }
     let segment_count = segments_per_source_edge(segments)
         .into_values()
         .max()

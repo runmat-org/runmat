@@ -125,6 +125,47 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
 }
 
 #[test]
+fn curve_driven_cad_surface_without_exact_samples_avoids_lattice_nodes() {
+    let topology = single_triangle_topology();
+    let cad_topology =
+        build_cad_topology(&geometry_for_topology(), &topology).expect("cad topology");
+    let cad_evaluation =
+        build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+    let curves = discretize_topology_curves(
+        &topology,
+        CurveDiscretizationOptions {
+            target_size_m: 0.25,
+            min_segments_per_edge: 4,
+            max_segments_per_edge: 4,
+        },
+    )
+    .expect("curves should discretize");
+
+    let surface = discretize_cad_surfaces_with_curves(
+        &topology,
+        &cad_evaluation,
+        &curves,
+        SurfaceDiscretizationOptions {
+            max_curve_segments_per_edge: 4,
+            ..SurfaceDiscretizationOptions::default()
+        },
+    )
+    .expect("cad-owned curve surface should discretize");
+
+    assert_eq!(surface.exact_cad_sample_node_count, 0);
+    assert_eq!(surface.nodes.len(), topology.vertices.len() + 9);
+    assert_eq!(surface.elements.len(), 10);
+    assert_eq!(
+        surface
+            .loop_coverage
+            .as_ref()
+            .expect("surface loop coverage evidence")
+            .boundary_segment_count,
+        curves.elements.len()
+    );
+}
+
+#[test]
 fn curve_driven_cad_surface_preserves_single_triangle_loop_without_extra_fan_node() {
     let topology = single_triangle_topology();
     let cad_topology =
