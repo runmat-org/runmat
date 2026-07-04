@@ -163,6 +163,16 @@ pub(super) fn assert_sizing_evidence(sizing: &MeshSizingEvidence) {
 }
 
 pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRecoveryEvidence) {
+    assert_eq!(recovery.plc_input_node_count, 4);
+    assert_eq!(recovery.plc_input_facet_count, 4);
+    assert_eq!(recovery.plc_input_protected_edge_count, 6);
+    assert_eq!(recovery.plc_input_boundary_component_count, 1);
+    assert_eq!(recovery.plc_input_boundary_component_node_count, 4);
+    assert_eq!(recovery.plc_input_max_boundary_component_node_count, 4);
+    assert!(recovery.plc_input_shell_nesting_classified);
+    assert_eq!(recovery.plc_input_outer_shell_count, 1);
+    assert_eq!(recovery.plc_input_nested_shell_count, 0);
+    assert_eq!(recovery.plc_input_max_shell_nesting_depth, 0);
     assert_eq!(recovery.element_count, 12);
     assert_eq!(recovery.recovered_component_ratio, 1.0);
     assert_eq!(recovery.volume_coverage_ratio, 0.99);

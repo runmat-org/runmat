@@ -105,6 +105,26 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub surface_max_cad_projection_error_m: f64,
     #[serde(default)]
+    pub plc_input_node_count: usize,
+    #[serde(default)]
+    pub plc_input_facet_count: usize,
+    #[serde(default)]
+    pub plc_input_protected_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_boundary_component_count: usize,
+    #[serde(default)]
+    pub plc_input_boundary_component_node_count: usize,
+    #[serde(default)]
+    pub plc_input_max_boundary_component_node_count: usize,
+    #[serde(default)]
+    pub plc_input_shell_nesting_classified: bool,
+    #[serde(default)]
+    pub plc_input_outer_shell_count: usize,
+    #[serde(default)]
+    pub plc_input_nested_shell_count: usize,
+    #[serde(default)]
+    pub plc_input_max_shell_nesting_depth: usize,
+    #[serde(default)]
     pub volume_component_count: usize,
     #[serde(default)]
     pub interior_seed_point_count: usize,

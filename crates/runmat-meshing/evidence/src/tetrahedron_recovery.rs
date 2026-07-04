@@ -4,6 +4,26 @@ use runmat_meshing_core::contracts::AnalysisMeshArtifact;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshTetrahedronRecoveryEvidence {
+    #[serde(default)]
+    pub plc_input_node_count: usize,
+    #[serde(default)]
+    pub plc_input_facet_count: usize,
+    #[serde(default)]
+    pub plc_input_protected_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_boundary_component_count: usize,
+    #[serde(default)]
+    pub plc_input_boundary_component_node_count: usize,
+    #[serde(default)]
+    pub plc_input_max_boundary_component_node_count: usize,
+    #[serde(default)]
+    pub plc_input_shell_nesting_classified: bool,
+    #[serde(default)]
+    pub plc_input_outer_shell_count: usize,
+    #[serde(default)]
+    pub plc_input_nested_shell_count: usize,
+    #[serde(default)]
+    pub plc_input_max_shell_nesting_depth: usize,
     pub element_count: usize,
     pub recovered_component_ratio: f64,
     pub unrecovered_tetrahedron_component_count: usize,
@@ -79,6 +99,20 @@ pub(super) fn tetrahedron_recovery_evidence(
     mesh: &AnalysisMeshArtifact,
 ) -> MeshTetrahedronRecoveryEvidence {
     MeshTetrahedronRecoveryEvidence {
+        plc_input_node_count: mesh.backend.plc_input_node_count,
+        plc_input_facet_count: mesh.backend.plc_input_facet_count,
+        plc_input_protected_edge_count: mesh.backend.plc_input_protected_edge_count,
+        plc_input_boundary_component_count: mesh.backend.plc_input_boundary_component_count,
+        plc_input_boundary_component_node_count: mesh
+            .backend
+            .plc_input_boundary_component_node_count,
+        plc_input_max_boundary_component_node_count: mesh
+            .backend
+            .plc_input_max_boundary_component_node_count,
+        plc_input_shell_nesting_classified: mesh.backend.plc_input_shell_nesting_classified,
+        plc_input_outer_shell_count: mesh.backend.plc_input_outer_shell_count,
+        plc_input_nested_shell_count: mesh.backend.plc_input_nested_shell_count,
+        plc_input_max_shell_nesting_depth: mesh.backend.plc_input_max_shell_nesting_depth,
         element_count: mesh.backend.tetrahedron_element_count,
         recovered_component_ratio: mesh.backend.tetrahedron_recovered_component_ratio,
         unrecovered_tetrahedron_component_count: mesh

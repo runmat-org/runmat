@@ -44,6 +44,16 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.volume_elements.len(), 1);
     assert_eq!(mesh.boundary_faces.len(), 4);
+    assert_eq!(mesh.backend.plc_input_node_count, 4);
+    assert_eq!(mesh.backend.plc_input_facet_count, 4);
+    assert_eq!(mesh.backend.plc_input_protected_edge_count, 6);
+    assert_eq!(mesh.backend.plc_input_boundary_component_count, 1);
+    assert_eq!(mesh.backend.plc_input_boundary_component_node_count, 4);
+    assert_eq!(mesh.backend.plc_input_max_boundary_component_node_count, 4);
+    assert!(mesh.backend.plc_input_shell_nesting_classified);
+    assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
+    assert_eq!(mesh.backend.plc_input_nested_shell_count, 0);
+    assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 0);
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("single Tetrahedron solid mesh should be solve-ready");
 }

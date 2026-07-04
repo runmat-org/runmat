@@ -106,6 +106,40 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             backend: "solid".to_string(),
             algorithm: SOLID_PLC_TETRAHEDRON_ALGORITHM.to_string(),
             surface_element_count: surface.elements.len(),
+            plc_input_node_count: tetrahedron_entity_count(&tetrahedron_mesh, "input_plc_nodes"),
+            plc_input_facet_count: tetrahedron_entity_count(&tetrahedron_mesh, "input_plc_facets"),
+            plc_input_protected_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_protected_edges",
+            ),
+            plc_input_boundary_component_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_boundary_components",
+            ),
+            plc_input_boundary_component_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_boundary_component_nodes",
+            ),
+            plc_input_max_boundary_component_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_max_boundary_component_nodes",
+            ),
+            plc_input_shell_nesting_classified: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_shell_nesting_classified",
+            ) > 0,
+            plc_input_outer_shell_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_outer_shells",
+            ),
+            plc_input_nested_shell_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_nested_shells",
+            ),
+            plc_input_max_shell_nesting_depth: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_max_shell_nesting_depth",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             boundary_face_recovery_ratio: 1.0,
             boundary_edge_recovery_ratio: 1.0,
@@ -122,6 +156,15 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             source_geometry_sha256: Some(geometry.source.sha256.clone()),
         },
     }
+}
+
+fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> usize {
+    tetrahedron_mesh
+        .evidence
+        .entity_counts
+        .get(key)
+        .copied()
+        .unwrap_or_default()
 }
 
 fn adjacent_volume_element_ids(
