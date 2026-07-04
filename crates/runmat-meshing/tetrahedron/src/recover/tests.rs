@@ -76,7 +76,7 @@ fn recovery_stage_result_repairs_boundary_source_face_provenance_before_audit() 
 #[test]
 fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() {
     let mut mesh = tetrahedron_mesh();
-    let missing_face = mesh.boundary_faces.remove(0);
+    let missing_face = mesh.boundary_faces.remove(2);
 
     let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
         .expect("missing exterior PLC facet should be recovered from Tetrahedron topology");
@@ -89,6 +89,10 @@ fn recovery_stage_result_recovers_missing_exterior_boundary_face_before_audit() 
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_missing_boundary_faces"],
         1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_protected_edge_boundary_faces"],
+        0
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
@@ -125,6 +129,10 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
     assert!(result.tetrahedron_mesh.recovery_complete);
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_missing_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_protected_edge_boundary_faces"],
         2
     );
     assert_eq!(

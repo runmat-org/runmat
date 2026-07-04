@@ -201,6 +201,22 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "missing_items",
             ),
+            tetrahedron_recovered_boundary_face_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_missing_boundary_faces",
+            ),
+            tetrahedron_recovered_protected_edge_boundary_face_count: recovery_entity_count(
+                recovery_queue,
+                "recovered_protected_edge_boundary_faces",
+            ),
+            tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
+                recovery_queue,
+                "repaired_source_face_provenance_items",
+            ),
+            tetrahedron_repaired_source_edge_provenance_count: recovery_entity_count(
+                recovery_queue,
+                "repaired_source_edge_provenance_items",
+            ),
             tetrahedron_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "source_face_items",
