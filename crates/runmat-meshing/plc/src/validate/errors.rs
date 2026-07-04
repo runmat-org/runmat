@@ -17,6 +17,14 @@ pub enum PlcValidationError {
         facet_id: TopologyEntityId,
         node_id: TopologyEntityId,
     },
+    DuplicateFacet {
+        facet_id: TopologyEntityId,
+    },
+    DuplicateBoundaryFacet {
+        first_facet_id: TopologyEntityId,
+        second_facet_id: TopologyEntityId,
+        node_ids: [TopologyEntityId; 3],
+    },
     FacetHasRepeatedNode {
         facet_id: TopologyEntityId,
     },
@@ -101,6 +109,18 @@ impl std::fmt::Display for PlcValidationError {
                 formatter,
                 "PLC facet {} references unknown node {}",
                 facet_id.id, node_id.id
+            ),
+            Self::DuplicateFacet { facet_id } => {
+                write!(formatter, "PLC has duplicate facet {}", facet_id.id)
+            }
+            Self::DuplicateBoundaryFacet {
+                first_facet_id,
+                second_facet_id,
+                node_ids,
+            } => write!(
+                formatter,
+                "PLC facets {} and {} both reference boundary facet {}-{}-{}",
+                first_facet_id.id, second_facet_id.id, node_ids[0].id, node_ids[1].id, node_ids[2].id
             ),
             Self::FacetHasRepeatedNode { facet_id } => {
                 write!(formatter, "PLC facet {} repeats a node", facet_id.id)

@@ -83,6 +83,34 @@ fn rejects_facet_that_references_unknown_node() {
 }
 
 #[test]
+fn rejects_duplicate_facet_id() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[1].facet_id = entity("f0");
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DuplicateFacet {
+            facet_id: entity("f0"),
+        })
+    );
+}
+
+#[test]
+fn rejects_duplicate_boundary_facet() {
+    let mut plc = tetrahedron_plc();
+    plc.facets[1].node_ids = [entity("1"), entity("2"), entity("0")];
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DuplicateBoundaryFacet {
+            first_facet_id: entity("f0"),
+            second_facet_id: entity("f1"),
+            node_ids: [entity("0"), entity("1"), entity("2")],
+        })
+    );
+}
+
+#[test]
 fn rejects_facet_with_empty_source_face_id() {
     let mut plc = tetrahedron_plc();
     plc.facets[0].source_face_id = source_face("");

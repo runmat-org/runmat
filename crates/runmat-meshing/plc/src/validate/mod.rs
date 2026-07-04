@@ -52,10 +52,27 @@ pub fn validate_protected_boundary_complex(
     let mut edge_incidence = BTreeMap::<[TopologyEntityId; 2], usize>::new();
     let mut edge_orientation_balance = BTreeMap::<[TopologyEntityId; 2], i32>::new();
     let mut referenced_node_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut facet_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut facet_id_by_nodes = BTreeMap::<[TopologyEntityId; 3], TopologyEntityId>::new();
     for facet in &plc.facets {
+        if !facet_ids.insert(facet.facet_id.clone()) {
+            return Err(PlcValidationError::DuplicateFacet {
+                facet_id: facet.facet_id.clone(),
+            });
+        }
         validate_facet_source_face(facet.facet_id.clone(), &facet.source_face_id)?;
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
         validate_facet_material_interfaces(facet.facet_id.clone(), &facet.material_interface_ids)?;
+        let facet_key = sorted_facet(facet.node_ids.clone());
+        if let Some(first_facet_id) =
+            facet_id_by_nodes.insert(facet_key.clone(), facet.facet_id.clone())
+        {
+            return Err(PlcValidationError::DuplicateBoundaryFacet {
+                first_facet_id,
+                second_facet_id: facet.facet_id.clone(),
+                node_ids: facet_key,
+            });
+        }
         referenced_node_ids.extend(facet.node_ids.iter().cloned());
         for edge_index in 0..3 {
             let left = facet.node_ids[edge_index].clone();
@@ -228,6 +245,11 @@ fn sorted_edge(left: TopologyEntityId, right: TopologyEntityId) -> [TopologyEnti
     } else {
         [right, left]
     }
+}
+
+fn sorted_facet(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
+    node_ids.sort();
+    node_ids
 }
 
 fn directed_edge_orientation(left: TopologyEntityId, right: TopologyEntityId) -> i32 {
