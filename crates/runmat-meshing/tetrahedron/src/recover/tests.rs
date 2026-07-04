@@ -388,6 +388,49 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
 }
 
 #[test]
+fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
+    let plc = two_region_bipyramid_plc();
+    let mut mesh = two_region_bipyramid_tetrahedron_mesh();
+    mesh.elements[0].material_region_id = "region_b".to_string();
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing material interface should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["material_interface_items"],
+        2
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_material_interface_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("boundary-facet material ownership should repair the missing region");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.tetrahedron_mesh.elements[0].material_region_id,
+        "region_a"
+    );
+    assert_eq!(
+        result.tetrahedron_mesh.elements[1].material_region_id,
+        "region_b"
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
+        0
+    );
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
@@ -766,6 +809,96 @@ fn boundary_diagonal_flip_tetrahedron_mesh() -> TetrahedronMesh {
     }
 }
 
+fn two_region_bipyramid_plc() -> ProtectedBoundaryComplex {
+    ProtectedBoundaryComplex {
+        complex_id: "two_region_bipyramid_plc".to_string(),
+        nodes: vec![
+            plc_node("0", [0.0, 0.0, 0.0]),
+            plc_node("1", [1.0, 0.0, 0.0]),
+            plc_node("2", [0.0, 1.0, 0.0]),
+            plc_node("3", [1.0, 1.0, 0.0]),
+            plc_node("4", [0.5, 0.5, 1.0]),
+        ],
+        facets: vec![
+            facet_with_material("facet_a_1", ["0", "2", "3"], "face_a_1", "region_a"),
+            facet_with_material("facet_a_2", ["0", "4", "2"], "face_a_2", "region_a"),
+            facet_with_material("facet_a_3", ["0", "3", "4"], "face_a_3", "region_a"),
+            facet_with_material("facet_b_1", ["1", "3", "2"], "face_b_1", "region_b"),
+            facet_with_material("facet_b_2", ["1", "4", "3"], "face_b_2", "region_b"),
+            facet_with_material("facet_b_3", ["1", "2", "4"], "face_b_3", "region_b"),
+        ],
+        protected_edges: Vec::new(),
+        validation: PlcValidationSummary {
+            watertight: true,
+            manifold: true,
+            shell_nesting_classified: true,
+            material_interfaces_classified: true,
+        },
+        evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    }
+}
+
+fn two_region_bipyramid_tetrahedron_mesh() -> TetrahedronMesh {
+    TetrahedronMesh {
+        mesh_id: "two_region_bipyramid_tetrahedron".to_string(),
+        nodes: vec![
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                [0.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                [1.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                [0.0, 1.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                [1.0, 1.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                [0.5, 0.5, 1.0],
+            ),
+        ],
+        elements: vec![
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_a"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                ],
+                material_region_id: "region_a".to_string(),
+            },
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_b"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                ],
+                material_region_id: "region_b".to_string(),
+            },
+        ],
+        boundary_faces: vec![
+            boundary_face("facet_a_1", ["0", "2", "3"], "face_a_1"),
+            boundary_face("facet_a_2", ["0", "4", "2"], "face_a_2"),
+            boundary_face("facet_a_3", ["0", "3", "4"], "face_a_3"),
+            boundary_face("facet_b_1", ["1", "3", "2"], "face_b_1"),
+            boundary_face("facet_b_2", ["1", "4", "3"], "face_b_2"),
+            boundary_face("facet_b_3", ["1", "2", "4"], "face_b_3"),
+        ],
+        recovery_complete: false,
+        quality_optimized: false,
+        evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+    }
+}
+
 fn plc_node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
     PlcNode {
         node_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
@@ -774,6 +907,15 @@ fn plc_node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
 }
 
 fn facet(id: &str, node_ids: [&str; 3], source_face_id: &str) -> PlcFacet {
+    facet_with_material(id, node_ids, source_face_id, "solid_body")
+}
+
+fn facet_with_material(
+    id: &str,
+    node_ids: [&str; 3],
+    source_face_id: &str,
+    material_interface_id: &str,
+) -> PlcFacet {
     PlcFacet {
         facet_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
         node_ids: [
@@ -782,7 +924,7 @@ fn facet(id: &str, node_ids: [&str; 3], source_face_id: &str) -> PlcFacet {
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
         ],
         source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
-        material_interface_ids: vec!["solid_body".to_string()],
+        material_interface_ids: vec![material_interface_id.to_string()],
     }
 }
 
