@@ -1,17 +1,9 @@
 use super::*;
 use crate::refinement::{MeshRefinementOptions, RefinementIndicatorOverrides};
 
-fn key(namespace: &str, name: &str) -> RefinementIndicatorKey {
-    RefinementIndicatorKey::new(namespace, name)
-}
+mod fixtures;
 
-fn available(namespace: &str, name: &str) -> RefinementIndicatorAvailability {
-    RefinementIndicatorAvailability {
-        key: key(namespace, name),
-        applicable: true,
-        field_available: true,
-    }
-}
+use fixtures::*;
 
 #[test]
 fn adaptive_convergence_is_disabled_for_nonadaptive_strategies() {
