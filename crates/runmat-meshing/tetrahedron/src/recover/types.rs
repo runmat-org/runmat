@@ -66,6 +66,8 @@ pub struct TetrahedronRecoveryQueueItem {
     #[serde(default)]
     pub source_entity_id: Option<TopologyEntityId>,
     #[serde(default)]
+    pub protected_edge_node_ids: Option<[TopologyEntityId; 2]>,
+    #[serde(default)]
     pub material_interface_id: Option<String>,
 }
 

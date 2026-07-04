@@ -16,6 +16,22 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
     assert_eq!(queue.evidence.entity_counts["material_interface_items"], 1);
     assert_eq!(queue.evidence.entity_counts["recovered_items"], 6);
     assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        0
+    );
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.protected_edge_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                ])
+    }));
     assert!(queue
         .items
         .iter()
@@ -122,6 +138,14 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         initial_queue.evidence.entity_counts["missing_source_edge_items"],
         1
     );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        0
+    );
 
     let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
         .expect("missing protected edge should recover with its exterior boundary faces");
@@ -160,6 +184,14 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
         .expect("missing protected source-edge provenance should be reported before recovery");
     assert_eq!(
         initial_queue.evidence.entity_counts["missing_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        0
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         1
     );
 
@@ -270,6 +302,14 @@ fn recovery_queue_reports_missing_source_edge() {
 
     assert_eq!(queue.evidence.status, StageEvidenceStatus::Failed);
     assert_eq!(queue.evidence.entity_counts["missing_source_edge_items"], 1);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_topology_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_edge_provenance_items"],
+        0
+    );
     assert!(queue.items.iter().any(|item| {
         item.kind == TetrahedronRecoveryKind::SourceEdge
             && item.status == TetrahedronRecoveryStatus::Missing

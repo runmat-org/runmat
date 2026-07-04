@@ -87,6 +87,8 @@ impl Default for MeshBackendSummary {
             tetrahedron_source_edge_recovery_item_count: 0,
             tetrahedron_recovered_source_edge_recovery_item_count: 0,
             tetrahedron_missing_source_edge_recovery_item_count: 0,
+            tetrahedron_missing_source_edge_topology_recovery_item_count: 0,
+            tetrahedron_missing_source_edge_provenance_recovery_item_count: 0,
             tetrahedron_missing_source_edge_recovery_ids: Vec::new(),
             tetrahedron_omitted_missing_source_edge_recovery_id_count: 0,
             tetrahedron_material_interface_recovery_item_count: 0,

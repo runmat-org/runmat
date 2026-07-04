@@ -51,6 +51,12 @@ pub fn build_recovery_queue_from_plc(
             source_edge_id.map(|source_edge_id| (edge_key, source_edge_id))
         })
         .collect::<BTreeSet<_>>();
+    let recovered_boundary_edges = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .flat_map(boundary_face_source_edges)
+        .map(|(edge_key, _)| edge_key)
+        .collect::<BTreeSet<_>>();
     let recovered_material_interfaces = tetrahedron_mesh
         .elements
         .iter()
@@ -72,6 +78,7 @@ pub fn build_recovery_queue_from_plc(
                 TetrahedronRecoveryStatus::Missing
             },
             source_entity_id: Some(facet.source_face_id.clone()),
+            protected_edge_node_ids: None,
             material_interface_id: None,
         });
     }
@@ -82,13 +89,14 @@ pub fn build_recovery_queue_from_plc(
             item_id: format!("source_edge:{}", protected_edge.edge_id.id),
             kind: TetrahedronRecoveryKind::SourceEdge,
             status: if recovered_boundary_source_edges
-                .contains(&(edge_key, protected_edge.source_edge_id.clone()))
+                .contains(&(edge_key.clone(), protected_edge.source_edge_id.clone()))
             {
                 TetrahedronRecoveryStatus::Recovered
             } else {
                 TetrahedronRecoveryStatus::Missing
             },
             source_entity_id: Some(protected_edge.source_edge_id.clone()),
+            protected_edge_node_ids: Some(edge_key),
             material_interface_id: None,
         });
     }
@@ -109,6 +117,7 @@ pub fn build_recovery_queue_from_plc(
             kind: TetrahedronRecoveryKind::MaterialInterface,
             status,
             source_entity_id: None,
+            protected_edge_node_ids: None,
             material_interface_id: Some(material_interface_id),
         });
     }
@@ -175,6 +184,34 @@ pub fn build_recovery_queue_from_plc(
             .filter(|item| {
                 item.kind == TetrahedronRecoveryKind::SourceEdge
                     && item.status == TetrahedronRecoveryStatus::Missing
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_topology_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item
+                        .protected_edge_node_ids
+                        .as_ref()
+                        .is_some_and(|node_ids| !recovered_boundary_edges.contains(node_ids))
+            })
+            .count(),
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edge_provenance_items".to_string(),
+        items
+            .iter()
+            .filter(|item| {
+                item.kind == TetrahedronRecoveryKind::SourceEdge
+                    && item.status == TetrahedronRecoveryStatus::Missing
+                    && item
+                        .protected_edge_node_ids
+                        .as_ref()
+                        .is_some_and(|node_ids| recovered_boundary_edges.contains(node_ids))
             })
             .count(),
     );
