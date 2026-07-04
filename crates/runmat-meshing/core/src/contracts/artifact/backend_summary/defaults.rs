@@ -110,6 +110,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_rejected_material_interface_recovery_item_count: 0,
             tetrahedron_global_material_interface_recovery_item_count: 0,
             tetrahedron_boundary_owned_material_interface_recovery_item_count: 0,
+            tetrahedron_interior_material_interface_recovery_item_count: 0,
             tetrahedron_rejected_material_interface_missing_boundary_ownership_count: 0,
             tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count: 0,
             tetrahedron_source_face_recovery_item_count: 0,

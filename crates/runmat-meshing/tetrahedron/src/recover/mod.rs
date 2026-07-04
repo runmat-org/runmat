@@ -534,6 +534,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
         material_interface_recovery.boundary_owned_material_interface_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "interior_material_interface_recovery_items".to_string(),
+        material_interface_recovery.interior_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "rejected_material_interface_missing_boundary_ownership".to_string(),
         material_interface_recovery.missing_boundary_ownership_count,
     );

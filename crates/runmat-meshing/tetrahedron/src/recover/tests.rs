@@ -724,6 +724,10 @@ fn recovery_stage_result_repairs_single_material_interface_before_audit() {
         0
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["interior_material_interface_recovery_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["rejected_material_interface_recovery_items"],
         0
     );
@@ -753,6 +757,7 @@ fn recovery_stage_result_does_not_guess_multi_material_interface_repair() {
     assert_eq!(recovery.rejected_material_interface_count, 1);
     assert_eq!(recovery.global_material_interface_count, 0);
     assert_eq!(recovery.boundary_owned_material_interface_count, 1);
+    assert_eq!(recovery.interior_material_interface_count, 0);
     assert_eq!(recovery.ambiguous_boundary_ownership_count, 1);
     assert_eq!(recovery.missing_boundary_ownership_count, 0);
 
@@ -824,9 +829,50 @@ fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["interior_material_interface_recovery_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_material_interface_items"],
         0
     );
+}
+
+#[test]
+fn material_interface_recovery_propagates_through_interior_faces() {
+    let plc = interior_material_interface_propagation_plc();
+    let initial_queue = TetrahedronRecoveryQueue {
+        items: vec![TetrahedronRecoveryQueueItem {
+            item_id: "material_interface:region_a".to_string(),
+            kind: TetrahedronRecoveryKind::MaterialInterface,
+            status: TetrahedronRecoveryStatus::Missing,
+            source_entity_id: None,
+            source_face_node_ids: None,
+            source_face_topology: None,
+            protected_edge_node_ids: None,
+            protected_edge_topology: None,
+            material_interface_id: Some("region_a".to_string()),
+        }],
+        evidence: StageEvidence::complete(MeshingStage::ConstraintRecovery),
+    };
+    let mut mesh = interior_material_interface_propagation_mesh();
+
+    let recovery = super::material_interfaces::recover_material_interface_regions(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(mesh.elements[0].material_region_id, "region_a");
+    assert_eq!(mesh.elements[1].material_region_id, "region_a");
+    assert_eq!(recovery.attempted_material_interface_count, 1);
+    assert_eq!(recovery.repaired_element_count, 2);
+    assert_eq!(recovery.rejected_material_interface_count, 0);
+    assert_eq!(recovery.global_material_interface_count, 0);
+    assert_eq!(recovery.boundary_owned_material_interface_count, 1);
+    assert_eq!(recovery.interior_material_interface_count, 1);
+    assert_eq!(recovery.ambiguous_boundary_ownership_count, 0);
+    assert_eq!(recovery.missing_boundary_ownership_count, 0);
 }
 
 #[test]
@@ -1439,6 +1485,88 @@ fn two_region_bipyramid_tetrahedron_mesh() -> TetrahedronMesh {
             boundary_face("facet_b_2", ["1", "4", "3"], "face_b_2"),
             boundary_face("facet_b_3", ["1", "2", "4"], "face_b_3"),
         ],
+        recovery_complete: false,
+        quality_optimized: false,
+        evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+    }
+}
+
+fn interior_material_interface_propagation_plc() -> ProtectedBoundaryComplex {
+    ProtectedBoundaryComplex {
+        complex_id: "interior_material_interface_propagation_plc".to_string(),
+        nodes: vec![
+            plc_node("0", [0.0, 0.0, 0.0]),
+            plc_node("1", [1.0, 0.0, 0.0]),
+            plc_node("2", [0.0, 1.0, 0.0]),
+            plc_node("3", [0.0, 0.0, 1.0]),
+            plc_node("4", [0.0, 0.0, -1.0]),
+            plc_node("5", [2.0, 0.0, 0.0]),
+            plc_node("6", [2.0, 1.0, 0.0]),
+            plc_node("7", [2.0, 0.0, 1.0]),
+        ],
+        facets: vec![
+            facet_with_material("facet_a", ["0", "1", "2"], "face_a", "region_a"),
+            facet_with_material("facet_b", ["5", "6", "7"], "face_b", "region_b"),
+        ],
+        protected_edges: Vec::new(),
+        validation: PlcValidationSummary {
+            watertight: true,
+            manifold: true,
+            shell_nesting_classified: true,
+            material_interfaces_classified: true,
+        },
+        evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    }
+}
+
+fn interior_material_interface_propagation_mesh() -> TetrahedronMesh {
+    TetrahedronMesh {
+        mesh_id: "interior_material_interface_propagation_tetrahedron".to_string(),
+        nodes: vec![
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                [0.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                [1.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                [0.0, 1.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                [0.0, 0.0, 1.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                [0.0, 0.0, -1.0],
+            ),
+        ],
+        elements: vec![
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_seed"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                ],
+                material_region_id: "unclassified".to_string(),
+            },
+            Tetrahedron4Element {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_interior"),
+                node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+                ],
+                material_region_id: "unclassified".to_string(),
+            },
+        ],
+        boundary_faces: Vec::new(),
         recovery_complete: false,
         quality_optimized: false,
         evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
