@@ -32,6 +32,17 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         0
     );
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian < 0.15);
+    assert!(
+        mesh.backend
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count
+            > 0
+    );
+    assert!(mesh
+        .backend
+        .tetrahedron_exact_scaled_jacobian_bins
+        .contains_key("0_00_to_0_15"));
+    assert!(mesh.backend.tetrahedron_optimization_target_seed_count > 0);
     assert!(mesh
         .backend
         .tetrahedron_missing_source_face_recovery_ids
@@ -44,6 +55,7 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         .backend
         .tetrahedron_missing_material_interface_recovery_ids
         .is_empty());
+    assert_eq!(mesh.backend.tetrahedron_sliver_removed_count, 0);
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
@@ -102,6 +114,13 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     assert_eq!(mesh.backend.tetrahedron_source_face_recovery_item_count, 4);
     assert_eq!(mesh.backend.tetrahedron_source_edge_recovery_item_count, 6);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_exact_scaled_jacobian_below_threshold_count,
+        0
+    );
+    assert_eq!(mesh.backend.tetrahedron_sliver_count, 0);
     assert_eq!(
         mesh.backend
             .tetrahedron_missing_source_edge_recovery_item_count,

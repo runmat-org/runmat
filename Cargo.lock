@@ -5639,6 +5639,7 @@ dependencies = [
  "runmat-meshing-cad",
  "runmat-meshing-core",
  "runmat-meshing-curve",
+ "runmat-meshing-opt",
  "runmat-meshing-plc",
  "runmat-meshing-surface",
  "runmat-meshing-tetrahedron",

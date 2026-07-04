@@ -16,6 +16,9 @@ use runmat_meshing_core::{
     },
     size::field::MeshSizingField,
 };
+use runmat_meshing_opt::sliver::{
+    classify_sliver_tetrahedra, SliverRecoveryOptions, SliverTetrahedronQuality,
+};
 use runmat_meshing_surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID};
 use runmat_meshing_tetrahedron::{
     generate::TetrahedronMesh,
@@ -113,6 +116,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         &source_edge_provenance_by_edge,
     );
     let quality = quality_report(&volume_elements, &coordinates_by_node_id);
+    let backend_quality = backend_quality_evidence(&quality);
     let missing_source_face_recovery =
         bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::SourceFace);
     let missing_source_edge_recovery =
@@ -168,6 +172,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 "input_plc_max_shell_nesting_depth",
             ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
+            tetrahedron_min_exact_scaled_jacobian: backend_quality.min_exact_scaled_jacobian,
+            tetrahedron_exact_scaled_jacobian_below_threshold_count: backend_quality
+                .exact_scaled_jacobian_below_threshold_count,
+            tetrahedron_exact_scaled_jacobian_bins: backend_quality.exact_scaled_jacobian_bins,
             boundary_face_recovery_ratio: 1.0,
             boundary_edge_recovery_ratio: 1.0,
             volume_component_count: 1,
@@ -219,6 +227,14 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 missing_material_interface_recovery.ids,
             tetrahedron_omitted_missing_material_interface_recovery_id_count:
                 missing_material_interface_recovery.omitted_count,
+            tetrahedron_sliver_count: backend_quality.sliver_count,
+            tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
+            tetrahedron_optimization_initial_max_aspect_ratio: backend_quality.max_aspect_ratio,
+            tetrahedron_optimization_final_max_aspect_ratio: backend_quality.max_aspect_ratio,
+            tetrahedron_optimization_initial_min_exact_scaled_jacobian: backend_quality
+                .min_exact_scaled_jacobian,
+            tetrahedron_optimization_final_min_exact_scaled_jacobian: backend_quality
+                .min_exact_scaled_jacobian,
             ..MeshBackendSummary::default()
         },
         adaptive_iterations: Vec::new(),
@@ -228,6 +244,73 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             source_geometry_revision: geometry.revision,
             source_geometry_sha256: Some(geometry.source.sha256.clone()),
         },
+    }
+}
+
+struct BackendQualityEvidence {
+    min_exact_scaled_jacobian: f64,
+    exact_scaled_jacobian_below_threshold_count: usize,
+    exact_scaled_jacobian_bins: BTreeMap<String, usize>,
+    sliver_count: usize,
+    quality_repair_target_count: usize,
+    max_aspect_ratio: f64,
+}
+
+fn backend_quality_evidence(quality: &AnalysisMeshQualityReport) -> BackendQualityEvidence {
+    let options = SliverRecoveryOptions::default();
+    let min_exact_scaled_jacobian = if quality.elements.is_empty() {
+        0.0
+    } else {
+        quality
+            .elements
+            .iter()
+            .map(|element| element.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min)
+    };
+    let exact_scaled_jacobian_below_threshold_count = quality
+        .elements
+        .iter()
+        .filter(|element| element.exact_scaled_jacobian < options.min_exact_scaled_jacobian)
+        .count();
+    let mut exact_scaled_jacobian_bins = BTreeMap::<String, usize>::new();
+    for element in &quality.elements {
+        *exact_scaled_jacobian_bins
+            .entry(scaled_jacobian_bin(element.exact_scaled_jacobian))
+            .or_default() += 1;
+    }
+    let sliver_inputs = quality
+        .elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| SliverTetrahedronQuality {
+            tetrahedron_id: index as u32 + 1,
+            aspect_ratio: element.aspect_ratio,
+            exact_scaled_jacobian: element.exact_scaled_jacobian,
+        })
+        .collect::<Vec<_>>();
+    let sliver_count =
+        classify_sliver_tetrahedra(&sliver_inputs, options).map_or(0, |slivers| slivers.len());
+
+    BackendQualityEvidence {
+        min_exact_scaled_jacobian,
+        exact_scaled_jacobian_below_threshold_count,
+        exact_scaled_jacobian_bins,
+        sliver_count,
+        quality_repair_target_count: sliver_count.max(exact_scaled_jacobian_below_threshold_count),
+        max_aspect_ratio: quality.max_aspect_ratio,
+    }
+}
+
+fn scaled_jacobian_bin(value: f64) -> String {
+    if !value.is_finite() {
+        return "non_finite".to_string();
+    }
+    match value {
+        value if value < 0.0 => "negative".to_string(),
+        value if value < 0.15 => "0_00_to_0_15".to_string(),
+        value if value < 0.35 => "0_15_to_0_35".to_string(),
+        value if value < 0.65 => "0_35_to_0_65".to_string(),
+        _ => "0_65_to_1_00".to_string(),
     }
 }
 
