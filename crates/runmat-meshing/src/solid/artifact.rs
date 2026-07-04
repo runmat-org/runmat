@@ -327,6 +327,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "removed_unsupported_boundary_faces",
             ),
+            tetrahedron_attempted_boundary_leak_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "attempted_boundary_leak_recovery_items",
+            ),
             tetrahedron_removed_exterior_leaked_element_count: recovery_entity_count(
                 recovery_queue,
                 "removed_exterior_leaked_elements",
@@ -338,6 +342,23 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_inserted_exposed_interior_boundary_face_count: recovery_entity_count(
                 recovery_queue,
                 "inserted_exposed_interior_boundary_faces",
+            ),
+            tetrahedron_rejected_boundary_leak_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_boundary_leak_recovery_items",
+            ),
+            tetrahedron_rejected_boundary_leak_adjacent_element_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_boundary_leak_adjacent_element_count",
+            ),
+            tetrahedron_rejected_boundary_leak_material_region_mismatch_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_boundary_leak_material_region_mismatch",
+                ),
+            tetrahedron_rejected_boundary_leak_outside_classification_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_boundary_leak_outside_classification",
             ),
             tetrahedron_repaired_source_face_provenance_count: recovery_entity_count(
                 recovery_queue,

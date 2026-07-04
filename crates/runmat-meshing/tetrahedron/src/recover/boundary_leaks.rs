@@ -19,9 +19,12 @@ use super::{
 };
 
 pub(super) struct BoundaryLeakRecovery {
+    pub attempted_source_face_count: usize,
     pub removed_element_count: usize,
     pub exposed_source_face_count: usize,
     pub inserted_boundary_face_count: usize,
+    pub rejected_source_face_count: usize,
+    pub rejection_counts: BTreeMap<&'static str, usize>,
 }
 
 pub(super) fn remove_exterior_elements_across_interior_source_faces(
@@ -40,6 +43,7 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
     let element_indices_by_face = element_indices_by_face(tetrahedron_mesh);
     let mut leaked_element_indices = BTreeSet::<usize>::new();
     let mut exposed_facets = BTreeMap::<[TopologyEntityId; 3], PlcFacet>::new();
+    let mut recovery = empty_recovery();
 
     for facet in plc.facets.iter().filter(|facet| {
         recoverable_source_faces.contains(&(
@@ -47,11 +51,14 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
             sorted_topology_ids(facet.node_ids.clone()),
         ))
     }) {
+        recovery.attempted_source_face_count += 1;
         let face_key = sorted_topology_ids(facet.node_ids.clone());
         let Some(element_indices) = element_indices_by_face.get(&face_key) else {
+            recovery.reject(BoundaryLeakRecoveryRejection::AdjacentElementCount);
             continue;
         };
         if element_indices.len() != 2 {
+            recovery.reject(BoundaryLeakRecoveryRejection::AdjacentElementCount);
             continue;
         }
         if element_indices
@@ -65,6 +72,7 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
             .len()
             != 1
         {
+            recovery.reject(BoundaryLeakRecoveryRejection::MaterialRegionMismatch);
             continue;
         }
         let outside_element_indices = element_indices
@@ -86,6 +94,7 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
             })
             .collect::<Vec<_>>();
         if outside_element_indices.len() != 1 {
+            recovery.reject(BoundaryLeakRecoveryRejection::OutsideClassification);
             continue;
         }
         leaked_element_indices.insert(outside_element_indices[0]);
@@ -93,24 +102,52 @@ pub(super) fn remove_exterior_elements_across_interior_source_faces(
     }
 
     if leaked_element_indices.is_empty() {
-        return empty_recovery();
+        return recovery;
     }
-    let removed_element_count = remove_elements(tetrahedron_mesh, &leaked_element_indices);
+    recovery.removed_element_count = remove_elements(tetrahedron_mesh, &leaked_element_indices);
     let (exposed_source_face_count, inserted_boundary_face_count) =
         materialize_exposed_boundary_faces(plc, tetrahedron_mesh, exposed_facets);
+    recovery.exposed_source_face_count = exposed_source_face_count;
+    recovery.inserted_boundary_face_count = inserted_boundary_face_count;
 
-    BoundaryLeakRecovery {
-        removed_element_count,
-        exposed_source_face_count,
-        inserted_boundary_face_count,
-    }
+    recovery
 }
 
 fn empty_recovery() -> BoundaryLeakRecovery {
     BoundaryLeakRecovery {
+        attempted_source_face_count: 0,
         removed_element_count: 0,
         exposed_source_face_count: 0,
         inserted_boundary_face_count: 0,
+        rejected_source_face_count: 0,
+        rejection_counts: BTreeMap::new(),
+    }
+}
+
+impl BoundaryLeakRecovery {
+    fn reject(&mut self, rejection: BoundaryLeakRecoveryRejection) {
+        self.rejected_source_face_count += 1;
+        *self
+            .rejection_counts
+            .entry(rejection.evidence_key())
+            .or_default() += 1;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryLeakRecoveryRejection {
+    AdjacentElementCount,
+    MaterialRegionMismatch,
+    OutsideClassification,
+}
+
+impl BoundaryLeakRecoveryRejection {
+    fn evidence_key(self) -> &'static str {
+        match self {
+            Self::AdjacentElementCount => "rejected_boundary_leak_adjacent_element_count",
+            Self::MaterialRegionMismatch => "rejected_boundary_leak_material_region_mismatch",
+            Self::OutsideClassification => "rejected_boundary_leak_outside_classification",
+        }
     }
 }
 

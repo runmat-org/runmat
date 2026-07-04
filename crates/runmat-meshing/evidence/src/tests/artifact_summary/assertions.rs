@@ -260,9 +260,20 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.repaired_boundary_face_identity_count, 1);
     assert_eq!(recovery.removed_redundant_boundary_face_count, 1);
     assert_eq!(recovery.removed_unsupported_boundary_face_count, 1);
+    assert_eq!(recovery.attempted_boundary_leak_recovery_item_count, 2);
     assert_eq!(recovery.removed_exterior_leaked_element_count, 1);
     assert_eq!(recovery.exposed_interior_source_face_count, 1);
     assert_eq!(recovery.inserted_exposed_interior_boundary_face_count, 1);
+    assert_eq!(recovery.rejected_boundary_leak_recovery_item_count, 3);
+    assert_eq!(recovery.rejected_boundary_leak_adjacent_element_count, 1);
+    assert_eq!(
+        recovery.rejected_boundary_leak_material_region_mismatch_count,
+        1
+    );
+    assert_eq!(
+        recovery.rejected_boundary_leak_outside_classification_count,
+        1
+    );
     assert_eq!(recovery.repaired_source_face_provenance_count, 1);
     assert_eq!(recovery.repaired_source_edge_provenance_count, 2);
     assert_eq!(recovery.repaired_material_interface_element_count, 3);

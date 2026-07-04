@@ -95,11 +95,21 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub removed_unsupported_boundary_face_count: usize,
     #[serde(default)]
+    pub attempted_boundary_leak_recovery_item_count: usize,
+    #[serde(default)]
     pub removed_exterior_leaked_element_count: usize,
     #[serde(default)]
     pub exposed_interior_source_face_count: usize,
     #[serde(default)]
     pub inserted_exposed_interior_boundary_face_count: usize,
+    #[serde(default)]
+    pub rejected_boundary_leak_recovery_item_count: usize,
+    #[serde(default)]
+    pub rejected_boundary_leak_adjacent_element_count: usize,
+    #[serde(default)]
+    pub rejected_boundary_leak_material_region_mismatch_count: usize,
+    #[serde(default)]
+    pub rejected_boundary_leak_outside_classification_count: usize,
     #[serde(default)]
     pub repaired_source_face_provenance_count: usize,
     #[serde(default)]
@@ -388,6 +398,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         removed_unsupported_boundary_face_count: mesh
             .backend
             .tetrahedron_removed_unsupported_boundary_face_count,
+        attempted_boundary_leak_recovery_item_count: mesh
+            .backend
+            .tetrahedron_attempted_boundary_leak_recovery_item_count,
         removed_exterior_leaked_element_count: mesh
             .backend
             .tetrahedron_removed_exterior_leaked_element_count,
@@ -397,6 +410,18 @@ pub(super) fn tetrahedron_recovery_evidence(
         inserted_exposed_interior_boundary_face_count: mesh
             .backend
             .tetrahedron_inserted_exposed_interior_boundary_face_count,
+        rejected_boundary_leak_recovery_item_count: mesh
+            .backend
+            .tetrahedron_rejected_boundary_leak_recovery_item_count,
+        rejected_boundary_leak_adjacent_element_count: mesh
+            .backend
+            .tetrahedron_rejected_boundary_leak_adjacent_element_count,
+        rejected_boundary_leak_material_region_mismatch_count: mesh
+            .backend
+            .tetrahedron_rejected_boundary_leak_material_region_mismatch_count,
+        rejected_boundary_leak_outside_classification_count: mesh
+            .backend
+            .tetrahedron_rejected_boundary_leak_outside_classification_count,
         repaired_source_face_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_face_provenance_count,

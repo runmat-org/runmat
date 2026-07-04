@@ -748,6 +748,10 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repaired_source_edge_provenance_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "attempted_boundary_leak_recovery_items".to_string(),
+        recovered_boundary_leaks.attempted_source_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "removed_exterior_leaked_elements".to_string(),
         recovered_boundary_leaks.removed_element_count,
     );
@@ -759,6 +763,16 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "inserted_exposed_interior_boundary_faces".to_string(),
         recovered_boundary_leaks.inserted_boundary_face_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_boundary_leak_recovery_items".to_string(),
+        recovered_boundary_leaks.rejected_source_face_count,
+    );
+    for (reason_key, count) in recovered_boundary_leaks.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(reason_key.to_string(), count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "repaired_material_interface_elements".to_string(),
         material_interface_recovery.repaired_element_count,

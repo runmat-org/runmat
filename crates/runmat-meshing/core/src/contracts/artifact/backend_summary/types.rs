@@ -203,11 +203,21 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_removed_unsupported_boundary_face_count: usize,
     #[serde(default)]
+    pub tetrahedron_attempted_boundary_leak_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_removed_exterior_leaked_element_count: usize,
     #[serde(default)]
     pub tetrahedron_exposed_interior_source_face_count: usize,
     #[serde(default)]
     pub tetrahedron_inserted_exposed_interior_boundary_face_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_boundary_leak_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_boundary_leak_adjacent_element_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_boundary_leak_material_region_mismatch_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_boundary_leak_outside_classification_count: usize,
     #[serde(default)]
     pub tetrahedron_repaired_source_face_provenance_count: usize,
     #[serde(default)]

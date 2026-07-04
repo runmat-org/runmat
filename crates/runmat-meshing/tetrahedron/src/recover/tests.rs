@@ -1405,6 +1405,18 @@ fn recovery_stage_result_rejects_material_repair_that_leaves_missing_source_face
         1
     );
     assert_eq!(
+        recovery_evidence.entity_counts["attempted_boundary_leak_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_boundary_leak_recovery_items"],
+        1
+    );
+    assert_eq!(
+        recovery_evidence.entity_counts["rejected_boundary_leak_material_region_mismatch"],
+        1
+    );
+    assert_eq!(
         recovery_evidence.entity_counts["removed_unsupported_boundary_faces"],
         1
     );
@@ -1794,12 +1806,20 @@ fn recovery_stage_result_removes_exterior_elements_across_interior_source_faces(
     assert!(result.tetrahedron_mesh.recovery_complete);
     assert_eq!(result.tetrahedron_mesh.elements.len(), 1);
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["attempted_boundary_leak_recovery_items"],
+        2
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["removed_exterior_leaked_elements"],
         2
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["exposed_interior_source_faces"],
         2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["rejected_boundary_leak_recovery_items"],
+        0
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["missing_source_edge_items"],
