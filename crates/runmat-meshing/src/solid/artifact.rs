@@ -272,6 +272,24 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "repaired_material_interface_elements",
             ),
+            tetrahedron_attempted_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "attempted_material_interface_recovery_items",
+            ),
+            tetrahedron_rejected_material_interface_recovery_item_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_material_interface_recovery_items",
+            ),
+            tetrahedron_rejected_material_interface_missing_boundary_ownership_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_material_interface_missing_boundary_ownership",
+                ),
+            tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_material_interface_ambiguous_boundary_ownership",
+                ),
             tetrahedron_source_face_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "source_face_items",

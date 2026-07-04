@@ -177,6 +177,14 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_repaired_material_interface_element_count: usize,
     #[serde(default)]
+    pub tetrahedron_attempted_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_material_interface_missing_boundary_ownership_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count: usize,
+    #[serde(default)]
     pub tetrahedron_source_face_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_recovered_source_face_recovery_item_count: usize,

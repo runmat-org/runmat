@@ -319,7 +319,7 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_source_face_provenance(plc, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance_count =
         repair_boundary_source_edge_provenance(plc, &mut tetrahedron_mesh);
-    let repaired_material_interface_element_count = recover_single_material_interface_region(
+    let material_interface_recovery = recover_single_material_interface_region(
         plc,
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
@@ -375,7 +375,23 @@ pub fn recover_tetrahedron_mesh_from_plc(
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_material_interface_elements".to_string(),
-        repaired_material_interface_element_count,
+        material_interface_recovery.repaired_element_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_material_interface_recovery_items".to_string(),
+        material_interface_recovery.attempted_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_material_interface_recovery_items".to_string(),
+        material_interface_recovery.rejected_material_interface_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_material_interface_missing_boundary_ownership".to_string(),
+        material_interface_recovery.missing_boundary_ownership_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_material_interface_ambiguous_boundary_ownership".to_string(),
+        material_interface_recovery.ambiguous_boundary_ownership_count,
     );
     mark_tetrahedron_mesh_recovery_state(&mut tetrahedron_mesh, &recovery_queue);
     if !tetrahedron_mesh.recovery_complete {

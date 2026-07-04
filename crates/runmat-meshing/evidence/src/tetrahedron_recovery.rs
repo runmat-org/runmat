@@ -69,6 +69,14 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub repaired_material_interface_element_count: usize,
     #[serde(default)]
+    pub attempted_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub rejected_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub rejected_material_interface_missing_boundary_ownership_count: usize,
+    #[serde(default)]
+    pub rejected_material_interface_ambiguous_boundary_ownership_count: usize,
+    #[serde(default)]
     pub source_face_recovery_item_count: usize,
     #[serde(default)]
     pub recovered_source_face_recovery_item_count: usize,
@@ -249,6 +257,18 @@ pub(super) fn tetrahedron_recovery_evidence(
         repaired_material_interface_element_count: mesh
             .backend
             .tetrahedron_repaired_material_interface_element_count,
+        attempted_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_attempted_material_interface_recovery_item_count,
+        rejected_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_rejected_material_interface_recovery_item_count,
+        rejected_material_interface_missing_boundary_ownership_count: mesh
+            .backend
+            .tetrahedron_rejected_material_interface_missing_boundary_ownership_count,
+        rejected_material_interface_ambiguous_boundary_ownership_count: mesh
+            .backend
+            .tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count,
         source_face_recovery_item_count: mesh.backend.tetrahedron_source_face_recovery_item_count,
         recovered_source_face_recovery_item_count: mesh
             .backend
