@@ -225,6 +225,20 @@ fn distance_helper_surface_executes_from_scripts() {
 }
 
 #[test]
+fn covariance_conversion_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "C = [4 2; 2 9]; [R,s] = corrcov(C); Q = cov2corr(C); r12 = R(1,2); s2 = s(2); q21 = Q(2,1);",
+    )
+    .expect("corrcov script");
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (*value - (1.0 / 3.0)).abs() < 1.0e-8)));
+    assert!(has_num(&vars, 3.0));
+}
+
+#[test]
 fn cvpartition_surface_executes_from_scripts() {
     let vars = execute_source(
         "c = cvpartition(6, 'KFold', 3); te = test(c, 2); tr = training(c, 'all'); nts = c.NumTestSets; ts = c.TestSize(1); h = cvpartition([1;1;2;2], 'Holdout', 0.5); hm = test(h); hs = h.TestSize;",

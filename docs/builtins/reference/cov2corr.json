@@ -1,0 +1,69 @@
+{
+  "title": "cov2corr",
+  "category": "stats/summary",
+  "keywords": [
+    "cov2corr",
+    "covariance",
+    "correlation",
+    "standard deviation",
+    "statistics"
+  ],
+  "summary": "Convert a covariance matrix to a correlation matrix.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "RunMat alias for `corrcov`; gpuArray inputs are gathered to the CPU reference path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::covariance_conversion::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`cov2corr(C)` is a RunMat alias that applies the same covariance-to-correlation conversion as `corrcov(C)`. `[R,sigma] = cov2corr(C)` also returns `sqrt(diag(C))` as an n-by-1 standard-deviation vector.",
+  "behaviors": [
+    "`C` must be a real numeric square matrix stored as double or single precision. Scalar numeric values are accepted as 1-by-1 covariance matrices.",
+    "The diagonal entries of `C` are interpreted as variances and must be nonnegative.",
+    "RunMat validates symmetry within floating-point tolerance before converting.",
+    "RunMat rejects covariance entries whose magnitude exceeds the variance-implied pairwise bound `sqrt(C(i,i)*C(j,j))`.",
+    "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero."
+  ],
+  "examples": [
+    {
+      "description": "Convert covariance to correlation",
+      "input": "C = [16 4; 4 25];\nR = cov2corr(C)",
+      "output": "R = [1 0.2; 0.2 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `cov2corr` different from `corrcov`?",
+      "answer": "No. In RunMat, `cov2corr` is an alias for the same covariance-to-correlation conversion as `corrcov`. It is documented as a RunMat alias rather than an official MathWorks API."
+    }
+  ],
+  "links": [
+    {
+      "label": "corrcov",
+      "url": "./corrcov"
+    },
+    {
+      "label": "cov",
+      "url": "./cov"
+    },
+    {
+      "label": "corrcoef",
+      "url": "./corrcoef"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion.rs"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "title": "corrcov",
+  "category": "stats/summary",
+  "keywords": [
+    "corrcov",
+    "covariance",
+    "correlation",
+    "standard deviation",
+    "statistics"
+  ],
+  "summary": "Convert a covariance matrix to a correlation matrix.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "RunMat accepts gpuArray inputs and currently gathers them to the CPU reference path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::covariance_conversion::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`corrcov(C)` returns the correlation matrix corresponding to the square covariance matrix `C`. `[R,sigma] = corrcov(C)` also returns the standard deviations from `sqrt(diag(C))` as an n-by-1 vector.",
+  "behaviors": [
+    "`C` must be a real numeric square matrix stored as double or single precision. Scalar numeric values are accepted as 1-by-1 covariance matrices.",
+    "The diagonal entries of `C` are interpreted as variances and must be nonnegative.",
+    "RunMat validates symmetry within floating-point tolerance before converting.",
+    "RunMat rejects covariance entries whose magnitude exceeds the variance-implied pairwise bound `sqrt(C(i,i)*C(j,j))`.",
+    "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero.",
+    "Logical inputs are promoted to double precision."
+  ],
+  "examples": [
+    {
+      "description": "Convert covariance to correlation",
+      "input": "C = [4 2; 2 9];\n[R,sigma] = corrcov(C)",
+      "output": "R = [1 0.3333; 0.3333 1]\nsigma = [2; 3]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does the second output contain?",
+      "answer": "`sigma` is an n-by-1 vector of standard deviations computed from the square root of the covariance matrix diagonal."
+    },
+    {
+      "question": "How are constant variables handled?",
+      "answer": "A zero diagonal entry means the corresponding variable has zero variance. Correlations involving that variable return `NaN`, matching the undefined zero-denominator calculation."
+    }
+  ],
+  "links": [
+    {
+      "label": "cov",
+      "url": "./cov"
+    },
+    {
+      "label": "corrcoef",
+      "url": "./corrcoef"
+    },
+    {
+      "label": "cov2corr",
+      "url": "./cov2corr"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion.rs"
+  }
+}

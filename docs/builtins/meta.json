@@ -12501,6 +12501,76 @@
       ]
     },
     {
+      "name": "corrcov",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = corrcov(C)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Square covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Correlation matrix corresponding to the covariance matrix."
+            }
+          ]
+        },
+        {
+          "label": "[R, sigma] = corrcov(C)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Square covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Correlation matrix corresponding to the covariance matrix."
+            },
+            {
+              "name": "sigma",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Column vector of standard deviations computed from diag(C)."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.corrcov.INVALID_ARGUMENT",
+          "identifier": "RunMat:corrcov:InvalidArgument",
+          "when": "Input is nonnumeric, complex, not single/double precision, non-square, has negative variances, violates covariance bounds, or too many arguments/outputs are supplied.",
+          "message": "covariance conversion: invalid argument"
+        },
+        {
+          "code": "RM.corrcov.INTERNAL",
+          "identifier": "RunMat:corrcov:Internal",
+          "when": "Internal tensor allocation fails.",
+          "message": "covariance conversion: internal error"
+        }
+      ]
+    },
+    {
       "name": "cos",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -13004,6 +13074,76 @@
           "identifier": "RunMat:cov:Internal",
           "when": "Internal tensor conversion/allocation or covariance computation fails.",
           "message": "cov: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "cov2corr",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = cov2corr(C)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Square covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Correlation matrix corresponding to the covariance matrix."
+            }
+          ]
+        },
+        {
+          "label": "[R, sigma] = cov2corr(C)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Square covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Correlation matrix corresponding to the covariance matrix."
+            },
+            {
+              "name": "sigma",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Column vector of standard deviations computed from diag(C)."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.cov2corr.INVALID_ARGUMENT",
+          "identifier": "RunMat:cov2corr:InvalidArgument",
+          "when": "Input is nonnumeric, complex, not single/double precision, non-square, has negative variances, violates covariance bounds, or too many arguments/outputs are supplied.",
+          "message": "covariance conversion: invalid argument"
+        },
+        {
+          "code": "RM.cov2corr.INTERNAL",
+          "identifier": "RunMat:cov2corr:Internal",
+          "when": "Internal tensor allocation fails.",
+          "message": "covariance conversion: internal error"
         }
       ]
     },
