@@ -13,10 +13,49 @@ pub fn validate_curve_discretization(
 ) -> Result<CurveValidationReport, CurveValidationError> {
     validate_options(options)?;
     let nodes_by_id = nodes_by_id(curves);
+    let source_edges = topology
+        .edges
+        .iter()
+        .map(|edge| (edge.edge_id, edge))
+        .collect::<BTreeMap<_, _>>();
     let mut elements_by_edge = BTreeMap::<u32, Vec<&CurveElement>>::new();
+    let mut max_projection_error_m = 0.0_f64;
+    let mut max_length_error_m = 0.0_f64;
     let mut max_segment_length_m = 0.0_f64;
 
+    for node in &curves.nodes {
+        let source_edge = source_edges.get(&node.source_edge_id).ok_or(
+            CurveValidationError::MissingSourceEdge {
+                source_edge_id: node.source_edge_id,
+            },
+        )?;
+        if !node.parameter.is_finite() || !(0.0..=1.0).contains(&node.parameter) {
+            return Err(CurveValidationError::InvalidNodeParameter {
+                node_id: node.node_id,
+                parameter: node.parameter,
+            });
+        }
+        if options.require_source_edge_projection {
+            let expected = source_edge_point(topology, source_edge, node.parameter)?;
+            let projection_error_m = distance(node.coordinates_m, expected);
+            max_projection_error_m = max_projection_error_m.max(projection_error_m);
+            if projection_error_m > options.max_projection_error_m {
+                return Err(CurveValidationError::NodeProjectionDrift {
+                    node_id: node.node_id,
+                    source_edge_id: node.source_edge_id,
+                    error_m: projection_error_m,
+                    max_error_m: options.max_projection_error_m,
+                });
+            }
+        }
+    }
+
     for element in &curves.elements {
+        source_edges.get(&element.source_edge_id).ok_or(
+            CurveValidationError::MissingSourceEdge {
+                source_edge_id: element.source_edge_id,
+            },
+        )?;
         let left_node = nodes_by_id.get(&element.node_ids[0]).copied().ok_or(
             CurveValidationError::UnknownNode {
                 element_id: element.element_id,
@@ -43,6 +82,18 @@ pub fn validate_curve_discretization(
             return Err(CurveValidationError::InvalidElementLength {
                 element_id: element.element_id,
                 length_m: element.length_m,
+            });
+        }
+        let measured_length_m = distance(left_node.coordinates_m, right_node.coordinates_m);
+        let length_error_m = (element.length_m - measured_length_m).abs();
+        max_length_error_m = max_length_error_m.max(length_error_m);
+        if length_error_m > options.max_length_error_m {
+            return Err(CurveValidationError::ElementLengthMismatch {
+                element_id: element.element_id,
+                reported_length_m: element.length_m,
+                measured_length_m,
+                error_m: length_error_m,
+                max_error_m: options.max_length_error_m,
             });
         }
         max_segment_length_m = max_segment_length_m.max(element.length_m);
@@ -80,6 +131,8 @@ pub fn validate_curve_discretization(
         curve_node_count: curves.nodes.len(),
         curve_element_count: curves.elements.len(),
         max_endpoint_error_m,
+        max_projection_error_m,
+        max_length_error_m,
         max_segment_length_m,
         max_adjacent_length_ratio,
     })
@@ -88,6 +141,10 @@ pub fn validate_curve_discretization(
 fn validate_options(options: CurveValidationOptions) -> Result<(), CurveValidationError> {
     if !options.max_endpoint_error_m.is_finite()
         || options.max_endpoint_error_m < 0.0
+        || !options.max_projection_error_m.is_finite()
+        || options.max_projection_error_m < 0.0
+        || !options.max_length_error_m.is_finite()
+        || options.max_length_error_m < 0.0
         || !options.max_growth_ratio.is_finite()
         || options.max_growth_ratio < 1.0
     {
@@ -148,6 +205,36 @@ fn validate_edge_endpoint(
     Ok(error_m)
 }
 
+fn source_edge_point(
+    topology: &SourceTopologyModel,
+    edge: &SourceTopologyEdge,
+    parameter: f64,
+) -> Result<[f64; 3], CurveValidationError> {
+    let left = topology
+        .vertices
+        .get(edge.node_ids[0] as usize)
+        .filter(|vertex| vertex.vertex_id == edge.node_ids[0])
+        .map(|vertex| vertex.coordinates_m)
+        .ok_or(CurveValidationError::MissingCurveEndpoint {
+            source_edge_id: edge.edge_id,
+            parameter: 0.0,
+        })?;
+    let right = topology
+        .vertices
+        .get(edge.node_ids[1] as usize)
+        .filter(|vertex| vertex.vertex_id == edge.node_ids[1])
+        .map(|vertex| vertex.coordinates_m)
+        .ok_or(CurveValidationError::MissingCurveEndpoint {
+            source_edge_id: edge.edge_id,
+            parameter: 1.0,
+        })?;
+    Ok([
+        left[0] + (right[0] - left[0]) * parameter,
+        left[1] + (right[1] - left[1]) * parameter,
+        left[2] + (right[2] - left[2]) * parameter,
+    ])
+}
+
 fn validate_growth(
     elements_by_edge: &mut BTreeMap<u32, Vec<&CurveElement>>,
     max_growth_ratio: f64,
@@ -185,6 +272,11 @@ fn adjacent_length_ratio(left: f64, right: f64) -> f64 {
 }
 
 fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    if !left.iter().all(|coordinate| coordinate.is_finite())
+        || !right.iter().all(|coordinate| coordinate.is_finite())
+    {
+        return f64::INFINITY;
+    }
     ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
         .sqrt()
 }

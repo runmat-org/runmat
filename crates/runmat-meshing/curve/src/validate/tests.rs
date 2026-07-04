@@ -27,6 +27,8 @@ fn validates_recovered_curve_endpoints_and_growth_evidence() {
     assert_eq!(report.curve_node_count, 5);
     assert_eq!(report.curve_element_count, 4);
     assert_eq!(report.max_endpoint_error_m, 0.0);
+    assert_eq!(report.max_projection_error_m, 0.0);
+    assert_eq!(report.max_length_error_m, 0.0);
     assert_eq!(report.max_adjacent_length_ratio, 1.0);
     assert!(report.max_segment_length_m <= 0.250000000001);
 }
@@ -62,7 +64,9 @@ fn rejects_curve_endpoint_drift_before_surface_meshing() {
         &curves,
         CurveValidationOptions {
             max_endpoint_error_m: 1.0e-4,
+            max_projection_error_m: 1.0,
             max_growth_ratio: 2.0,
+            ..CurveValidationOptions::default()
         },
     )
     .expect_err("endpoint drift should fail");
@@ -72,6 +76,113 @@ fn rejects_curve_endpoint_drift_before_surface_meshing() {
         CurveValidationError::EndpointDrift {
             source_edge_id: 0,
             parameter: 0.0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rejects_curve_node_projection_drift_before_surface_meshing() {
+    let topology = line_topology(1.0);
+    let curves = CurveDiscretization {
+        nodes: vec![
+            CurveNode {
+                node_id: 0,
+                source_edge_id: 0,
+                parameter: 0.0,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            CurveNode {
+                node_id: 1,
+                source_edge_id: 0,
+                parameter: 0.5,
+                coordinates_m: [0.5, 0.01, 0.0],
+            },
+            CurveNode {
+                node_id: 2,
+                source_edge_id: 0,
+                parameter: 1.0,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+        ],
+        elements: vec![
+            CurveElement {
+                element_id: 0,
+                source_edge_id: 0,
+                node_ids: [0, 1],
+                length_m: (0.5_f64.powi(2) + 0.01_f64.powi(2)).sqrt(),
+            },
+            CurveElement {
+                element_id: 1,
+                source_edge_id: 0,
+                node_ids: [1, 2],
+                length_m: (0.5_f64.powi(2) + 0.01_f64.powi(2)).sqrt(),
+            },
+        ],
+    };
+
+    let err = validate_curve_discretization(
+        &topology,
+        &curves,
+        CurveValidationOptions {
+            max_projection_error_m: 1.0e-4,
+            ..CurveValidationOptions::default()
+        },
+    )
+    .expect_err("interior curve node drift should fail");
+
+    assert!(matches!(
+        err,
+        CurveValidationError::NodeProjectionDrift {
+            node_id: 1,
+            source_edge_id: 0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rejects_curve_element_length_mismatch() {
+    let topology = line_topology(1.0);
+    let curves = CurveDiscretization {
+        nodes: vec![
+            CurveNode {
+                node_id: 0,
+                source_edge_id: 0,
+                parameter: 0.0,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            CurveNode {
+                node_id: 1,
+                source_edge_id: 0,
+                parameter: 1.0,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+        ],
+        elements: vec![CurveElement {
+            element_id: 0,
+            source_edge_id: 0,
+            node_ids: [0, 1],
+            length_m: 0.75,
+        }],
+    };
+
+    let err = validate_curve_discretization(
+        &topology,
+        &curves,
+        CurveValidationOptions {
+            max_length_error_m: 1.0e-4,
+            ..CurveValidationOptions::default()
+        },
+    )
+    .expect_err("reported element length must match node coordinates");
+
+    assert!(matches!(
+        err,
+        CurveValidationError::ElementLengthMismatch {
+            element_id: 0,
+            reported_length_m: 0.75,
+            measured_length_m: 1.0,
             ..
         }
     ));
@@ -123,6 +234,7 @@ fn rejects_excessive_adjacent_curve_growth() {
         CurveValidationOptions {
             max_endpoint_error_m: 1.0e-8,
             max_growth_ratio: 2.0,
+            ..CurveValidationOptions::default()
         },
     )
     .expect_err("adjacent growth should fail");

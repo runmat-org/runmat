@@ -140,10 +140,9 @@ fn rejects_invalid_curve_boundary_before_surface_triangulation() {
 
     assert!(matches!(
         err,
-        SurfaceDiscretizationError::InvalidCurveBoundary(CurveValidationError::EndpointDrift {
-            source_edge_id: 0,
-            parameter: 0.0,
-            ..
-        })
+        SurfaceDiscretizationError::InvalidCurveBoundary(
+            CurveValidationError::EndpointDrift { .. }
+                | CurveValidationError::ElementLengthMismatch { .. }
+        )
     ));
 }

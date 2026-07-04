@@ -126,6 +126,8 @@ fn tetra_surface() -> SurfaceDiscretization {
             curve_node_count: 12,
             curve_element_count: 6,
             max_endpoint_error_m: 0.0,
+            max_projection_error_m: 0.0,
+            max_length_error_m: 0.0,
             max_segment_length_m: 1.0,
             max_adjacent_length_ratio: 1.0,
         }),

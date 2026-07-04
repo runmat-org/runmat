@@ -184,7 +184,7 @@ pub fn discretize_cad_surfaces_with_curves(
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
     let curve_boundary_validation =
-        validate_curve_discretization(topology, curves, CurveValidationOptions::default())
+        validate_curve_discretization(topology, curves, cad_curve_validation_options())
             .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
     let mut nodes = topology
         .vertices
@@ -258,7 +258,7 @@ pub fn discretize_cad_topology_surfaces_with_curves(
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
     let curve_boundary_validation =
-        validate_curve_discretization(topology, curves, CurveValidationOptions::default())
+        validate_curve_discretization(topology, curves, cad_curve_validation_options())
             .map_err(SurfaceDiscretizationError::InvalidCurveBoundary)?;
     let mut nodes = topology
         .vertices
@@ -366,6 +366,13 @@ fn cad_face_surface_seed(
         area_m2: cad_face.area_m2,
         unit_normal: cad_face.unit_normal,
     })
+}
+
+fn cad_curve_validation_options() -> CurveValidationOptions {
+    CurveValidationOptions {
+        require_source_edge_projection: false,
+        ..CurveValidationOptions::default()
+    }
 }
 
 fn cad_face_loop_source_edge_ids(
