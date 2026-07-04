@@ -1,4 +1,4 @@
-use super::{RefinementIndicatorAvailability, RefinementIndicatorKey};
+use crate::adaptive::{RefinementIndicatorAvailability, RefinementIndicatorKey};
 
 pub(super) fn key(namespace: &str, name: &str) -> RefinementIndicatorKey {
     RefinementIndicatorKey::new(namespace, name)
