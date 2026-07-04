@@ -1,5 +1,4 @@
 use super::*;
-use crate::contracts::AnalysisMeshArtifact;
 use fixtures::*;
 
 #[test]
@@ -45,19 +44,4 @@ fn rejects_solid_mesh_with_unclassified_plc_shell_evidence() {
             reason: "unclassified_plc_shell_nesting".to_string(),
         }
     );
-}
-
-fn solid_tetrahedron_mesh_with_plc_input_evidence() -> AnalysisMeshArtifact {
-    let mut mesh = valid_tetrahedron_mesh();
-    mesh.backend.backend = "solid".to_string();
-    mesh.backend.algorithm = "plc_tetrahedron/v1".to_string();
-    mesh.backend.plc_input_node_count = 4;
-    mesh.backend.plc_input_facet_count = 4;
-    mesh.backend.plc_input_protected_edge_count = 6;
-    mesh.backend.plc_input_boundary_component_count = 1;
-    mesh.backend.plc_input_boundary_component_node_count = 4;
-    mesh.backend.plc_input_max_boundary_component_node_count = 4;
-    mesh.backend.plc_input_shell_nesting_classified = true;
-    mesh.backend.plc_input_outer_shell_count = 1;
-    mesh
 }

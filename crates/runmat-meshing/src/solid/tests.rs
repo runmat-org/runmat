@@ -1,11 +1,13 @@
 use super::*;
+use std::collections::BTreeSet;
+
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationOptions,
-    MeshBackendKind, MeshTargetSize, QualityThresholds, VolumeMeshingOptions,
+    MeshBackendKind, MeshTargetSize, QualityThresholds, SourceEntityKind, VolumeMeshingOptions,
 };
 
 #[test]
@@ -54,8 +56,32 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_nested_shell_count, 0);
     assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 0);
+    assert!(mesh.boundary_faces.iter().all(|face| face
+        .provenance
+        .iter()
+        .any(|provenance| provenance.source_entity_kind == SourceEntityKind::Face)));
+    let source_edge_count = mesh
+        .boundary_edges
+        .iter()
+        .flat_map(|edge| edge.provenance.iter())
+        .filter(|provenance| provenance.source_entity_kind == SourceEntityKind::Edge)
+        .map(|provenance| provenance.source_entity_id.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+    assert_eq!(
+        source_edge_count,
+        mesh.backend.plc_input_protected_edge_count
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("single Tetrahedron solid mesh should be solve-ready");
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            require_boundary_source_edge_provenance: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("single Tetrahedron solid mesh should preserve every protected source edge");
 }
 
 #[test]

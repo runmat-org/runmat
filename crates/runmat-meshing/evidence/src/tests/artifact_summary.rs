@@ -28,7 +28,13 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             node_ids: vec![1, 2, 3],
             adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
             region_ids: vec!["fixed".to_string()],
-            provenance: Vec::new(),
+            provenance: vec![MeshEntityProvenance {
+                source_geometry_id: "geo".to_string(),
+                source_geometry_revision: 1,
+                source_entity_kind: SourceEntityKind::Face,
+                source_entity_id: "source_face_1".to_string(),
+                region_ids: vec!["fixed".to_string()],
+            }],
         }],
         boundary_edges: vec![
             boundary_edge("edge_1", [1, 2]),

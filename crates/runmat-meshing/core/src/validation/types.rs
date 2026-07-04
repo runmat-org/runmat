@@ -18,6 +18,7 @@ pub struct AnalysisMeshValidationOptions {
     pub min_boundary_area_ratio: f64,
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
+    pub require_boundary_source_edge_provenance: bool,
     pub require_no_unrecovered_tetrahedron_components: bool,
     pub require_no_unrepaired_exact_quality: bool,
     pub required_boundary_region_ids: Vec<String>,
@@ -40,6 +41,7 @@ impl Default for AnalysisMeshValidationOptions {
             min_boundary_area_ratio: 0.90,
             min_boundary_face_recovery_ratio: 0.0,
             min_boundary_edge_recovery_ratio: 0.0,
+            require_boundary_source_edge_provenance: false,
             require_no_unrecovered_tetrahedron_components: false,
             require_no_unrepaired_exact_quality: false,
             required_boundary_region_ids: Vec::new(),
@@ -162,6 +164,13 @@ pub enum AnalysisMeshValidationError {
     MissingPlcInputEvidence {
         reason: String,
     },
+    MissingBoundarySourceFaceProvenance {
+        face_id: String,
+    },
+    MissingBoundarySourceEdgeProvenance {
+        recovered_edge_count: usize,
+        required_edge_count: usize,
+    },
     UnrecoveredTetrahedronComponentsPresent {
         component_count: usize,
     },
@@ -251,6 +260,12 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
             "boundary_edge_recovery_failed"
         }
         AnalysisMeshValidationError::MissingPlcInputEvidence { .. } => "missing_plc_input_evidence",
+        AnalysisMeshValidationError::MissingBoundarySourceFaceProvenance { .. } => {
+            "missing_boundary_source_face_provenance"
+        }
+        AnalysisMeshValidationError::MissingBoundarySourceEdgeProvenance { .. } => {
+            "missing_boundary_source_edge_provenance"
+        }
         AnalysisMeshValidationError::UnrecoveredTetrahedronComponentsPresent { .. } => {
             "unrecovered_tetrahedron_components_present"
         }

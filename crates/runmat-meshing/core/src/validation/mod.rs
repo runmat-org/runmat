@@ -45,6 +45,9 @@ use recovery::{
 mod regions;
 use regions::{validate_required_boundary_regions, validate_required_material_regions};
 
+mod source_provenance;
+use source_provenance::validate_boundary_source_provenance;
+
 mod types;
 pub use types::{
     analysis_mesh_validation_error_code, AnalysisMeshValidationError, AnalysisMeshValidationOptions,
@@ -98,6 +101,7 @@ pub fn validate_analysis_mesh_with_options(
     validate_required_boundary_regions(mesh, &options.required_boundary_region_ids)?;
     validate_required_material_regions(mesh, &options.required_material_region_ids)?;
     validate_plc_input_evidence(mesh)?;
+    validate_boundary_source_provenance(mesh, options.require_boundary_source_edge_provenance)?;
     validate_no_unrecovered_tetrahedron_components(
         mesh,
         options.require_no_unrecovered_tetrahedron_components,

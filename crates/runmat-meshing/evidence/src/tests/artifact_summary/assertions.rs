@@ -63,6 +63,7 @@ pub(super) fn assert_validation_evidence(validation: &MeshValidationEvidence) {
     assert_eq!(validation.min_coverage_sample_ratio, 1.0);
     assert_eq!(validation.coverage_sample_points_m, vec![[0.1, 0.1, 0.1]]);
     assert!(validation.require_no_unrecovered_tetrahedron_components);
+    assert!(!validation.require_boundary_source_edge_provenance);
     assert!(!validation.require_no_unrepaired_exact_quality);
     assert_eq!(validation.unrecovered_tetrahedron_component_count, 0);
     assert_eq!(validation.unrepaired_exact_quality_total_count, 9);

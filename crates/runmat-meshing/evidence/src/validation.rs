@@ -49,6 +49,8 @@ pub struct MeshValidationEvidence {
     pub min_boundary_face_recovery_ratio: f64,
     pub min_boundary_edge_recovery_ratio: f64,
     #[serde(default)]
+    pub require_boundary_source_edge_provenance: bool,
+    #[serde(default)]
     pub require_no_unrecovered_tetrahedron_components: bool,
     #[serde(default)]
     pub require_no_unrepaired_exact_quality: bool,
@@ -96,6 +98,7 @@ pub(super) fn validation_options_from_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
+        require_boundary_source_edge_provenance: validation.require_boundary_source_edge_provenance,
         require_no_unrecovered_tetrahedron_components: validation
             .require_no_unrecovered_tetrahedron_components,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,
@@ -144,6 +147,7 @@ pub(super) fn validation_evidence(
         min_boundary_area_ratio: validation.min_boundary_area_ratio,
         min_boundary_face_recovery_ratio: validation.min_boundary_face_recovery_ratio,
         min_boundary_edge_recovery_ratio: validation.min_boundary_edge_recovery_ratio,
+        require_boundary_source_edge_provenance: validation.require_boundary_source_edge_provenance,
         require_no_unrecovered_tetrahedron_components: validation
             .require_no_unrecovered_tetrahedron_components,
         require_no_unrepaired_exact_quality: validation.require_no_unrepaired_exact_quality,

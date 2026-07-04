@@ -3,7 +3,8 @@ use runmat_meshing_core::{
     contracts::RefinementIndicatorMode,
     contracts::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshProvenance,
-        AnalysisVolumeElement, BoundaryElementKind, VolumeElementKind,
+        AnalysisVolumeElement, BoundaryElementKind, MeshEntityProvenance, SourceEntityKind,
+        VolumeElementKind,
     },
     contracts::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::{AnalysisMeshQualityReport, ElementQuality},
