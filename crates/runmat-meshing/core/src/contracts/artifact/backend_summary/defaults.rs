@@ -80,6 +80,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_volume_edge_source_edge_recovery_item_count: 0,
             tetrahedron_boundary_edge_source_edge_recovery_item_count: 0,
             tetrahedron_interior_edge_source_edge_recovery_item_count: 0,
+            tetrahedron_absent_edge_source_edge_recovery_item_count: 0,
             tetrahedron_boundary_face_source_face_recovery_item_count: 0,
             tetrahedron_interior_face_source_face_recovery_item_count: 0,
             tetrahedron_volume_face_source_face_recovery_item_count: 0,

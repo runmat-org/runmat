@@ -121,6 +121,10 @@ fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["absent_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_absent_source_edge_boundary_faces"],
         2
     );
