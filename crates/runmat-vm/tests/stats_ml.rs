@@ -209,3 +209,16 @@ fn distance_helper_surface_executes_from_scripts() {
     assert!(has_num(&vars, 1.0));
     assert!(has_num(&vars, 3.0));
 }
+
+#[test]
+fn cvpartition_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "c = cvpartition(6, 'KFold', 3); te = test(c, 2); tr = training(c, 'all'); nts = c.NumTestSets; ts = c.TestSize(1); h = cvpartition([1;1;2;2], 'Holdout', 0.5); hm = test(h); hs = h.TestSize;",
+    )
+    .expect("cvpartition script");
+    assert!(has_logical_shape(&vars, &[6, 1]));
+    assert!(has_logical_shape(&vars, &[6, 3]));
+    assert!(has_logical_shape(&vars, &[4, 1]));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 2.0));
+}

@@ -17147,6 +17147,195 @@
       ]
     },
     {
+      "name": "cvpartition",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "c = cvpartition(n, 'KFold', k)",
+          "inputs": [
+            {
+              "name": "nOrStratvar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation count or stratification variable."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Partition kind such as KFold, Holdout, Leaveout, Resubstitution, or CustomPartition."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Partition parameter such as fold count, holdout fraction, holdout count, or custom test sets."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cross-validation partition object."
+            }
+          ]
+        },
+        {
+          "label": "c = cvpartition(stratvar, 'KFold', k, 'Stratify', tf)",
+          "inputs": [
+            {
+              "name": "nOrStratvar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation count or stratification variable."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Partition kind such as KFold, Holdout, Leaveout, Resubstitution, or CustomPartition."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Partition parameter such as fold count, holdout fraction, holdout count, or custom test sets."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options including Stratify."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cross-validation partition object."
+            }
+          ]
+        },
+        {
+          "label": "c = cvpartition(n, 'Holdout', p)",
+          "inputs": [
+            {
+              "name": "nOrStratvar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation count or stratification variable."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Partition kind such as KFold, Holdout, Leaveout, Resubstitution, or CustomPartition."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Partition parameter such as fold count, holdout fraction, holdout count, or custom test sets."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cross-validation partition object."
+            }
+          ]
+        },
+        {
+          "label": "c = cvpartition(n, 'Leaveout')",
+          "inputs": [
+            {
+              "name": "nOrStratvar",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Observation count or stratification variable."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Partition kind such as KFold, Holdout, Leaveout, Resubstitution, or CustomPartition."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cross-validation partition object."
+            }
+          ]
+        },
+        {
+          "label": "c = cvpartition('CustomPartition', testSets)",
+          "inputs": [
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Partition kind such as KFold, Holdout, Leaveout, Resubstitution, or CustomPartition."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Partition parameter such as fold count, holdout fraction, holdout count, or custom test sets."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cross-validation partition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CVPARTITION.INVALID_ARGUMENT",
+          "identifier": "RunMat:cvpartition:InvalidArgument",
+          "when": "Inputs, partition kinds, dimensions, indices, or name-value options are malformed.",
+          "message": "cvpartition: invalid argument"
+        },
+        {
+          "code": "RM.CVPARTITION.INTERNAL",
+          "identifier": "RunMat:cvpartition:Internal",
+          "when": "RunMat cannot allocate or construct a partition output.",
+          "message": "cvpartition: internal error"
+        }
+      ]
+    },
+    {
       "name": "damp",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -88588,6 +88777,76 @@
       ]
     },
     {
+      "name": "test",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mask = test(c)",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
+        },
+        {
+          "label": "mask = test(c, i)",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            },
+            {
+              "name": "i",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set index, vector of indices, or 'all'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CVPARTITION.INVALID_ARGUMENT",
+          "identifier": "RunMat:cvpartition:InvalidArgument",
+          "when": "Inputs, partition kinds, dimensions, indices, or name-value options are malformed.",
+          "message": "cvpartition: invalid argument"
+        },
+        {
+          "code": "RM.CVPARTITION.INTERNAL",
+          "identifier": "RunMat:cvpartition:Internal",
+          "when": "RunMat cannot allocate or construct a partition output.",
+          "message": "cvpartition: internal error"
+        }
+      ]
+    },
+    {
       "name": "text",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -90135,6 +90394,76 @@
           "identifier": "RunMat:trace:Internal",
           "when": "Runtime cannot materialize or transport trace results.",
           "message": "trace: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "training",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mask = training(c)",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
+        },
+        {
+          "label": "mask = training(c, i)",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            },
+            {
+              "name": "i",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set index, vector of indices, or 'all'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CVPARTITION.INVALID_ARGUMENT",
+          "identifier": "RunMat:cvpartition:InvalidArgument",
+          "when": "Inputs, partition kinds, dimensions, indices, or name-value options are malformed.",
+          "message": "cvpartition: invalid argument"
+        },
+        {
+          "code": "RM.CVPARTITION.INTERNAL",
+          "identifier": "RunMat:cvpartition:Internal",
+          "when": "RunMat cannot allocate or construct a partition output.",
+          "message": "cvpartition: internal error"
         }
       ]
     },
