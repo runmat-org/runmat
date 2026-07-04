@@ -186,6 +186,22 @@ fn bootstrp_surface_executes_from_scripts() {
 }
 
 #[test]
+fn dividerand_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "rng('default'); [tr,val,te] = dividerand(10, 0.6, 0.2, 0.2); ntr = numel(tr); nv = numel(val); nt = numel(te); total = ntr + nv + nt; first = tr(1);",
+    )
+    .expect("dividerand script");
+    assert!(has_tensor_shape(&vars, &[1, 6]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
+    assert!(has_num(&vars, 6.0));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 10.0));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if (1.0..=10.0).contains(value))));
+}
+
+#[test]
 fn ecdf_and_cdfplot_surface_executes_from_scripts() {
     let _plot_guard = disable_interactive_plots_for_test();
     let vars = execute_source(

@@ -21510,6 +21510,118 @@
       ]
     },
     {
+      "name": "dividerand",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[trainInd, valInd, testInd] = dividerand(Q)",
+          "inputs": [
+            {
+              "name": "Q",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of targets to divide."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "trainInd",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based training-set indices."
+            },
+            {
+              "name": "valInd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based validation-set indices."
+            },
+            {
+              "name": "testInd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set indices."
+            }
+          ]
+        },
+        {
+          "label": "[trainInd, valInd, testInd] = dividerand(Q, trainRatio, valRatio, testRatio)",
+          "inputs": [
+            {
+              "name": "Q",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of targets to divide."
+            },
+            {
+              "name": "trainRatio",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.7",
+              "description": "Training-set allocation ratio."
+            },
+            {
+              "name": "valRatio",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.15",
+              "description": "Validation-set allocation ratio."
+            },
+            {
+              "name": "testRatio",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.15",
+              "description": "Test-set allocation ratio."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "trainInd",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based training-set indices."
+            },
+            {
+              "name": "valInd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based validation-set indices."
+            },
+            {
+              "name": "testInd",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.dividerand.INVALID_ARGUMENT",
+          "identifier": "RunMat:dividerand:InvalidArgument",
+          "when": "Inputs, dimensions, replacement flags, or weights are malformed.",
+          "message": "sampling: invalid argument"
+        },
+        {
+          "code": "RM.dividerand.INTERNAL",
+          "identifier": "RunMat:dividerand:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "sampling: internal error"
+        }
+      ]
+    },
+    {
       "name": "dlmread",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -12,6 +12,8 @@ use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+const MAX_DIVIDERAND_Q: usize = 10_000_000;
+
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SAMPLING.INVALID_ARGUMENT",
     identifier: None,
@@ -85,6 +87,30 @@ const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Discrete uniform random sample.",
 }];
 
+const OUTPUT_DIVIDERAND: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "trainInd",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based training-set indices.",
+    },
+    BuiltinParamDescriptor {
+        name: "valInd",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based validation-set indices.",
+    },
+    BuiltinParamDescriptor {
+        name: "testInd",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based test-set indices.",
+    },
+];
+
 const OUTPUT_BOOTSTAT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bootstat",
     ty: BuiltinParamType::NumericArray,
@@ -134,6 +160,38 @@ const PARAM_K: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Number of samples.",
 };
 
+const PARAM_Q: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "Q",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of targets to divide.",
+};
+
+const PARAM_TRAIN_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "trainRatio",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0.7"),
+    description: "Training-set allocation ratio.",
+};
+
+const PARAM_VAL_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "valRatio",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0.15"),
+    description: "Validation-set allocation ratio.",
+};
+
+const PARAM_TEST_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "testRatio",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0.15"),
+    description: "Test-set allocation ratio.",
+};
+
 const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "options",
     ty: BuiltinParamType::Any,
@@ -181,6 +239,13 @@ const INPUTS_N_K_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_N, PARAM_K, PARAM
 const INPUTS_N: [BuiltinParamDescriptor; 1] = [PARAM_N];
 const INPUTS_N_SZ: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_SZ];
 const INPUTS_BOOTSTRP: [BuiltinParamDescriptor; 3] = [PARAM_NBOOT, PARAM_BOOTFUN, PARAM_BOOT_DATA];
+const INPUTS_DIVIDERAND_Q: [BuiltinParamDescriptor; 1] = [PARAM_Q];
+const INPUTS_DIVIDERAND_RATIOS: [BuiltinParamDescriptor; 4] = [
+    PARAM_Q,
+    PARAM_TRAIN_RATIO,
+    PARAM_VAL_RATIO,
+    PARAM_TEST_RATIO,
+];
 
 const DATASAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
@@ -256,6 +321,19 @@ const BOOTSTRP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "[bootstat, bootsam] = bootstrp(___)",
         inputs: &INPUTS_BOOTSTRP,
         outputs: &OUTPUT_BOOTSTAT_BOOTSAM,
+    },
+];
+
+const DIVIDERAND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "[trainInd, valInd, testInd] = dividerand(Q)",
+        inputs: &INPUTS_DIVIDERAND_Q,
+        outputs: &OUTPUT_DIVIDERAND,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[trainInd, valInd, testInd] = dividerand(Q, trainRatio, valRatio, testRatio)",
+        inputs: &INPUTS_DIVIDERAND_RATIOS,
+        outputs: &OUTPUT_DIVIDERAND,
     },
 ];
 
@@ -1056,6 +1134,197 @@ pub mod unidrnd {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DividerandArgs {
+    q: usize,
+    ratios: [f64; 3],
+}
+
+async fn parse_dividerand_args(args: Vec<Value>) -> BuiltinResult<DividerandArgs> {
+    if args.len() != 1 && args.len() != 4 {
+        return Err(sampling_error(
+            "dividerand",
+            "dividerand: expected Q or Q, trainRatio, valRatio, testRatio",
+        ));
+    }
+    let q = parse_nonnegative_usize(
+        "dividerand",
+        gathered(args[0].clone(), "dividerand").await?,
+        "Q",
+    )?;
+    let ratios = if args.len() == 1 {
+        [0.7, 0.15, 0.15]
+    } else {
+        [
+            parse_nonnegative_scalar_ratio(
+                gathered(args[1].clone(), "dividerand").await?,
+                "trainRatio",
+            )?,
+            parse_nonnegative_scalar_ratio(
+                gathered(args[2].clone(), "dividerand").await?,
+                "valRatio",
+            )?,
+            parse_nonnegative_scalar_ratio(
+                gathered(args[3].clone(), "dividerand").await?,
+                "testRatio",
+            )?,
+        ]
+    };
+    if ratios.iter().sum::<f64>() <= 0.0 {
+        return Err(sampling_error(
+            "dividerand",
+            "dividerand: at least one ratio must be positive",
+        ));
+    }
+    Ok(DividerandArgs { q, ratios })
+}
+
+fn parse_nonnegative_usize(name: &str, value: Value, label: &str) -> BuiltinResult<usize> {
+    let tensor = tensor::value_into_tensor_for(name, value)
+        .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
+    if tensor.data.len() != 1 {
+        return Err(sampling_error(
+            name,
+            format!("{name}: {label} must be a scalar"),
+        ));
+    }
+    let raw = tensor.data[0];
+    if !raw.is_finite() || raw < 0.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+        return Err(sampling_error(
+            name,
+            format!("{name}: {label} must be a nonnegative integer"),
+        ));
+    }
+    Ok(raw as usize)
+}
+
+fn parse_nonnegative_scalar_ratio(value: Value, label: &str) -> BuiltinResult<f64> {
+    let tensor = tensor::value_into_tensor_for("dividerand", value)
+        .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))?;
+    if tensor.data.len() != 1 {
+        return Err(sampling_error(
+            "dividerand",
+            format!("dividerand: {label} must be a scalar"),
+        ));
+    }
+    let raw = tensor.data[0];
+    if !raw.is_finite() || raw < 0.0 {
+        return Err(sampling_error(
+            "dividerand",
+            format!("dividerand: {label} must be a finite nonnegative scalar"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn dividerand_counts(q: usize, ratios: [f64; 3]) -> [usize; 3] {
+    if q == 0 {
+        return [0, 0, 0];
+    }
+    let max_ratio = ratios.iter().copied().fold(0.0, f64::max);
+    let normalized = ratios.map(|ratio| ratio / max_ratio);
+    let total = normalized.iter().sum::<f64>();
+    let mut counts = [0usize; 3];
+    let mut remainders = [(0usize, 0.0f64); 3];
+    let mut assigned = 0usize;
+    for (idx, ratio) in normalized.iter().enumerate() {
+        let exact = (*ratio / total) * q as f64;
+        let count = exact.floor().min(q as f64) as usize;
+        counts[idx] = count;
+        assigned += count;
+        remainders[idx] = (idx, exact - count as f64);
+    }
+    remainders.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    for (idx, _) in remainders.iter().take(q.saturating_sub(assigned)) {
+        counts[*idx] += 1;
+    }
+    counts
+}
+
+fn dividerand_permutation(q: usize) -> BuiltinResult<Vec<usize>> {
+    if q > MAX_DIVIDERAND_Q {
+        return Err(sampling_error(
+            "dividerand",
+            format!("dividerand: Q exceeds the maximum supported value of {MAX_DIVIDERAND_Q}"),
+        ));
+    }
+    let uniforms = random::generate_uniform(q, "dividerand")?;
+    let mut pool = Vec::new();
+    pool.try_reserve_exact(q)
+        .map_err(|_| sampling_error("dividerand", "dividerand: requested output is too large"))?;
+    pool.extend(0..q);
+    for (draw, u) in uniforms.into_iter().enumerate() {
+        let span = q - draw;
+        let offset = ((u * span as f64).floor() as usize).min(span - 1);
+        pool.swap(draw, draw + offset);
+    }
+    Ok(pool)
+}
+
+fn row_index_value(indices: &[usize]) -> BuiltinResult<Value> {
+    let mut data = Vec::new();
+    data.try_reserve_exact(indices.len())
+        .map_err(|_| sampling_error("dividerand", "dividerand: requested output is too large"))?;
+    data.extend(indices.iter().map(|idx| (idx + 1) as f64));
+    Tensor::new(data, vec![1, indices.len()])
+        .map(Value::Tensor)
+        .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))
+}
+
+fn dividerand_compute(args: DividerandArgs) -> BuiltinResult<[Value; 3]> {
+    let counts = dividerand_counts(args.q, args.ratios);
+    let permutation = if args.q == 0 {
+        Vec::new()
+    } else {
+        dividerand_permutation(args.q)?
+    };
+    let train_end = counts[0];
+    let val_end = train_end + counts[1];
+    Ok([
+        row_index_value(&permutation[..train_end])?,
+        row_index_value(&permutation[train_end..val_end])?,
+        row_index_value(&permutation[val_end..])?,
+    ])
+}
+
+pub mod dividerand {
+    use super::*;
+    sampling_descriptor!(
+        "dividerand",
+        DIVIDERAND_SIGNATURES,
+        BuiltinOutputMode::ByRequestedOutputCount
+    );
+
+    #[runtime_builtin(
+        name = "dividerand",
+        category = "stats/random",
+        summary = "Divide target indices randomly into training, validation, and test sets.",
+        keywords = "dividerand,random,partition,train,validation,test,statistics,machine-learning",
+        type_resolver(super::sampling_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::random::sampling::dividerand"
+    )]
+    pub(crate) async fn dividerand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        let parsed = super::parse_dividerand_args(args).await?;
+        let [train, val, test] = super::dividerand_compute(parsed)?;
+        match crate::output_count::current_output_count() {
+            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(1) => Ok(Value::OutputList(vec![train])),
+            Some(2) => Ok(Value::OutputList(vec![train, val])),
+            Some(3) => Ok(Value::OutputList(vec![train, val, test])),
+            None => Ok(train),
+            Some(_) => Err(super::sampling_error(
+                "dividerand",
+                "dividerand: too many output arguments",
+            )),
+        }
+    }
+}
+
 struct BootstrpArgs {
     nboot: usize,
     bootfun: Value,
@@ -1566,6 +1835,123 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dividerand_partitions_indices_into_row_vectors() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let out = block_on(dividerand::dividerand_builtin(vec![
+            Value::Num(10.0),
+            Value::Num(0.6),
+            Value::Num(0.2),
+            Value::Num(0.2),
+        ]))
+        .unwrap();
+        match out {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 3);
+                let mut seen = Vec::new();
+                for (value, expected_len) in values.iter().zip([6usize, 2, 2]) {
+                    match value {
+                        Value::Tensor(t) => {
+                            assert_eq!(t.shape, vec![1, expected_len]);
+                            seen.extend_from_slice(&t.data);
+                        }
+                        other => panic!("expected tensor indices, got {other:?}"),
+                    }
+                }
+                seen.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                assert_eq!(seen, (1..=10).map(|idx| idx as f64).collect::<Vec<_>>());
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dividerand_supports_defaults_and_empty_partitions() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        {
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let out = block_on(dividerand::dividerand_builtin(vec![Value::Num(4.0)])).unwrap();
+            match out {
+                Value::OutputList(values) => {
+                    let shapes = values
+                        .iter()
+                        .map(|value| match value {
+                            Value::Tensor(t) => t.shape.clone(),
+                            other => panic!("expected tensor indices, got {other:?}"),
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(shapes, vec![vec![1, 3], vec![1, 1], vec![1, 0]]);
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+
+        random::reset_rng();
+        {
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let out = block_on(dividerand::dividerand_builtin(vec![
+                Value::Num(3.0),
+                Value::Num(1.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]))
+            .unwrap();
+            match out {
+                Value::OutputList(values) => {
+                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape == vec![1, 3]));
+                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape == vec![1, 0]));
+                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape == vec![1, 0]));
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn dividerand_rejects_bad_arguments() {
+        let err = block_on(dividerand::dividerand_builtin(vec![
+            Value::Num(3.5),
+            Value::Num(0.7),
+            Value::Num(0.2),
+            Value::Num(0.1),
+        ]))
+        .unwrap_err();
+        assert!(err.message().contains("nonnegative integer"));
+
+        let err = block_on(dividerand::dividerand_builtin(vec![
+            Value::Num(3.0),
+            Value::Num(0.0),
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]))
+        .unwrap_err();
+        assert!(err.message().contains("at least one ratio"));
+
+        let err = block_on(dividerand::dividerand_builtin(vec![
+            Value::Num(3.0),
+            Value::Num(1.0),
+        ]))
+        .unwrap_err();
+        assert!(err.message().contains("expected Q"));
+    }
+
+    #[test]
+    fn dividerand_handles_extreme_ratios_and_rejects_excessive_q() {
+        assert_eq!(
+            dividerand_counts(10, [f64::MAX, f64::MAX, f64::MAX]),
+            [4, 3, 3]
+        );
+
+        let err = block_on(dividerand::dividerand_builtin(vec![Value::Num(
+            (MAX_DIVIDERAND_Q + 1) as f64,
+        )]))
+        .unwrap_err();
+        assert!(err.message().contains("maximum supported value"));
     }
 
     #[test]
