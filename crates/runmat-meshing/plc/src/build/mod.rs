@@ -23,6 +23,15 @@ pub fn build_protected_boundary_complex(
     if surface.elements.is_empty() {
         return Err(PlcBuildError::EmptySurface);
     }
+    let has_protected_source_edges = surface.elements.iter().any(|element| {
+        element
+            .source_edge_ids
+            .iter()
+            .any(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
+    });
+    if has_protected_source_edges && surface.curve_boundary_validation.is_none() {
+        return Err(PlcBuildError::MissingCurveBoundaryValidation);
+    }
 
     let surface_nodes = surface
         .nodes
@@ -134,6 +143,20 @@ pub fn build_protected_boundary_complex(
     evidence
         .entity_counts
         .insert("protected_edges".to_string(), protected_edges.len());
+    if let Some(curve_boundary_validation) = &surface.curve_boundary_validation {
+        evidence.entity_counts.insert(
+            "validated_curve_source_edges".to_string(),
+            curve_boundary_validation.source_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "validated_curve_nodes".to_string(),
+            curve_boundary_validation.curve_node_count,
+        );
+        evidence.entity_counts.insert(
+            "validated_curve_elements".to_string(),
+            curve_boundary_validation.curve_element_count,
+        );
+    }
 
     let mut plc = ProtectedBoundaryComplex {
         complex_id: "plc_surface_boundary".to_string(),

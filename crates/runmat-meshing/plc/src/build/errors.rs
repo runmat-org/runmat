@@ -3,6 +3,7 @@ use crate::validate::PlcValidationError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlcBuildError {
     EmptySurface,
+    MissingCurveBoundaryValidation,
     MissingSurfaceNode {
         element_id: u32,
         node_id: u32,
@@ -31,6 +32,10 @@ impl std::fmt::Display for PlcBuildError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptySurface => write!(formatter, "surface mesh has no facets for PLC build"),
+            Self::MissingCurveBoundaryValidation => write!(
+                formatter,
+                "surface mesh has protected source edges but no curve-boundary validation evidence"
+            ),
             Self::MissingSurfaceNode {
                 element_id,
                 node_id,

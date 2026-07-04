@@ -1,5 +1,6 @@
 use super::*;
 use crate::validate::PlcValidationError;
+use runmat_meshing_core::curve::CurveValidationReport;
 use runmat_meshing_core::surface::{SurfaceDiscretization, SurfaceElement, SurfaceNode};
 
 #[test]
@@ -12,6 +13,18 @@ fn builds_valid_plc_from_closed_tetra_surface() {
     assert_eq!(plc.facets.len(), 4);
     assert_eq!(plc.protected_edges.len(), 6);
     assert_eq!(plc.evidence.entity_counts["facets"], 4);
+    assert_eq!(plc.evidence.entity_counts["validated_curve_elements"], 6);
+}
+
+#[test]
+fn rejects_surface_with_protected_edges_without_curve_boundary_evidence() {
+    let mut surface = tetra_surface();
+    surface.curve_boundary_validation = None;
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::MissingCurveBoundaryValidation)
+    );
 }
 
 #[test]
@@ -64,7 +77,14 @@ fn tetra_surface() -> SurfaceDiscretization {
             element(2, [1, 2, 3], [1, 5, 4]),
             element(3, [2, 0, 3], [2, 3, 5]),
         ],
-        curve_boundary_validation: None,
+        curve_boundary_validation: Some(CurveValidationReport {
+            source_edge_count: 6,
+            curve_node_count: 12,
+            curve_element_count: 6,
+            max_endpoint_error_m: 0.0,
+            max_segment_length_m: 1.0,
+            max_adjacent_length_ratio: 1.0,
+        }),
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }
