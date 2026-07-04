@@ -4,6 +4,8 @@ use runmat_meshing_core::contracts::{
     TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
 };
 
+mod input_validation;
+
 #[test]
 fn builds_recovery_queue_for_recovered_plc_constraints() {
     let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &tetrahedron_mesh())
@@ -1402,6 +1404,10 @@ fn recovery_stage_result_rejects_missing_queue_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces.remove(0);
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+        [1.0, 1.0, 1.0],
+    ));
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
 
     let recovery_evidence = assert_incomplete_recovery(

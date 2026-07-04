@@ -2,6 +2,7 @@ mod absent_edges;
 mod boundary_diagonal;
 mod boundary_faces;
 pub mod boundary_queue;
+mod input_validation;
 mod material_interfaces;
 mod material_partitions;
 mod source_faces;
@@ -22,6 +23,7 @@ use boundary_faces::{
     recover_volume_face_source_face_boundary_faces, repair_boundary_face_identity,
     repair_boundary_source_edge_provenance, repair_boundary_source_face_provenance,
 };
+use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
 use material_partitions::recover_absent_material_interface_partitions;
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
@@ -44,6 +46,7 @@ pub fn build_recovery_queue_from_plc(
     if tetrahedron_mesh.nodes.is_empty() || tetrahedron_mesh.elements.is_empty() {
         return Err(TetrahedronRecoveryError::EmptyTetrahedronMesh);
     }
+    validate_tetrahedron_recovery_input_mesh(tetrahedron_mesh)?;
 
     let recovered_face_keys = tetrahedron_mesh
         .boundary_faces
