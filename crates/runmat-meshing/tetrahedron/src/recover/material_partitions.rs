@@ -60,10 +60,10 @@ pub(super) fn recover_absent_material_interface_partitions(
             tetrahedron_mesh,
             &material_interface_id,
         ) {
-            Ok(inserted_boundary_face_count) => {
+            Ok(inserted_partition) => {
                 recovery.inserted_material_interface_count += 1;
-                recovery.inserted_element_count += 1;
-                recovery.inserted_boundary_face_count += inserted_boundary_face_count;
+                recovery.inserted_element_count += inserted_partition.element_count;
+                recovery.inserted_boundary_face_count += inserted_partition.boundary_face_count;
             }
             Err(rejection) => {
                 recovery.rejected_material_interface_count += 1;
@@ -82,7 +82,7 @@ fn insert_absent_material_interface_partition(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
     material_interface_id: &str,
-) -> Result<usize, MaterialPartitionRecoveryRejection> {
+) -> Result<InsertedMaterialPartition, MaterialPartitionRecoveryRejection> {
     let material_facets = plc
         .facets
         .iter()
@@ -95,80 +95,235 @@ fn insert_absent_material_interface_partition(
                 })
         })
         .collect::<Vec<_>>();
-    if !(3..=4).contains(&material_facets.len()) {
+    if !(3..=12).contains(&material_facets.len()) {
         return Err(MaterialPartitionRecoveryRejection::FacetCount);
     }
 
-    let candidate_node_ids = candidate_partition_node_ids(&material_facets)
-        .ok_or(MaterialPartitionRecoveryRejection::FacetTopology)?;
-    let candidate_face_keys = tetrahedron_faces(candidate_node_ids.clone());
     let material_facet_face_keys = material_facets
         .iter()
         .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
         .collect::<BTreeSet<_>>();
-    if !material_facet_face_keys
-        .iter()
-        .all(|face_key| candidate_face_keys.contains(face_key))
-    {
-        return Err(MaterialPartitionRecoveryRejection::FacetTopology);
-    }
-    if element_exists(tetrahedron_mesh, &candidate_node_ids) {
-        return Err(MaterialPartitionRecoveryRejection::ElementAlreadyExists);
-    }
-    validate_partition_interior_support(
+    let candidate_partition = select_candidate_partition(
         tetrahedron_mesh,
-        &candidate_face_keys,
+        &material_facets,
         &material_facet_face_keys,
     )?;
+    let inserted_element_count = candidate_partition.elements.len();
 
-    let node_coordinates = node_coordinates(tetrahedron_mesh);
-    let oriented_node_ids = orient_partition_tetrahedron(candidate_node_ids, &node_coordinates)
-        .ok_or(MaterialPartitionRecoveryRejection::QualityGate)?;
-    tetrahedron_mesh.elements.push(Tetrahedron4Element {
-        element_id: TopologyEntityId {
-            stage: MeshingStage::TetrahedronMesh,
-            id: format!("material_partition:{material_interface_id}"),
-        },
-        node_ids: oriented_node_ids,
-        material_region_id: material_interface_id.to_string(),
-    });
+    for (element_index, node_ids) in candidate_partition.elements.into_iter().enumerate() {
+        tetrahedron_mesh.elements.push(Tetrahedron4Element {
+            element_id: TopologyEntityId {
+                stage: MeshingStage::TetrahedronMesh,
+                id: format!("material_partition:{material_interface_id}:{element_index}"),
+            },
+            node_ids,
+            material_region_id: material_interface_id.to_string(),
+        });
+    }
 
-    Ok(insert_material_partition_boundary_faces(
-        plc,
-        &material_facets,
-        tetrahedron_mesh,
-    ))
+    let inserted_boundary_face_count =
+        insert_material_partition_boundary_faces(plc, &material_facets, tetrahedron_mesh);
+    Ok(InsertedMaterialPartition {
+        element_count: inserted_element_count,
+        boundary_face_count: inserted_boundary_face_count,
+    })
 }
 
-fn candidate_partition_node_ids(material_facets: &[&PlcFacet]) -> Option<[TopologyEntityId; 4]> {
+struct InsertedMaterialPartition {
+    element_count: usize,
+    boundary_face_count: usize,
+}
+
+struct CandidateMaterialPartition {
+    elements: Vec<[TopologyEntityId; 4]>,
+}
+
+struct CandidateMaterialPartitionElement {
+    node_ids: [TopologyEntityId; 4],
+    face_keys: BTreeSet<[TopologyEntityId; 3]>,
+}
+
+fn select_candidate_partition(
+    tetrahedron_mesh: &TetrahedronMesh,
+    material_facets: &[&PlcFacet],
+    material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
+) -> Result<CandidateMaterialPartition, MaterialPartitionRecoveryRejection> {
+    let material_node_ids = material_partition_node_ids(material_facets)?;
+    let candidate_node_sets = candidate_partition_node_sets(&material_node_ids);
+    let node_coordinates = node_coordinates(tetrahedron_mesh);
+    let mut topology_candidate_count = 0;
+    let mut quality_rejected_candidate_count = 0;
+    let mut existing_element_candidate_count = 0;
+    let mut candidates = Vec::<CandidateMaterialPartitionElement>::new();
+    for node_ids in candidate_node_sets {
+        let face_keys = tetrahedron_faces(node_ids.clone());
+        let boundary_face_count = face_keys.intersection(material_facet_face_keys).count();
+        if boundary_face_count < 3 {
+            continue;
+        }
+        topology_candidate_count += 1;
+        if element_exists(tetrahedron_mesh, &node_ids) {
+            existing_element_candidate_count += 1;
+            continue;
+        }
+        let Some(oriented_node_ids) = orient_partition_tetrahedron(node_ids, &node_coordinates)
+        else {
+            quality_rejected_candidate_count += 1;
+            continue;
+        };
+        candidates.push(CandidateMaterialPartitionElement {
+            node_ids: oriented_node_ids,
+            face_keys,
+        });
+    }
+
+    if candidates.is_empty() {
+        if existing_element_candidate_count > 0 {
+            return Err(MaterialPartitionRecoveryRejection::ElementAlreadyExists);
+        }
+        if quality_rejected_candidate_count > 0 {
+            return Err(MaterialPartitionRecoveryRejection::QualityGate);
+        }
+        return Err(MaterialPartitionRecoveryRejection::FacetTopology);
+    }
+    if topology_candidate_count > 12 || candidates.len() > 8 {
+        return Err(MaterialPartitionRecoveryRejection::FacetCount);
+    }
+
+    let volume_face_counts = volume_face_counts(tetrahedron_mesh);
+    for candidate_count in 1..=candidates.len().min(4) {
+        let mut selected_indices = Vec::<usize>::new();
+        if let Some(partition) = select_candidate_partition_with_count(
+            &candidates,
+            candidate_count,
+            0,
+            &mut selected_indices,
+            material_facet_face_keys,
+            &volume_face_counts,
+        ) {
+            return Ok(partition);
+        }
+    }
+
+    Err(MaterialPartitionRecoveryRejection::InteriorFaceTopology)
+}
+
+fn material_partition_node_ids(
+    material_facets: &[&PlcFacet],
+) -> Result<Vec<TopologyEntityId>, MaterialPartitionRecoveryRejection> {
     let node_ids = material_facets
         .iter()
         .flat_map(|facet| facet.node_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
-    let node_ids = node_ids.into_iter().collect::<Vec<_>>();
-    (node_ids.len() == 4).then(|| {
-        [
-            node_ids[0].clone(),
-            node_ids[1].clone(),
-            node_ids[2].clone(),
-            node_ids[3].clone(),
-        ]
+    if !(4..=8).contains(&node_ids.len()) {
+        return Err(MaterialPartitionRecoveryRejection::FacetTopology);
+    }
+    Ok(node_ids.into_iter().collect())
+}
+
+fn candidate_partition_node_sets(node_ids: &[TopologyEntityId]) -> Vec<[TopologyEntityId; 4]> {
+    let mut candidates = Vec::<[TopologyEntityId; 4]>::new();
+    for first in 0..node_ids.len() {
+        for second in first + 1..node_ids.len() {
+            for third in second + 1..node_ids.len() {
+                for fourth in third + 1..node_ids.len() {
+                    candidates.push([
+                        node_ids[first].clone(),
+                        node_ids[second].clone(),
+                        node_ids[third].clone(),
+                        node_ids[fourth].clone(),
+                    ]);
+                }
+            }
+        }
+    }
+    candidates
+}
+
+fn select_candidate_partition_with_count(
+    candidates: &[CandidateMaterialPartitionElement],
+    candidate_count: usize,
+    next_candidate_index: usize,
+    selected_indices: &mut Vec<usize>,
+    material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
+    volume_face_counts: &BTreeMap<[TopologyEntityId; 3], usize>,
+) -> Option<CandidateMaterialPartition> {
+    if selected_indices.len() == candidate_count {
+        return build_candidate_partition(
+            candidates,
+            selected_indices,
+            material_facet_face_keys,
+            volume_face_counts,
+        );
+    }
+    let remaining_slots = candidate_count - selected_indices.len();
+    let max_start = candidates.len().saturating_sub(remaining_slots);
+    for candidate_index in next_candidate_index..=max_start {
+        selected_indices.push(candidate_index);
+        if let Some(partition) = select_candidate_partition_with_count(
+            candidates,
+            candidate_count,
+            candidate_index + 1,
+            selected_indices,
+            material_facet_face_keys,
+            volume_face_counts,
+        ) {
+            return Some(partition);
+        }
+        selected_indices.pop();
+    }
+    None
+}
+
+fn build_candidate_partition(
+    candidates: &[CandidateMaterialPartitionElement],
+    selected_indices: &[usize],
+    material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
+    volume_face_counts: &BTreeMap<[TopologyEntityId; 3], usize>,
+) -> Option<CandidateMaterialPartition> {
+    let mut selected_face_counts = BTreeMap::<[TopologyEntityId; 3], usize>::new();
+    for candidate_index in selected_indices {
+        for face_key in &candidates[*candidate_index].face_keys {
+            *selected_face_counts.entry(face_key.clone()).or_default() += 1;
+        }
+    }
+    if material_facet_face_keys.iter().any(|face_key| {
+        selected_face_counts
+            .get(face_key)
+            .copied()
+            .unwrap_or_default()
+            != 1
+    }) {
+        return None;
+    }
+    if selected_face_counts.keys().any(|face_key| {
+        !material_facet_face_keys.contains(face_key)
+            && selected_face_counts
+                .get(face_key)
+                .copied()
+                .unwrap_or_default()
+                != 2
+            && volume_face_counts
+                .get(face_key)
+                .copied()
+                .unwrap_or_default()
+                != 1
+    }) {
+        return None;
+    }
+
+    Some(CandidateMaterialPartition {
+        elements: selected_indices
+            .iter()
+            .map(|candidate_index| candidates[*candidate_index].node_ids.clone())
+            .collect(),
     })
 }
 
-fn validate_partition_interior_support(
+fn volume_face_counts(
     tetrahedron_mesh: &TetrahedronMesh,
-    candidate_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
-    material_facet_face_keys: &BTreeSet<[TopologyEntityId; 3]>,
-) -> Result<(), MaterialPartitionRecoveryRejection> {
-    let interior_face_keys = candidate_face_keys
-        .difference(material_facet_face_keys)
-        .collect::<Vec<_>>();
-    if interior_face_keys.len() > 1 {
-        return Err(MaterialPartitionRecoveryRejection::InteriorFaceTopology);
-    }
-
-    let volume_face_counts = tetrahedron_mesh
+) -> BTreeMap<[TopologyEntityId; 3], usize> {
+    tetrahedron_mesh
         .elements
         .iter()
         .flat_map(|element| tetrahedron_faces(element.node_ids.clone()))
@@ -178,18 +333,7 @@ fn validate_partition_interior_support(
                 *counts.entry(face_key).or_default() += 1;
                 counts
             },
-        );
-    if interior_face_keys.iter().any(|face_key| {
-        volume_face_counts
-            .get(*face_key)
-            .copied()
-            .unwrap_or_default()
-            != 1
-    }) {
-        return Err(MaterialPartitionRecoveryRejection::InteriorFaceTopology);
-    }
-
-    Ok(())
+        )
 }
 
 fn insert_material_partition_boundary_faces(
