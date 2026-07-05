@@ -1,4 +1,5 @@
 mod artifact;
+mod authoring;
 mod cad;
 #[cfg(feature = "dev-evidence")]
 pub mod dev_traces;
@@ -9,6 +10,11 @@ mod validation;
 pub use artifact::{
     build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,
     MeshEvidenceArtifact, MESH_EVIDENCE_SCHEMA_VERSION,
+};
+pub use authoring::{
+    build_mesh_authoring_summary, MeshAuthoringBoundaryRegion, MeshAuthoringMaterialRegion,
+    MeshAuthoringQualitySummary, MeshAuthoringRecoverySummary, MeshAuthoringRegionSummary,
+    MeshAuthoringSummary, MeshAuthoringTopologySummary, MESH_AUTHORING_SUMMARY_SCHEMA_VERSION,
 };
 pub use cad::MeshCadEvidence;
 

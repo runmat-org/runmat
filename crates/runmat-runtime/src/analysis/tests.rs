@@ -2162,6 +2162,42 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         Some("mesh-evidence/v1")
     );
     assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["schema_version"].as_str(),
+        Some("mesh-authoring-summary/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["mesh_id"].as_str(),
+        evidence_payload["mesh_evidence"]["mesh_id"].as_str()
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["solve_ready"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["regions"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("authoring required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["regions"]["required_material_region_ids"]
+            .as_array()
+            .expect("authoring required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
+    );
+    assert!(evidence_payload["mesh_authoring_summary"]
+        .get("debug")
+        .is_none());
+    assert!(evidence_payload["mesh_authoring_summary"]
+        .get("mesh")
+        .is_none());
+    assert_eq!(
         evidence_payload["mesh_evidence"]["topology"]["node_count"].as_u64(),
         payload["mesh"]["nodes"]
             .as_array()
@@ -5562,6 +5598,23 @@ fn mesh_evidence_refresh_uses_persisted_validation_options() {
     assert_eq!(
         refreshed["mesh_evidence"]["validation"]["solve_ready"].as_bool(),
         Some(false)
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["schema_version"].as_str(),
+        Some("mesh-authoring-summary/v1")
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["solve_ready"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["regions"]["missing_required_boundary_region_ids"]
+            .as_array()
+            .expect("authoring missing boundary regions")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tip"]
     );
     assert!(
         refreshed["mesh_evidence"]["validation"]["validation_error_message"]

@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 
 mod adaptive;
 mod artifact_summary;
+mod authoring;
 mod fixtures;
 
 use fixtures::*;

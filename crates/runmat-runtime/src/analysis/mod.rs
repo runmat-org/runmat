@@ -51,8 +51,8 @@ use runmat_meshing_core::{
     TETRAHEDRON4_FIELD_ELEMENT_KIND,
 };
 use runmat_meshing_evidence::{
-    build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,
-    MeshValidationEvidence,
+    build_mesh_authoring_summary, build_mesh_evidence_artifact,
+    build_mesh_evidence_artifact_with_validation_evidence, MeshValidationEvidence,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13704,6 +13704,7 @@ fn generate_and_persist_study_analysis_mesh(
             )
         })?;
     let mesh_evidence = build_mesh_evidence_artifact(&mesh, &validation_options);
+    let mesh_authoring_summary = build_mesh_authoring_summary(&mesh_evidence);
     let evidence_path = persist_study_evidence(
         study_fingerprint,
         "mesh_evidence",
@@ -13717,6 +13718,7 @@ fn generate_and_persist_study_analysis_mesh(
             "refinement_context": analysis_refinement_context(spec),
             "mesh_options": options,
             "mesh_validation_options": validation_options,
+            "mesh_authoring_summary": mesh_authoring_summary,
             "mesh_evidence": mesh_evidence,
         }),
     )
@@ -15400,6 +15402,9 @@ fn update_mesh_evidence_from_analysis_mesh_payload(
         }
         build_mesh_evidence_artifact(mesh, &validation_options)
     };
+    let mesh_authoring_summary = build_mesh_authoring_summary(&mesh_evidence);
+    evidence_payload["mesh_authoring_summary"] = serde_json::to_value(mesh_authoring_summary)
+        .map_err(|err| format!("failed to encode mesh authoring summary: {err}"))?;
     evidence_payload["mesh_evidence"] = serde_json::to_value(mesh_evidence)
         .map_err(|err| format!("failed to encode mesh evidence payload: {err}"))?;
     let bytes = serde_json::to_vec_pretty(&evidence_payload)
