@@ -20,6 +20,9 @@ pub enum TetrahedronRecoveryError {
     NonFiniteTetrahedronMeshNode {
         node_id: TopologyEntityId,
     },
+    TetrahedronMeshNodeStageMismatch {
+        node_id: TopologyEntityId,
+    },
     TetrahedronElementStageMismatch {
         element_id: TopologyEntityId,
     },
@@ -89,6 +92,11 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::NonFiniteTetrahedronMeshNode { node_id } => write!(
                 formatter,
                 "Tetrahedron mesh node {} has non-finite coordinates",
+                node_id.id
+            ),
+            Self::TetrahedronMeshNodeStageMismatch { node_id } => write!(
+                formatter,
+                "Tetrahedron mesh node {} is not a PLC or TetrahedronMesh entity",
                 node_id.id
             ),
             Self::TetrahedronElementStageMismatch { element_id } => write!(

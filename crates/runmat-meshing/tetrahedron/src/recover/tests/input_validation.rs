@@ -39,6 +39,22 @@ fn rejects_recovery_input_with_duplicate_nodes() {
 }
 
 #[test]
+fn rejects_recovery_input_with_non_tetrahedron_node_stage() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::SurfaceMesh, "surface_node"),
+        [0.5, 0.5, 0.5],
+    ));
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(TetrahedronRecoveryError::TetrahedronMeshNodeStageMismatch {
+            node_id: entity(MeshingStage::SurfaceMesh, "surface_node"),
+        })
+    );
+}
+
+#[test]
 fn rejects_recovery_input_with_non_tetrahedron_element_id() {
     let mut mesh = tetrahedron_mesh();
     mesh.elements[0].element_id = entity(MeshingStage::ProtectedBoundaryComplex, "wrong_stage");

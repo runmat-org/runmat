@@ -17,6 +17,14 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
 
     let mut node_ids = BTreeSet::<TopologyEntityId>::new();
     for node in &tetrahedron_mesh.nodes {
+        if !matches!(
+            node.node_id.stage,
+            MeshingStage::ProtectedBoundaryComplex | MeshingStage::TetrahedronMesh
+        ) {
+            return Err(TetrahedronRecoveryError::TetrahedronMeshNodeStageMismatch {
+                node_id: node.node_id.clone(),
+            });
+        }
         if !node_ids.insert(node.node_id.clone()) {
             return Err(TetrahedronRecoveryError::DuplicateTetrahedronMeshNode {
                 node_id: node.node_id.clone(),
