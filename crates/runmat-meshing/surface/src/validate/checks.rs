@@ -49,12 +49,13 @@ pub fn validate_surface_discretization(
             },
         )?;
         let points = surface_element_points(surface, element)?;
-        if triangle_area(points) <= tolerance.length_epsilon(1.0).powi(2) {
+        let computed_area_m2 = triangle_area(points);
+        if computed_area_m2 <= tolerance.length_epsilon(1.0).powi(2) {
             return Err(SurfaceValidationError::DegenerateElement {
                 element_id: element.element_id,
             });
         }
-        validate_element_area_evidence(element, tolerance)?;
+        validate_element_area_evidence(element, computed_area_m2, tolerance)?;
         validate_element_projection_evidence(element)?;
         let source_points = topology_face_points(topology, source_face.node_ids)?;
         let projection_error_m = points
@@ -213,12 +214,13 @@ pub fn validate_cad_topology_surface_discretization(
         })?;
 
         let points = surface_element_points(surface, element)?;
-        if triangle_area(points) <= tolerance.length_epsilon(1.0).powi(2) {
+        let computed_area_m2 = triangle_area(points);
+        if computed_area_m2 <= tolerance.length_epsilon(1.0).powi(2) {
             return Err(SurfaceValidationError::DegenerateElement {
                 element_id: element.element_id,
             });
         }
-        validate_element_area_evidence(element, tolerance)?;
+        validate_element_area_evidence(element, computed_area_m2, tolerance)?;
         validate_element_projection_evidence(element)?;
         max_projection_error_m = max_projection_error_m.max(element.max_projection_error_m);
         if element.max_projection_error_m > options.max_projection_error_m.max(tolerance.absolute_m)
@@ -394,9 +396,19 @@ fn validate_element_unit_normal(
 
 fn validate_element_area_evidence(
     element: &SurfaceElement,
+    computed_area_m2: f64,
     tolerance: MeshingTolerance,
 ) -> Result<(), SurfaceValidationError> {
     if !element.area_m2.is_finite() || element.area_m2 <= tolerance.length_epsilon(1.0).powi(2) {
+        return Err(SurfaceValidationError::InvalidElementArea {
+            element_id: element.element_id,
+        });
+    }
+    let area_tolerance_m2 = tolerance
+        .length_epsilon(1.0)
+        .powi(2)
+        .max(computed_area_m2.abs() * 1.0e-8);
+    if (element.area_m2 - computed_area_m2).abs() > area_tolerance_m2 {
         return Err(SurfaceValidationError::InvalidElementArea {
             element_id: element.element_id,
         });

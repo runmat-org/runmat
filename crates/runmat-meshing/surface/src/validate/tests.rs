@@ -1,8 +1,11 @@
 use super::*;
 use crate::{
-    discretize_topology_surfaces, math::distance, validate::geometry::sorted_edge,
-    validate::source_edges::count_closed_source_edge_loops, SurfaceDiscretization,
-    SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
+    discretize_topology_surfaces,
+    math::{distance, triangle_area},
+    validate::geometry::sorted_edge,
+    validate::source_edges::count_closed_source_edge_loops,
+    SurfaceDiscretization, SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode,
+    INTERNAL_SOURCE_EDGE_ID,
 };
 use runmat_meshing_cad::{
     CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyModel, CadTopologyReport,
@@ -85,6 +88,11 @@ fn rejects_surface_projection_drift() {
         discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
             .expect("surface should discretize");
     surface.nodes[0].coordinates_m = [0.0, 0.0, 0.1];
+    surface.elements[0].area_m2 = triangle_area([
+        surface.nodes[surface.elements[0].node_ids[0] as usize].coordinates_m,
+        surface.nodes[surface.elements[0].node_ids[1] as usize].coordinates_m,
+        surface.nodes[surface.elements[0].node_ids[2] as usize].coordinates_m,
+    ]);
 
     let err = validate_surface_discretization(
         &topology,
@@ -181,6 +189,38 @@ fn rejects_non_positive_cad_surface_element_area_evidence() {
     let cad_topology = square_cad_topology(&topology);
     let mut surface = square_cad_surface(false);
     surface.elements[0].area_m2 = 0.0;
+
+    assert_eq!(
+        validate_cad_topology_surface_discretization(
+            &cad_topology,
+            &topology,
+            &surface,
+            SurfaceValidationOptions::default(),
+        ),
+        Err(SurfaceValidationError::InvalidElementArea { element_id: 0 })
+    );
+}
+
+#[test]
+fn rejects_stale_surface_element_area_evidence() {
+    let topology = cube_topology();
+    let mut surface =
+        discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
+            .expect("surface should discretize");
+    surface.elements[0].area_m2 *= 2.0;
+
+    assert_eq!(
+        validate_surface_discretization(&topology, &surface, SurfaceValidationOptions::default()),
+        Err(SurfaceValidationError::InvalidElementArea { element_id: 0 })
+    );
+}
+
+#[test]
+fn rejects_stale_cad_surface_element_area_evidence() {
+    let topology = square_split_by_display_diagonal_topology();
+    let cad_topology = square_cad_topology(&topology);
+    let mut surface = square_cad_surface(false);
+    surface.elements[0].area_m2 *= 2.0;
 
     assert_eq!(
         validate_cad_topology_surface_discretization(
