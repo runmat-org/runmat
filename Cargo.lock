@@ -5726,6 +5726,7 @@ version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
  "runmat-meshing-core",
+ "runmat-meshing-opt",
  "runmat-meshing-plc",
  "serde",
  "serde_json",

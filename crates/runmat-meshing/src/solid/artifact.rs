@@ -7,6 +7,11 @@ use runmat_meshing_core::{
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
         SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ACCEPTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_BUDGET_LIMIT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTION_PREFIX,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
@@ -704,10 +709,36 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_omitted_missing_material_interface_recovery_id_count:
                 missing_material_interface_recovery.omitted_count,
             tetrahedron_optimization_pass_count: usize::from(tetrahedron_mesh.quality_optimized),
+            tetrahedron_smoothed_point_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ACCEPTED_COUNT,
+            ),
             tetrahedron_sliver_count: backend_quality.sliver_count,
             tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
             tetrahedron_optimization_skipped_target_seed_count: backend_quality
                 .quality_repair_target_count,
+            tetrahedron_optimization_interior_smoothing_attempt_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ATTEMPT_COUNT,
+            ),
+            tetrahedron_optimization_interior_smoothing_accepted_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ACCEPTED_COUNT,
+            ),
+            tetrahedron_optimization_interior_smoothing_rejected_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTED_COUNT,
+            ),
+            tetrahedron_optimization_interior_smoothing_budget_limited_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_BUDGET_LIMIT_COUNT,
+                ),
+            tetrahedron_optimization_interior_smoothing_rejected_by_reason:
+                tetrahedron_rejection_counts_by_prefix(
+                    &tetrahedron_mesh,
+                    TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTION_PREFIX,
+                ),
             tetrahedron_optimization_local_reconnection_attempt_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,

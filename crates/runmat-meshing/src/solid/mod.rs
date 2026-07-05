@@ -10,6 +10,7 @@ use runmat_meshing_surface::{
     SurfaceValidationOptions,
 };
 use runmat_meshing_tetrahedron::{
+    optimize::{smooth_tetrahedron_mesh_interior, TetrahedronMeshInteriorSmoothingOptions},
     reconnect::{
         improve_tetrahedron_mesh_with_local_flips, TetrahedronMeshLocalReconnectionOptions,
     },
@@ -115,6 +116,10 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     improve_tetrahedron_mesh_with_local_flips(
         &mut recovery.tetrahedron_mesh,
         TetrahedronMeshLocalReconnectionOptions::default(),
+    );
+    smooth_tetrahedron_mesh_interior(
+        &mut recovery.tetrahedron_mesh,
+        TetrahedronMeshInteriorSmoothingOptions::default(),
     );
 
     Ok(analysis_artifact_from_tetrahedron_mesh(

@@ -79,6 +79,15 @@ fn validate_optimization_evidence(
     let repair_pass_count = backend.tetrahedron_optimization_pass_count
         + backend.tetrahedron_untangling_pass_count
         + backend.tetrahedron_exact_quality_repair_pass_count;
+    if repair_pass_count == 0 && reported_edit_count > 0 {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_edits_without_pass".to_string(),
+                observed_count: reported_edit_count,
+                limit_count: repair_pass_count,
+            },
+        );
+    }
     let local_reconnection_attempt_count =
         backend.tetrahedron_optimization_local_reconnection_attempt_count;
     let local_reconnection_accepted_count =
@@ -109,12 +118,42 @@ fn validate_optimization_evidence(
             },
         );
     }
-    if repair_pass_count == 0 && reported_edit_count > 0 {
+    let interior_smoothing_attempt_count =
+        backend.tetrahedron_optimization_interior_smoothing_attempt_count;
+    let interior_smoothing_accepted_count =
+        backend.tetrahedron_optimization_interior_smoothing_accepted_count;
+    let interior_smoothing_rejected_count =
+        backend.tetrahedron_optimization_interior_smoothing_rejected_count;
+    let interior_smoothing_outcome_count =
+        interior_smoothing_accepted_count + interior_smoothing_rejected_count;
+    if interior_smoothing_outcome_count > interior_smoothing_attempt_count {
         return Err(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
-                family: "optimization_edits_without_pass".to_string(),
-                observed_count: reported_edit_count,
-                limit_count: repair_pass_count,
+                family: "optimization_interior_smoothing_outcomes".to_string(),
+                observed_count: interior_smoothing_outcome_count,
+                limit_count: interior_smoothing_attempt_count,
+            },
+        );
+    }
+    if backend.tetrahedron_smoothed_point_count != interior_smoothing_accepted_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_interior_smoothing_accepted_points".to_string(),
+                observed_count: backend.tetrahedron_smoothed_point_count,
+                limit_count: interior_smoothing_accepted_count,
+            },
+        );
+    }
+    let interior_smoothing_reason_count = backend
+        .tetrahedron_optimization_interior_smoothing_rejected_by_reason
+        .values()
+        .sum::<usize>();
+    if interior_smoothing_reason_count != interior_smoothing_rejected_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_interior_smoothing_rejection_reasons".to_string(),
+                observed_count: interior_smoothing_reason_count,
+                limit_count: interior_smoothing_rejected_count,
             },
         );
     }
@@ -123,6 +162,15 @@ fn validate_optimization_evidence(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
                 family: "optimization_local_reconnections_without_pass".to_string(),
                 observed_count: local_reconnection_attempt_count,
+                limit_count: repair_pass_count,
+            },
+        );
+    }
+    if repair_pass_count == 0 && interior_smoothing_attempt_count > 0 {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_interior_smoothing_without_pass".to_string(),
+                observed_count: interior_smoothing_attempt_count,
                 limit_count: repair_pass_count,
             },
         );

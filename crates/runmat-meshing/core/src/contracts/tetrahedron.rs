@@ -10,6 +10,16 @@ pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT: &str =
     "optimization_local_reconnection_rejected";
 pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX: &str =
     "optimization_local_reconnection_rejected_";
+pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ATTEMPT_COUNT: &str =
+    "optimization_interior_smoothing_attempts";
+pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ACCEPTED_COUNT: &str =
+    "optimization_interior_smoothing_accepted";
+pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTED_COUNT: &str =
+    "optimization_interior_smoothing_rejected";
+pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_BUDGET_LIMIT_COUNT: &str =
+    "optimization_interior_smoothing_budget_limited";
+pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTION_PREFIX: &str =
+    "optimization_interior_smoothing_rejected_";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {

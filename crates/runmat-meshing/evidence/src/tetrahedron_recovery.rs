@@ -278,6 +278,16 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub refinement_point_count: usize,
     pub optimization_pass_count: usize,
     pub smoothed_point_count: usize,
+    #[serde(default)]
+    pub optimization_interior_smoothing_attempt_count: usize,
+    #[serde(default)]
+    pub optimization_interior_smoothing_accepted_count: usize,
+    #[serde(default)]
+    pub optimization_interior_smoothing_rejected_count: usize,
+    #[serde(default)]
+    pub optimization_interior_smoothing_budget_limited_count: usize,
+    #[serde(default)]
+    pub optimization_interior_smoothing_rejected_by_reason: BTreeMap<String, usize>,
     pub sliver_count: usize,
     #[serde(default)]
     pub sliver_removed_count: usize,
@@ -728,6 +738,22 @@ pub(super) fn tetrahedron_recovery_evidence(
         refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
         optimization_pass_count: mesh.backend.tetrahedron_optimization_pass_count,
         smoothed_point_count: mesh.backend.tetrahedron_smoothed_point_count,
+        optimization_interior_smoothing_attempt_count: mesh
+            .backend
+            .tetrahedron_optimization_interior_smoothing_attempt_count,
+        optimization_interior_smoothing_accepted_count: mesh
+            .backend
+            .tetrahedron_optimization_interior_smoothing_accepted_count,
+        optimization_interior_smoothing_rejected_count: mesh
+            .backend
+            .tetrahedron_optimization_interior_smoothing_rejected_count,
+        optimization_interior_smoothing_budget_limited_count: mesh
+            .backend
+            .tetrahedron_optimization_interior_smoothing_budget_limited_count,
+        optimization_interior_smoothing_rejected_by_reason: mesh
+            .backend
+            .tetrahedron_optimization_interior_smoothing_rejected_by_reason
+            .clone(),
         sliver_count: mesh.backend.tetrahedron_sliver_count,
         sliver_removed_count: mesh.backend.tetrahedron_sliver_removed_count,
         optimization_target_seed_count: mesh.backend.tetrahedron_optimization_target_seed_count,
