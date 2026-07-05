@@ -253,6 +253,117 @@ fn rejects_recovered_absent_material_partition_count_that_exceeds_typed_input_co
 }
 
 #[test]
+fn rejects_attempted_absent_source_edge_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_absent_source_edge_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("attempted absent source-edge evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "attempted_absent_source_edge".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+    assert_eq!(
+        analysis_mesh_validation_error_code(&err),
+        "inconsistent_tetrahedron_recovery_item_evidence"
+    );
+}
+
+#[test]
+fn rejects_rejected_absent_source_edge_count_that_exceeds_attempted_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_absent_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_rejected_absent_source_edge_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("rejected absent source-edge evidence cannot exceed attempts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "rejected_absent_source_edge".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_attempted_volume_face_source_face_restoration_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_face_source_face_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("attempted source-face boundary restoration cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "attempted_volume_face_source_face_boundary_restoration".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_attempted_material_interface_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_material_interface_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_material_interface_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("attempted material-interface evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "attempted_material_interface".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_attempted_absent_material_partition_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_missing_material_interface_absent_partition_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_absent_material_partition_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("attempted absent material partition evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "attempted_absent_material_partition".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

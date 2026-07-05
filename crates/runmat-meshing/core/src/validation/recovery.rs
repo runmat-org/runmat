@@ -87,6 +87,16 @@ pub(super) fn validate_recovery_evidence_consistency(
     mesh: &AnalysisMeshArtifact,
 ) -> Result<(), AnalysisMeshValidationError> {
     let backend = &mesh.backend;
+    validate_recovery_item_count(
+        "attempted_protected_edge_boundary_face_restoration",
+        backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_volume_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_protected_edge_boundary_face_restoration",
+        backend.tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+    )?;
     validate_recovered_count(
         "volume_edge_source_edge",
         backend.tetrahedron_recovered_volume_edge_source_edge_recovery_item_count,
@@ -122,10 +132,70 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_recovered_volume_face_source_face_recovery_item_count,
         backend.tetrahedron_volume_face_source_face_recovery_item_count,
     )?;
+    validate_recovery_item_count(
+        "attempted_volume_face_source_face_boundary_restoration",
+        backend.tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count,
+        backend.tetrahedron_volume_face_source_face_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_volume_face_source_face_boundary_restoration",
+        backend.tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count,
+        backend.tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count,
+    )?;
     validate_recovered_count(
         "absent_face_source_face",
         backend.tetrahedron_recovered_absent_face_source_face_recovery_item_count,
         backend.tetrahedron_absent_face_source_face_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "deferred_absent_source_edge",
+        backend.tetrahedron_deferred_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_absent_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "attempted_absent_source_edge",
+        backend.tetrahedron_attempted_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_absent_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "reconnected_absent_source_edge",
+        backend.tetrahedron_reconnected_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_attempted_absent_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_absent_source_edge",
+        backend.tetrahedron_rejected_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_attempted_absent_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "attempted_source_face_diagonal_pair",
+        backend.tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
+        backend.tetrahedron_absent_face_source_face_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "recovered_source_face_diagonal_pair",
+        backend.tetrahedron_recovered_source_face_diagonal_pair_count,
+        backend.tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_source_face_diagonal_pair",
+        backend.tetrahedron_rejected_source_face_diagonal_recovery_pair_count,
+        backend.tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_source_face_diagonal_item",
+        backend.tetrahedron_rejected_source_face_diagonal_recovery_item_count,
+        backend.tetrahedron_absent_face_source_face_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "attempted_material_interface",
+        backend.tetrahedron_attempted_material_interface_recovery_item_count,
+        backend.tetrahedron_material_interface_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_material_interface",
+        backend.tetrahedron_rejected_material_interface_recovery_item_count,
+        backend.tetrahedron_attempted_material_interface_recovery_item_count,
     )?;
     validate_recovered_count(
         "material_interface",
@@ -147,6 +217,43 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_recovered_absent_partition_material_interface_recovery_item_count,
         backend.tetrahedron_missing_material_interface_absent_partition_recovery_item_count,
     )?;
+    validate_recovery_item_count(
+        "attempted_absent_material_partition",
+        backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_missing_material_interface_absent_partition_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "inserted_absent_material_partition",
+        backend.tetrahedron_inserted_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_absent_material_partition",
+        backend.tetrahedron_rejected_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rolled_back_absent_material_partition",
+        backend.tetrahedron_rolled_back_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
+    )?;
+    Ok(())
+}
+
+fn validate_recovery_item_count(
+    family: &str,
+    item_count: usize,
+    input_count: usize,
+) -> Result<(), AnalysisMeshValidationError> {
+    if item_count > input_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+                family: family.to_string(),
+                item_count,
+                input_count,
+            },
+        );
+    }
     Ok(())
 }
 
