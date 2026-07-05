@@ -191,6 +191,11 @@ pub enum CadTopologyError {
         edge_id: String,
         capability: &'static str,
     },
+    InvalidCurveEvaluatorSample {
+        edge_id: String,
+        sample_index: usize,
+        reason: &'static str,
+    },
     ReportCountMismatch {
         field: &'static str,
         expected: usize,
@@ -255,6 +260,14 @@ impl std::fmt::Display for CadTopologyError {
             } => write!(
                 formatter,
                 "CAD edge {edge_id} declares evaluator capability {capability} without an evaluator id"
+            ),
+            Self::InvalidCurveEvaluatorSample {
+                edge_id,
+                sample_index,
+                reason,
+            } => write!(
+                formatter,
+                "CAD edge {edge_id} has invalid evaluator sample {sample_index}: {reason}"
             ),
             Self::ReportCountMismatch {
                 field,

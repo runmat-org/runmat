@@ -400,6 +400,56 @@ fn rejects_curve_evaluator_capability_without_evaluator_id() {
     );
 }
 
+#[test]
+fn rejects_curve_evaluator_sample_with_invalid_parameter() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let edge = cad
+        .edges
+        .iter_mut()
+        .find(|edge| !edge.evaluator_samples.is_empty())
+        .expect("sample-backed edge should exist");
+    let edge_id = edge.entity_id.id.clone();
+    edge.evaluator_samples[0].parameter = 1.5;
+
+    let err = validate_cad_topology_model(&cad).expect_err("invalid parameter should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::InvalidCurveEvaluatorSample {
+            edge_id,
+            sample_index: 0,
+            reason: "parameter must be finite and in [0, 1]",
+        }
+    );
+}
+
+#[test]
+fn rejects_curve_evaluator_sample_with_invalid_projection_error() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let edge = cad
+        .edges
+        .iter_mut()
+        .find(|edge| !edge.evaluator_samples.is_empty())
+        .expect("sample-backed edge should exist");
+    let edge_id = edge.entity_id.id.clone();
+    edge.evaluator_samples[0].projection_error_m = Some(-1.0);
+
+    let err = validate_cad_topology_model(&cad).expect_err("negative projection error should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::InvalidCurveEvaluatorSample {
+            edge_id,
+            sample_index: 0,
+            reason: "projection error must be finite and non-negative",
+        }
+    );
+}
+
 fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
     let mut geometry = cube_geometry(true);
     geometry.regions.push(Region {

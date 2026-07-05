@@ -493,6 +493,62 @@ fn validate_edge_evaluator_metadata(edge: &CadEdge) -> Result<(), CadTopologyErr
             });
         }
     }
+    for (sample_index, sample) in edge.evaluator_samples.iter().enumerate() {
+        if !sample.parameter.is_finite() || !(0.0..=1.0).contains(&sample.parameter) {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "parameter must be finite and in [0, 1]",
+            });
+        }
+        if !sample.point_m.iter().all(|value| value.is_finite()) {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "point must be finite",
+            });
+        }
+        if sample
+            .projected_point_m
+            .is_some_and(|point| !point.iter().all(|value| value.is_finite()))
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "projected point must be finite",
+            });
+        }
+        if sample
+            .tangent_m
+            .is_some_and(|tangent| !tangent.iter().all(|value| value.is_finite()))
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "tangent must be finite",
+            });
+        }
+        if sample
+            .curvature_1_per_m
+            .is_some_and(|curvature| !curvature.is_finite())
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "curvature must be finite",
+            });
+        }
+        if sample
+            .projection_error_m
+            .is_some_and(|error| !error.is_finite() || error < 0.0)
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "projection error must be finite and non-negative",
+            });
+        }
+    }
     Ok(())
 }
 
