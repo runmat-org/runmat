@@ -75631,6 +75631,488 @@
       ]
     },
     {
+      "name": "regress",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = regress(y, X)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            }
+          ]
+        },
+        {
+          "label": "b = regress(y, X, alpha)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.05",
+              "description": "Significance level for coefficient and residual intervals."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint] = regress(y, X)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint] = regress(y, X, alpha)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.05",
+              "description": "Significance level for coefficient and residual intervals."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r] = regress(y, X)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r] = regress(y, X, alpha)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.05",
+              "description": "Significance level for coefficient and residual intervals."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r, rint] = regress(y, X)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            },
+            {
+              "name": "rint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for residuals."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r, rint] = regress(y, X, alpha)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.05",
+              "description": "Significance level for coefficient and residual intervals."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            },
+            {
+              "name": "rint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for residuals."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r, rint, stats] = regress(y, X)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            },
+            {
+              "name": "rint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for residuals."
+            },
+            {
+              "name": "stats",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector [R2 F p errorVariance]."
+            }
+          ]
+        },
+        {
+          "label": "[b, bint, r, rint, stats] = regress(y, X, alpha)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Design matrix with observations in rows and model terms in columns."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.05",
+              "description": "Significance level for coefficient and residual intervals."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Least-squares coefficient estimates."
+            },
+            {
+              "name": "bint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for coefficient estimates."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Regression residuals for complete observations."
+            },
+            {
+              "name": "rint",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confidence intervals for residuals."
+            },
+            {
+              "name": "stats",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector [R2 F p errorVariance]."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.REGRESS.INVALID_ARGUMENT",
+          "identifier": "RunMat:regress:InvalidArgument",
+          "when": "Inputs, dimensions, alpha, or requested output counts are malformed.",
+          "message": "regress: invalid argument"
+        },
+        {
+          "code": "RM.REGRESS.NUMERICAL",
+          "identifier": "RunMat:regress:Numerical",
+          "when": "The regression design cannot be solved numerically.",
+          "message": "regress: numerical failure"
+        },
+        {
+          "code": "RM.REGRESS.INTERNAL",
+          "identifier": "RunMat:regress:Internal",
+          "when": "RunMat cannot allocate or construct regression outputs.",
+          "message": "regress: internal error"
+        }
+      ]
+    },
+    {
       "name": "rehash",
       "output_mode": "Fixed",
       "completion_policy": "Public",

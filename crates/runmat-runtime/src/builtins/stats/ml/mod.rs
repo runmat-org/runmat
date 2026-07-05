@@ -10,5 +10,6 @@ pub mod kmeans;
 pub mod lasso;
 pub mod linear_model;
 pub mod linkage;
+pub mod regress;
 pub mod ridge;
 pub mod tsne;

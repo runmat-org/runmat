@@ -188,6 +188,21 @@ fn encoding_surface_executes_from_scripts() {
 }
 
 #[test]
+fn regress_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [1 0; 1 1; 1 2; 1 3]; y = [1; 3; 5; 7]; [b,bint,r,rint,stats] = regress(y, X); intercept = b(1); slope = b(2); r2 = stats(1);",
+    )
+    .expect("regress script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[4, 1]));
+    assert!(has_tensor_shape(&vars, &[4, 2]));
+    assert!(has_tensor_shape(&vars, &[1, 4]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn kmeans_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; [idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10], 'MaxIter', 20); a = idx(1); b = idx(4); c11 = C(1,1); c22 = C(2,2); dshape = size(D);",
