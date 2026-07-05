@@ -19,6 +19,7 @@ use runmat_meshing_core::{
         TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTION_PREFIX,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
         UNCLASSIFIED_MATERIAL_REGION_ID,
@@ -714,6 +715,16 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_omitted_missing_material_interface_recovery_id_count:
                 missing_material_interface_recovery.omitted_count,
             tetrahedron_optimization_pass_count: usize::from(tetrahedron_mesh.quality_optimized),
+            tetrahedron_optimization_budget_limited_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
+            ) + tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_BUDGET_LIMIT_COUNT,
+            ) + tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_BUDGET_LIMIT_COUNT,
+            ),
             tetrahedron_smoothed_point_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ACCEPTED_COUNT,
@@ -781,6 +792,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
             ),
+            tetrahedron_optimization_local_reconnection_budget_limited_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
+                ),
             tetrahedron_optimization_local_reconnection_rejected_by_reason:
                 tetrahedron_rejection_counts_by_prefix(
                     &tetrahedron_mesh,

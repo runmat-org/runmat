@@ -5,6 +5,7 @@ use runmat_meshing_core::{
         MeshingStage, Tetrahedron4Element, TetrahedronMesh, TopologyEntityId,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
     },
@@ -20,6 +21,7 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TetrahedronMeshLocalReconnectionOptions {
     pub quality_thresholds: LocalTetrahedronFlipQualityThresholds,
+    pub max_attempted_reconnections: usize,
     pub max_accepted_reconnections: usize,
 }
 
@@ -27,6 +29,7 @@ impl Default for TetrahedronMeshLocalReconnectionOptions {
     fn default() -> Self {
         Self {
             quality_thresholds: LocalTetrahedronFlipQualityThresholds::default(),
+            max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         }
     }
@@ -37,6 +40,7 @@ pub struct TetrahedronMeshLocalReconnectionReport {
     pub attempted_reconnection_count: usize,
     pub accepted_reconnection_count: usize,
     pub rejected_reconnection_count: usize,
+    pub budget_limited_reconnection_count: usize,
     pub rejected_by_reason: BTreeMap<String, usize>,
 }
 
@@ -45,7 +49,10 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
     options: TetrahedronMeshLocalReconnectionOptions,
 ) -> TetrahedronMeshLocalReconnectionReport {
     let mut report = TetrahedronMeshLocalReconnectionReport::default();
-    if options.max_accepted_reconnections == 0 || mesh.elements.len() < 2 {
+    if options.max_attempted_reconnections == 0
+        || options.max_accepted_reconnections == 0
+        || mesh.elements.len() < 2
+    {
         record_local_reconnection_evidence(mesh, &report);
         return report;
     }
@@ -60,6 +67,18 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
     let mut accepted = 0_usize;
 
     'search: loop {
+        if report.attempted_reconnection_count >= options.max_attempted_reconnections {
+            if has_potential_local_reconnection_candidate(
+                mesh,
+                &node_index,
+                &node_coordinates,
+                &boundary_faces,
+                options,
+            ) {
+                report.budget_limited_reconnection_count += 1;
+            }
+            break;
+        }
         let Some(candidate) = first_local_reconnection_candidate(
             mesh,
             &node_index,
@@ -80,6 +99,15 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
                 report.accepted_reconnection_count += 1;
                 accepted += 1;
                 if accepted >= options.max_accepted_reconnections {
+                    if has_potential_local_reconnection_candidate(
+                        mesh,
+                        &node_index,
+                        &node_coordinates,
+                        &boundary_faces,
+                        options,
+                    ) {
+                        report.budget_limited_reconnection_count += 1;
+                    }
                     break 'search;
                 }
             }
@@ -173,6 +201,42 @@ fn first_local_reconnection_candidate(
         }
     }
     None
+}
+
+fn has_potential_local_reconnection_candidate(
+    mesh: &TetrahedronMesh,
+    node_index: &BTreeMap<TopologyEntityId, u32>,
+    node_coordinates: &BTreeMap<u32, Point3>,
+    boundary_faces: &BTreeSet<Vec<TopologyEntityId>>,
+    options: TetrahedronMeshLocalReconnectionOptions,
+) -> bool {
+    for left_index in 0..mesh.elements.len() {
+        for right_index in (left_index + 1)..mesh.elements.len() {
+            let left_element = &mesh.elements[left_index];
+            let right_element = &mesh.elements[right_index];
+            if left_element.material_region_id != right_element.material_region_id {
+                continue;
+            }
+            let Some(shared_face) = shared_element_face(left_element, right_element) else {
+                continue;
+            };
+            if boundary_faces.contains(&shared_face) {
+                continue;
+            }
+            let Some(left) = local_tetrahedron(left_index, left_element, node_index) else {
+                return true;
+            };
+            let Some(right) = local_tetrahedron(right_index, right_element, node_index) else {
+                return true;
+            };
+            if local_pair_min_scaled_jacobian([left, right], node_coordinates)
+                < options.quality_thresholds.min_scaled_jacobian
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn mesh_node_index(mesh: &TetrahedronMesh) -> BTreeMap<TopologyEntityId, u32> {
@@ -313,6 +377,11 @@ fn record_local_reconnection_evidence(
         .entity_counts
         .entry(TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT.to_string())
         .or_default() += report.rejected_reconnection_count;
+    *mesh
+        .evidence
+        .entity_counts
+        .entry(TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT.to_string())
+        .or_default() += report.budget_limited_reconnection_count;
     for (reason, count) in &report.rejected_by_reason {
         *mesh
             .evidence

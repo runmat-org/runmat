@@ -119,6 +119,49 @@ fn rejects_optimization_edits_without_reported_pass() {
 }
 
 #[test]
+fn rejects_optimization_budget_limited_total_mismatch() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend.tetrahedron_optimization_budget_limited_count = 3;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_budget_limited_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_interior_smoothing_budget_limited_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("aggregate budget count must match pass-specific budget counts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_budget_limited_total".to_string(),
+            observed_count: 3,
+            limit_count: 2,
+        }
+    );
+}
+
+#[test]
+fn rejects_optimization_budget_limited_without_reported_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_budget_limited_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_budget_limited_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("budget-limited optimization evidence requires a pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_budget_limited_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
+        }
+    );
+}
+
+#[test]
 fn rejects_interior_smoothing_outcomes_that_exceed_attempts() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend.tetrahedron_optimization_pass_count = 1;

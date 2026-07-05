@@ -8,6 +8,8 @@ pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT: &str =
     "optimization_local_reconnection_accepted";
 pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT: &str =
     "optimization_local_reconnection_rejected";
+pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT: &str =
+    "optimization_local_reconnection_budget_limited";
 pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX: &str =
     "optimization_local_reconnection_rejected_";
 pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ATTEMPT_COUNT: &str =

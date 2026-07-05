@@ -307,6 +307,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
                 2,
             )]),
             tetrahedron_optimization_pass_count: 1,
+            tetrahedron_optimization_budget_limited_count: 3,
             tetrahedron_smoothed_point_count: 3,
             tetrahedron_optimization_interior_smoothing_attempt_count: 4,
             tetrahedron_optimization_interior_smoothing_accepted_count: 2,
@@ -332,6 +333,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_optimization_local_reconnection_attempt_count: 5,
             tetrahedron_optimization_local_reconnection_accepted_count: 3,
             tetrahedron_optimization_local_reconnection_rejected_count: 2,
+            tetrahedron_optimization_local_reconnection_budget_limited_count: 1,
             tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap::from([
                 ("quality_does_not_improve".to_string(), 1),
                 ("scaled_jacobian_below_threshold".to_string(), 1),

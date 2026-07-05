@@ -415,6 +415,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_optimization_pass_count: usize,
     #[serde(default)]
+    pub tetrahedron_optimization_budget_limited_count: usize,
+    #[serde(default)]
     pub tetrahedron_smoothed_point_count: usize,
     #[serde(default)]
     pub tetrahedron_optimization_interior_smoothing_attempt_count: usize,
@@ -452,6 +454,8 @@ pub struct MeshBackendSummary {
     pub tetrahedron_optimization_local_reconnection_accepted_count: usize,
     #[serde(default)]
     pub tetrahedron_optimization_local_reconnection_rejected_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_local_reconnection_budget_limited_count: usize,
     #[serde(default)]
     pub tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
     #[serde(default)]

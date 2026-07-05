@@ -87,6 +87,15 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         0
     );
     assert_eq!(
+        mesh.backend.tetrahedron_optimization_budget_limited_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_local_reconnection_budget_limited_count,
+        0
+    );
+    assert_eq!(
         mesh.backend
             .tetrahedron_optimization_interior_smoothing_attempt_count,
         0

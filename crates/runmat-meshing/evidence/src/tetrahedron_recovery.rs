@@ -277,6 +277,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub refinement_pass_count: usize,
     pub refinement_point_count: usize,
     pub optimization_pass_count: usize,
+    #[serde(default)]
+    pub optimization_budget_limited_count: usize,
     pub smoothed_point_count: usize,
     #[serde(default)]
     pub optimization_interior_smoothing_attempt_count: usize,
@@ -313,6 +315,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub optimization_local_reconnection_accepted_count: usize,
     #[serde(default)]
     pub optimization_local_reconnection_rejected_count: usize,
+    #[serde(default)]
+    pub optimization_local_reconnection_budget_limited_count: usize,
     #[serde(default)]
     pub optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
@@ -747,6 +751,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         refinement_pass_count: mesh.backend.tetrahedron_refinement_pass_count,
         refinement_point_count: mesh.backend.tetrahedron_refinement_point_count,
         optimization_pass_count: mesh.backend.tetrahedron_optimization_pass_count,
+        optimization_budget_limited_count: mesh
+            .backend
+            .tetrahedron_optimization_budget_limited_count,
         smoothed_point_count: mesh.backend.tetrahedron_smoothed_point_count,
         optimization_interior_smoothing_attempt_count: mesh
             .backend
@@ -796,6 +803,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         optimization_local_reconnection_rejected_count: mesh
             .backend
             .tetrahedron_optimization_local_reconnection_rejected_count,
+        optimization_local_reconnection_budget_limited_count: mesh
+            .backend
+            .tetrahedron_optimization_local_reconnection_budget_limited_count,
         optimization_local_reconnection_rejected_by_reason: mesh
             .backend
             .tetrahedron_optimization_local_reconnection_rejected_by_reason

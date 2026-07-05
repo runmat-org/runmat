@@ -3,6 +3,7 @@ use runmat_meshing_core::contracts::{
     MeshingStage, StageEvidence, Tetrahedron4Element, TetrahedronMesh, TetrahedronMeshNode,
     TopologyEntityId, TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
 };
@@ -193,6 +194,7 @@ fn mesh_local_reconnection_applies_quality_improving_interior_face_flip() {
                 min_volume_m3: 1.0e-12,
                 min_scaled_jacobian: 0.15,
             },
+            max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
     );
@@ -233,6 +235,7 @@ fn mesh_local_reconnection_records_quality_neutral_rejection() {
                 min_volume_m3: 1.0e-12,
                 min_scaled_jacobian: 0.95,
             },
+            max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
     );
@@ -258,6 +261,31 @@ fn mesh_local_reconnection_records_quality_neutral_rejection() {
         mesh.evidence.rejection_counts[&format!(
             "{TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX}scaled_jacobian_below_threshold"
         )],
+        1
+    );
+}
+
+#[test]
+fn mesh_local_reconnection_records_attempt_budget_limit() {
+    let mut mesh = two_reconnection_pair_mesh();
+
+    let report = improve_tetrahedron_mesh_with_local_flips(
+        &mut mesh,
+        TetrahedronMeshLocalReconnectionOptions {
+            quality_thresholds: LocalTetrahedronFlipQualityThresholds {
+                min_volume_m3: 1.0e-12,
+                min_scaled_jacobian: 0.15,
+            },
+            max_attempted_reconnections: 1,
+            max_accepted_reconnections: 4,
+        },
+    );
+
+    assert_eq!(report.attempted_reconnection_count, 1);
+    assert_eq!(report.accepted_reconnection_count, 1);
+    assert_eq!(report.budget_limited_reconnection_count, 1);
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT],
         1
     );
 }
@@ -323,6 +351,41 @@ fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
         quality_optimized: false,
         evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
     }
+}
+
+fn two_reconnection_pair_mesh() -> TetrahedronMesh {
+    let base_coordinates = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5357890395018374, -0.18744218273792734, 0.3827030431131124],
+        [0.4852929197428164, 1.1962618573152073, -0.10539356221586194],
+    ];
+    let mut mesh = two_tetrahedron_mesh(base_coordinates);
+    let offset_coordinates = base_coordinates.map(|point| [point[0] + 3.0, point[1], point[2]]);
+    let node_offset = mesh.nodes.len();
+    mesh.nodes.extend(
+        offset_coordinates
+            .into_iter()
+            .enumerate()
+            .map(|(index, coordinates_m)| TetrahedronMeshNode {
+                node_id: entity(node_offset + index),
+                coordinates_m,
+            }),
+    );
+    mesh.elements.extend([
+        Tetrahedron4Element {
+            element_id: entity(20),
+            node_ids: [entity(5), entity(6), entity(7), entity(8)],
+            material_region_id: "body".to_string(),
+        },
+        Tetrahedron4Element {
+            element_id: entity(21),
+            node_ids: [entity(5), entity(7), entity(6), entity(9)],
+            material_region_id: "body".to_string(),
+        },
+    ]);
+    mesh
 }
 
 fn entity(id: usize) -> TopologyEntityId {
