@@ -55,6 +55,7 @@ pub fn validate_surface_discretization(
                 element_id: element.element_id,
             });
         }
+        validate_element_parametric_evidence(element)?;
         validate_element_area_evidence(element, computed_area_m2, tolerance)?;
         validate_element_projection_evidence(element)?;
         let source_points = topology_face_points(topology, source_face.node_ids)?;
@@ -220,6 +221,7 @@ pub fn validate_cad_topology_surface_discretization(
                 element_id: element.element_id,
             });
         }
+        validate_element_parametric_evidence(element)?;
         validate_element_area_evidence(element, computed_area_m2, tolerance)?;
         validate_element_projection_evidence(element)?;
         max_projection_error_m = max_projection_error_m.max(element.max_projection_error_m);
@@ -410,6 +412,22 @@ fn validate_element_area_evidence(
         .max(computed_area_m2.abs() * 1.0e-8);
     if (element.area_m2 - computed_area_m2).abs() > area_tolerance_m2 {
         return Err(SurfaceValidationError::InvalidElementArea {
+            element_id: element.element_id,
+        });
+    }
+    Ok(())
+}
+
+fn validate_element_parametric_evidence(
+    element: &SurfaceElement,
+) -> Result<(), SurfaceValidationError> {
+    if !element
+        .parametric_node_uv
+        .iter()
+        .flatten()
+        .all(|coordinate| coordinate.is_finite())
+    {
+        return Err(SurfaceValidationError::InvalidParametricEvidence {
             element_id: element.element_id,
         });
     }

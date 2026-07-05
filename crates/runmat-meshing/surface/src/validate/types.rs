@@ -77,6 +77,9 @@ pub enum SurfaceValidationError {
     InvalidElementArea {
         element_id: u32,
     },
+    InvalidParametricEvidence {
+        element_id: u32,
+    },
     InvalidProjectionEvidence {
         element_id: u32,
     },
@@ -168,6 +171,10 @@ impl std::fmt::Display for SurfaceValidationError {
             Self::InvalidElementArea { element_id } => write!(
                 formatter,
                 "surface element {element_id} has invalid area evidence"
+            ),
+            Self::InvalidParametricEvidence { element_id } => write!(
+                formatter,
+                "surface element {element_id} has invalid parametric coordinate evidence"
             ),
             Self::InvalidProjectionEvidence { element_id } => write!(
                 formatter,
