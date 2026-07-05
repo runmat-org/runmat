@@ -131,6 +131,16 @@ pub enum AnalysisMeshValidationError {
     QualityThresholdFailed {
         reason: String,
     },
+    InconsistentTetrahedronOptimizationEvidence {
+        family: String,
+        observed_count: usize,
+        limit_count: usize,
+    },
+    TetrahedronOptimizationQualityRegression {
+        metric: String,
+        initial_value: String,
+        final_value: String,
+    },
     ElementBudgetExceeded {
         element_count: usize,
         max_element_count: usize,
@@ -276,6 +286,12 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
             "unknown_boundary_edge_adjacent_face"
         }
         AnalysisMeshValidationError::QualityThresholdFailed { .. } => "quality_threshold_failed",
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence { .. } => {
+            "inconsistent_tetrahedron_optimization_evidence"
+        }
+        AnalysisMeshValidationError::TetrahedronOptimizationQualityRegression { .. } => {
+            "tetrahedron_optimization_quality_regression"
+        }
         AnalysisMeshValidationError::ElementBudgetExceeded { .. } => "element_budget_exceeded",
         AnalysisMeshValidationError::VolumeComponentCountExceeded { .. } => {
             "volume_component_count_exceeded"
