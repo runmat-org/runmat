@@ -68,7 +68,7 @@ pub struct SurfaceLoopCoverageReport {
     pub max_loops_per_face: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceCadCurveBoundaryProvenanceReport {
     pub recovered_source_edge_count: usize,
     pub boundary_segment_count: usize,
@@ -78,10 +78,12 @@ pub struct SurfaceCadCurveBoundaryProvenanceReport {
     pub live_query_edge_count: usize,
     pub live_query_sample_count: usize,
     pub rejected_evaluator_sample_count: usize,
+    pub curvature_sized_edge_count: usize,
+    pub curvature_sample_count: usize,
     pub edges: Vec<SurfaceCadCurveBoundaryEdgeProvenance>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceCadCurveBoundaryEdgeProvenance {
     pub source_edge_id: u32,
     pub cad_edge_id: String,
@@ -105,6 +107,10 @@ pub struct SurfaceCadCurveBoundaryEdgeProvenance {
     pub live_query_sample_count: usize,
     #[serde(default)]
     pub rejected_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub curvature_sample_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curvature_limited_target_size_m: Option<f64>,
     pub boundary_segment_count: usize,
 }
 

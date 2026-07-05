@@ -104,6 +104,8 @@ impl SurfaceCadCurveBoundaryProvenanceAccumulator {
                     live_query_backed: source.live_query_backed,
                     live_query_sample_count: source.live_query_sample_count,
                     rejected_evaluator_sample_count: source.rejected_evaluator_sample_count,
+                    curvature_sample_count: source.curvature_sample_count,
+                    curvature_limited_target_size_m: source.curvature_limited_target_size_m,
                     boundary_segment_count: 1,
                 });
         }
@@ -130,6 +132,11 @@ impl SurfaceCadCurveBoundaryProvenanceAccumulator {
                 .iter()
                 .map(|edge| edge.rejected_evaluator_sample_count)
                 .sum(),
+            curvature_sized_edge_count: edges
+                .iter()
+                .filter(|edge| edge.curvature_limited_target_size_m.is_some())
+                .count(),
+            curvature_sample_count: edges.iter().map(|edge| edge.curvature_sample_count).sum(),
             edges,
         }
     }

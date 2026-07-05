@@ -72,6 +72,10 @@ pub struct CadCurveEdgeProvenance {
     pub live_query_sample_count: usize,
     #[serde(default)]
     pub rejected_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub curvature_sample_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curvature_limited_target_size_m: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -235,22 +239,64 @@ pub fn discretize_cad_topology_curves_with_sizing_and_provider(
     sizing: Option<&MeshSizingField>,
     evaluator_provider: &dyn CadCurveEvaluatorProvider,
 ) -> Result<CadCurveDiscretization, CurveDiscretizationError> {
-    let mut curves = discretize_topology_curves_with_sizing(topology, options, sizing)?;
+    validate_curve_options(options)?;
     let cad_edges_by_source_edge = cad_topology
         .edges
         .iter()
         .map(|edge| (edge.source_edge_id, edge))
         .collect::<BTreeMap<_, _>>();
+    let mut curves = CurveDiscretization {
+        nodes: Vec::new(),
+        elements: Vec::new(),
+    };
     let mut edge_provenance = Vec::<CadCurveEdgeProvenance>::with_capacity(topology.edges.len());
-    let mut evaluator_samples_by_source_edge =
-        BTreeMap::<u32, BoundedCadCurveEvaluationSamples>::new();
     for edge in &topology.edges {
+        let left = topology
+            .vertices
+            .get(edge.node_ids[0] as usize)
+            .filter(|vertex| vertex.vertex_id == edge.node_ids[0])
+            .map(|vertex| vertex.coordinates_m)
+            .ok_or(CurveDiscretizationError::MissingEdgeVertex {
+                edge_id: edge.edge_id,
+                node_id: edge.node_ids[0],
+            })?;
+        let right = topology
+            .vertices
+            .get(edge.node_ids[1] as usize)
+            .filter(|vertex| vertex.vertex_id == edge.node_ids[1])
+            .map(|vertex| vertex.coordinates_m)
+            .ok_or(CurveDiscretizationError::MissingEdgeVertex {
+                edge_id: edge.edge_id,
+                node_id: edge.node_ids[1],
+            })?;
         let cad_edge = cad_edges_by_source_edge.get(&edge.edge_id).ok_or(
             CurveDiscretizationError::MissingCadEdge {
                 source_edge_id: edge.edge_id,
             },
         )?;
-        let evaluator_samples = cad_curve_evaluator_samples(cad_edge, &curves, evaluator_provider);
+        let sizing_target_size_m = sizing
+            .and_then(|sizing| {
+                sizing
+                    .query_segment_size(SegmentSizingQuery {
+                        start_m: left,
+                        end_m: right,
+                    })
+                    .target_size_m
+            })
+            .unwrap_or(options.target_size_m);
+        let curvature_sizing = cad_curve_curvature_sizing(cad_edge, sizing_target_size_m);
+        let target_size_m = curvature_sizing
+            .target_size_m
+            .unwrap_or(sizing_target_size_m);
+        append_edge_discretization(
+            edge,
+            left,
+            right,
+            options,
+            target_size_m,
+            &mut curves.nodes,
+            &mut curves.elements,
+        );
         edge_provenance.push(CadCurveEdgeProvenance {
             source_edge_id: edge.edge_id,
             cad_edge_id: cad_edge.entity_id.id.clone(),
@@ -260,18 +306,71 @@ pub fn discretize_cad_topology_curves_with_sizing_and_provider(
             evaluator_supports_projection: cad_edge.evaluator_supports_projection,
             evaluator_supports_tangent: cad_edge.evaluator_supports_tangent,
             evaluator_supports_curvature: cad_edge.evaluator_supports_curvature,
-            evaluator_sample_count: evaluator_samples.samples.len(),
-            live_query_backed: evaluator_samples.live_sample_count > 0,
-            live_query_sample_count: evaluator_samples.live_sample_count,
-            rejected_evaluator_sample_count: evaluator_samples.rejected_count,
+            evaluator_sample_count: 0,
+            live_query_backed: false,
+            live_query_sample_count: 0,
+            rejected_evaluator_sample_count: 0,
+            curvature_sample_count: curvature_sizing.sample_count,
+            curvature_limited_target_size_m: curvature_sizing.target_size_m,
         });
-        evaluator_samples_by_source_edge.insert(edge.edge_id, evaluator_samples);
+    }
+    let mut evaluator_samples_by_source_edge =
+        BTreeMap::<u32, BoundedCadCurveEvaluationSamples>::new();
+    for provenance in &mut edge_provenance {
+        let cad_edge = cad_edges_by_source_edge
+            .get(&provenance.source_edge_id)
+            .expect("CAD edge provenance should have a matching CAD edge");
+        let evaluator_samples = cad_curve_evaluator_samples(cad_edge, &curves, evaluator_provider);
+        provenance.evaluator_sample_count = evaluator_samples.samples.len();
+        provenance.live_query_backed = evaluator_samples.live_sample_count > 0;
+        provenance.live_query_sample_count = evaluator_samples.live_sample_count;
+        provenance.rejected_evaluator_sample_count = evaluator_samples.rejected_count;
+        evaluator_samples_by_source_edge.insert(provenance.source_edge_id, evaluator_samples);
     }
     apply_cad_curve_samples(&mut curves, &evaluator_samples_by_source_edge);
     Ok(CadCurveDiscretization {
         curves,
         edge_provenance,
     })
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct CadCurveCurvatureSizing {
+    target_size_m: Option<f64>,
+    sample_count: usize,
+}
+
+fn cad_curve_curvature_sizing(
+    cad_edge: &runmat_meshing_cad::CadEdge,
+    current_target_size_m: f64,
+) -> CadCurveCurvatureSizing {
+    if !current_target_size_m.is_finite() || current_target_size_m <= 0.0 {
+        return CadCurveCurvatureSizing::default();
+    }
+    let mut sample_count = 0_usize;
+    let mut target_size_m = current_target_size_m;
+    for sample in &cad_edge.evaluator_samples {
+        if !cad_curve_sample_is_valid(sample) {
+            continue;
+        }
+        let Some(curvature_1_per_m) = sample.curvature_1_per_m else {
+            continue;
+        };
+        if !curvature_1_per_m.is_finite() || curvature_1_per_m <= 0.0 {
+            continue;
+        }
+        sample_count += 1;
+        let radius_m = 1.0 / curvature_1_per_m;
+        let curvature_target_size_m = 0.5 * radius_m;
+        if curvature_target_size_m.is_finite() && curvature_target_size_m > 0.0 {
+            target_size_m = target_size_m.min(curvature_target_size_m);
+        }
+    }
+    CadCurveCurvatureSizing {
+        target_size_m: (sample_count > 0 && target_size_m < current_target_size_m)
+            .then_some(target_size_m),
+        sample_count,
+    }
 }
 
 fn cad_curve_evaluator_samples(
@@ -605,6 +704,8 @@ mod tests {
         assert!(provenance.evaluator_supports_tangent);
         assert!(provenance.evaluator_supports_curvature);
         assert_eq!(provenance.evaluator_sample_count, 1);
+        assert_eq!(provenance.curvature_sample_count, 1);
+        assert_eq!(provenance.curvature_limited_target_size_m, None);
         assert_eq!(cad_curves.curves.nodes[0].coordinates_m, [0.0, 0.0, 0.0]);
         assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.2, 0.0]);
         assert_eq!(cad_curves.curves.nodes[2].coordinates_m, [1.0, 0.0, 0.0]);
@@ -613,6 +714,31 @@ mod tests {
             .elements
             .iter()
             .all(|element| element.length_m > 0.5));
+    }
+
+    #[test]
+    fn cad_curve_curvature_samples_refine_curve_discretization() {
+        let topology = line_topology(1.0);
+        let mut cad_topology = cad_topology_for_line(&topology);
+        cad_topology.edges[0].evaluator_samples[0].curvature_1_per_m = Some(8.0);
+
+        let cad_curves = discretize_cad_topology_curves_with_sizing(
+            &topology,
+            &cad_topology,
+            CurveDiscretizationOptions {
+                target_size_m: 1.0,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 32,
+            },
+            None,
+        )
+        .expect("curvature-aware CAD curves should discretize");
+
+        assert_eq!(cad_curves.curves.elements.len(), 16);
+        let provenance = &cad_curves.edge_provenance[0];
+        assert_eq!(provenance.curvature_sample_count, 1);
+        assert_eq!(provenance.curvature_limited_target_size_m, Some(0.0625));
+        assert_eq!(provenance.evaluator_sample_count, 1);
     }
 
     #[test]
