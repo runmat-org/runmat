@@ -142,6 +142,8 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     );
     let quality = quality_report(&volume_elements, &coordinates_by_node_id);
     let backend_quality = backend_quality_evidence(&quality);
+    let optimization_targets =
+        optimization_target_evidence(&initial_backend_quality, &backend_quality);
     let missing_source_face_recovery =
         bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::SourceFace);
     let missing_source_edge_recovery =
@@ -876,10 +878,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ACCEPTED_COUNT,
             ),
             tetrahedron_sliver_count: backend_quality.sliver_count,
-            tetrahedron_optimization_target_seed_count: initial_backend_quality
-                .quality_repair_target_count,
-            tetrahedron_optimization_skipped_target_seed_count: initial_backend_quality
-                .quality_repair_target_count,
+            tetrahedron_optimization_target_seed_count: optimization_targets.target_seed_count,
+            tetrahedron_optimization_skipped_target_seed_count: optimization_targets
+                .skipped_target_seed_count,
             tetrahedron_optimization_interior_smoothing_attempt_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_ATTEMPT_COUNT,
@@ -1036,6 +1037,22 @@ pub(super) fn backend_quality_evidence_from_tetrahedron_mesh(
         max_boundary_projection_error_m: 0.0,
         elements,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OptimizationTargetEvidence {
+    target_seed_count: usize,
+    skipped_target_seed_count: usize,
+}
+
+fn optimization_target_evidence(
+    initial: &BackendQualityEvidence,
+    final_quality: &BackendQualityEvidence,
+) -> OptimizationTargetEvidence {
+    OptimizationTargetEvidence {
+        target_seed_count: initial.quality_repair_target_count,
+        skipped_target_seed_count: final_quality.quality_repair_target_count,
+    }
 }
 
 fn backend_quality_evidence(quality: &AnalysisMeshQualityReport) -> BackendQualityEvidence {
@@ -1461,6 +1478,22 @@ mod tests {
         assert_eq!(evidence.sliver_count, 0);
         assert_eq!(evidence.quality_repair_target_count, 0);
         assert!(evidence.min_exact_scaled_jacobian >= 0.15);
+    }
+
+    #[test]
+    fn optimization_target_evidence_reports_remaining_targets_as_skipped() {
+        let initial = backend_quality_evidence_from_tetrahedron_mesh(&tetrahedron_quality_mesh([
+            0.01, 0.01, 0.001,
+        ]));
+        let final_quality =
+            backend_quality_evidence_from_tetrahedron_mesh(&tetrahedron_quality_mesh([
+                0.0, 0.0, 1.0,
+            ]));
+
+        let targets = optimization_target_evidence(&initial, &final_quality);
+
+        assert!(targets.target_seed_count > 0);
+        assert_eq!(targets.skipped_target_seed_count, 0);
     }
 
     fn tetrahedron_quality_mesh(apex: [f64; 3]) -> TetrahedronMesh {
