@@ -3,6 +3,7 @@ use crate::validate::PlcValidationError;
 use runmat_meshing_core::curve::CurveValidationReport;
 use runmat_meshing_core::surface::{
     SurfaceDiscretization, SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
+    INTERNAL_SOURCE_EDGE_ID,
 };
 
 #[test]
@@ -83,6 +84,14 @@ fn rejects_open_surface_before_volume_meshing() {
 }
 
 #[test]
+fn rejects_nonmanifold_surface_edge_before_volume_meshing() {
+    let err = build_protected_boundary_complex(&edge_shared_tetrahedra_surface())
+        .expect_err("nonmanifold edge incidence must not become a PLC");
+
+    assert!(matches!(err, PlcBuildError::NonManifoldBoundaryEdge { .. }));
+}
+
+#[test]
 fn rejects_duplicate_surface_facets() {
     let mut surface = tetra_surface();
     surface.elements[1] = surface.elements[0].clone();
@@ -136,6 +145,41 @@ fn tetra_surface() -> SurfaceDiscretization {
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }
+}
+
+fn edge_shared_tetrahedra_surface() -> SurfaceDiscretization {
+    SurfaceDiscretization {
+        nodes: vec![
+            node(0, [0.0, 0.0, 0.0]),
+            node(1, [1.0, 0.0, 0.0]),
+            node(2, [0.0, 1.0, 0.0]),
+            node(3, [0.0, 0.0, 1.0]),
+            node(4, [0.0, -1.0, 0.0]),
+            node(5, [0.0, 0.0, -1.0]),
+        ],
+        elements: vec![
+            element(0, [0, 2, 1], internal_source_edges()),
+            element(1, [0, 1, 3], internal_source_edges()),
+            element(2, [1, 2, 3], internal_source_edges()),
+            element(3, [2, 0, 3], internal_source_edges()),
+            element(4, [0, 1, 4], internal_source_edges()),
+            element(5, [0, 5, 1], internal_source_edges()),
+            element(6, [1, 5, 4], internal_source_edges()),
+            element(7, [5, 0, 4], internal_source_edges()),
+        ],
+        curve_boundary_validation: None,
+        loop_coverage: None,
+        exact_cad_sample_node_count: 0,
+        rejected_exact_cad_sample_count: 0,
+    }
+}
+
+fn internal_source_edges() -> [u32; 3] {
+    [
+        INTERNAL_SOURCE_EDGE_ID,
+        INTERNAL_SOURCE_EDGE_ID,
+        INTERNAL_SOURCE_EDGE_ID,
+    ]
 }
 
 fn loop_coverage() -> SurfaceLoopCoverageReport {
