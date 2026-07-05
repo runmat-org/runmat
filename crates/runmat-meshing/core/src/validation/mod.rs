@@ -109,8 +109,8 @@ pub fn validate_analysis_mesh_with_options(
         options.require_no_unrecovered_tetrahedron_components,
     )?;
     validate_no_rolled_back_material_interface_partitions(mesh)?;
-    validate_tetrahedron_recovery_complete(mesh)?;
     validate_recovery_evidence_consistency(mesh)?;
+    validate_tetrahedron_recovery_complete(mesh)?;
     validate_no_unrepaired_exact_quality(mesh, options.require_no_unrepaired_exact_quality)?;
     validate_volume_component_count(mesh, options.max_volume_component_count)?;
     validate_coverage_samples(

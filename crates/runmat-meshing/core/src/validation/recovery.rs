@@ -237,6 +237,54 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_rolled_back_absent_material_partition_recovery_item_count,
         backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
     )?;
+    let typed_recovery_item_count = backend.tetrahedron_source_face_recovery_item_count
+        + backend.tetrahedron_source_edge_recovery_item_count
+        + backend.tetrahedron_material_interface_recovery_item_count;
+    validate_aggregate_recovery_count(
+        "recovery_items",
+        backend.tetrahedron_recovery_item_count,
+        typed_recovery_item_count,
+    )?;
+    let typed_missing_item_count = backend.tetrahedron_missing_source_face_recovery_item_count
+        + backend.tetrahedron_missing_source_edge_recovery_item_count
+        + backend.tetrahedron_missing_material_interface_recovery_item_count;
+    validate_aggregate_recovery_count(
+        "missing_items",
+        backend.tetrahedron_missing_recovery_item_count,
+        typed_missing_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "recovery_status_items",
+        backend.tetrahedron_recovery_item_count,
+        backend.tetrahedron_recovered_item_count + backend.tetrahedron_missing_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "recovered_items",
+        backend.tetrahedron_recovered_item_count,
+        backend.tetrahedron_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "missing_items",
+        backend.tetrahedron_missing_recovery_item_count,
+        backend.tetrahedron_recovery_item_count,
+    )?;
+    Ok(())
+}
+
+fn validate_aggregate_recovery_count(
+    family: &str,
+    aggregate_count: usize,
+    typed_count: usize,
+) -> Result<(), AnalysisMeshValidationError> {
+    if aggregate_count != typed_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+                family: family.to_string(),
+                aggregate_count,
+                typed_count,
+            },
+        );
+    }
     Ok(())
 }
 

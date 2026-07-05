@@ -207,6 +207,11 @@ pub enum AnalysisMeshValidationError {
         item_count: usize,
         input_count: usize,
     },
+    InconsistentTetrahedronRecoveryAggregateEvidence {
+        family: String,
+        aggregate_count: usize,
+        typed_count: usize,
+    },
     MissingRequiredBoundaryRegion {
         region_id: String,
     },
@@ -312,6 +317,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
         AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence { .. } => {
             "inconsistent_tetrahedron_recovery_item_evidence"
         }
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            ..
+        } => "inconsistent_tetrahedron_recovery_aggregate_evidence",
         AnalysisMeshValidationError::MissingRequiredBoundaryRegion { .. } => {
             "missing_required_boundary_region"
         }
