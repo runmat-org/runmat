@@ -23,6 +23,8 @@ pub enum TetrahedronGenerationError {
     DegenerateSingleTetrahedronPlc,
     UnsupportedConvexPolyhedronPlc,
     DegenerateConvexPolyhedronPlc,
+    UnsupportedStarShapedPolyhedronPlc,
+    DegenerateStarShapedPolyhedronPlc,
     DegenerateBoundaryFacet {
         facet_id: String,
     },
@@ -82,6 +84,18 @@ impl std::fmt::Display for TetrahedronGenerationError {
                 write!(
                     formatter,
                     "validated convex polyhedron PLC would create degenerate Tetrahedron4 elements"
+                )
+            }
+            Self::UnsupportedStarShapedPolyhedronPlc => {
+                write!(
+                    formatter,
+                    "validated PLC is not a supported star-shaped triangulated polyhedron"
+                )
+            }
+            Self::DegenerateStarShapedPolyhedronPlc => {
+                write!(
+                    formatter,
+                    "validated star-shaped polyhedron PLC would create degenerate Tetrahedron4 elements"
                 )
             }
             Self::DegenerateBoundaryFacet { facet_id } => {

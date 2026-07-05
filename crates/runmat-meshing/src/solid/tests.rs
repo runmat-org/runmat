@@ -476,6 +476,37 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
 }
 
 #[test]
+fn auto_backend_generates_star_shaped_dented_corner_solid() {
+    let mesh = generate_analysis_mesh(
+        &dented_corner_box_geometry(),
+        VolumeMeshingOptions::default(),
+    )
+    .expect("star-shaped dented-corner solid should run through the root solid pipeline");
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.volume_elements.len(),
+        mesh.backend.surface_element_count
+    );
+    assert_eq!(
+        mesh.backend.tetrahedron_element_count,
+        mesh.volume_elements.len()
+    );
+    assert_eq!(
+        mesh.boundary_faces.len(),
+        mesh.backend.surface_element_count
+    );
+    assert_eq!(
+        mesh.backend.tetrahedron_source_face_recovery_item_count,
+        mesh.backend.surface_element_count
+    );
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian > 0.0);
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("star-shaped dented-corner solid mesh should be solve-ready");
+}
+
+#[test]
 fn explicit_structured_grid_tetrahedron_backend_runs_structured_stage() {
     let mesh = generate_analysis_mesh(
         &cube_geometry(),
@@ -585,6 +616,15 @@ fn split_material_cube_geometry() -> GeometryAsset {
             vec![EntityIdRange::new(6, 6)],
         ),
     ];
+    geometry
+}
+
+fn dented_corner_box_geometry() -> GeometryAsset {
+    let mut geometry = cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_dented_corner_box".to_string();
+    geometry.source.path = "/fixtures/generic_dented_corner_box.step".to_string();
+    geometry.source.sha256 = "generic-dented-corner-box".to_string();
+    geometry.surface_meshes[0].vertices[6] = [0.55, 0.55, 0.55];
     geometry
 }
 

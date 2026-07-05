@@ -478,6 +478,51 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
 }
 
 #[test]
+fn generates_star_shaped_polyhedron_tetrahedron_mesh_from_dented_corner_box_plc() {
+    let plc = dented_corner_box_plc();
+
+    assert_eq!(
+        generate_convex_polyhedron_tetrahedron_mesh_from_plc(&plc),
+        Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
+    );
+    let mesh = generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("star-shaped dented-corner box PLC should generate a Tetrahedron mesh");
+
+    assert_eq!(mesh.mesh_id, "star_shaped_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.nodes.len(), plc.nodes.len() + 1);
+    assert_eq!(mesh.elements.len(), plc.facets.len());
+    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
+    assert_eq!(
+        mesh.evidence.entity_counts["star_shaped_polyhedron_facets"],
+        plc.facets.len()
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_facets"],
+        plc.facets.len()
+    );
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") > 0.0);
+    for element in &mesh.elements {
+        let points = element.node_ids.clone().map(|node_id| {
+            mesh.nodes
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .expect("node exists")
+                .coordinates_m
+        });
+        assert!(tetrahedron_signed_volume(points) > 0.0);
+    }
+}
+
+#[test]
+fn solver_generation_supports_star_shaped_polyhedron_plcs() {
+    let mesh = generate_solver_tetrahedron_mesh_from_plc(&dented_corner_box_plc())
+        .expect("dented-corner box PLC should use star-shaped polyhedron generation");
+
+    assert_eq!(mesh.mesh_id, "star_shaped_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.elements.len(), 12);
+}
+
+#[test]
 fn solver_generation_rejects_unreferenced_plc_nodes_before_shape_selection() {
     assert!(matches!(
         generate_solver_tetrahedron_mesh_from_plc(&octahedron_with_extra_interior_node_plc()),

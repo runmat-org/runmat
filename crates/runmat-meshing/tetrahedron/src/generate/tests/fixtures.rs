@@ -151,6 +151,13 @@ pub(super) fn split_edge_box_plc() -> ProtectedBoundaryComplex {
     plc
 }
 
+pub(super) fn dented_corner_box_plc() -> ProtectedBoundaryComplex {
+    let mut plc = box_plc();
+    plc.complex_id = "dented_corner_box".to_string();
+    plc.nodes[6].coordinates_m = [0.55, 0.55, 0.55];
+    plc
+}
+
 fn node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
     PlcNode {
         node_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
