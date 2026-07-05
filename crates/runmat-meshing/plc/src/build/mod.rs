@@ -7,7 +7,9 @@ pub use runmat_meshing_core::contracts::{
 };
 use runmat_meshing_core::{
     contracts::{MeshingStage, StageEvidence, TopologyEntityId},
-    surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID},
+    surface::{
+        SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID,
+    },
 };
 
 use crate::validate::{
@@ -193,6 +195,12 @@ pub fn build_protected_boundary_complex(
             });
         }
     }
+    if let Some(cad_curve_boundary_provenance) = &surface.cad_curve_boundary_provenance {
+        validate_cad_curve_boundary_provenance(
+            cad_curve_boundary_provenance,
+            protected_source_edge_count,
+        )?;
+    }
 
     let mut evidence = StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex);
     evidence
@@ -351,4 +359,99 @@ fn topology_entity_id(stage: MeshingStage, id: impl ToString) -> TopologyEntityI
         stage,
         id: id.to_string(),
     }
+}
+
+fn validate_cad_curve_boundary_provenance(
+    report: &SurfaceCadCurveBoundaryProvenanceReport,
+    protected_source_edge_count: usize,
+) -> Result<(), PlcBuildError> {
+    let computed_boundary_segment_count = report
+        .edges
+        .iter()
+        .map(|edge| edge.boundary_segment_count)
+        .sum::<usize>();
+    let computed_imported_edge_count = report
+        .edges
+        .iter()
+        .filter(|edge| edge.imported_curve_id.is_some())
+        .count();
+    let computed_evaluator_edge_count = report
+        .edges
+        .iter()
+        .filter(|edge| edge.evaluator_id.is_some())
+        .count();
+    let computed_evaluator_sample_count = report
+        .edges
+        .iter()
+        .map(|edge| edge.evaluator_sample_count)
+        .sum::<usize>();
+    let computed_live_query_edge_count = report
+        .edges
+        .iter()
+        .filter(|edge| edge.live_query_backed)
+        .count();
+    let computed_live_query_sample_count = report
+        .edges
+        .iter()
+        .map(|edge| edge.live_query_sample_count)
+        .sum::<usize>();
+    let computed_rejected_evaluator_sample_count = report
+        .edges
+        .iter()
+        .map(|edge| edge.rejected_evaluator_sample_count)
+        .sum::<usize>();
+    let computed_curvature_sized_edge_count = report
+        .edges
+        .iter()
+        .filter(|edge| edge.curvature_limited_target_size_m.is_some())
+        .count();
+    let computed_curvature_sample_count = report
+        .edges
+        .iter()
+        .map(|edge| edge.curvature_sample_count)
+        .sum::<usize>();
+
+    let reason = if report.recovered_source_edge_count != report.edges.len() {
+        Some("source_edge_count_mismatch")
+    } else if report.recovered_source_edge_count > protected_source_edge_count {
+        Some("source_edge_count_exceeds_protected_edges")
+    } else if report.boundary_segment_count != computed_boundary_segment_count {
+        Some("boundary_segment_count_mismatch")
+    } else if report.recovered_source_edge_count > 0
+        && report.boundary_segment_count < report.recovered_source_edge_count
+    {
+        Some("boundary_segment_count_below_source_edges")
+    } else if report.imported_curve_edge_count != computed_imported_edge_count {
+        Some("imported_curve_edge_count_mismatch")
+    } else if report.evaluator_curve_edge_count != computed_evaluator_edge_count {
+        Some("evaluator_curve_edge_count_mismatch")
+    } else if report.evaluator_sample_count != computed_evaluator_sample_count {
+        Some("evaluator_sample_count_mismatch")
+    } else if report.live_query_edge_count != computed_live_query_edge_count {
+        Some("live_query_edge_count_mismatch")
+    } else if report.live_query_edge_count > report.evaluator_curve_edge_count {
+        Some("live_query_edge_count_exceeds_evaluator_edges")
+    } else if report.live_query_sample_count != computed_live_query_sample_count {
+        Some("live_query_sample_count_mismatch")
+    } else if report.rejected_evaluator_sample_count != computed_rejected_evaluator_sample_count {
+        Some("rejected_evaluator_sample_count_mismatch")
+    } else if report.curvature_sized_edge_count != computed_curvature_sized_edge_count {
+        Some("curvature_sized_edge_count_mismatch")
+    } else if report.curvature_sample_count != computed_curvature_sample_count {
+        Some("curvature_sample_count_mismatch")
+    } else {
+        None
+    };
+
+    if let Some(reason) = reason {
+        return Err(PlcBuildError::InconsistentCadCurveBoundaryProvenance {
+            reason,
+            recovered_source_edge_count: report.recovered_source_edge_count,
+            protected_source_edge_count,
+            boundary_segment_count: report.boundary_segment_count,
+            edge_report_count: report.edges.len(),
+        });
+    }
+
+    Ok(())
 }

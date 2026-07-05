@@ -36,35 +36,9 @@ fn builds_valid_plc_from_closed_tetra_surface() {
 #[test]
 fn carries_cad_curve_boundary_provenance_into_stage_evidence() {
     let mut surface = tetra_surface();
-    surface.cad_curve_boundary_provenance = Some(SurfaceCadCurveBoundaryProvenanceReport {
-        recovered_source_edge_count: 1,
-        boundary_segment_count: 2,
-        imported_curve_edge_count: 1,
-        evaluator_curve_edge_count: 1,
-        evaluator_sample_count: 3,
-        live_query_edge_count: 1,
-        live_query_sample_count: 2,
-        rejected_evaluator_sample_count: 1,
-        curvature_sized_edge_count: 1,
-        curvature_sample_count: 1,
-        edges: vec![SurfaceCadCurveBoundaryEdgeProvenance {
-            source_edge_id: 0,
-            cad_edge_id: "cad-edge-0".to_string(),
-            imported_curve_id: Some(42),
-            evaluator_id: Some("curve-evaluator-0".to_string()),
-            evaluator_supports_point_evaluation: true,
-            evaluator_supports_projection: true,
-            evaluator_supports_tangent: true,
-            evaluator_supports_curvature: true,
-            evaluator_sample_count: 3,
-            live_query_backed: true,
-            live_query_sample_count: 2,
-            rejected_evaluator_sample_count: 1,
-            curvature_sample_count: 1,
-            curvature_limited_target_size_m: Some(0.25),
-            boundary_segment_count: 2,
-        }],
-    });
+    surface.cad_curve_boundary_provenance = Some(cad_curve_boundary_provenance(vec![
+        cad_curve_edge_provenance(0),
+    ]));
 
     let plc = build_protected_boundary_complex(&surface)
         .expect("CAD curve boundary provenance should not invalidate a closed PLC");
@@ -91,6 +65,82 @@ fn carries_cad_curve_boundary_provenance_into_stage_evidence() {
         1
     );
     assert_eq!(plc.evidence.entity_counts["cad_curve_curvature_samples"], 1);
+}
+
+#[test]
+fn rejects_cad_curve_boundary_provenance_count_mismatch() {
+    let mut surface = tetra_surface();
+    let mut provenance = cad_curve_boundary_provenance(vec![cad_curve_edge_provenance(0)]);
+    provenance.recovered_source_edge_count = 2;
+    surface.cad_curve_boundary_provenance = Some(provenance);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentCadCurveBoundaryProvenance {
+            reason: "source_edge_count_mismatch",
+            recovered_source_edge_count: 2,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 2,
+            edge_report_count: 1,
+        })
+    );
+}
+
+#[test]
+fn rejects_cad_curve_boundary_provenance_exceeding_protected_edges() {
+    let mut surface = tetra_surface();
+    surface.cad_curve_boundary_provenance = Some(cad_curve_boundary_provenance(
+        (0..7).map(cad_curve_edge_provenance).collect(),
+    ));
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentCadCurveBoundaryProvenance {
+            reason: "source_edge_count_exceeds_protected_edges",
+            recovered_source_edge_count: 7,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 14,
+            edge_report_count: 7,
+        })
+    );
+}
+
+#[test]
+fn rejects_cad_curve_boundary_segment_count_mismatch() {
+    let mut surface = tetra_surface();
+    let mut provenance = cad_curve_boundary_provenance(vec![cad_curve_edge_provenance(0)]);
+    provenance.boundary_segment_count = 1;
+    surface.cad_curve_boundary_provenance = Some(provenance);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentCadCurveBoundaryProvenance {
+            reason: "boundary_segment_count_mismatch",
+            recovered_source_edge_count: 1,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 1,
+            edge_report_count: 1,
+        })
+    );
+}
+
+#[test]
+fn rejects_cad_curve_live_queries_without_evaluator_edges() {
+    let mut surface = tetra_surface();
+    let mut edge = cad_curve_edge_provenance(0);
+    edge.evaluator_id = None;
+    surface.cad_curve_boundary_provenance = Some(cad_curve_boundary_provenance(vec![edge]));
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentCadCurveBoundaryProvenance {
+            reason: "live_query_edge_count_exceeds_evaluator_edges",
+            recovered_source_edge_count: 1,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 2,
+            edge_report_count: 1,
+        })
+    );
 }
 
 #[test]
@@ -356,6 +406,56 @@ fn loop_coverage() -> SurfaceLoopCoverageReport {
         recovered_source_edge_count: 6,
         boundary_segment_count: 12,
         max_loops_per_face: 1,
+    }
+}
+
+fn cad_curve_boundary_provenance(
+    edges: Vec<SurfaceCadCurveBoundaryEdgeProvenance>,
+) -> SurfaceCadCurveBoundaryProvenanceReport {
+    SurfaceCadCurveBoundaryProvenanceReport {
+        recovered_source_edge_count: edges.len(),
+        boundary_segment_count: edges.iter().map(|edge| edge.boundary_segment_count).sum(),
+        imported_curve_edge_count: edges
+            .iter()
+            .filter(|edge| edge.imported_curve_id.is_some())
+            .count(),
+        evaluator_curve_edge_count: edges
+            .iter()
+            .filter(|edge| edge.evaluator_id.is_some())
+            .count(),
+        evaluator_sample_count: edges.iter().map(|edge| edge.evaluator_sample_count).sum(),
+        live_query_edge_count: edges.iter().filter(|edge| edge.live_query_backed).count(),
+        live_query_sample_count: edges.iter().map(|edge| edge.live_query_sample_count).sum(),
+        rejected_evaluator_sample_count: edges
+            .iter()
+            .map(|edge| edge.rejected_evaluator_sample_count)
+            .sum(),
+        curvature_sized_edge_count: edges
+            .iter()
+            .filter(|edge| edge.curvature_limited_target_size_m.is_some())
+            .count(),
+        curvature_sample_count: edges.iter().map(|edge| edge.curvature_sample_count).sum(),
+        edges,
+    }
+}
+
+fn cad_curve_edge_provenance(source_edge_id: u32) -> SurfaceCadCurveBoundaryEdgeProvenance {
+    SurfaceCadCurveBoundaryEdgeProvenance {
+        source_edge_id,
+        cad_edge_id: format!("cad-edge-{source_edge_id}"),
+        imported_curve_id: Some(source_edge_id as u64 + 42),
+        evaluator_id: Some(format!("curve-evaluator-{source_edge_id}")),
+        evaluator_supports_point_evaluation: true,
+        evaluator_supports_projection: true,
+        evaluator_supports_tangent: true,
+        evaluator_supports_curvature: true,
+        evaluator_sample_count: 3,
+        live_query_backed: true,
+        live_query_sample_count: 2,
+        rejected_evaluator_sample_count: 1,
+        curvature_sample_count: 1,
+        curvature_limited_target_size_m: Some(0.25),
+        boundary_segment_count: 2,
     }
 }
 

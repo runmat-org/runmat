@@ -14,6 +14,13 @@ pub enum PlcBuildError {
         protected_source_edge_count: usize,
         boundary_segment_count: usize,
     },
+    InconsistentCadCurveBoundaryProvenance {
+        reason: &'static str,
+        recovered_source_edge_count: usize,
+        protected_source_edge_count: usize,
+        boundary_segment_count: usize,
+        edge_report_count: usize,
+    },
     MissingSurfaceNode {
         element_id: u32,
         node_id: u32,
@@ -73,6 +80,16 @@ impl std::fmt::Display for PlcBuildError {
             } => write!(
                 formatter,
                 "surface loop coverage is inconsistent with PLC input: recovered faces {recovered_face_count}, surface source faces {surface_source_face_count}, boundary loops {boundary_loop_count}, max loops per face {max_loops_per_face}, recovered source edges {recovered_source_edge_count}, protected source edges {protected_source_edge_count}, boundary segments {boundary_segment_count}"
+            ),
+            Self::InconsistentCadCurveBoundaryProvenance {
+                reason,
+                recovered_source_edge_count,
+                protected_source_edge_count,
+                boundary_segment_count,
+                edge_report_count,
+            } => write!(
+                formatter,
+                "CAD curve boundary provenance is inconsistent with PLC input ({reason}): recovered source edges {recovered_source_edge_count}, protected source edges {protected_source_edge_count}, boundary segments {boundary_segment_count}, edge reports {edge_report_count}"
             ),
             Self::MissingSurfaceNode {
                 element_id,
