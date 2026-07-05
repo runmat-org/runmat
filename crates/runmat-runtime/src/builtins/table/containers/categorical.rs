@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::builtins::table) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args
         .first()
         .cloned()
@@ -250,7 +250,7 @@ fn categorical_from_code_value(
     Ok(Value::Object(object))
 }
 
-pub(in crate::builtins::table) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
+pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![normalize_category_label(text)]),
         Value::StringArray(array) => Ok(array

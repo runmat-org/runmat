@@ -165,6 +165,18 @@ fn classify_surface_executes_from_scripts() {
 }
 
 #[test]
+fn confusionmat_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "truth = [1; 1; 2; 2; NaN]; pred = [1; 2; 2; 1; 1]; [C,ord] = confusionmat(truth, pred, 'Order', [2; 1]); a = C(1,1); b = C(1,2); c = C(2,1); d = C(2,2); o1 = ord(1); labels = [\"cat\";\"dog\";\"dog\"]; guesses = [\"dog\";\"dog\";\"cat\"]; [S,sord] = confusionmat(labels, guesses); s11 = S(1,1); s12 = S(1,2);",
+    )
+    .expect("confusionmat script");
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn kmeans_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; [idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10], 'MaxIter', 20); a = idx(1); b = idx(4); c11 = C(1,1); c22 = C(2,2); dshape = size(D);",

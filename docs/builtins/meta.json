@@ -10428,6 +10428,132 @@
       ]
     },
     {
+      "name": "confusionmat",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = confusionmat(group, grouphat)",
+          "inputs": [
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "grouphat",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confusion matrix with true labels in rows and predicted labels in columns."
+            }
+          ]
+        },
+        {
+          "label": "C = confusionmat(group, grouphat, Name, Value)",
+          "inputs": [
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "grouphat",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Order."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confusion matrix with true labels in rows and predicted labels in columns."
+            }
+          ]
+        },
+        {
+          "label": "[C,order] = confusionmat(___)",
+          "inputs": [
+            {
+              "name": "group",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "grouphat",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Predicted class labels."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Order."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Confusion matrix with true labels in rows and predicted labels in columns."
+            },
+            {
+              "name": "order",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Class labels corresponding to rows and columns of C."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CONFUSIONMAT.INVALID_ARGUMENT",
+          "identifier": "RunMat:confusionmat:InvalidArgument",
+          "when": "Label vectors, dimensions, order labels, or name-value options are malformed.",
+          "message": "confusionmat: invalid argument"
+        },
+        {
+          "code": "RM.CONFUSIONMAT.INTERNAL",
+          "identifier": "RunMat:confusionmat:Internal",
+          "when": "RunMat cannot allocate or construct confusion matrix outputs.",
+          "message": "confusionmat: internal error"
+        }
+      ]
+    },
+    {
       "name": "conj",
       "output_mode": "Fixed",
       "completion_policy": "Public",
