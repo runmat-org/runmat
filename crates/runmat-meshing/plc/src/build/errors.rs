@@ -1,4 +1,5 @@
 use crate::validate::PlcValidationError;
+use runmat_meshing_core::contracts::TopologyEntityId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlcBuildError {
@@ -22,17 +23,20 @@ pub enum PlcBuildError {
         edge_report_count: usize,
     },
     MissingSurfaceNode {
-        element_id: u32,
+        triangle_id: u32,
         node_id: u32,
     },
     NonFiniteSurfaceNode {
         node_id: u32,
     },
-    NonFiniteSurfaceElement {
-        element_id: u32,
+    NonFiniteSurfaceTriangle {
+        triangle_id: u32,
     },
-    NonPositiveSurfaceElementArea {
-        element_id: u32,
+    NonPositiveSurfaceTriangleArea {
+        triangle_id: u32,
+    },
+    InvalidSurfaceEntityId {
+        entity_id: TopologyEntityId,
     },
     DuplicateFacet {
         element_id: u32,
@@ -92,11 +96,11 @@ impl std::fmt::Display for PlcBuildError {
                 "CAD curve boundary provenance is inconsistent with PLC input ({reason}): recovered source edges {recovered_source_edge_count}, protected source edges {protected_source_edge_count}, boundary segments {boundary_segment_count}, edge reports {edge_report_count}"
             ),
             Self::MissingSurfaceNode {
-                element_id,
+                triangle_id,
                 node_id,
             } => write!(
                 formatter,
-                "surface element {element_id} references missing PLC node {node_id}"
+                "surface triangle {triangle_id} references missing PLC node {node_id}"
             ),
             Self::NonFiniteSurfaceNode { node_id } => {
                 write!(
@@ -104,17 +108,22 @@ impl std::fmt::Display for PlcBuildError {
                     "surface node {node_id} has non-finite coordinates"
                 )
             }
-            Self::NonFiniteSurfaceElement { element_id } => write!(
+            Self::NonFiniteSurfaceTriangle { triangle_id } => write!(
                 formatter,
-                "surface element {element_id} has non-finite area or projection evidence"
+                "surface triangle {triangle_id} has non-finite area or projection evidence"
             ),
-            Self::NonPositiveSurfaceElementArea { element_id } => write!(
+            Self::NonPositiveSurfaceTriangleArea { triangle_id } => write!(
                 formatter,
-                "surface element {element_id} has non-positive area evidence"
+                "surface triangle {triangle_id} has non-positive area evidence"
+            ),
+            Self::InvalidSurfaceEntityId { entity_id } => write!(
+                formatter,
+                "surface contract entity {:?}:{} is not usable as a PLC numeric topology ID",
+                entity_id.stage, entity_id.id
             ),
             Self::DuplicateFacet { element_id } => write!(
                 formatter,
-                "surface element {element_id} duplicates an existing PLC facet"
+                "surface triangle {element_id} duplicates an existing PLC facet"
             ),
             Self::AmbiguousProtectedBoundarySegment {
                 node_ids,

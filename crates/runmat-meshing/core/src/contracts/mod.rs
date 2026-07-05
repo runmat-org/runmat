@@ -49,7 +49,11 @@ pub use provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityK
 pub use size::SizingFieldContract;
 pub use solve::SolveReadinessReport;
 pub use stage::{MeshingStage, StageEvidence, StageEvidenceStatus, TopologyEntityId};
-pub use surface::{SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle};
+pub use surface::{
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenance,
+    SurfaceCurveBoundaryValidation, SurfaceLoopCoverage, SurfaceMesh, SurfaceMeshNode,
+    SurfaceMeshTriangle,
+};
 pub use tetrahedron::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh, TetrahedronMeshNode,
     TETRAHEDRON_EXACT_QUALITY_REPAIR_PASS_COUNT, TETRAHEDRON_EXACT_QUALITY_REPAIR_REJECTION_PREFIX,

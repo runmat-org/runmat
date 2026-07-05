@@ -130,9 +130,9 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         SurfaceValidationOptions::default(),
     )
     .map_err(SolidMeshingError::SurfaceValidation)?;
-    let _surface_mesh_contract =
+    let surface_mesh_contract =
         crate::build_surface_mesh_contract("solid_surface_mesh", &surface, &surface_validation);
-    let plc = build_protected_boundary_complex(&surface)
+    let plc = build_protected_boundary_complex(&surface_mesh_contract)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
     let mut recovery = recover_tetrahedron_mesh_from_plc(&plc, tetrahedron_mesh)

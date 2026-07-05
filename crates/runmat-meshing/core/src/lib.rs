@@ -51,7 +51,9 @@ pub use contracts::{
     CadModel, CadShellContract, CadVertexContract, CadVolumeContract, CurveMesh, CurveMeshElement,
     CurveMeshNode, MeshingStage, MeshingStageArtifacts, MeshingStageContractError, PlcFacet,
     PlcNode, PlcProtectedEdge, PlcValidationSummary, ProtectedBoundaryComplex, SizingFieldContract,
-    SolveReadinessReport, StageEvidence, StageEvidenceStatus, SurfaceMesh, SurfaceMeshNode,
+    SolveReadinessReport, StageEvidence, StageEvidenceStatus,
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenance,
+    SurfaceCurveBoundaryValidation, SurfaceLoopCoverage, SurfaceMesh, SurfaceMeshNode,
     SurfaceMeshTriangle, Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh,
     TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
 };
@@ -109,9 +111,8 @@ pub use surface::validate::{
 pub use surface::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
     discretize_cad_topology_surfaces_with_cad_curves, discretize_topology_surfaces,
-    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
-    SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
-    SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
+    SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, SurfaceDiscretizationError,
+    SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
 pub use tolerance::MeshingTolerance;
 pub use validation::{

@@ -1,9 +1,12 @@
 use runmat_meshing_core::{
-    MeshingStage, StageEvidence, SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle,
-    TopologyEntityId,
+    MeshingStage, StageEvidence, SurfaceCadCurveBoundaryEdgeProvenance,
+    SurfaceCadCurveBoundaryProvenance, SurfaceCurveBoundaryValidation, SurfaceLoopCoverage,
+    SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle, TopologyEntityId,
 };
 use runmat_meshing_surface::{
-    SurfaceDiscretization, SurfaceValidationReport, INTERNAL_SOURCE_EDGE_ID,
+    SurfaceCadCurveBoundaryEdgeProvenance as SurfaceStageCadCurveBoundaryEdgeProvenance,
+    SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, SurfaceLoopCoverageReport,
+    SurfaceValidationReport, INTERNAL_SOURCE_EDGE_ID,
 };
 
 pub fn build_surface_mesh_contract(
@@ -74,13 +77,7 @@ pub fn build_surface_mesh_contract(
             .map(|element| SurfaceMeshTriangle {
                 triangle_id: surface_entity_id(element.element_id),
                 source_face_id: surface_entity_id(element.source_face_id),
-                source_edge_ids: element
-                    .source_edge_ids
-                    .iter()
-                    .copied()
-                    .filter(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
-                    .map(curve_entity_id)
-                    .collect(),
+                source_edge_ids: element.source_edge_ids.map(surface_source_edge_id),
                 node_ids: [
                     surface_entity_id(element.node_ids[0]),
                     surface_entity_id(element.node_ids[1]),
@@ -88,9 +85,19 @@ pub fn build_surface_mesh_contract(
                 ],
                 region_ids: element.region_ids.clone(),
                 material_region_ids: element.material_region_ids.clone(),
+                max_projection_error_m: element.max_projection_error_m,
                 area_m2: element.area_m2,
             })
             .collect(),
+        curve_boundary_validation: surface
+            .curve_boundary_validation
+            .as_ref()
+            .map(surface_curve_boundary_validation),
+        loop_coverage: surface.loop_coverage.as_ref().map(surface_loop_coverage),
+        cad_curve_boundary_provenance: surface
+            .cad_curve_boundary_provenance
+            .as_ref()
+            .map(surface_cad_curve_boundary_provenance),
         evidence,
     }
 }
@@ -143,6 +150,81 @@ fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
     TopologyEntityId {
         stage: MeshingStage::CurveMesh,
         id: id.to_string(),
+    }
+}
+
+fn surface_source_edge_id(id: u32) -> Option<TopologyEntityId> {
+    (id != INTERNAL_SOURCE_EDGE_ID).then(|| curve_entity_id(id))
+}
+
+fn surface_curve_boundary_validation(
+    report: &runmat_meshing_curve::CurveValidationReport,
+) -> SurfaceCurveBoundaryValidation {
+    SurfaceCurveBoundaryValidation {
+        source_edge_count: report.source_edge_count,
+        curve_node_count: report.curve_node_count,
+        curve_element_count: report.curve_element_count,
+        max_endpoint_error_m: report.max_endpoint_error_m,
+        max_projection_error_m: report.max_projection_error_m,
+        max_length_error_m: report.max_length_error_m,
+        max_segment_length_m: report.max_segment_length_m,
+        max_parameter_gap: report.max_parameter_gap,
+        max_adjacent_length_ratio: report.max_adjacent_length_ratio,
+    }
+}
+
+fn surface_loop_coverage(report: &SurfaceLoopCoverageReport) -> SurfaceLoopCoverage {
+    SurfaceLoopCoverage {
+        source_face_count: report.source_face_count,
+        recovered_face_count: report.recovered_face_count,
+        boundary_loop_count: report.boundary_loop_count,
+        recovered_source_edge_count: report.recovered_source_edge_count,
+        boundary_segment_count: report.boundary_segment_count,
+        max_loops_per_face: report.max_loops_per_face,
+    }
+}
+
+fn surface_cad_curve_boundary_provenance(
+    report: &SurfaceCadCurveBoundaryProvenanceReport,
+) -> SurfaceCadCurveBoundaryProvenance {
+    SurfaceCadCurveBoundaryProvenance {
+        recovered_source_edge_count: report.recovered_source_edge_count,
+        boundary_segment_count: report.boundary_segment_count,
+        imported_curve_edge_count: report.imported_curve_edge_count,
+        evaluator_curve_edge_count: report.evaluator_curve_edge_count,
+        evaluator_sample_count: report.evaluator_sample_count,
+        live_query_edge_count: report.live_query_edge_count,
+        live_query_sample_count: report.live_query_sample_count,
+        rejected_evaluator_sample_count: report.rejected_evaluator_sample_count,
+        curvature_sized_edge_count: report.curvature_sized_edge_count,
+        curvature_sample_count: report.curvature_sample_count,
+        edges: report
+            .edges
+            .iter()
+            .map(surface_cad_curve_boundary_edge_provenance)
+            .collect(),
+    }
+}
+
+fn surface_cad_curve_boundary_edge_provenance(
+    provenance: &SurfaceStageCadCurveBoundaryEdgeProvenance,
+) -> SurfaceCadCurveBoundaryEdgeProvenance {
+    SurfaceCadCurveBoundaryEdgeProvenance {
+        source_edge_id: curve_entity_id(provenance.source_edge_id),
+        cad_edge_id: provenance.cad_edge_id.clone(),
+        imported_curve_id: provenance.imported_curve_id,
+        evaluator_id: provenance.evaluator_id.clone(),
+        evaluator_supports_point_evaluation: provenance.evaluator_supports_point_evaluation,
+        evaluator_supports_projection: provenance.evaluator_supports_projection,
+        evaluator_supports_tangent: provenance.evaluator_supports_tangent,
+        evaluator_supports_curvature: provenance.evaluator_supports_curvature,
+        evaluator_sample_count: provenance.evaluator_sample_count,
+        live_query_backed: provenance.live_query_backed,
+        live_query_sample_count: provenance.live_query_sample_count,
+        rejected_evaluator_sample_count: provenance.rejected_evaluator_sample_count,
+        curvature_sample_count: provenance.curvature_sample_count,
+        curvature_limited_target_size_m: provenance.curvature_limited_target_size_m,
+        boundary_segment_count: provenance.boundary_segment_count,
     }
 }
 
@@ -216,11 +298,16 @@ mod tests {
             triangle
                 .source_edge_ids
                 .iter()
-                .map(|source_edge_id| (source_edge_id.stage, source_edge_id.id.as_str()))
+                .map(|source_edge_id| {
+                    source_edge_id
+                        .as_ref()
+                        .map(|source_edge_id| (source_edge_id.stage, source_edge_id.id.as_str()))
+                })
                 .collect::<Vec<_>>(),
             vec![
-                (MeshingStage::CurveMesh, "11"),
-                (MeshingStage::CurveMesh, "12")
+                Some((MeshingStage::CurveMesh, "11")),
+                None,
+                Some((MeshingStage::CurveMesh, "12"))
             ]
         );
         assert_eq!(

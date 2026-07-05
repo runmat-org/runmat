@@ -156,6 +156,9 @@ fn surface_mesh() -> SurfaceMesh {
         mesh_id: "surface".to_string(),
         nodes: vec![],
         triangles: vec![],
+        curve_boundary_validation: None,
+        loop_coverage: None,
+        cad_curve_boundary_provenance: None,
         evidence: StageEvidence::complete(MeshingStage::SurfaceMesh),
     }
 }

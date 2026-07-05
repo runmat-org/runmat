@@ -1,10 +1,9 @@
 use super::*;
 use crate::validate::PlcValidationError;
-use runmat_meshing_core::curve::CurveValidationReport;
-use runmat_meshing_core::surface::{
-    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
-    SurfaceDiscretization, SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
-    INTERNAL_SOURCE_EDGE_ID,
+use runmat_meshing_core::{
+    StageEvidence, SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenance,
+    SurfaceCurveBoundaryValidation, SurfaceLoopCoverage, SurfaceMesh, SurfaceMeshNode,
+    SurfaceMeshTriangle, TopologyEntityId,
 };
 
 #[test]
@@ -36,7 +35,7 @@ fn builds_valid_plc_from_closed_tetra_surface() {
 #[test]
 fn material_interfaces_use_material_regions_not_boundary_regions() {
     let mut surface = tetra_surface();
-    for element in &mut surface.elements {
+    for element in &mut surface.triangles {
         element.region_ids = vec!["fixed_face".to_string(), "load_face".to_string()];
         element.material_region_ids = vec!["body".to_string()];
     }
@@ -269,7 +268,7 @@ fn rejects_surface_with_inconsistent_boundary_segment_count_evidence() {
 #[test]
 fn rejects_open_surface_before_volume_meshing() {
     let mut surface = tetra_surface();
-    surface.elements.pop();
+    surface.triangles.pop();
 
     let err =
         build_protected_boundary_complex(&surface).expect_err("open surface must not become a PLC");
@@ -288,8 +287,8 @@ fn rejects_nonmanifold_surface_edge_before_volume_meshing() {
 #[test]
 fn rejects_duplicate_surface_facets() {
     let mut surface = tetra_surface();
-    surface.elements[1] = surface.elements[0].clone();
-    surface.elements[1].element_id = 99;
+    surface.triangles[1] = surface.triangles[0].clone();
+    surface.triangles[1].triangle_id = surface_entity_id(99);
 
     assert_eq!(
         build_protected_boundary_complex(&surface),
@@ -300,11 +299,11 @@ fn rejects_duplicate_surface_facets() {
 #[test]
 fn rejects_non_positive_surface_element_area_before_volume_meshing() {
     let mut surface = tetra_surface();
-    surface.elements[0].area_m2 = 0.0;
+    surface.triangles[0].area_m2 = 0.0;
 
     assert_eq!(
         build_protected_boundary_complex(&surface),
-        Err(PlcBuildError::NonPositiveSurfaceElementArea { element_id: 0 })
+        Err(PlcBuildError::NonPositiveSurfaceTriangleArea { triangle_id: 0 })
     );
 }
 
@@ -327,8 +326,16 @@ fn rejects_degenerate_surface_facet_geometry_before_returning_plc() {
 #[test]
 fn rejects_inconsistent_surface_orientation_before_returning_plc() {
     let mut surface = tetra_surface();
-    surface.elements[0].node_ids = [0, 1, 2];
-    surface.elements[0].source_edge_ids = [0, 1, 2];
+    surface.triangles[0].node_ids = [
+        surface_entity_id(0),
+        surface_entity_id(1),
+        surface_entity_id(2),
+    ];
+    surface.triangles[0].source_edge_ids = [
+        Some(curve_entity_id(0)),
+        Some(curve_entity_id(1)),
+        Some(curve_entity_id(2)),
+    ];
 
     assert!(matches!(
         build_protected_boundary_complex(&surface),
@@ -342,7 +349,7 @@ fn rejects_inconsistent_surface_orientation_before_returning_plc() {
 #[test]
 fn rejects_ambiguous_protected_source_edges_on_same_boundary_segment() {
     let mut surface = tetra_surface();
-    surface.elements[1].source_edge_ids[0] = 99;
+    surface.triangles[1].source_edge_ids[0] = Some(curve_entity_id(99));
 
     assert_eq!(
         build_protected_boundary_complex(&surface),
@@ -357,7 +364,7 @@ fn rejects_ambiguous_protected_source_edges_on_same_boundary_segment() {
 #[test]
 fn rejects_partially_protected_source_edge_on_same_boundary_segment() {
     let mut surface = tetra_surface();
-    surface.elements[1].source_edge_ids[0] = INTERNAL_SOURCE_EDGE_ID;
+    surface.triangles[1].source_edge_ids[0] = None;
 
     assert_eq!(
         build_protected_boundary_complex(&surface),
@@ -368,21 +375,22 @@ fn rejects_partially_protected_source_edge_on_same_boundary_segment() {
     );
 }
 
-fn tetra_surface() -> SurfaceDiscretization {
-    SurfaceDiscretization {
+fn tetra_surface() -> SurfaceMesh {
+    SurfaceMesh {
+        mesh_id: "tetra_surface".to_string(),
         nodes: vec![
             node(0, [0.0, 0.0, 0.0]),
             node(1, [1.0, 0.0, 0.0]),
             node(2, [0.0, 1.0, 0.0]),
             node(3, [0.0, 0.0, 1.0]),
         ],
-        elements: vec![
+        triangles: vec![
             element(0, [0, 2, 1], [2, 1, 0]),
             element(1, [0, 1, 3], [0, 4, 3]),
             element(2, [1, 2, 3], [1, 5, 4]),
             element(3, [2, 0, 3], [2, 3, 5]),
         ],
-        curve_boundary_validation: Some(CurveValidationReport {
+        curve_boundary_validation: Some(SurfaceCurveBoundaryValidation {
             source_edge_count: 6,
             curve_node_count: 12,
             curve_element_count: 6,
@@ -395,13 +403,13 @@ fn tetra_surface() -> SurfaceDiscretization {
         }),
         loop_coverage: Some(loop_coverage()),
         cad_curve_boundary_provenance: None,
-        exact_cad_sample_node_count: 0,
-        rejected_exact_cad_sample_count: 0,
+        evidence: StageEvidence::complete(MeshingStage::SurfaceMesh),
     }
 }
 
-fn edge_shared_tetrahedra_surface() -> SurfaceDiscretization {
-    SurfaceDiscretization {
+fn edge_shared_tetrahedra_surface() -> SurfaceMesh {
+    SurfaceMesh {
+        mesh_id: "edge_shared_tetrahedra_surface".to_string(),
         nodes: vec![
             node(0, [0.0, 0.0, 0.0]),
             node(1, [1.0, 0.0, 0.0]),
@@ -410,7 +418,7 @@ fn edge_shared_tetrahedra_surface() -> SurfaceDiscretization {
             node(4, [0.0, -1.0, 0.0]),
             node(5, [0.0, 0.0, -1.0]),
         ],
-        elements: vec![
+        triangles: vec![
             element(0, [0, 2, 1], internal_source_edges()),
             element(1, [0, 1, 3], internal_source_edges()),
             element(2, [1, 2, 3], internal_source_edges()),
@@ -423,21 +431,16 @@ fn edge_shared_tetrahedra_surface() -> SurfaceDiscretization {
         curve_boundary_validation: None,
         loop_coverage: None,
         cad_curve_boundary_provenance: None,
-        exact_cad_sample_node_count: 0,
-        rejected_exact_cad_sample_count: 0,
+        evidence: StageEvidence::complete(MeshingStage::SurfaceMesh),
     }
 }
 
-fn internal_source_edges() -> [u32; 3] {
-    [
-        INTERNAL_SOURCE_EDGE_ID,
-        INTERNAL_SOURCE_EDGE_ID,
-        INTERNAL_SOURCE_EDGE_ID,
-    ]
+fn internal_source_edges() -> [Option<TopologyEntityId>; 3] {
+    [None, None, None]
 }
 
-fn loop_coverage() -> SurfaceLoopCoverageReport {
-    SurfaceLoopCoverageReport {
+fn loop_coverage() -> SurfaceLoopCoverage {
+    SurfaceLoopCoverage {
         source_face_count: 4,
         recovered_face_count: 4,
         boundary_loop_count: 4,
@@ -449,8 +452,8 @@ fn loop_coverage() -> SurfaceLoopCoverageReport {
 
 fn cad_curve_boundary_provenance(
     edges: Vec<SurfaceCadCurveBoundaryEdgeProvenance>,
-) -> SurfaceCadCurveBoundaryProvenanceReport {
-    SurfaceCadCurveBoundaryProvenanceReport {
+) -> SurfaceCadCurveBoundaryProvenance {
+    SurfaceCadCurveBoundaryProvenance {
         recovered_source_edge_count: edges.len(),
         boundary_segment_count: edges.iter().map(|edge| edge.boundary_segment_count).sum(),
         imported_curve_edge_count: edges
@@ -479,7 +482,7 @@ fn cad_curve_boundary_provenance(
 
 fn cad_curve_edge_provenance(source_edge_id: u32) -> SurfaceCadCurveBoundaryEdgeProvenance {
     SurfaceCadCurveBoundaryEdgeProvenance {
-        source_edge_id,
+        source_edge_id: curve_entity_id(source_edge_id),
         cad_edge_id: format!("cad-edge-{source_edge_id}"),
         imported_curve_id: Some(source_edge_id as u64 + 42),
         evaluator_id: Some(format!("curve-evaluator-{source_edge_id}")),
@@ -497,26 +500,52 @@ fn cad_curve_edge_provenance(source_edge_id: u32) -> SurfaceCadCurveBoundaryEdge
     }
 }
 
-fn node(node_id: u32, coordinates_m: [f64; 3]) -> SurfaceNode {
-    SurfaceNode {
-        node_id,
-        source_vertex_id: node_id,
+fn node(node_id: u32, coordinates_m: [f64; 3]) -> SurfaceMeshNode {
+    SurfaceMeshNode {
+        node_id: surface_entity_id(node_id),
         coordinates_m,
+        source_edge_id: None,
+        source_face_id: surface_entity_id(0),
     }
 }
 
-fn element(element_id: u32, node_ids: [u32; 3], source_edge_ids: [u32; 3]) -> SurfaceElement {
-    SurfaceElement {
-        element_id,
-        source_face_id: element_id,
-        cad_face_id: None,
-        source_edge_ids,
-        node_ids,
-        parametric_node_uv: [[0.0, 0.0]; 3],
-        max_projection_error_m: 0.0,
+fn element(
+    element_id: u32,
+    node_ids: [u32; 3],
+    source_edge_ids: impl IntoSourceEdgeIds,
+) -> SurfaceMeshTriangle {
+    SurfaceMeshTriangle {
+        triangle_id: surface_entity_id(element_id),
+        source_face_id: surface_entity_id(element_id),
+        source_edge_ids: source_edge_ids.into_source_edge_ids(),
+        node_ids: node_ids.map(surface_entity_id),
         region_ids: vec!["body".to_string()],
         material_region_ids: vec!["body".to_string()],
+        max_projection_error_m: 0.0,
         area_m2: 0.5,
-        unit_normal: [0.0, 0.0, 1.0],
+    }
+}
+
+fn surface_entity_id(id: impl ToString) -> TopologyEntityId {
+    topology_entity_id(MeshingStage::SurfaceMesh, id)
+}
+
+fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
+    topology_entity_id(MeshingStage::CurveMesh, id)
+}
+
+trait IntoSourceEdgeIds {
+    fn into_source_edge_ids(self) -> [Option<TopologyEntityId>; 3];
+}
+
+impl IntoSourceEdgeIds for [u32; 3] {
+    fn into_source_edge_ids(self) -> [Option<TopologyEntityId>; 3] {
+        self.map(|source_edge_id| Some(curve_entity_id(source_edge_id)))
+    }
+}
+
+impl IntoSourceEdgeIds for [Option<TopologyEntityId>; 3] {
+    fn into_source_edge_ids(self) -> [Option<TopologyEntityId>; 3] {
+        self
     }
 }

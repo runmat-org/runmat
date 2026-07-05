@@ -2,15 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod errors;
 pub use errors::PlcBuildError;
+use runmat_meshing_core::contracts::{
+    MeshingStage, StageEvidence, SurfaceCadCurveBoundaryEdgeProvenance,
+    SurfaceCadCurveBoundaryProvenance, SurfaceMesh, TopologyEntityId,
+};
 pub use runmat_meshing_core::contracts::{
     PlcFacet, PlcNode, PlcProtectedEdge, PlcProtectedEdgeCadCurveBoundary, ProtectedBoundaryComplex,
-};
-use runmat_meshing_core::{
-    contracts::{MeshingStage, StageEvidence, TopologyEntityId},
-    surface::{
-        SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
-        SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID,
-    },
 };
 
 use crate::validate::{
@@ -23,22 +20,21 @@ pub const MODULE_PURPOSE: &str = "oriented protected boundary complex constructi
 mod tests;
 
 pub fn build_protected_boundary_complex(
-    surface: &SurfaceDiscretization,
+    surface: &SurfaceMesh,
 ) -> Result<ProtectedBoundaryComplex, PlcBuildError> {
-    if surface.elements.is_empty() {
+    if surface.triangles.is_empty() {
         return Err(PlcBuildError::EmptySurface);
     }
     let surface_source_face_count = surface
-        .elements
+        .triangles
         .iter()
-        .map(|element| element.source_face_id)
+        .map(|element| element.source_face_id.clone())
         .collect::<BTreeSet<_>>()
         .len();
     let protected_source_edge_count = surface
-        .elements
+        .triangles
         .iter()
-        .flat_map(|element| element.source_edge_ids)
-        .filter(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
+        .flat_map(|element| element.source_edge_ids.iter().filter_map(|id| id.as_ref()))
         .collect::<BTreeSet<_>>()
         .len();
     let has_protected_source_edges = protected_source_edge_count > 0;
@@ -55,7 +51,7 @@ pub fn build_protected_boundary_complex(
             report
                 .edges
                 .iter()
-                .map(|edge| (edge.source_edge_id, edge))
+                .map(|edge| (edge.source_edge_id.clone(), edge))
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
@@ -63,8 +59,8 @@ pub fn build_protected_boundary_complex(
     let surface_nodes = surface
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
+        .map(|node| Ok((numeric_entity_id(&node.node_id)?, node.coordinates_m)))
+        .collect::<Result<BTreeMap<_, _>, PlcBuildError>>()?;
     for node in &surface.nodes {
         if !node
             .coordinates_m
@@ -72,52 +68,58 @@ pub fn build_protected_boundary_complex(
             .all(|coordinate| coordinate.is_finite())
         {
             return Err(PlcBuildError::NonFiniteSurfaceNode {
-                node_id: node.node_id,
+                node_id: numeric_entity_id(&node.node_id)?,
             });
         }
     }
 
-    let mut facets = Vec::<PlcFacet>::with_capacity(surface.elements.len());
-    let mut protected_edges = BTreeMap::<(u32, u32, u32), PlcProtectedEdge>::new();
+    let mut facets = Vec::<PlcFacet>::with_capacity(surface.triangles.len());
+    let mut protected_edges = BTreeMap::<(TopologyEntityId, u32, u32), PlcProtectedEdge>::new();
     let mut source_edge_marker_by_segment = BTreeMap::<[u32; 2], Option<u32>>::new();
     let mut edge_incidence = BTreeMap::<[u32; 2], usize>::new();
     let mut facet_keys = BTreeSet::<[u32; 3]>::new();
-    for element in &surface.elements {
+    for element in &surface.triangles {
+        let element_id = numeric_entity_id(&element.triangle_id)?;
+        let element_node_ids = element
+            .node_ids
+            .iter()
+            .map(numeric_entity_id)
+            .collect::<Result<Vec<_>, _>>()?;
+        let element_node_ids: [u32; 3] = element_node_ids
+            .try_into()
+            .expect("surface triangles always carry three node IDs");
         if !element.area_m2.is_finite() || !element.max_projection_error_m.is_finite() {
-            return Err(PlcBuildError::NonFiniteSurfaceElement {
-                element_id: element.element_id,
+            return Err(PlcBuildError::NonFiniteSurfaceTriangle {
+                triangle_id: element_id,
             });
         }
         if element.area_m2 <= 0.0 {
-            return Err(PlcBuildError::NonPositiveSurfaceElementArea {
-                element_id: element.element_id,
+            return Err(PlcBuildError::NonPositiveSurfaceTriangleArea {
+                triangle_id: element_id,
             });
         }
-        for node_id in element.node_ids {
+        for node_id in element_node_ids {
             if !surface_nodes.contains_key(&node_id) {
                 return Err(PlcBuildError::MissingSurfaceNode {
-                    element_id: element.element_id,
+                    triangle_id: element_id,
                     node_id,
                 });
             }
         }
-        let mut facet_key = element.node_ids;
+        let mut facet_key = element_node_ids;
         facet_key.sort_unstable();
         if !facet_keys.insert(facet_key) {
-            return Err(PlcBuildError::DuplicateFacet {
-                element_id: element.element_id,
-            });
+            return Err(PlcBuildError::DuplicateFacet { element_id });
         }
 
         for edge_index in 0..3 {
-            let left = element.node_ids[edge_index];
-            let right = element.node_ids[(edge_index + 1) % 3];
+            let left = element_node_ids[edge_index];
+            let right = element_node_ids[(edge_index + 1) % 3];
             let edge = sorted_edge(left, right);
             *edge_incidence.entry(edge).or_insert(0) += 1;
 
-            let source_edge_id = element.source_edge_ids[edge_index];
-            let source_edge_marker =
-                (source_edge_id != INTERNAL_SOURCE_EDGE_ID).then_some(source_edge_id);
+            let source_edge_id = element.source_edge_ids[edge_index].as_ref();
+            let source_edge_marker = source_edge_id.map(numeric_entity_id).transpose()?;
             if let Some(first_source_edge_marker) =
                 source_edge_marker_by_segment.insert(edge, source_edge_marker)
             {
@@ -140,14 +142,16 @@ pub fn build_protected_boundary_complex(
                     _ => {}
                 }
             }
-            if source_edge_id != INTERNAL_SOURCE_EDGE_ID {
+            if let Some(source_edge_id) = source_edge_id {
+                let source_edge_marker =
+                    source_edge_marker.expect("source-edge marker exists when ID exists");
                 protected_edges
-                    .entry((source_edge_id, edge[0], edge[1]))
+                    .entry((source_edge_id.clone(), edge[0], edge[1]))
                     .or_insert_with(|| PlcProtectedEdge {
                         edge_id: topology_entity_id(
                             MeshingStage::ProtectedBoundaryComplex,
                             format!(
-                                "plc_protected_edge_{source_edge_id}_{}_{}",
+                                "plc_protected_edge_{source_edge_marker}_{}_{}",
                                 edge[0], edge[1]
                             ),
                         ),
@@ -155,9 +159,9 @@ pub fn build_protected_boundary_complex(
                             topology_entity_id(MeshingStage::ProtectedBoundaryComplex, edge[0]),
                             topology_entity_id(MeshingStage::ProtectedBoundaryComplex, edge[1]),
                         ],
-                        source_edge_id: topology_entity_id(MeshingStage::CurveMesh, source_edge_id),
+                        source_edge_id: source_edge_id.clone(),
                         cad_curve_boundary: cad_curve_boundary_by_source_edge
-                            .get(&source_edge_id)
+                            .get(source_edge_id)
                             .map(|provenance| plc_cad_curve_boundary(provenance)),
                     });
             }
@@ -166,14 +170,23 @@ pub fn build_protected_boundary_complex(
         facets.push(PlcFacet {
             facet_id: topology_entity_id(
                 MeshingStage::ProtectedBoundaryComplex,
-                element.element_id,
+                element.triangle_id.id.clone(),
             ),
             node_ids: [
-                topology_entity_id(MeshingStage::ProtectedBoundaryComplex, element.node_ids[0]),
-                topology_entity_id(MeshingStage::ProtectedBoundaryComplex, element.node_ids[1]),
-                topology_entity_id(MeshingStage::ProtectedBoundaryComplex, element.node_ids[2]),
+                topology_entity_id(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    element.node_ids[0].id.clone(),
+                ),
+                topology_entity_id(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    element.node_ids[1].id.clone(),
+                ),
+                topology_entity_id(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    element.node_ids[2].id.clone(),
+                ),
             ],
-            source_face_id: topology_entity_id(MeshingStage::SurfaceMesh, element.source_face_id),
+            source_face_id: element.source_face_id.clone(),
             material_interface_ids: element.material_region_ids.clone(),
         });
     }
@@ -308,7 +321,10 @@ pub fn build_protected_boundary_complex(
             .nodes
             .iter()
             .map(|node| PlcNode {
-                node_id: topology_entity_id(MeshingStage::ProtectedBoundaryComplex, node.node_id),
+                node_id: topology_entity_id(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    node.node_id.id.clone(),
+                ),
                 coordinates_m: node.coordinates_m,
             })
             .collect(),
@@ -376,8 +392,17 @@ fn topology_entity_id(stage: MeshingStage, id: impl ToString) -> TopologyEntityI
     }
 }
 
+fn numeric_entity_id(entity_id: &TopologyEntityId) -> Result<u32, PlcBuildError> {
+    entity_id
+        .id
+        .parse()
+        .map_err(|_| PlcBuildError::InvalidSurfaceEntityId {
+            entity_id: entity_id.clone(),
+        })
+}
+
 fn validate_cad_curve_boundary_provenance(
-    report: &SurfaceCadCurveBoundaryProvenanceReport,
+    report: &SurfaceCadCurveBoundaryProvenance,
     protected_source_edge_count: usize,
 ) -> Result<(), PlcBuildError> {
     let computed_boundary_segment_count = report
