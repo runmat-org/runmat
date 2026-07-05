@@ -1,7 +1,7 @@
 use super::*;
 use runmat_meshing_core::contracts::{
-    PlcFacet, PlcNode, PlcProtectedEdge, PlcValidationSummary, Tetrahedron4Element,
-    TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
+    PlcFacet, PlcNode, PlcProtectedEdge, PlcProtectedEdgeCadCurveBoundary, PlcValidationSummary,
+    Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
 };
 
 mod boundary_leaks;
@@ -70,6 +70,65 @@ fn builds_recovery_queue_for_recovered_plc_constraints() {
         .items
         .iter()
         .all(|item| item.status == TetrahedronRecoveryStatus::Recovered));
+}
+
+#[test]
+fn recovery_queue_classifies_recovered_cad_curve_source_edges() {
+    let queue = build_recovery_queue_from_plc(&cad_curve_tetrahedron_plc(), &tetrahedron_mesh())
+        .expect("matching Tetrahedron mesh should recover CAD curve PLC constraints");
+
+    assert_eq!(
+        queue.evidence.entity_counts["cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_provenance_items"],
+        0
+    );
+}
+
+#[test]
+fn recovery_queue_classifies_missing_cad_curve_source_edge_provenance() {
+    let mut mesh = tetrahedron_mesh();
+    for boundary_face in &mut mesh.boundary_faces {
+        boundary_face.source_edge_ids = [None, None, None];
+    }
+
+    let queue = build_recovery_queue_from_plc(&cad_curve_tetrahedron_plc(), &mesh)
+        .expect("boundary topology with missing CAD curve provenance should build a queue");
+
+    assert_eq!(
+        queue.evidence.entity_counts["cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_topology_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_cad_curve_source_edge_provenance_items"],
+        1
+    );
 }
 
 #[test]
@@ -1321,6 +1380,31 @@ fn tetrahedron_plc() -> ProtectedBoundaryComplex {
             material_interfaces_classified: true,
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    }
+}
+
+fn cad_curve_tetrahedron_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges[0].cad_curve_boundary = Some(cad_curve_boundary());
+    plc
+}
+
+fn cad_curve_boundary() -> PlcProtectedEdgeCadCurveBoundary {
+    PlcProtectedEdgeCadCurveBoundary {
+        cad_edge_id: "cad_edge_1".to_string(),
+        imported_curve_id: Some(1),
+        evaluator_id: Some("cad_curve_1".to_string()),
+        evaluator_supports_point_evaluation: true,
+        evaluator_supports_projection: true,
+        evaluator_supports_tangent: true,
+        evaluator_supports_curvature: true,
+        evaluator_sample_count: 2,
+        live_query_backed: true,
+        live_query_sample_count: 1,
+        rejected_evaluator_sample_count: 0,
+        curvature_sample_count: 1,
+        curvature_limited_target_size_m: Some(0.5),
+        boundary_segment_count: 1,
     }
 }
 

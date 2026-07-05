@@ -81,6 +81,12 @@ pub fn build_recovery_queue_from_plc(
         .iter()
         .map(|element| element.material_region_id.clone())
         .collect::<BTreeSet<_>>();
+    let cad_curve_source_edge_ids = plc
+        .protected_edges
+        .iter()
+        .filter(|edge| edge.cad_curve_boundary.is_some())
+        .map(|edge| edge.source_edge_id.clone())
+        .collect::<BTreeSet<_>>();
 
     let mut items = Vec::<TetrahedronRecoveryQueueItem>::new();
     for facet in &plc.facets {
@@ -396,6 +402,44 @@ pub fn build_recovery_queue_from_plc(
             .count(),
     );
     evidence.entity_counts.insert(
+        "cad_curve_source_edge_items".to_string(),
+        source_edge_item_count_by_cad_curve_boundary(&items, &cad_curve_source_edge_ids),
+    );
+    evidence.entity_counts.insert(
+        "recovered_cad_curve_source_edge_items".to_string(),
+        source_edge_item_count_by_cad_curve_boundary_and_status(
+            &items,
+            &cad_curve_source_edge_ids,
+            TetrahedronRecoveryStatus::Recovered,
+        ),
+    );
+    evidence.entity_counts.insert(
+        "missing_cad_curve_source_edge_items".to_string(),
+        source_edge_item_count_by_cad_curve_boundary_and_status(
+            &items,
+            &cad_curve_source_edge_ids,
+            TetrahedronRecoveryStatus::Missing,
+        ),
+    );
+    evidence.entity_counts.insert(
+        "missing_cad_curve_source_edge_topology_items".to_string(),
+        source_edge_item_count_by_cad_curve_boundary_status_and_topology(
+            &items,
+            &cad_curve_source_edge_ids,
+            TetrahedronRecoveryStatus::Missing,
+            |topology| topology != TetrahedronProtectedEdgeTopology::BoundaryEdge,
+        ),
+    );
+    evidence.entity_counts.insert(
+        "missing_cad_curve_source_edge_provenance_items".to_string(),
+        source_edge_item_count_by_cad_curve_boundary_status_and_topology(
+            &items,
+            &cad_curve_source_edge_ids,
+            TetrahedronRecoveryStatus::Missing,
+            |topology| topology == TetrahedronProtectedEdgeTopology::BoundaryEdge,
+        ),
+    );
+    evidence.entity_counts.insert(
         "missing_material_interface_items".to_string(),
         items
             .iter()
@@ -466,6 +510,59 @@ fn protected_boundary_edge_provenance_complete(
         && matching_edge_sources
             .iter()
             .all(|boundary_source_edge_id| boundary_source_edge_id.as_ref() == Some(source_edge_id))
+}
+
+fn source_edge_item_count_by_cad_curve_boundary(
+    items: &[TetrahedronRecoveryQueueItem],
+    cad_curve_source_edge_ids: &BTreeSet<TopologyEntityId>,
+) -> usize {
+    items
+        .iter()
+        .filter(|item| source_edge_item_has_cad_curve_boundary(item, cad_curve_source_edge_ids))
+        .count()
+}
+
+fn source_edge_item_count_by_cad_curve_boundary_and_status(
+    items: &[TetrahedronRecoveryQueueItem],
+    cad_curve_source_edge_ids: &BTreeSet<TopologyEntityId>,
+    status: TetrahedronRecoveryStatus,
+) -> usize {
+    items
+        .iter()
+        .filter(|item| {
+            item.status == status
+                && source_edge_item_has_cad_curve_boundary(item, cad_curve_source_edge_ids)
+        })
+        .count()
+}
+
+fn source_edge_item_count_by_cad_curve_boundary_status_and_topology(
+    items: &[TetrahedronRecoveryQueueItem],
+    cad_curve_source_edge_ids: &BTreeSet<TopologyEntityId>,
+    status: TetrahedronRecoveryStatus,
+    topology_matches: impl Fn(TetrahedronProtectedEdgeTopology) -> bool,
+) -> usize {
+    items
+        .iter()
+        .filter(|item| {
+            item.status == status
+                && source_edge_item_has_cad_curve_boundary(item, cad_curve_source_edge_ids)
+                && item
+                    .protected_edge_topology
+                    .is_some_and(|topology| topology_matches(topology))
+        })
+        .count()
+}
+
+fn source_edge_item_has_cad_curve_boundary(
+    item: &TetrahedronRecoveryQueueItem,
+    cad_curve_source_edge_ids: &BTreeSet<TopologyEntityId>,
+) -> bool {
+    item.kind == TetrahedronRecoveryKind::SourceEdge
+        && item
+            .source_entity_id
+            .as_ref()
+            .is_some_and(|source_edge_id| cad_curve_source_edge_ids.contains(source_edge_id))
 }
 
 fn material_interface_recovery_topology(
