@@ -138,6 +138,19 @@ fn statset_and_statget_surface_executes_from_scripts() {
 }
 
 #[test]
+fn kstest_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "h = kstest([-1 -0.25 0 0.25 1]); [h2,p2,ks,cv] = kstest([2;2.5;3;3.5;4], 'Tail', 'smaller');",
+    )
+    .expect("kstest script");
+    assert!(has_bool(&vars, false));
+    assert!(has_bool(&vars, true));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if *value > 0.0 && *value < 1.0)));
+}
+
+#[test]
 fn statset_options_feed_named_stats_builtins() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; kopts = statset('kmeans'); [idx,C] = kmeans(X, 2, 'Start', [0 0; 10 10], 'Options', kopts); rng('default'); topts = statset('tsne'); Y = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'Options', topts); ks = size(C); ts = size(Y); krows = ks(1); kcols = ks(2); trows = ts(1); tcols = ts(2);",

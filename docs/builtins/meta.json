@@ -48305,6 +48305,160 @@
       ]
     },
     {
+      "name": "kstest",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = kstest(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            }
+          ]
+        },
+        {
+          "label": "h = kstest(x, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, CDF, and Tail options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            }
+          ]
+        },
+        {
+          "label": "[h, p] = kstest(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, CDF, and Tail options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-value."
+            }
+          ]
+        },
+        {
+          "label": "[h, p, ksstat, cv] = kstest(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha, CDF, and Tail options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hypothesis test decision."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-value."
+            },
+            {
+              "name": "ksstat",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Kolmogorov-Smirnov test statistic."
+            },
+            {
+              "name": "cv",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Approximate critical value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.KSTEST.INVALID_ARGUMENT",
+          "identifier": "RunMat:kstest:InvalidArgument",
+          "when": "Inputs, CDF specification, tail, or significance level are malformed.",
+          "message": "kstest: invalid argument"
+        },
+        {
+          "code": "RM.KSTEST.INTERNAL",
+          "identifier": "RunMat:kstest:Internal",
+          "when": "RunMat cannot construct kstest outputs.",
+          "message": "kstest: internal error"
+        }
+      ]
+    },
+    {
       "name": "kurtosis",
       "output_mode": "Fixed",
       "completion_policy": "Public",
