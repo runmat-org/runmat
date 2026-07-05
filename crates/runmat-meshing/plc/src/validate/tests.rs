@@ -283,6 +283,7 @@ fn rejects_protected_edge_that_references_unknown_node() {
         edge_id: entity("edge_missing"),
         node_ids: [entity("0"), entity("missing")],
         source_edge_id: source_edge("source_edge"),
+        cad_curve_boundary: None,
     });
 
     assert!(matches!(
@@ -298,6 +299,7 @@ fn rejects_protected_edge_id_with_non_plc_stage() {
         edge_id: source_edge("wrong_stage_edge"),
         node_ids: [entity("0"), entity("1")],
         source_edge_id: source_edge("source_edge_01"),
+        cad_curve_boundary: None,
     });
 
     assert_eq!(
@@ -315,6 +317,7 @@ fn rejects_protected_edge_node_with_non_plc_stage() {
         edge_id: entity("edge_wrong_stage_node"),
         node_ids: [entity("0"), source_face("wrong_stage_node")],
         source_edge_id: source_edge("source_edge_01"),
+        cad_curve_boundary: None,
     });
 
     assert_eq!(
@@ -332,11 +335,13 @@ fn rejects_duplicate_protected_edge_id() {
         edge_id: entity("edge_duplicate"),
         node_ids: [entity("0"), entity("1")],
         source_edge_id: source_edge("source_edge_01"),
+        cad_curve_boundary: None,
     });
     plc.protected_edges.push(PlcProtectedEdge {
         edge_id: entity("edge_duplicate"),
         node_ids: [entity("0"), entity("2")],
         source_edge_id: source_edge("source_edge_02"),
+        cad_curve_boundary: None,
     });
 
     assert_eq!(
@@ -354,11 +359,13 @@ fn rejects_duplicate_protected_boundary_segment() {
         edge_id: entity("edge_01_a"),
         node_ids: [entity("0"), entity("1")],
         source_edge_id: source_edge("source_edge_01_a"),
+        cad_curve_boundary: None,
     });
     plc.protected_edges.push(PlcProtectedEdge {
         edge_id: entity("edge_01_b"),
         node_ids: [entity("1"), entity("0")],
         source_edge_id: source_edge("source_edge_01_b"),
+        cad_curve_boundary: None,
     });
 
     assert_eq!(
@@ -378,6 +385,7 @@ fn rejects_protected_edge_that_is_not_a_boundary_edge() {
         edge_id: entity("pole_to_pole"),
         node_ids: [entity("0"), entity("5")],
         source_edge_id: source_edge("source_edge"),
+        cad_curve_boundary: None,
     });
 
     assert!(matches!(
@@ -393,6 +401,7 @@ fn rejects_protected_edge_with_empty_source_edge_id() {
         edge_id: entity("edge_empty_source"),
         node_ids: [entity("0"), entity("1")],
         source_edge_id: source_edge(""),
+        cad_curve_boundary: None,
     });
 
     assert!(matches!(
@@ -408,6 +417,7 @@ fn rejects_protected_edge_with_non_curve_source_edge_id() {
         edge_id: entity("edge_wrong_stage_source"),
         node_ids: [entity("0"), entity("1")],
         source_edge_id: entity("source_edge"),
+        cad_curve_boundary: None,
     });
 
     assert!(matches!(

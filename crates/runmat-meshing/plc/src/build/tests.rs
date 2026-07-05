@@ -65,6 +65,27 @@ fn carries_cad_curve_boundary_provenance_into_stage_evidence() {
         1
     );
     assert_eq!(plc.evidence.entity_counts["cad_curve_curvature_samples"], 1);
+    let protected_edge = plc
+        .protected_edges
+        .iter()
+        .find(|edge| edge.source_edge_id.id == "0")
+        .expect("source edge 0 should be protected");
+    let cad_curve_boundary = protected_edge
+        .cad_curve_boundary
+        .as_ref()
+        .expect("CAD curve boundary provenance should be preserved per protected edge");
+    assert_eq!(cad_curve_boundary.cad_edge_id, "cad-edge-0");
+    assert_eq!(cad_curve_boundary.imported_curve_id, Some(42));
+    assert_eq!(
+        cad_curve_boundary.evaluator_id.as_deref(),
+        Some("curve-evaluator-0")
+    );
+    assert!(cad_curve_boundary.live_query_backed);
+    assert_eq!(cad_curve_boundary.live_query_sample_count, 2);
+    assert_eq!(
+        cad_curve_boundary.curvature_limited_target_size_m,
+        Some(0.25)
+    );
 }
 
 #[test]

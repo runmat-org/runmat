@@ -3,12 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 mod errors;
 pub use errors::PlcBuildError;
 pub use runmat_meshing_core::contracts::{
-    PlcFacet, PlcNode, PlcProtectedEdge, ProtectedBoundaryComplex,
+    PlcFacet, PlcNode, PlcProtectedEdge, PlcProtectedEdgeCadCurveBoundary, ProtectedBoundaryComplex,
 };
 use runmat_meshing_core::{
     contracts::{MeshingStage, StageEvidence, TopologyEntityId},
     surface::{
-        SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID,
+        SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
+        SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID,
     },
 };
 
@@ -47,6 +48,17 @@ pub fn build_protected_boundary_complex(
     if has_protected_source_edges && surface.loop_coverage.is_none() {
         return Err(PlcBuildError::MissingSurfaceLoopCoverage);
     }
+    let cad_curve_boundary_by_source_edge = surface
+        .cad_curve_boundary_provenance
+        .as_ref()
+        .map(|report| {
+            report
+                .edges
+                .iter()
+                .map(|edge| (edge.source_edge_id, edge))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
 
     let surface_nodes = surface
         .nodes
@@ -144,6 +156,9 @@ pub fn build_protected_boundary_complex(
                             topology_entity_id(MeshingStage::ProtectedBoundaryComplex, edge[1]),
                         ],
                         source_edge_id: topology_entity_id(MeshingStage::CurveMesh, source_edge_id),
+                        cad_curve_boundary: cad_curve_boundary_by_source_edge
+                            .get(&source_edge_id)
+                            .map(|provenance| plc_cad_curve_boundary(provenance)),
                     });
             }
         }
@@ -454,4 +469,25 @@ fn validate_cad_curve_boundary_provenance(
     }
 
     Ok(())
+}
+
+fn plc_cad_curve_boundary(
+    provenance: &SurfaceCadCurveBoundaryEdgeProvenance,
+) -> PlcProtectedEdgeCadCurveBoundary {
+    PlcProtectedEdgeCadCurveBoundary {
+        cad_edge_id: provenance.cad_edge_id.clone(),
+        imported_curve_id: provenance.imported_curve_id,
+        evaluator_id: provenance.evaluator_id.clone(),
+        evaluator_supports_point_evaluation: provenance.evaluator_supports_point_evaluation,
+        evaluator_supports_projection: provenance.evaluator_supports_projection,
+        evaluator_supports_tangent: provenance.evaluator_supports_tangent,
+        evaluator_supports_curvature: provenance.evaluator_supports_curvature,
+        evaluator_sample_count: provenance.evaluator_sample_count,
+        live_query_backed: provenance.live_query_backed,
+        live_query_sample_count: provenance.live_query_sample_count,
+        rejected_evaluator_sample_count: provenance.rejected_evaluator_sample_count,
+        curvature_sample_count: provenance.curvature_sample_count,
+        curvature_limited_target_size_m: provenance.curvature_limited_target_size_m,
+        boundary_segment_count: provenance.boundary_segment_count,
+    }
 }

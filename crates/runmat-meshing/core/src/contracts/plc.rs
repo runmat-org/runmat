@@ -35,6 +35,38 @@ pub struct PlcProtectedEdge {
     pub edge_id: TopologyEntityId,
     pub node_ids: [TopologyEntityId; 2],
     pub source_edge_id: TopologyEntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cad_curve_boundary: Option<PlcProtectedEdgeCadCurveBoundary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlcProtectedEdgeCadCurveBoundary {
+    pub cad_edge_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_curve_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_id: Option<String>,
+    #[serde(default)]
+    pub evaluator_supports_point_evaluation: bool,
+    #[serde(default)]
+    pub evaluator_supports_projection: bool,
+    #[serde(default)]
+    pub evaluator_supports_tangent: bool,
+    #[serde(default)]
+    pub evaluator_supports_curvature: bool,
+    #[serde(default)]
+    pub evaluator_sample_count: usize,
+    #[serde(default)]
+    pub live_query_backed: bool,
+    #[serde(default)]
+    pub live_query_sample_count: usize,
+    #[serde(default)]
+    pub rejected_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub curvature_sample_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curvature_limited_target_size_m: Option<f64>,
+    pub boundary_segment_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -179,6 +179,7 @@ fn protected_edge(id: &str, node_ids: [&str; 2], source_edge_id: &str) -> PlcPro
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
         ],
         source_edge_id: entity(MeshingStage::CurveMesh, source_edge_id),
+        cad_curve_boundary: None,
     }
 }
 

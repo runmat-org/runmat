@@ -1312,6 +1312,7 @@ fn tetrahedron_plc() -> ProtectedBoundaryComplex {
                 entity(MeshingStage::ProtectedBoundaryComplex, "1"),
             ],
             source_edge_id: entity(MeshingStage::CurveMesh, "edge_1"),
+            cad_curve_boundary: None,
         }],
         validation: PlcValidationSummary {
             watertight: true,
@@ -1391,6 +1392,7 @@ fn boundary_diagonal_flip_plc() -> ProtectedBoundaryComplex {
                 entity(MeshingStage::ProtectedBoundaryComplex, "1"),
             ],
             source_edge_id: entity(MeshingStage::CurveMesh, "edge_1"),
+            cad_curve_boundary: None,
         }],
         validation: PlcValidationSummary {
             watertight: true,
@@ -1512,6 +1514,7 @@ fn two_region_bipyramid_plc_with_region_a_protected_edge() -> ProtectedBoundaryC
             entity(MeshingStage::ProtectedBoundaryComplex, "2"),
         ],
         source_edge_id: entity(MeshingStage::CurveMesh, "edge_region_a_0_2"),
+        cad_curve_boundary: None,
     }];
     plc
 }
