@@ -230,35 +230,7 @@ fn source_edge_split_refill_application_closes_remaining_volume_edge_chain() {
 
 #[test]
 fn recovery_stage_result_applies_split_refill_for_remaining_interior_source_edge() {
-    let mut mesh = tetrahedron_mesh();
-    mesh.nodes.push(tetrahedron_node(
-        entity(MeshingStage::TetrahedronMesh, "interior_neighbor_1"),
-        [0.2, 0.2, 0.1],
-    ));
-    mesh.nodes.push(tetrahedron_node(
-        entity(MeshingStage::TetrahedronMesh, "interior_neighbor_2"),
-        [0.2, 0.1, 0.2],
-    ));
-    mesh.elements.push(Tetrahedron4Element {
-        element_id: entity(MeshingStage::TetrahedronMesh, "interior_neighbor_element_1"),
-        node_ids: [
-            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-            entity(MeshingStage::TetrahedronMesh, "interior_neighbor_1"),
-        ],
-        material_region_id: "solid_body".to_string(),
-    });
-    mesh.elements.push(Tetrahedron4Element {
-        element_id: entity(MeshingStage::TetrahedronMesh, "interior_neighbor_element_2"),
-        node_ids: [
-            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-            entity(MeshingStage::TetrahedronMesh, "interior_neighbor_2"),
-        ],
-        material_region_id: "solid_body".to_string(),
-    });
+    let mesh = interior_source_edge_split_refill_mesh();
 
     let initial_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
         .expect("interior source-edge queue should build before split/refill recovery");
@@ -292,6 +264,80 @@ fn recovery_stage_result_applies_split_refill_for_remaining_interior_source_edge
         result.recovery_queue.evidence.entity_counts["missing_source_face_items"],
         0
     );
+}
+
+#[test]
+fn recovery_stage_result_applies_cad_curve_split_refill_for_remaining_interior_source_edge() {
+    let plc = cad_curve_tetrahedron_plc();
+    let mesh = interior_source_edge_split_refill_mesh();
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("CAD-backed interior source-edge queue should build before split/refill recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_topology_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("remaining CAD-backed interior source edge should recover by split/refill");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["post_repair_attempted_cad_curve_source_edge_split_refill_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["applied_cad_curve_source_edge_split_refill_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_cad_curve_interior_edge_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+}
+
+fn interior_source_edge_split_refill_mesh() -> runmat_meshing_core::contracts::TetrahedronMesh {
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "interior_neighbor_1"),
+        [0.2, 0.2, 0.1],
+    ));
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::TetrahedronMesh, "interior_neighbor_2"),
+        [0.2, 0.1, 0.2],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "interior_neighbor_element_1"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::TetrahedronMesh, "interior_neighbor_1"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "interior_neighbor_element_2"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::TetrahedronMesh, "interior_neighbor_2"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+    mesh
 }
 
 fn split_boundary_face(
