@@ -149,6 +149,22 @@ fn generated_tetrahedron_mesh_preserves_input_plc_cad_curve_evidence() {
 }
 
 #[test]
+fn generated_tetrahedron_mesh_preserves_input_plc_surface_boundary_node_evidence() {
+    let mut plc = tetra_plc();
+    plc.evidence
+        .entity_counts
+        .insert("surface_boundary_nodes".to_string(), 4);
+
+    let mesh = generate_initial_tetrahedron_mesh_from_plc(&plc)
+        .expect("validated PLC should generate initial Tetrahedron mesh");
+
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_surface_boundary_nodes"],
+        4
+    );
+}
+
+#[test]
 fn rejects_unvalidated_plc_before_tetrahedron_generation() {
     let mut plc = tetra_plc();
     plc.validation.watertight = false;

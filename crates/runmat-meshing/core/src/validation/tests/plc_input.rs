@@ -32,6 +32,38 @@ fn accepts_solid_mesh_with_classified_plc_input_evidence() {
 }
 
 #[test]
+fn rejects_solid_mesh_without_plc_surface_boundary_node_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_surface_boundary_node_count = 0;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("solid PLC-fed meshes must expose consumed surface boundary nodes");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_plc_surface_boundary_nodes".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_solid_mesh_with_inconsistent_plc_surface_boundary_node_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_surface_boundary_node_count = mesh.backend.plc_input_node_count + 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("surface boundary node evidence must be bounded by PLC node count");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_plc_surface_boundary_nodes".to_string(),
+        }
+    );
+}
+
+#[test]
 fn accepts_solid_mesh_with_nested_shell_generation_evidence() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     configure_nested_shell_generation_evidence(&mut mesh);

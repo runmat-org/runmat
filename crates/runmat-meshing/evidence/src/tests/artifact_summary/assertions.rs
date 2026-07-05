@@ -200,6 +200,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     );
     assert_eq!(recovery.plc_input_cad_curve_curvature_sized_edge_count, 1);
     assert_eq!(recovery.plc_input_cad_curve_curvature_sample_count, 2);
+    assert_eq!(recovery.plc_input_surface_boundary_node_count, 4);
     assert_eq!(recovery.generation_family, "nested_tetrahedron_shell");
     assert_eq!(recovery.generation_attempted_family_count, 1);
     assert_eq!(recovery.generation_rejected_family_count, 0);

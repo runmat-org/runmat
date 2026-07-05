@@ -410,6 +410,7 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     assert_eq!(mesh.backend.plc_input_boundary_component_count, 1);
     assert_eq!(mesh.backend.plc_input_boundary_component_node_count, 4);
     assert_eq!(mesh.backend.plc_input_max_boundary_component_node_count, 4);
+    assert_eq!(mesh.backend.plc_input_surface_boundary_node_count, 4);
     assert!(mesh.backend.plc_input_shell_nesting_classified);
     assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_nested_shell_count, 0);

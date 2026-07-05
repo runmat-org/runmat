@@ -18,6 +18,8 @@ const INPUT_PLC_CAD_CURVE_EVIDENCE_KEYS: &[&str] = &[
     "cad_curve_curvature_samples",
 ];
 
+const INPUT_PLC_SURFACE_EVIDENCE_KEYS: &[&str] = &["surface_boundary_nodes"];
+
 pub(super) fn record_input_plc_evidence(
     plc: &ProtectedBoundaryComplex,
     evidence: &mut StageEvidence,
@@ -84,6 +86,13 @@ pub(super) fn record_input_plc_evidence(
         material_region_facet_count,
     );
     for key in INPUT_PLC_CAD_CURVE_EVIDENCE_KEYS {
+        if let Some(count) = plc.evidence.entity_counts.get(*key) {
+            evidence
+                .entity_counts
+                .insert(format!("input_plc_{key}"), *count);
+        }
+    }
+    for key in INPUT_PLC_SURFACE_EVIDENCE_KEYS {
         if let Some(count) = plc.evidence.entity_counts.get(*key) {
             evidence
                 .entity_counts

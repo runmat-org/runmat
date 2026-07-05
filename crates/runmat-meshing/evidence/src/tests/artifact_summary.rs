@@ -177,6 +177,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             plc_input_cad_curve_rejected_evaluator_sample_count: 1,
             plc_input_cad_curve_curvature_sized_edge_count: 1,
             plc_input_cad_curve_curvature_sample_count: 2,
+            plc_input_surface_boundary_node_count: 4,
             tetrahedron_generation_family: "nested_tetrahedron_shell".to_string(),
             tetrahedron_generation_attempted_family_count: 1,
             tetrahedron_generation_rejected_family_count: 0,

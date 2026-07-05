@@ -149,6 +149,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub plc_input_cad_curve_curvature_sample_count: usize,
     #[serde(default)]
+    pub plc_input_surface_boundary_node_count: usize,
+    #[serde(default)]
     pub volume_component_count: usize,
     #[serde(default)]
     pub interior_seed_point_count: usize,

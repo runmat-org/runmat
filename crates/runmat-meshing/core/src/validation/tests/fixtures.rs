@@ -78,6 +78,7 @@ pub(super) fn solid_tetrahedron_mesh_with_plc_input_evidence() -> AnalysisMeshAr
     mesh.backend.plc_input_outer_shell_count = 1;
     mesh.backend.plc_input_material_region_count = 1;
     mesh.backend.plc_input_material_region_facet_count = 4;
+    mesh.backend.plc_input_surface_boundary_node_count = 4;
     mesh.backend.tetrahedron_generation_family = "single_tetrahedron".to_string();
     mesh.backend.tetrahedron_generation_attempted_family_count = 1;
     mesh.backend.tetrahedron_generation_rejected_family_count = 0;

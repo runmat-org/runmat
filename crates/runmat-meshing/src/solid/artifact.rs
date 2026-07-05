@@ -258,6 +258,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "input_plc_cad_curve_curvature_samples",
             ),
+            plc_input_surface_boundary_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_surface_boundary_nodes",
+            ),
             tetrahedron_generation_family: tetrahedron_mesh.tetrahedron_generation_family.clone(),
             tetrahedron_generation_attempted_family_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,

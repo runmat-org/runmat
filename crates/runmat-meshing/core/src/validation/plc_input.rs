@@ -38,6 +38,17 @@ pub(super) fn validate_plc_input_evidence(
     if mesh.backend.plc_input_max_boundary_component_node_count == 0 {
         return missing("missing_plc_max_boundary_component_nodes");
     }
+    if mesh.backend.plc_input_surface_boundary_node_count == 0 {
+        return missing("missing_plc_surface_boundary_nodes");
+    }
+    if mesh.backend.plc_input_surface_boundary_node_count > mesh.backend.plc_input_node_count {
+        return missing("inconsistent_plc_surface_boundary_nodes");
+    }
+    if mesh.backend.plc_input_surface_boundary_node_count
+        > mesh.backend.plc_input_boundary_component_node_count
+    {
+        return missing("inconsistent_plc_surface_boundary_component_nodes");
+    }
     if !mesh.backend.plc_input_shell_nesting_classified {
         return missing("unclassified_plc_shell_nesting");
     }

@@ -78,6 +78,7 @@ impl Default for MeshBackendSummary {
             plc_input_cad_curve_rejected_evaluator_sample_count: 0,
             plc_input_cad_curve_curvature_sized_edge_count: 0,
             plc_input_cad_curve_curvature_sample_count: 0,
+            plc_input_surface_boundary_node_count: 0,
             volume_component_count: 0,
             interior_seed_point_count: 0,
             tetrahedron_generation_family: "unknown".to_string(),
