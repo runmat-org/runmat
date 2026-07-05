@@ -68321,6 +68321,194 @@
       ]
     },
     {
+      "name": "perfcurve",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = perfcurve(labels, scores, posclass)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "scores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Classifier scores for the positive class."
+            },
+            {
+              "name": "posclass",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive class label."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X-coordinate criterion values for the performance curve."
+            }
+          ]
+        },
+        {
+          "label": "X = perfcurve(labels, scores, posclass, Name, Value)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "scores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Classifier scores for the positive class."
+            },
+            {
+              "name": "posclass",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive class label."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as XCrit, YCrit, NegClass, Weights, Prior, Cost, TVals, XVals, UseNearest, and ProcessNaN."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X-coordinate criterion values for the performance curve."
+            }
+          ]
+        },
+        {
+          "label": "[X,Y,T,AUC,OPTROCPT,SUBY,SUBYNAMES] = perfcurve(___)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "True class labels."
+            },
+            {
+              "name": "scores",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Classifier scores for the positive class."
+            },
+            {
+              "name": "posclass",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive class label."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as XCrit, YCrit, NegClass, Weights, Prior, Cost, TVals, XVals, UseNearest, and ProcessNaN."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X-coordinate criterion values for the performance curve."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Y-coordinate criterion values for the performance curve."
+            },
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Score thresholds used to compute the curve."
+            },
+            {
+              "name": "AUC",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Area under the X/Y performance curve."
+            },
+            {
+              "name": "OPTROCPT",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optimal operating point on the ROC curve."
+            },
+            {
+              "name": "SUBY",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Y-criterion values computed for each negative subclass."
+            },
+            {
+              "name": "SUBYNAMES",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Negative subclass labels corresponding to columns of SUBY."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PERFCURVE.INVALID_ARGUMENT",
+          "identifier": "RunMat:perfcurve:InvalidArgument",
+          "when": "Labels, scores, class selections, criteria, thresholds, weights, priors, costs, or name-value options are malformed.",
+          "message": "perfcurve: invalid argument"
+        },
+        {
+          "code": "RM.PERFCURVE.UNSUPPORTED",
+          "identifier": "RunMat:perfcurve:Unsupported",
+          "when": "A documented advanced mode requires confidence bounds, bootstrap/cross-validation outputs, or score matrix class-column inference that is not implemented yet.",
+          "message": "perfcurve: unsupported mode"
+        },
+        {
+          "code": "RM.PERFCURVE.INTERNAL",
+          "identifier": "RunMat:perfcurve:Internal",
+          "when": "RunMat cannot allocate or construct perfcurve outputs.",
+          "message": "perfcurve: internal error"
+        }
+      ]
+    },
+    {
       "name": "periodogram",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

@@ -204,6 +204,21 @@ fn confusionmat_surface_executes_from_scripts() {
 }
 
 #[test]
+fn perfcurve_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "labels = [1; 0; 1; 0]; scores = [0.9; 0.8; 0.4; 0.1]; [X,Y,T,AUC,opt,suby,names] = perfcurve(labels, scores, 1); n = length(T); xl = X(end); yl = Y(end); [R,P] = perfcurve(labels, scores, 1, 'XCrit', 'reca', 'YCrit', 'prec', 'TVals', [0.8 0.4]); r2 = R(2); p1 = P(1);",
+    )
+    .expect("perfcurve script");
+    assert!(has_tensor_shape(&vars, &[5, 1]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_num(&vars, 0.75));
+    assert!(has_num(&vars, 5.0));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 0.5));
+}
+
+#[test]
 fn encoding_surface_executes_from_scripts() {
     let vars = execute_source(
         "D = dummyvar([1;2;1]); labels = [\"red\";\"blue\";\"red\"]; H = onehotencode(labels, 2, 'ClassNames', [\"blue\";\"red\"], 'OutputType', 'logical'); dec = onehotdecode(H, [\"blue\";\"red\"], 2, 'string'); d11 = D(1,1); d22 = D(2,2);",
