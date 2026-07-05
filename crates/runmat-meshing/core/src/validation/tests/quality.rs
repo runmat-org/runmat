@@ -97,6 +97,28 @@ fn rejects_optimization_target_outcomes_that_exceed_target_seeds() {
 }
 
 #[test]
+fn rejects_sliver_removals_that_exceed_target_seed_outcomes() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend.tetrahedron_optimization_target_seed_count = 1;
+    mesh.backend.tetrahedron_sliver_removed_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_skipped_target_seed_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("sliver removals are optimization target outcomes");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_target_outcomes".to_string(),
+            observed_count: 2,
+            limit_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_optimization_edits_without_reported_pass() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend.tetrahedron_optimization_target_seed_count = 1;

@@ -56,6 +56,7 @@ fn validate_optimization_evidence(
 ) -> Result<(), AnalysisMeshValidationError> {
     let backend = &mesh.backend;
     let completed_target_count = backend.tetrahedron_optimization_skipped_target_seed_count
+        + backend.tetrahedron_sliver_removed_count
         + backend.tetrahedron_optimization_rejected_edit_count;
     if completed_target_count > backend.tetrahedron_optimization_target_seed_count {
         return Err(
