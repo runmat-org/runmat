@@ -6,6 +6,7 @@ use runmat_meshing_core::{
 };
 
 use super::evidence::record_input_plc_evidence;
+use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
@@ -63,13 +64,7 @@ pub fn generate_single_tetrahedron_mesh_from_plc(
         coordinates_by_id[&node_ids[3]],
     ];
     let min_scaled_jacobian = tetrahedron_scaled_jacobian(points);
-    let material_region_id = plc
-        .facets
-        .iter()
-        .flat_map(|facet| facet.material_interface_ids.iter())
-        .next()
-        .cloned()
-        .unwrap_or_else(|| "solid_body".to_string());
+    let material_region_id = plc_material_region_id(plc);
 
     let nodes = plc
         .nodes

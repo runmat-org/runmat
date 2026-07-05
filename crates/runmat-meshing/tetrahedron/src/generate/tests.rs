@@ -1,5 +1,5 @@
 use super::*;
-use runmat_meshing_core::contracts::TopologyEntityId;
+use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
 use runmat_meshing_core::quality::predicate::tetrahedron_signed_volume;
 
 mod fixtures;
@@ -23,6 +23,19 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
     );
     assert_eq!(mesh.evidence.entity_counts["input_plc_outer_shells"], 1);
     assert!(mesh.evidence.min_scaled_jacobian.expect("volume evidence") > 0.0);
+}
+
+#[test]
+fn initial_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let plc = with_split_material_ids(tetra_plc());
+
+    let mesh = generate_initial_tetrahedron_mesh_from_plc(&plc)
+        .expect("validated PLC should generate initial Tetrahedron mesh");
+
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
 }
 
 #[test]
@@ -78,19 +91,29 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 
 #[test]
 fn structured_box_generation_keeps_ambiguous_material_ownership_unclassified() {
-    let mut plc = box_plc();
-    for (facet_index, facet) in plc.facets.iter_mut().enumerate() {
-        facet.material_interface_ids = vec![if facet_index < 6 {
-            "region_a".to_string()
-        } else {
-            "region_b".to_string()
-        }];
-    }
+    let plc = with_split_material_ids(box_plc());
 
     let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
         .expect("validated box PLC should generate initial Tetrahedron mesh");
 
     assert_eq!(mesh.elements.len(), 6);
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+}
+
+#[test]
+fn boundary_conforming_box_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let plc = with_split_material_ids(split_edge_box_plc());
+
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("subdivided box PLC should generate boundary-conforming Tetrahedron mesh");
+
+    assert_eq!(
+        mesh.mesh_id,
+        "structured_box_boundary_conforming_tetrahedron_mesh"
+    );
     assert!(mesh
         .elements
         .iter()
@@ -157,6 +180,16 @@ fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
     assert!(tetrahedron_signed_volume(points) > 0.0);
 }
 
+#[test]
+fn single_tetrahedron_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let plc = with_split_material_ids(tetra_plc());
+
+    let mesh = generate_single_tetrahedron_mesh_from_plc(&plc)
+        .expect("tetrahedron PLC should generate one solver Tetrahedron4");
+
+    assert_eq!(mesh.elements[0].material_region_id, "unclassified");
+}
+
 fn sorted_face_ids(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
     node_ids.sort();
     node_ids
@@ -211,6 +244,19 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
         });
         assert!(tetrahedron_signed_volume(points) > 0.0);
     }
+}
+
+#[test]
+fn convex_polyhedron_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let plc = with_split_material_ids(octahedron_plc());
+
+    let mesh = generate_convex_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("convex octahedron PLC should generate one Tetrahedron4 per boundary facet");
+
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
 }
 
 #[test]
@@ -279,4 +325,16 @@ fn convex_polyhedron_generation_rejects_nonconvex_boundary_facet() {
         generate_convex_polyhedron_tetrahedron_mesh_from_plc(&plc),
         Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
     );
+}
+
+fn with_split_material_ids(mut plc: ProtectedBoundaryComplex) -> ProtectedBoundaryComplex {
+    let split_index = plc.facets.len() / 2;
+    for (facet_index, facet) in plc.facets.iter_mut().enumerate() {
+        facet.material_interface_ids = vec![if facet_index < split_index {
+            "region_a".to_string()
+        } else {
+            "region_b".to_string()
+        }];
+    }
+    plc
 }

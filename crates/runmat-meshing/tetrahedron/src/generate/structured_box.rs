@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 mod boundary;
 mod shape;
 
 use super::evidence::record_input_plc_evidence;
+use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
@@ -15,9 +16,6 @@ use runmat_meshing_core::{
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 use shape::{plc_nodes_are_box_corners, validate_structured_box_plc};
-
-const DEFAULT_MATERIAL_REGION_ID: &str = "solid_body";
-const UNCLASSIFIED_MATERIAL_REGION_ID: &str = "unclassified";
 
 pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
@@ -116,6 +114,7 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
     let interior_selection =
         select_boundary_conforming_box_interior(plc, &coordinates_by_id, bounds, tolerance)?;
     let interior = interior_selection.point;
+    let material_region_id = plc_material_region_id(plc);
     let interior_id = TopologyEntityId {
         stage: MeshingStage::TetrahedronMesh,
         id: "structured_box_interior_0".to_string(),
@@ -184,11 +183,7 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
                 id: format!("structured_box_boundary_conforming_tetrahedron_{element_index}"),
             },
             node_ids,
-            material_region_id: facet
-                .material_interface_ids
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "solid_body".to_string()),
+            material_region_id: material_region_id.clone(),
         });
     }
 
@@ -377,21 +372,6 @@ fn plc_bounds(plc: &ProtectedBoundaryComplex) -> Result<[[f64; 3]; 2], Tetrahedr
         Ok([min, max])
     } else {
         Err(TetrahedronGenerationError::DegeneratePlcBounds)
-    }
-}
-
-fn plc_material_region_id(plc: &ProtectedBoundaryComplex) -> String {
-    let material_region_ids = plc
-        .facets
-        .iter()
-        .flat_map(|facet| facet.material_interface_ids.iter().cloned())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    match material_region_ids.as_slice() {
-        [] => DEFAULT_MATERIAL_REGION_ID.to_string(),
-        [material_region_id] => material_region_id.clone(),
-        _ => UNCLASSIFIED_MATERIAL_REGION_ID.to_string(),
     }
 }
 

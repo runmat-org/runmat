@@ -8,6 +8,7 @@ use runmat_meshing_core::{
 };
 
 use super::evidence::record_input_plc_evidence;
+use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
@@ -34,6 +35,7 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
         stage: MeshingStage::TetrahedronMesh,
         id: "convex_polyhedron_interior_0".to_string(),
     };
+    let material_region_id = plc_material_region_id(plc);
     let mut nodes = plc
         .nodes
         .iter()
@@ -85,11 +87,7 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
                 id: format!("convex_polyhedron_tetrahedron_{element_index}"),
             },
             node_ids,
-            material_region_id: facet
-                .material_interface_ids
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "solid_body".to_string()),
+            material_region_id: material_region_id.clone(),
         });
     }
 

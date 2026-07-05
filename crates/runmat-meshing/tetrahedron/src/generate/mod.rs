@@ -7,6 +7,7 @@ pub const MODULE_PURPOSE: &str = "deterministic Tetrahedron4 generation from a v
 mod convex_polyhedron;
 mod evidence;
 mod initial;
+mod material;
 mod single_tetrahedron;
 mod solver;
 mod structured_box;
