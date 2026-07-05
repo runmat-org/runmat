@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 mod quality;
-pub use quality::evaluate_local_tetrahedron_flip_quality;
+pub use quality::{
+    evaluate_local_tetrahedron_flip_improvement, evaluate_local_tetrahedron_flip_quality,
+};
 
 mod topology;
 pub use topology::local_tetrahedron_boundary_faces;
@@ -63,6 +65,16 @@ pub struct LocalTetrahedronFlipQualityReport {
     pub max_aspect_ratio: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocalTetrahedronFlipImprovementReport {
+    pub removed_tetrahedron_count: usize,
+    pub created_tetrahedron_count: usize,
+    pub current_min_scaled_jacobian: f64,
+    pub candidate_min_scaled_jacobian: f64,
+    pub current_total_volume_m3: f64,
+    pub candidate_total_volume_m3: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalTetrahedronFlipError {
@@ -88,6 +100,7 @@ pub enum LocalTetrahedronFlipError {
         node_ids: [u32; 4],
         scaled_jacobian: String,
     },
+    QualityDoesNotImprove,
 }
 
 pub fn two_to_three_face_flip_candidate(

@@ -2,7 +2,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::super::super::reconnect::{
-    evaluate_local_tetrahedron_flip_quality, three_to_two_edge_flip_candidate,
+    evaluate_local_tetrahedron_flip_improvement, three_to_two_edge_flip_candidate,
     two_to_three_face_flip_candidate, LocalTetrahedron, LocalTetrahedronFlipCandidate,
     LocalTetrahedronFlipQualityThresholds,
 };
@@ -46,7 +46,14 @@ pub(in super::super) fn improve_refill_with_local_flips(
             let Ok(flip) = two_to_three_face_flip_candidate(left, right) else {
                 continue;
             };
-            if evaluate_local_tetrahedron_flip_quality(&flip, &coordinates, thresholds).is_err() {
+            if evaluate_local_tetrahedron_flip_improvement(
+                &[left, right],
+                &flip,
+                &coordinates,
+                thresholds,
+            )
+            .is_err()
+            {
                 continue;
             }
 
@@ -90,8 +97,13 @@ pub(in super::super) fn improve_refill_with_local_flips(
                     let Ok(flip) = three_to_two_edge_flip_candidate(tetrahedra, edge) else {
                         continue;
                     };
-                    if evaluate_local_tetrahedron_flip_quality(&flip, &coordinates, thresholds)
-                        .is_err()
+                    if evaluate_local_tetrahedron_flip_improvement(
+                        &tetrahedra,
+                        &flip,
+                        &coordinates,
+                        thresholds,
+                    )
+                    .is_err()
                     {
                         continue;
                     }

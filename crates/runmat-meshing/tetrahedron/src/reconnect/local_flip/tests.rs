@@ -129,6 +129,80 @@ fn local_flip_quality_rejects_low_scaled_jacobian() {
 }
 
 #[test]
+fn local_flip_improvement_accepts_quality_improving_flip() {
+    let left = LocalTetrahedron {
+        tetrahedron_id: 9,
+        node_ids: [0, 1, 2, 3],
+    };
+    let right = LocalTetrahedron {
+        tetrahedron_id: 4,
+        node_ids: [0, 2, 1, 4],
+    };
+    let candidate = two_to_three_face_flip_candidate(left, right).expect("shared face should flip");
+    let node_coordinates = BTreeMap::from([
+        (0, [0.0, 0.0, 0.0]),
+        (1, [1.0, 0.0, 0.0]),
+        (2, [0.0, 1.0, 0.0]),
+        (
+            3,
+            [0.5357890395018374, -0.18744218273792734, 0.3827030431131124],
+        ),
+        (
+            4,
+            [0.4852929197428164, 1.1962618573152073, -0.10539356221586194],
+        ),
+    ]);
+
+    let report = evaluate_local_tetrahedron_flip_improvement(
+        &[left, right],
+        &candidate,
+        &node_coordinates,
+        LocalTetrahedronFlipQualityThresholds {
+            min_volume_m3: 1.0e-12,
+            min_scaled_jacobian: 0.01,
+        },
+    )
+    .expect("candidate should improve the worst local scaled-Jacobian");
+
+    assert_eq!(report.removed_tetrahedron_count, 2);
+    assert_eq!(report.created_tetrahedron_count, 3);
+    assert!(report.candidate_min_scaled_jacobian > report.current_min_scaled_jacobian);
+}
+
+#[test]
+fn local_flip_improvement_rejects_candidate_that_does_not_improve_quality_or_count() {
+    let left = LocalTetrahedron {
+        tetrahedron_id: 4,
+        node_ids: [0, 1, 2, 3],
+    };
+    let right = LocalTetrahedron {
+        tetrahedron_id: 9,
+        node_ids: [0, 2, 1, 4],
+    };
+    let candidate = two_to_three_face_flip_candidate(left, right).expect("shared face should flip");
+    let node_coordinates = BTreeMap::from([
+        (0, [0.0, 0.0, 0.0]),
+        (1, [1.0, 0.0, 0.0]),
+        (2, [0.0, 1.0, 0.0]),
+        (3, [1.0 / 3.0, 1.0 / 3.0, 1.0]),
+        (4, [1.0 / 3.0, 1.0 / 3.0, -1.0]),
+    ]);
+
+    let err = evaluate_local_tetrahedron_flip_improvement(
+        &[left, right],
+        &candidate,
+        &node_coordinates,
+        LocalTetrahedronFlipQualityThresholds {
+            min_volume_m3: 1.0e-12,
+            min_scaled_jacobian: 0.05,
+        },
+    )
+    .expect_err("quality-neutral count-increasing flip should be rejected");
+
+    assert_eq!(err, LocalTetrahedronFlipError::QualityDoesNotImprove);
+}
+
+#[test]
 fn three_to_two_edge_flip_preserves_local_boundary_faces() {
     let tetrahedra = [
         LocalTetrahedron {

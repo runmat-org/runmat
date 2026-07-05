@@ -1,12 +1,69 @@
 use std::collections::BTreeMap;
 
 use super::{
-    LocalTetrahedronFlipCandidate, LocalTetrahedronFlipError, LocalTetrahedronFlipQualityReport,
+    LocalTetrahedron, LocalTetrahedronFlipCandidate, LocalTetrahedronFlipError,
+    LocalTetrahedronFlipImprovementReport, LocalTetrahedronFlipQualityReport,
     LocalTetrahedronFlipQualityThresholds,
 };
 use runmat_meshing_core::quality::predicate::{
     tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian, tetrahedron_signed_volume, Point3,
 };
+
+const MIN_IMPROVEMENT: f64 = 1.0e-12;
+
+pub fn evaluate_local_tetrahedron_flip_improvement(
+    removed_tetrahedra: &[LocalTetrahedron],
+    candidate: &LocalTetrahedronFlipCandidate,
+    node_coordinates: &BTreeMap<u32, Point3>,
+    thresholds: LocalTetrahedronFlipQualityThresholds,
+) -> Result<LocalTetrahedronFlipImprovementReport, LocalTetrahedronFlipError> {
+    let mut removed_ids = removed_tetrahedra
+        .iter()
+        .map(|tetrahedron| tetrahedron.tetrahedron_id)
+        .collect::<Vec<_>>();
+    removed_ids.sort();
+    if removed_ids != candidate.removed_tetrahedron_ids {
+        return Err(LocalTetrahedronFlipError::QualityDoesNotImprove);
+    }
+    let current = evaluate_local_tetrahedron_flip_quality(
+        &LocalTetrahedronFlipCandidate {
+            kind: candidate.kind,
+            removed_tetrahedron_ids: removed_ids,
+            created_tetrahedra: removed_tetrahedra
+                .iter()
+                .map(|tetrahedron| tetrahedron.node_ids)
+                .collect(),
+            shared_face: candidate.shared_face,
+            shared_edge: candidate.shared_edge,
+        },
+        node_coordinates,
+        LocalTetrahedronFlipQualityThresholds {
+            min_volume_m3: 0.0,
+            min_scaled_jacobian: 0.0,
+        },
+    )?;
+    let candidate_quality =
+        evaluate_local_tetrahedron_flip_quality(candidate, node_coordinates, thresholds)?;
+    let improves_quality =
+        candidate_quality.min_scaled_jacobian > current.min_scaled_jacobian + MIN_IMPROVEMENT;
+    let preserves_quality = (candidate_quality.min_scaled_jacobian - current.min_scaled_jacobian)
+        .abs()
+        <= MIN_IMPROVEMENT;
+    let reduces_tetrahedron_count =
+        candidate_quality.created_tetrahedron_count < removed_tetrahedra.len();
+    if !improves_quality && !(preserves_quality && reduces_tetrahedron_count) {
+        return Err(LocalTetrahedronFlipError::QualityDoesNotImprove);
+    }
+
+    Ok(LocalTetrahedronFlipImprovementReport {
+        removed_tetrahedron_count: removed_tetrahedra.len(),
+        created_tetrahedron_count: candidate_quality.created_tetrahedron_count,
+        current_min_scaled_jacobian: current.min_scaled_jacobian,
+        candidate_min_scaled_jacobian: candidate_quality.min_scaled_jacobian,
+        current_total_volume_m3: current.total_volume_m3,
+        candidate_total_volume_m3: candidate_quality.total_volume_m3,
+    })
+}
 
 pub fn evaluate_local_tetrahedron_flip_quality(
     candidate: &LocalTetrahedronFlipCandidate,

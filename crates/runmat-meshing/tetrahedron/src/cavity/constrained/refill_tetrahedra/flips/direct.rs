@@ -210,5 +210,6 @@ fn local_tetrahedron_flip_error_reason(error: &LocalTetrahedronFlipError) -> &'s
         LocalTetrahedronFlipError::ScaledJacobianBelowThreshold { .. } => {
             "scaled_jacobian_below_threshold"
         }
+        LocalTetrahedronFlipError::QualityDoesNotImprove => "quality_does_not_improve",
     }
 }
