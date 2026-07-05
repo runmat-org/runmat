@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
-    quality::predicate::tetrahedron_signed_volume,
+    quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 
 use super::evidence::record_input_plc_evidence;
@@ -53,7 +53,7 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
 
     let mut elements = Vec::<Tetrahedron4Element>::with_capacity(plc.facets.len());
     let mut boundary_faces = Vec::<TetrahedronBoundaryFace>::with_capacity(plc.facets.len());
-    let mut min_signed_volume = f64::INFINITY;
+    let mut min_scaled_jacobian = f64::INFINITY;
     for (element_index, facet) in plc.facets.iter().enumerate() {
         let mut node_ids = [
             facet.node_ids[0].clone(),
@@ -88,7 +88,14 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
         if signed_volume < 0.0 {
             node_ids.swap(1, 2);
         }
-        min_signed_volume = min_signed_volume.min(signed_volume.abs());
+        let points = node_ids.clone().map(|node_id| {
+            if node_id == interior_id {
+                interior
+            } else {
+                coordinates_by_id[&node_id]
+            }
+        });
+        min_scaled_jacobian = min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
 
         elements.push(Tetrahedron4Element {
             element_id: TopologyEntityId {
@@ -120,7 +127,7 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
         .entity_counts
         .insert("boundary_faces".to_string(), boundary_faces.len());
     record_input_plc_evidence(plc, &mut evidence);
-    evidence.min_scaled_jacobian = Some(min_signed_volume);
+    evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
 
     Ok(TetrahedronMesh {
         mesh_id: "initial_plc_tetrahedron_mesh".to_string(),

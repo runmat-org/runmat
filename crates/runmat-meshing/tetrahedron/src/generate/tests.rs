@@ -2,7 +2,9 @@ use super::*;
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
-use runmat_meshing_core::quality::predicate::tetrahedron_signed_volume;
+use runmat_meshing_core::quality::predicate::{
+    tetrahedron_scaled_jacobian, tetrahedron_signed_volume,
+};
 
 mod fixtures;
 
@@ -24,7 +26,9 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
         1
     );
     assert_eq!(mesh.evidence.entity_counts["input_plc_outer_shells"], 1);
-    assert!(mesh.evidence.min_scaled_jacobian.expect("volume evidence") > 0.0);
+    let min_scaled_jacobian = mesh.evidence.min_scaled_jacobian.expect("quality evidence");
+    assert!(min_scaled_jacobian > 0.0);
+    assert!((min_scaled_jacobian - min_generated_scaled_jacobian(&mesh)).abs() <= f64::EPSILON);
 }
 
 #[test]
@@ -240,6 +244,22 @@ fn single_tetrahedron_generation_keeps_ambiguous_material_ownership_unclassified
 fn sorted_face_ids(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
     node_ids.sort();
     node_ids
+}
+
+fn min_generated_scaled_jacobian(mesh: &TetrahedronMesh) -> f64 {
+    mesh.elements
+        .iter()
+        .map(|element| {
+            let points = element.node_ids.clone().map(|node_id| {
+                mesh.nodes
+                    .iter()
+                    .find(|node| node.node_id == node_id)
+                    .expect("element node exists")
+                    .coordinates_m
+            });
+            tetrahedron_scaled_jacobian(points)
+        })
+        .fold(f64::INFINITY, f64::min)
 }
 
 #[test]
