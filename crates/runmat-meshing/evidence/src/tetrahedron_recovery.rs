@@ -52,6 +52,12 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub plc_input_cad_curve_curvature_sample_count: usize,
     #[serde(default)]
     pub generation_family: String,
+    #[serde(default)]
+    pub generation_attempted_family_count: usize,
+    #[serde(default)]
+    pub generation_rejected_family_count: usize,
+    #[serde(default)]
+    pub generation_selected_family_index: usize,
     pub element_count: usize,
     #[serde(default)]
     pub material_region_count: usize,
@@ -500,6 +506,15 @@ pub(super) fn tetrahedron_recovery_evidence(
             .backend
             .plc_input_cad_curve_curvature_sample_count,
         generation_family: mesh.backend.tetrahedron_generation_family.clone(),
+        generation_attempted_family_count: mesh
+            .backend
+            .tetrahedron_generation_attempted_family_count,
+        generation_rejected_family_count: mesh
+            .backend
+            .tetrahedron_generation_rejected_family_count,
+        generation_selected_family_index: mesh
+            .backend
+            .tetrahedron_generation_selected_family_index,
         element_count: mesh.backend.tetrahedron_element_count,
         material_region_count: mesh.backend.tetrahedron_material_region_count,
         unclassified_material_element_count: mesh

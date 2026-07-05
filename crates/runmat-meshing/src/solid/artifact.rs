@@ -259,6 +259,18 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 "input_plc_cad_curve_curvature_samples",
             ),
             tetrahedron_generation_family: tetrahedron_mesh.tetrahedron_generation_family.clone(),
+            tetrahedron_generation_attempted_family_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "solver_generation_attempted_families",
+            ),
+            tetrahedron_generation_rejected_family_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "solver_generation_rejected_families",
+            ),
+            tetrahedron_generation_selected_family_index: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "solver_generation_selected_family_index",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,

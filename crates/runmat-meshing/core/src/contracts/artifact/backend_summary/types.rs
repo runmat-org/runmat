@@ -155,6 +155,12 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_generation_family: String,
     #[serde(default)]
+    pub tetrahedron_generation_attempted_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_rejected_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_selected_family_index: usize,
+    #[serde(default)]
     pub tetrahedron_element_count: usize,
     #[serde(default)]
     pub tetrahedron_material_region_count: usize,

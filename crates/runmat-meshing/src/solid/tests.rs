@@ -396,6 +396,12 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
         mesh.backend.tetrahedron_generation_family,
         "single_tetrahedron"
     );
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_attempted_family_count,
+        3
+    );
+    assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 2);
+    assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 3);
     assert_eq!(mesh.volume_elements.len(), 1);
     assert_eq!(mesh.boundary_faces.len(), 4);
     assert_eq!(mesh.backend.plc_input_node_count, 4);
@@ -503,6 +509,12 @@ fn auto_backend_generates_nested_tetrahedron_shell_solid() {
         mesh.backend.tetrahedron_generation_family,
         "nested_tetrahedron_shell"
     );
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_attempted_family_count,
+        1
+    );
+    assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 0);
+    assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 1);
     assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_nested_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 1);
@@ -524,6 +536,12 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
         mesh.backend.tetrahedron_generation_family,
         "star_shaped_polyhedron"
     );
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_attempted_family_count,
+        5
+    );
+    assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 4);
+    assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 5);
     assert_eq!(
         mesh.volume_elements.len(),
         mesh.backend.surface_element_count
