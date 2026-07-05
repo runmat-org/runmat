@@ -14,6 +14,11 @@ pub fn build_curve_mesh_contract(
     validation_options: CurveValidationOptions,
 ) -> Result<CurveMesh, CurveValidationError> {
     let validation = validate_curve_discretization(topology, curves, validation_options)?;
+    let source_edges_by_id = topology
+        .edges
+        .iter()
+        .map(|edge| (edge.edge_id, edge))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut evidence = StageEvidence::complete(MeshingStage::CurveMesh);
     evidence
         .entity_counts
@@ -27,6 +32,9 @@ pub fn build_curve_mesh_contract(
     evidence
         .entity_counts
         .insert("parameter_chain_gaps".to_string(), 0);
+    evidence
+        .entity_counts
+        .insert("endpoint_nodes".to_string(), topology.edges.len() * 2);
     evidence.max_projection_error_m = Some(validation.max_projection_error_m);
 
     Ok(CurveMesh {
@@ -37,6 +45,9 @@ pub fn build_curve_mesh_contract(
             .map(|node| CurveMeshNode {
                 node_id: curve_entity_id(node.node_id),
                 source_edge_id: curve_entity_id(node.source_edge_id),
+                source_vertex_id: source_edges_by_id
+                    .get(&node.source_edge_id)
+                    .and_then(|edge| source_vertex_for_parameter(edge.node_ids, node.parameter)),
                 parameter: node.parameter,
                 coordinates_m: node.coordinates_m,
             })
@@ -56,6 +67,23 @@ pub fn build_curve_mesh_contract(
             .collect(),
         evidence,
     })
+}
+
+fn source_vertex_for_parameter(node_ids: [u32; 2], parameter: f64) -> Option<TopologyEntityId> {
+    if (parameter - 0.0).abs() <= 1.0e-12 {
+        Some(cad_topology_entity_id(node_ids[0]))
+    } else if (parameter - 1.0).abs() <= 1.0e-12 {
+        Some(cad_topology_entity_id(node_ids[1]))
+    } else {
+        None
+    }
+}
+
+fn cad_topology_entity_id(id: impl ToString) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::CadTopology,
+        id: id.to_string(),
+    }
 }
 
 fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
@@ -110,6 +138,10 @@ mod tests {
             contract.evidence.entity_counts.get("parameter_chain_gaps"),
             Some(&0)
         );
+        assert_eq!(
+            contract.evidence.entity_counts.get("endpoint_nodes"),
+            Some(&2)
+        );
         assert_eq!(contract.evidence.max_projection_error_m, Some(0.0));
         assert!(contract
             .nodes
@@ -127,6 +159,21 @@ mod tests {
             ));
         assert_eq!(contract.nodes[0].parameter, 0.0);
         assert_eq!(contract.nodes[4].parameter, 1.0);
+        assert_eq!(
+            contract.nodes[0]
+                .source_vertex_id
+                .as_ref()
+                .map(|source_vertex_id| (source_vertex_id.stage, source_vertex_id.id.as_str())),
+            Some((MeshingStage::CadTopology, "0"))
+        );
+        assert!(contract.nodes[1].source_vertex_id.is_none());
+        assert_eq!(
+            contract.nodes[4]
+                .source_vertex_id
+                .as_ref()
+                .map(|source_vertex_id| (source_vertex_id.stage, source_vertex_id.id.as_str())),
+            Some((MeshingStage::CadTopology, "1"))
+        );
     }
 
     #[test]

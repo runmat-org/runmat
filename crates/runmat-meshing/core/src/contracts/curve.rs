@@ -16,6 +16,8 @@ pub struct CurveMesh {
 pub struct CurveMeshNode {
     pub node_id: TopologyEntityId,
     pub source_edge_id: TopologyEntityId,
+    #[serde(default)]
+    pub source_vertex_id: Option<TopologyEntityId>,
     pub parameter: f64,
     pub coordinates_m: [f64; 3],
 }
