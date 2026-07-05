@@ -346,6 +346,34 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     recovery_queue,
                     "recovered_cad_curve_interior_edge_source_edge_items",
                 ),
+            tetrahedron_attempted_source_edge_split_refill_item_count: recovery_entity_count(
+                recovery_queue,
+                "attempted_source_edge_split_refill_items",
+            ),
+            tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_cad_curve_source_edge_split_refill_items",
+                ),
+            tetrahedron_accepted_source_edge_split_refill_candidate_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "accepted_source_edge_split_refill_candidate_items",
+                ),
+            tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "accepted_cad_curve_source_edge_split_refill_candidate_items",
+                ),
+            tetrahedron_rejected_source_edge_split_refill_item_count: recovery_entity_count(
+                recovery_queue,
+                "rejected_source_edge_split_refill_items",
+            ),
+            tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_cad_curve_source_edge_split_refill_items",
+                ),
             tetrahedron_absent_edge_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "absent_edge_source_edge_recovery_items",

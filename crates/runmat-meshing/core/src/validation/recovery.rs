@@ -144,6 +144,56 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
         backend.tetrahedron_recovered_interior_edge_source_edge_recovery_item_count,
     )?;
+    let source_edge_split_refill_input_count = backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count
+        + backend.tetrahedron_interior_edge_source_edge_recovery_item_count;
+    validate_recovery_item_count(
+        "attempted_source_edge_split_refill",
+        backend.tetrahedron_attempted_source_edge_split_refill_item_count,
+        source_edge_split_refill_input_count,
+    )?;
+    validate_recovery_item_count(
+        "attempted_cad_curve_source_edge_split_refill",
+        backend.tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count,
+        backend.tetrahedron_attempted_source_edge_split_refill_item_count,
+    )?;
+    validate_recovery_item_count(
+        "accepted_source_edge_split_refill_candidate",
+        backend.tetrahedron_accepted_source_edge_split_refill_candidate_item_count,
+        backend.tetrahedron_attempted_source_edge_split_refill_item_count,
+    )?;
+    validate_recovery_item_count(
+        "accepted_cad_curve_source_edge_split_refill_candidate",
+        backend.tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+        backend.tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count,
+    )?;
+    validate_recovery_item_count(
+        "accepted_cad_curve_source_edge_split_refill_candidate",
+        backend.tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+        backend.tetrahedron_accepted_source_edge_split_refill_candidate_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_source_edge_split_refill",
+        backend.tetrahedron_rejected_source_edge_split_refill_item_count,
+        backend.tetrahedron_attempted_source_edge_split_refill_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_cad_curve_source_edge_split_refill",
+        backend.tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count,
+        backend.tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "source_edge_split_refill_status_items",
+        backend.tetrahedron_attempted_source_edge_split_refill_item_count,
+        backend.tetrahedron_accepted_source_edge_split_refill_candidate_item_count
+            + backend.tetrahedron_rejected_source_edge_split_refill_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "cad_curve_source_edge_split_refill_status_items",
+        backend.tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count,
+        backend.tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count
+            + backend.tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count,
+    )?;
     validate_recovered_count(
         "absent_edge_source_edge",
         backend.tetrahedron_recovered_absent_edge_source_edge_recovery_item_count,

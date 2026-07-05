@@ -97,6 +97,18 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub recovered_cad_curve_interior_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub attempted_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub attempted_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub accepted_source_edge_split_refill_candidate_item_count: usize,
+    #[serde(default)]
+    pub accepted_cad_curve_source_edge_split_refill_candidate_item_count: usize,
+    #[serde(default)]
+    pub rejected_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub rejected_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
     pub absent_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub recovered_absent_edge_source_edge_recovery_item_count: usize,
@@ -530,6 +542,24 @@ pub(super) fn tetrahedron_recovery_evidence(
         recovered_cad_curve_interior_edge_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
+        attempted_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_attempted_source_edge_split_refill_item_count,
+        attempted_cad_curve_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count,
+        accepted_source_edge_split_refill_candidate_item_count: mesh
+            .backend
+            .tetrahedron_accepted_source_edge_split_refill_candidate_item_count,
+        accepted_cad_curve_source_edge_split_refill_candidate_item_count: mesh
+            .backend
+            .tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+        rejected_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_rejected_source_edge_split_refill_item_count,
+        rejected_cad_curve_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count,
         absent_edge_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_absent_edge_source_edge_recovery_item_count,
