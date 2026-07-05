@@ -1,6 +1,6 @@
 use super::*;
 use super::{
-    boundary::{single_face_curve_segment_loop, FaceCurveSegment},
+    boundary::FaceCurveSegment,
     elements::append_curve_fan_face_elements,
     geometry::{point_in_polygon_2d, triangle_centroid_2d},
     sampling::ExactCadSampleSurfaceReport,

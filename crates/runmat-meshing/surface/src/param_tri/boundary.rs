@@ -129,34 +129,6 @@ pub(super) fn curve_segments_for_source_edges(
     Ok(segments)
 }
 
-#[cfg(test)]
-pub(super) fn single_face_curve_segment_loop(
-    face_id: u32,
-    segments: &[FaceCurveSegment],
-) -> Result<Vec<FaceCurveSegment>, SurfaceDiscretizationError> {
-    let loops = face_curve_segment_loops(face_id, segments)?;
-    if loops.len() != 1 {
-        return Err(SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
-            face_id,
-            loop_count: loops.len(),
-            loop_node_counts: loops
-                .iter()
-                .map(|loop_segments| loop_segments.len())
-                .collect(),
-            loop_source_edge_ids: loops
-                .iter()
-                .map(|loop_segments| {
-                    loop_segments
-                        .iter()
-                        .map(|segment| segment.source_edge_id)
-                        .collect()
-                })
-                .collect(),
-        });
-    }
-    Ok(loops.into_iter().next().unwrap_or_default())
-}
-
 pub(super) fn face_curve_segment_loops(
     face_id: u32,
     segments: &[FaceCurveSegment],

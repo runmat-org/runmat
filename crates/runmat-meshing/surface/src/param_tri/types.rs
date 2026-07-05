@@ -106,12 +106,6 @@ pub enum SurfaceDiscretizationError {
         node_id: u32,
         incident_segment_count: usize,
     },
-    MultipleFaceLoopsUnsupported {
-        face_id: u32,
-        loop_count: usize,
-        loop_node_counts: Vec<usize>,
-        loop_source_edge_ids: Vec<Vec<u32>>,
-    },
 }
 
 impl std::fmt::Display for SurfaceDiscretizationError {
@@ -165,15 +159,6 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             } => write!(
                 formatter,
                 "source face {face_id} boundary node {node_id} has {incident_segment_count} incident curve segments"
-            ),
-            Self::MultipleFaceLoopsUnsupported {
-                face_id,
-                loop_count,
-                loop_node_counts,
-                loop_source_edge_ids,
-            } => write!(
-                formatter,
-                "source face {face_id} has {loop_count} boundary loops with node counts {loop_node_counts:?} and source edge loops {loop_source_edge_ids:?}; holed or multi-loop faces are not supported by this surface triangulation path yet"
             ),
         }
     }

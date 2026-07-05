@@ -89,7 +89,7 @@ fn curve_driven_face_elements_triangulate_holed_loop_domain() {
 }
 
 #[test]
-fn single_loop_extractor_reports_multiple_face_curve_loops() {
+fn face_curve_segment_loops_extracts_multiple_closed_loops() {
     let segments = vec![
         FaceCurveSegment {
             node_ids: [0, 1],
@@ -117,24 +117,27 @@ fn single_loop_extractor_reports_multiple_face_curve_loops() {
         },
     ];
 
-    let err = single_face_curve_segment_loop(7, &segments)
-        .expect_err("multi-loop face topology should fail closed");
+    let loops = face_curve_segment_loops(7, &segments).expect("multi-loop face should extract");
 
     assert_eq!(
-        err,
-        SurfaceDiscretizationError::MultipleFaceLoopsUnsupported {
-            face_id: 7,
-            loop_count: 2,
-            loop_node_counts: vec![3, 3],
-            loop_source_edge_ids: vec![vec![0, 1, 2], vec![3, 4, 5]],
-        }
+        loops
+            .iter()
+            .map(|loop_segments| loop_segments.len())
+            .collect::<Vec<_>>(),
+        vec![3, 3]
     );
-    assert!(err
-        .to_string()
-        .contains("boundary loops with node counts [3, 3]"));
-    assert!(err
-        .to_string()
-        .contains("source edge loops [[0, 1, 2], [3, 4, 5]]"));
+    assert_eq!(
+        loops
+            .iter()
+            .map(|loop_segments| {
+                loop_segments
+                    .iter()
+                    .map(|segment| segment.source_edge_id)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+        vec![vec![0, 1, 2], vec![3, 4, 5]]
+    );
 }
 
 #[test]
@@ -197,8 +200,8 @@ fn rejects_open_face_curve_loop_before_triangulation() {
         },
     ];
 
-    let err = single_face_curve_segment_loop(7, &segments)
-        .expect_err("open face loop should fail closed");
+    let err =
+        face_curve_segment_loops(7, &segments).expect_err("open face loop should fail closed");
 
     assert_eq!(
         err,
