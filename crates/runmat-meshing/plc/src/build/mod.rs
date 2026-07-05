@@ -236,6 +236,48 @@ pub fn build_protected_boundary_complex(
             loop_coverage.recovered_source_edge_count,
         );
     }
+    if let Some(cad_curve_boundary_provenance) = &surface.cad_curve_boundary_provenance {
+        evidence.entity_counts.insert(
+            "cad_curve_boundary_source_edges".to_string(),
+            cad_curve_boundary_provenance.recovered_source_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_boundary_segments".to_string(),
+            cad_curve_boundary_provenance.boundary_segment_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_imported_edges".to_string(),
+            cad_curve_boundary_provenance.imported_curve_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_evaluator_edges".to_string(),
+            cad_curve_boundary_provenance.evaluator_curve_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_evaluator_samples".to_string(),
+            cad_curve_boundary_provenance.evaluator_sample_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_live_query_edges".to_string(),
+            cad_curve_boundary_provenance.live_query_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_live_query_samples".to_string(),
+            cad_curve_boundary_provenance.live_query_sample_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_rejected_evaluator_samples".to_string(),
+            cad_curve_boundary_provenance.rejected_evaluator_sample_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_curvature_sized_edges".to_string(),
+            cad_curve_boundary_provenance.curvature_sized_edge_count,
+        );
+        evidence.entity_counts.insert(
+            "cad_curve_curvature_samples".to_string(),
+            cad_curve_boundary_provenance.curvature_sample_count,
+        );
+    }
 
     let mut plc = ProtectedBoundaryComplex {
         complex_id: "plc_surface_boundary".to_string(),

@@ -2,6 +2,7 @@ use super::*;
 use crate::validate::PlcValidationError;
 use runmat_meshing_core::curve::CurveValidationReport;
 use runmat_meshing_core::surface::{
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
     SurfaceDiscretization, SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
     INTERNAL_SOURCE_EDGE_ID,
 };
@@ -30,6 +31,66 @@ fn builds_valid_plc_from_closed_tetra_surface() {
     assert_eq!(plc.evidence.entity_counts["shell_nesting_classified"], 1);
     assert_eq!(plc.evidence.entity_counts["outer_shells"], 1);
     assert_eq!(plc.evidence.entity_counts["nested_shells"], 0);
+}
+
+#[test]
+fn carries_cad_curve_boundary_provenance_into_stage_evidence() {
+    let mut surface = tetra_surface();
+    surface.cad_curve_boundary_provenance = Some(SurfaceCadCurveBoundaryProvenanceReport {
+        recovered_source_edge_count: 1,
+        boundary_segment_count: 2,
+        imported_curve_edge_count: 1,
+        evaluator_curve_edge_count: 1,
+        evaluator_sample_count: 3,
+        live_query_edge_count: 1,
+        live_query_sample_count: 2,
+        rejected_evaluator_sample_count: 1,
+        curvature_sized_edge_count: 1,
+        curvature_sample_count: 1,
+        edges: vec![SurfaceCadCurveBoundaryEdgeProvenance {
+            source_edge_id: 0,
+            cad_edge_id: "cad-edge-0".to_string(),
+            imported_curve_id: Some(42),
+            evaluator_id: Some("curve-evaluator-0".to_string()),
+            evaluator_supports_point_evaluation: true,
+            evaluator_supports_projection: true,
+            evaluator_supports_tangent: true,
+            evaluator_supports_curvature: true,
+            evaluator_sample_count: 3,
+            live_query_backed: true,
+            live_query_sample_count: 2,
+            rejected_evaluator_sample_count: 1,
+            curvature_sample_count: 1,
+            curvature_limited_target_size_m: Some(0.25),
+            boundary_segment_count: 2,
+        }],
+    });
+
+    let plc = build_protected_boundary_complex(&surface)
+        .expect("CAD curve boundary provenance should not invalidate a closed PLC");
+
+    assert_eq!(
+        plc.evidence.entity_counts["cad_curve_boundary_source_edges"],
+        1
+    );
+    assert_eq!(plc.evidence.entity_counts["cad_curve_boundary_segments"], 2);
+    assert_eq!(plc.evidence.entity_counts["cad_curve_imported_edges"], 1);
+    assert_eq!(plc.evidence.entity_counts["cad_curve_evaluator_edges"], 1);
+    assert_eq!(plc.evidence.entity_counts["cad_curve_evaluator_samples"], 3);
+    assert_eq!(plc.evidence.entity_counts["cad_curve_live_query_edges"], 1);
+    assert_eq!(
+        plc.evidence.entity_counts["cad_curve_live_query_samples"],
+        2
+    );
+    assert_eq!(
+        plc.evidence.entity_counts["cad_curve_rejected_evaluator_samples"],
+        1
+    );
+    assert_eq!(
+        plc.evidence.entity_counts["cad_curve_curvature_sized_edges"],
+        1
+    );
+    assert_eq!(plc.evidence.entity_counts["cad_curve_curvature_samples"], 1);
 }
 
 #[test]
