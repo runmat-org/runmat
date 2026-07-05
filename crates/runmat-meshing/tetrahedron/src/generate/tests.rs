@@ -697,7 +697,7 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
     assert!(
         mesh.evidence
             .entity_counts
-            .get("interior_smoothing_candidate_points")
+            .get("interior_support_candidate_points")
             .copied()
             .unwrap_or_default()
             > 1
@@ -705,7 +705,7 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
     assert!(mesh
         .evidence
         .entity_counts
-        .contains_key("interior_smoothing_accepted_points"));
+        .contains_key("interior_support_accepted_points"));
     assert_eq!(mesh.evidence.entity_counts["tetrahedron4_elements"], 8);
     assert_eq!(
         mesh.evidence.entity_counts["input_plc_boundary_components"],

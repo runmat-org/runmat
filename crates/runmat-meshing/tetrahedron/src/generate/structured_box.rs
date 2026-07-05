@@ -224,11 +224,11 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
         plc.facets.len(),
     );
     evidence.entity_counts.insert(
-        "interior_smoothing_candidate_points".to_string(),
+        "interior_support_candidate_points".to_string(),
         interior_selection.candidate_count,
     );
     evidence.entity_counts.insert(
-        "interior_smoothing_accepted_points".to_string(),
+        "interior_support_accepted_points".to_string(),
         usize::from(interior_selection.improved),
     );
     record_input_plc_evidence(plc, &mut evidence);

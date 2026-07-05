@@ -123,11 +123,11 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
         .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
     record_input_plc_evidence(plc, &mut evidence);
     evidence.entity_counts.insert(
-        "interior_smoothing_candidate_points".to_string(),
+        "interior_support_candidate_points".to_string(),
         interior_selection.candidate_count,
     );
     evidence.entity_counts.insert(
-        "interior_smoothing_accepted_points".to_string(),
+        "interior_support_accepted_points".to_string(),
         usize::from(interior_selection.improved),
     );
     record_tetrahedron_material_evidence(&elements, &mut evidence);
