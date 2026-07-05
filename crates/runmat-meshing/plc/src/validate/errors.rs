@@ -96,6 +96,11 @@ pub enum PlcValidationError {
         node_ids: [TopologyEntityId; 2],
         incidence_count: usize,
     },
+    NonManifoldBoundaryVertex {
+        node_id: TopologyEntityId,
+        incident_facet_count: usize,
+        link_component_count: usize,
+    },
     InconsistentBoundaryEdgeOrientation {
         node_ids: [TopologyEntityId; 2],
     },
@@ -253,6 +258,15 @@ impl std::fmt::Display for PlcValidationError {
                 formatter,
                 "PLC edge {}-{} has non-manifold incidence {incidence_count}, expected 2",
                 node_ids[0].id, node_ids[1].id
+            ),
+            Self::NonManifoldBoundaryVertex {
+                node_id,
+                incident_facet_count,
+                link_component_count,
+            } => write!(
+                formatter,
+                "PLC vertex {} has non-manifold boundary incidence: {incident_facet_count} incident facets form {link_component_count} vertex-link components",
+                node_id.id
             ),
             Self::InconsistentBoundaryEdgeOrientation { node_ids } => write!(
                 formatter,

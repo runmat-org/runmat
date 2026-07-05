@@ -417,6 +417,18 @@ fn rejects_protected_edge_with_non_curve_source_edge_id() {
 }
 
 #[test]
+fn rejects_vertex_touching_closed_shells_as_nonmanifold() {
+    assert_eq!(
+        validate_protected_boundary_complex(&vertex_touching_tetrahedra_plc()),
+        Err(PlcValidationError::NonManifoldBoundaryVertex {
+            node_id: entity("0"),
+            incident_facet_count: 6,
+            link_component_count: 2,
+        })
+    );
+}
+
+#[test]
 fn rejects_disjoint_boundary_components_after_shell_classification() {
     let plc = disconnected_tetrahedra_plc();
     let report = classify_boundary_components(&plc);
@@ -480,6 +492,23 @@ fn disconnected_tetrahedra_plc() -> ProtectedBoundaryComplex {
         facet("f11", ["10", "11", "13"]),
         facet("f12", ["11", "12", "13"]),
         facet("f13", ["12", "10", "13"]),
+    ]);
+    plc
+}
+
+fn vertex_touching_tetrahedra_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetrahedron_plc();
+    plc.complex_id = "vertex_touching_tetrahedra_plc".to_string();
+    plc.nodes.extend([
+        node("10", [2.0, 0.0, 0.0]),
+        node("11", [2.0, 1.0, 0.0]),
+        node("12", [2.0, 0.0, 1.0]),
+    ]);
+    plc.facets.extend([
+        facet("f10", ["0", "11", "10"]),
+        facet("f11", ["0", "10", "12"]),
+        facet("f12", ["10", "11", "12"]),
+        facet("f13", ["11", "0", "12"]),
     ]);
     plc
 }

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod components;
 mod errors;
+mod vertex_links;
 pub use components::{
     classify_boundary_components, classify_shell_nesting, PlcBoundaryComponentReport,
     PlcShellClassificationReport,
@@ -13,6 +14,7 @@ use runmat_meshing_core::{
     predicate::triangle_area,
     tolerance::MeshingTolerance,
 };
+use vertex_links::validate_vertex_links_are_manifold;
 
 pub const MODULE_PURPOSE: &str =
     "watertightness, manifold incidence, shell nesting, and material interfaces";
@@ -201,6 +203,8 @@ pub fn validate_protected_boundary_complex(
             return Err(PlcValidationError::InconsistentBoundaryEdgeOrientation { node_ids: edge });
         }
     }
+    validate_vertex_links_are_manifold(plc)?;
+
     let component_report = classify_boundary_components(plc);
     let shell_classification = classify_shell_nesting(plc, &component_report);
     if !shell_classification.shell_nesting_classified {
