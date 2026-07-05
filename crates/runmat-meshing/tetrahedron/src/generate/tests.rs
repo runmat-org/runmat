@@ -514,6 +514,69 @@ fn generates_star_shaped_polyhedron_tetrahedron_mesh_from_dented_corner_box_plc(
 }
 
 #[test]
+fn star_shaped_polyhedron_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let plc = with_split_material_ids(dented_corner_box_plc());
+
+    let mesh = generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("star-shaped dented-corner PLC should generate a Tetrahedron mesh");
+
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+    assert_eq!(mesh.evidence.entity_counts["input_plc_material_regions"], 2);
+    assert_eq!(
+        mesh.evidence.entity_counts["unclassified_tetrahedron_material_elements"],
+        mesh.elements.len()
+    );
+}
+
+#[test]
+fn star_shaped_polyhedron_recovery_assigns_material_ownership_from_plc_facets() {
+    let plc = with_split_material_ids(dented_corner_box_plc());
+    let mesh = generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("star-shaped dented-corner PLC should generate a Tetrahedron mesh");
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+
+    let result = crate::recover::recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("star-shaped PLC material ownership should recover from boundary facets");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(result
+        .tetrahedron_mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id != "unclassified"));
+    let material_region_ids = result
+        .tetrahedron_mesh
+        .elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_a", "region_b"])
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_input_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_boundary_owned_material_interface_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        plc.facets.len()
+    );
+}
+
+#[test]
 fn solver_generation_supports_star_shaped_polyhedron_plcs() {
     let mesh = generate_solver_tetrahedron_mesh_from_plc(&dented_corner_box_plc())
         .expect("dented-corner box PLC should use star-shaped polyhedron generation");

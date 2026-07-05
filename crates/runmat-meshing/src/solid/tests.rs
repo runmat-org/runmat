@@ -507,6 +507,42 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
 }
 
 #[test]
+fn auto_backend_preserves_recovered_material_regions_for_dented_corner_solid() {
+    let mesh = generate_analysis_mesh(
+        &split_material_dented_corner_box_geometry(),
+        VolumeMeshingOptions::default(),
+    )
+    .expect("split-region dented-corner solid should recover material ownership");
+
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert!(mesh
+        .volume_elements
+        .iter()
+        .all(|element| element.material_region_id != "unclassified"));
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_recovered_material_interface_recovery_item_count,
+        2
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["region_base".to_string(), "region_cap".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("dented-corner solid artifact should expose both recovered material regions");
+}
+
+#[test]
 fn explicit_structured_grid_tetrahedron_backend_runs_structured_stage() {
     let mesh = generate_analysis_mesh(
         &cube_geometry(),
@@ -624,6 +660,15 @@ fn dented_corner_box_geometry() -> GeometryAsset {
     geometry.geometry_id = "geo_root_meshing_dented_corner_box".to_string();
     geometry.source.path = "/fixtures/generic_dented_corner_box.step".to_string();
     geometry.source.sha256 = "generic-dented-corner-box".to_string();
+    geometry.surface_meshes[0].vertices[6] = [0.55, 0.55, 0.55];
+    geometry
+}
+
+fn split_material_dented_corner_box_geometry() -> GeometryAsset {
+    let mut geometry = split_material_cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_split_material_dented_corner_box".to_string();
+    geometry.source.path = "/fixtures/generic_split_material_dented_corner_box.step".to_string();
+    geometry.source.sha256 = "generic-split-material-dented-corner-box".to_string();
     geometry.surface_meshes[0].vertices[6] = [0.55, 0.55, 0.55];
     geometry
 }
