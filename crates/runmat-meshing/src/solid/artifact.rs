@@ -132,7 +132,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     let missing_material_interface_recovery =
         bounded_missing_recovery_ids(recovery_queue, TetrahedronRecoveryKind::MaterialInterface);
 
-    AnalysisMeshArtifact {
+    let mut artifact = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: format!("analysis_mesh_{}", geometry.geometry_id),
         nodes,
@@ -141,6 +141,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         boundary_edges,
         quality,
         sizing: sizing.clone(),
+        field_topology: Vec::new(),
         backend: MeshBackendSummary {
             backend: "solid".to_string(),
             algorithm: SOLID_PLC_TETRAHEDRON_ALGORITHM.to_string(),
@@ -701,7 +702,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             source_geometry_revision: geometry.revision,
             source_geometry_sha256: Some(geometry.source.sha256.clone()),
         },
-    }
+    };
+    artifact.refresh_field_topology();
+    artifact
 }
 
 struct BackendQualityEvidence {

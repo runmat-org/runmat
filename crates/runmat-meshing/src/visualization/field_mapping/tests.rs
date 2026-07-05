@@ -313,6 +313,7 @@ fn field_mapping_mesh() -> AnalysisMeshArtifact {
         boundary_edges: Vec::new(),
         quality: AnalysisMeshQualityReport::default(),
         sizing: MeshSizingField::default(),
+        field_topology: Vec::new(),
         backend: MeshBackendSummary::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {

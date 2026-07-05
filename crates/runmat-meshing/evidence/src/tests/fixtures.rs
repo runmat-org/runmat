@@ -73,6 +73,7 @@ pub(super) fn minimal_evidence_mesh() -> AnalysisMeshArtifact {
                 volume_m3: 1.0 / 6.0,
             }],
         },
+        field_topology: Vec::new(),
         backend: MeshBackendSummary::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {

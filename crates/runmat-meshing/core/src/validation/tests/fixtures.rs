@@ -52,6 +52,7 @@ pub(super) fn valid_tetrahedron_mesh() -> AnalysisMeshArtifact {
         boundary_edges: Vec::new(),
         quality: AnalysisMeshQualityReport::default(),
         sizing: MeshSizingField::default(),
+        field_topology: Vec::new(),
         backend: Default::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {

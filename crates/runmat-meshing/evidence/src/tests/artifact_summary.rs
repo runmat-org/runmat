@@ -115,6 +115,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             }],
             ..MeshSizingField::default()
         },
+        field_topology: Vec::new(),
         backend: MeshBackendSummary {
             backend: "solid".to_string(),
             cad_topology_source: "semantic_cad".to_string(),

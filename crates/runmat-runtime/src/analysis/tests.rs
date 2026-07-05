@@ -75,10 +75,11 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
-    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
+    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
+    AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
     AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
     BoundaryElementKind, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
-    VolumeElementKind,
+    VolumeElementKind, ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND,
 };
 
 use super::*;
@@ -5672,6 +5673,30 @@ fn field_topology_quality_reasons_detect_primary_solver_field_mismatch() {
 }
 
 #[test]
+fn field_topology_quality_reasons_use_analysis_mesh_descriptors() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.field_topology = vec![AnalysisFieldTopologyDescriptor {
+        topology_id: ANALYSIS_MESH_FIELD_TOPOLOGY_ID.to_string(),
+        location: AnalysisFieldTopologyLocation::VolumeElement,
+        entity_count: 3,
+        element_kind: Some(TETRAHEDRON4_FIELD_ELEMENT_KIND.to_string()),
+    }];
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        vec![2, 6],
+        vec![0.0; 12],
+    )];
+
+    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
+
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
+    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
+    assert!(reasons[0].detail.contains("expected_entity_count=3"));
+    assert!(reasons[0].detail.contains("actual_entity_count=2"));
+}
+
+#[test]
 fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
     let mut mesh = minimal_analysis_mesh();
     mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
@@ -7666,6 +7691,7 @@ fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
         boundary_edges: Vec::new(),
         quality: AnalysisMeshQualityReport::default(),
         sizing: MeshSizingField::default(),
+        field_topology: Vec::new(),
         backend: Default::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {

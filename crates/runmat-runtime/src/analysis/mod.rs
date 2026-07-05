@@ -44,10 +44,11 @@ use runmat_meshing::{
 };
 use runmat_meshing_core::{
     build_refinement_markers_from_samples, plan_refinement_indicators, AdaptiveConvergenceStatus,
-    AdaptiveIterationSummary, AnalysisMeshArtifact, AnalysisMeshValidationOptions, MeshSizingField,
-    MeshTargetSize, RefinementIndicatorAvailability, RefinementIndicatorSample,
-    RefinementMarkerOptions, RefinementStrategy, SizingFieldUpdate, SourceEntityKind,
-    VolumeMeshingOptions,
+    AdaptiveIterationSummary, AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation,
+    AnalysisMeshArtifact, AnalysisMeshValidationOptions, MeshSizingField, MeshTargetSize,
+    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
+    RefinementStrategy, SizingFieldUpdate, SourceEntityKind, VolumeMeshingOptions,
+    TETRAHEDRON4_FIELD_ELEMENT_KIND,
 };
 use runmat_meshing_evidence::{
     build_mesh_evidence_artifact, build_mesh_evidence_artifact_with_validation_evidence,
@@ -9936,6 +9937,10 @@ fn primary_solver_mesh_field_expected_count(
     field: &AnalysisField,
     mesh: &AnalysisMeshArtifact,
 ) -> Option<usize> {
+    if let Some(count) = mesh_field_topology_expected_count(field, mesh) {
+        return Some(count);
+    }
+
     match field.field_id.as_str() {
         FEA_FIELD_STRUCTURAL_DISPLACEMENT | FEA_FIELD_STRUCTURAL_NODAL_VON_MISES => {
             Some(mesh.nodes.len())
@@ -9945,6 +9950,59 @@ fn primary_solver_mesh_field_expected_count(
         | FEA_FIELD_STRUCTURAL_STRESS
         | FEA_FIELD_STRUCTURAL_VON_MISES => Some(mesh.volume_elements.len()),
         _ => None,
+    }
+}
+
+fn mesh_field_topology_expected_count(
+    field: &AnalysisField,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<usize> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    let topology_id = descriptor.topology_id.as_deref()?;
+    let location = mesh_field_topology_location(descriptor.location)?;
+    let element_kind = descriptor.element_kind.as_deref();
+
+    mesh.field_topology
+        .iter()
+        .find(|topology| {
+            topology.topology_id == topology_id
+                && topology.location == location
+                && topology_element_kind_matches(topology, element_kind)
+        })
+        .map(|topology| topology.entity_count)
+}
+
+fn mesh_field_topology_location(
+    location: AnalysisFieldLocation,
+) -> Option<AnalysisFieldTopologyLocation> {
+    match location {
+        AnalysisFieldLocation::Node => Some(AnalysisFieldTopologyLocation::Node),
+        AnalysisFieldLocation::Element => Some(AnalysisFieldTopologyLocation::VolumeElement),
+        AnalysisFieldLocation::BoundaryFace => Some(AnalysisFieldTopologyLocation::BoundaryFace),
+        _ => None,
+    }
+}
+
+fn topology_element_kind_matches(
+    topology: &AnalysisFieldTopologyDescriptor,
+    element_kind: Option<&str>,
+) -> bool {
+    match (
+        topology.element_kind.as_deref(),
+        normalized_mesh_element_kind(element_kind),
+    ) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left == right,
+        (None, Some(_)) => false,
+        (Some(_), None) => false,
+    }
+}
+
+fn normalized_mesh_element_kind(element_kind: Option<&str>) -> Option<&str> {
+    match element_kind {
+        Some("tetrahedron4") => Some(TETRAHEDRON4_FIELD_ELEMENT_KIND),
+        Some(other) => Some(other),
+        None => None,
     }
 }
 

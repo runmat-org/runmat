@@ -47,6 +47,7 @@ fn dev_mesh_evidence_caps_debug_events() {
         ],
         sizing: MeshSizingField::default(),
         quality: quality_report(),
+        field_topology: Vec::new(),
         backend: MeshBackendSummary::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {

@@ -28,8 +28,11 @@ pub use cad::topology::{
     CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
 };
 pub use contracts::artifact::{
-    AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
-    AnalysisVolumeElement, MeshBackendSummary,
+    analysis_mesh_field_topology, AnalysisBoundaryEdge, AnalysisBoundaryFace,
+    AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
+    AnalysisMeshNode, AnalysisVolumeElement, MeshBackendSummary,
+    ANALYSIS_MESH_BOUNDARY_EDGE_TOPOLOGY_ID, ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
+    ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
 };
 pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};

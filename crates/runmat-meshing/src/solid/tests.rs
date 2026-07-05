@@ -7,9 +7,11 @@ use runmat_geometry_core::{
     UnitSystem,
 };
 use runmat_meshing_core::{
-    validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationOptions,
-    MeshBackendKind, MeshSizingField, MeshTargetSize, QualityThresholds, SizingSample,
-    SourceEntityKind, VolumeMeshingOptions,
+    validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisFieldTopologyLocation,
+    AnalysisMeshValidationOptions, MeshBackendKind, MeshSizingField, MeshTargetSize,
+    QualityThresholds, SizingSample, SourceEntityKind, VolumeMeshingOptions,
+    ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID, ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
+    TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
 };
 
 #[test]
@@ -87,6 +89,33 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         .tetrahedron_missing_material_interface_recovery_ids
         .is_empty());
     assert_eq!(mesh.backend.tetrahedron_sliver_removed_count, 0);
+    assert_eq!(
+        field_topology_count(
+            &mesh,
+            ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
+            AnalysisFieldTopologyLocation::Node,
+            None,
+        ),
+        Some(mesh.nodes.len())
+    );
+    assert_eq!(
+        field_topology_count(
+            &mesh,
+            ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
+            AnalysisFieldTopologyLocation::VolumeElement,
+            Some(TETRAHEDRON4_FIELD_ELEMENT_KIND),
+        ),
+        Some(mesh.volume_elements.len())
+    );
+    assert_eq!(
+        field_topology_count(
+            &mesh,
+            ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
+            AnalysisFieldTopologyLocation::BoundaryFace,
+            Some(TRI3_FIELD_ELEMENT_KIND),
+        ),
+        Some(mesh.boundary_faces.len())
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("default auto cube should be solve-ready after healed CAD face loops");
     validate_analysis_mesh_with_options(
@@ -98,6 +127,22 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         },
     )
     .expect("root solid pipeline should recover PLC constraints before quality optimization");
+}
+
+fn field_topology_count(
+    mesh: &runmat_meshing_core::AnalysisMeshArtifact,
+    topology_id: &str,
+    location: AnalysisFieldTopologyLocation,
+    element_kind: Option<&str>,
+) -> Option<usize> {
+    mesh.field_topology
+        .iter()
+        .find(|descriptor| {
+            descriptor.topology_id == topology_id
+                && descriptor.location == location
+                && descriptor.element_kind.as_deref() == element_kind
+        })
+        .map(|descriptor| descriptor.entity_count)
 }
 
 #[test]

@@ -36,6 +36,7 @@ pub(super) fn build_analysis_mesh_artifact(
         boundary_edges: Vec::new(),
         quality,
         sizing,
+        field_topology: Vec::new(),
         backend: MeshBackendSummary {
             backend: "structured_grid_tetrahedron".to_string(),
             algorithm: "structured_bbox_tetrahedron/v1".to_string(),
@@ -67,6 +68,7 @@ fn compact_analysis_mesh_nodes(mut mesh: AnalysisMeshArtifact) -> AnalysisMeshAr
     }
 
     if referenced_node_ids.len() == mesh.nodes.len() {
+        mesh.refresh_field_topology();
         return mesh;
     }
 
@@ -91,6 +93,7 @@ fn compact_analysis_mesh_nodes(mut mesh: AnalysisMeshArtifact) -> AnalysisMeshAr
         remap_node_ids(&mut face.node_ids, &referenced_node_ids);
     }
     mesh.nodes = compact_nodes;
+    mesh.refresh_field_topology();
     mesh
 }
 
