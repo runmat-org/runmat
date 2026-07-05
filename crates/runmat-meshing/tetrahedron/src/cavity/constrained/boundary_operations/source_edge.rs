@@ -194,3 +194,39 @@ pub fn split_constrained_cavity_source_edge(
         source_tetrahedra: split_source_tetrahedra,
     })
 }
+
+pub fn recover_constrained_cavity_source_edge_by_split_refill(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &[ConstrainedCavityNode],
+    source_nodes: &[ConstrainedCavityNode],
+    source_tetrahedra: &[CavityTetrahedron],
+    edge: [u32; 2],
+    options: ConstrainedCavityRefillOptions,
+) -> Result<ConstrainedCavitySourceEdgeSplitRecovery, ConstrainedCavitySourceEdgeSplitError> {
+    let split = split_constrained_cavity_source_edge(
+        cavity,
+        boundary_nodes,
+        source_nodes,
+        source_tetrahedra,
+        edge,
+    )?;
+    let mut split_boundary_nodes = source_nodes.to_vec();
+    if !split_boundary_nodes
+        .iter()
+        .any(|node| node.node_id == split.split_node.node_id)
+    {
+        split_boundary_nodes.push(split.split_node.clone());
+    }
+    let refill_evaluation = evaluate_constrained_cavity_refill_candidates(
+        &split.cavity,
+        &split_boundary_nodes,
+        &[],
+        options,
+    )
+    .map_err(ConstrainedCavitySourceEdgeSplitError::Refill)?;
+
+    Ok(ConstrainedCavitySourceEdgeSplitRecovery {
+        split,
+        refill_evaluation,
+    })
+}

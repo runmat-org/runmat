@@ -17,6 +17,7 @@ mod refill_evaluation;
 mod refill_rejections;
 mod shared_face_split;
 mod solid_empty;
+mod source_edge_split_recovery;
 mod validation;
 
 use fixtures::*;

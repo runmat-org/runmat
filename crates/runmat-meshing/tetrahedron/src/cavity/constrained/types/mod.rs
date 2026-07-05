@@ -206,6 +206,12 @@ pub struct ConstrainedCavitySourceEdgeSplit {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstrainedCavitySourceEdgeSplitRecovery {
+    pub split: ConstrainedCavitySourceEdgeSplit,
+    pub refill_evaluation: ConstrainedCavityRefillEvaluation,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavityBoundaryEdgeRecovery {
     pub cavity: ConstrainedCavity,
     pub attempted_boundary_faces: Vec<[u32; 3]>,

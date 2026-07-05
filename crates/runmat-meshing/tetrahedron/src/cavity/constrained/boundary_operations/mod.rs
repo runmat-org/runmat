@@ -12,7 +12,9 @@ pub use face_splits::{
     split_constrained_cavity_boundary_faces_at_centroids,
 };
 mod source_edge;
-pub use source_edge::split_constrained_cavity_source_edge;
+pub use source_edge::{
+    recover_constrained_cavity_source_edge_by_split_refill, split_constrained_cavity_source_edge,
+};
 
 pub fn split_constrained_cavity_boundary_edge(
     cavity: &ConstrainedCavity,

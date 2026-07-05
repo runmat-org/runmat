@@ -123,6 +123,7 @@ pub enum ConstrainedCavitySourceEdgeSplitError {
     NoIncidentSourceTetrahedron { node_ids: [u32; 2] },
     DegenerateSplitTetrahedron { tetrahedron_id: u32 },
     Validation(ConstrainedCavityValidationError),
+    Refill(ConstrainedCavityRefillError),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

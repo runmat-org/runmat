@@ -46,7 +46,7 @@ use boundary_nodes::{
 };
 use boundary_operations::*;
 pub use boundary_operations::{
-    split_constrained_cavity_boundary_edge,
+    recover_constrained_cavity_source_edge_by_split_refill, split_constrained_cavity_boundary_edge,
     split_constrained_cavity_boundary_edge_patch_at_centroid,
     split_constrained_cavity_boundary_face, split_constrained_cavity_boundary_face_at_barycentric,
     split_constrained_cavity_boundary_face_at_centroid, split_constrained_cavity_boundary_faces,
