@@ -107,6 +107,7 @@ fn rejects_duplicate_surface_facets() {
 fn rejects_inconsistent_surface_orientation_before_returning_plc() {
     let mut surface = tetra_surface();
     surface.elements[0].node_ids = [0, 1, 2];
+    surface.elements[0].source_edge_ids = [0, 1, 2];
 
     assert!(matches!(
         build_protected_boundary_complex(&surface),
@@ -115,6 +116,21 @@ fn rejects_inconsistent_surface_orientation_before_returning_plc() {
                 | PlcValidationError::DuplicateProtectedBoundarySegment { .. }
         ))
     ));
+}
+
+#[test]
+fn rejects_ambiguous_protected_source_edges_on_same_boundary_segment() {
+    let mut surface = tetra_surface();
+    surface.elements[1].source_edge_ids[0] = 99;
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::AmbiguousProtectedBoundarySegment {
+            node_ids: [0, 1],
+            first_source_edge_id: 0,
+            second_source_edge_id: 99,
+        })
+    );
 }
 
 fn tetra_surface() -> SurfaceDiscretization {
