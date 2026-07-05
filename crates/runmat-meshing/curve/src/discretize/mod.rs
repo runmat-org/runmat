@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
 
-use runmat_meshing_cad::{CadTopologyModel, SourceTopologyEdge, SourceTopologyModel};
+use runmat_meshing_cad::{
+    CadCurveEvaluationSample, CadTopologyModel, SourceTopologyEdge, SourceTopologyModel,
+};
 use runmat_meshing_size::field::{MeshSizingField, SegmentSizingQuery, SizingFieldService};
 
 pub const MODULE_PURPOSE: &str = "CAD edge discretization before surface or volume meshing";
@@ -64,6 +66,12 @@ pub struct CadCurveEdgeProvenance {
     pub evaluator_supports_curvature: bool,
     #[serde(default)]
     pub evaluator_sample_count: usize,
+    #[serde(default)]
+    pub live_query_backed: bool,
+    #[serde(default)]
+    pub live_query_sample_count: usize,
+    #[serde(default)]
+    pub rejected_evaluator_sample_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +79,45 @@ pub struct CadCurveDiscretization {
     pub curves: CurveDiscretization,
     #[serde(default)]
     pub edge_provenance: Vec<CadCurveEdgeProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadCurveEvaluationRequest<'a> {
+    pub cad_edge_id: &'a str,
+    pub source_edge_id: u32,
+    pub imported_curve_id: Option<u64>,
+    pub evaluator_id: Option<&'a str>,
+    pub supports_point_evaluation: bool,
+    pub supports_projection: bool,
+    pub supports_tangent: bool,
+    pub supports_curvature: bool,
+    pub parameters: &'a [f64],
+}
+
+pub trait CadCurveEvaluatorProvider {
+    fn evaluate_curve(
+        &self,
+        request: &CadCurveEvaluationRequest<'_>,
+    ) -> Vec<CadCurveEvaluationSample>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopCadCurveEvaluatorProvider;
+
+impl CadCurveEvaluatorProvider for NoopCadCurveEvaluatorProvider {
+    fn evaluate_curve(
+        &self,
+        _request: &CadCurveEvaluationRequest<'_>,
+    ) -> Vec<CadCurveEvaluationSample> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct BoundedCadCurveEvaluationSamples {
+    samples: Vec<CadCurveEvaluationSample>,
+    live_sample_count: usize,
+    rejected_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +219,22 @@ pub fn discretize_cad_topology_curves_with_sizing(
     options: CurveDiscretizationOptions,
     sizing: Option<&MeshSizingField>,
 ) -> Result<CadCurveDiscretization, CurveDiscretizationError> {
+    discretize_cad_topology_curves_with_sizing_and_provider(
+        topology,
+        cad_topology,
+        options,
+        sizing,
+        &NoopCadCurveEvaluatorProvider,
+    )
+}
+
+pub fn discretize_cad_topology_curves_with_sizing_and_provider(
+    topology: &SourceTopologyModel,
+    cad_topology: &CadTopologyModel,
+    options: CurveDiscretizationOptions,
+    sizing: Option<&MeshSizingField>,
+    evaluator_provider: &dyn CadCurveEvaluatorProvider,
+) -> Result<CadCurveDiscretization, CurveDiscretizationError> {
     let mut curves = discretize_topology_curves_with_sizing(topology, options, sizing)?;
     let cad_edges_by_source_edge = cad_topology
         .edges
@@ -179,12 +242,15 @@ pub fn discretize_cad_topology_curves_with_sizing(
         .map(|edge| (edge.source_edge_id, edge))
         .collect::<BTreeMap<_, _>>();
     let mut edge_provenance = Vec::<CadCurveEdgeProvenance>::with_capacity(topology.edges.len());
+    let mut evaluator_samples_by_source_edge =
+        BTreeMap::<u32, BoundedCadCurveEvaluationSamples>::new();
     for edge in &topology.edges {
         let cad_edge = cad_edges_by_source_edge.get(&edge.edge_id).ok_or(
             CurveDiscretizationError::MissingCadEdge {
                 source_edge_id: edge.edge_id,
             },
         )?;
+        let evaluator_samples = cad_curve_evaluator_samples(cad_edge, &curves, evaluator_provider);
         edge_provenance.push(CadCurveEdgeProvenance {
             source_edge_id: edge.edge_id,
             cad_edge_id: cad_edge.entity_id.id.clone(),
@@ -194,28 +260,95 @@ pub fn discretize_cad_topology_curves_with_sizing(
             evaluator_supports_projection: cad_edge.evaluator_supports_projection,
             evaluator_supports_tangent: cad_edge.evaluator_supports_tangent,
             evaluator_supports_curvature: cad_edge.evaluator_supports_curvature,
-            evaluator_sample_count: cad_edge.evaluator_samples.len(),
+            evaluator_sample_count: evaluator_samples.samples.len(),
+            live_query_backed: evaluator_samples.live_sample_count > 0,
+            live_query_sample_count: evaluator_samples.live_sample_count,
+            rejected_evaluator_sample_count: evaluator_samples.rejected_count,
         });
+        evaluator_samples_by_source_edge.insert(edge.edge_id, evaluator_samples);
     }
-    apply_cad_curve_samples(&mut curves, &cad_edges_by_source_edge);
+    apply_cad_curve_samples(&mut curves, &evaluator_samples_by_source_edge);
     Ok(CadCurveDiscretization {
         curves,
         edge_provenance,
     })
 }
 
+fn cad_curve_evaluator_samples(
+    cad_edge: &runmat_meshing_cad::CadEdge,
+    curves: &CurveDiscretization,
+    evaluator_provider: &dyn CadCurveEvaluatorProvider,
+) -> BoundedCadCurveEvaluationSamples {
+    let query_parameters = curves
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.source_edge_id == cad_edge.source_edge_id
+                && node.parameter > 1.0e-12
+                && node.parameter < 1.0 - 1.0e-12
+        })
+        .map(|node| node.parameter)
+        .collect::<Vec<_>>();
+    let live_samples = if query_parameters.is_empty()
+        || cad_edge.evaluator_id.is_none()
+        || !(cad_edge.evaluator_supports_point_evaluation
+            || cad_edge.evaluator_supports_projection
+            || cad_edge.evaluator_supports_tangent
+            || cad_edge.evaluator_supports_curvature)
+    {
+        Vec::new()
+    } else {
+        evaluator_provider.evaluate_curve(&CadCurveEvaluationRequest {
+            cad_edge_id: &cad_edge.entity_id.id,
+            source_edge_id: cad_edge.source_edge_id,
+            imported_curve_id: cad_edge.imported_curve_id,
+            evaluator_id: cad_edge.evaluator_id.as_deref(),
+            supports_point_evaluation: cad_edge.evaluator_supports_point_evaluation,
+            supports_projection: cad_edge.evaluator_supports_projection,
+            supports_tangent: cad_edge.evaluator_supports_tangent,
+            supports_curvature: cad_edge.evaluator_supports_curvature,
+            parameters: &query_parameters,
+        })
+    };
+    let mut rejected_count = 0_usize;
+    let mut live_sample_count = 0_usize;
+    let mut samples = Vec::<CadCurveEvaluationSample>::new();
+    for sample in live_samples {
+        if cad_curve_sample_is_valid(&sample) {
+            live_sample_count += 1;
+            samples.push(sample);
+        } else {
+            rejected_count += 1;
+        }
+    }
+    for sample in cad_edge.evaluator_samples.clone() {
+        if cad_curve_sample_is_valid(&sample) {
+            samples.push(sample);
+        } else {
+            rejected_count += 1;
+        }
+    }
+    let overflow_rejected = samples.len().saturating_sub(32);
+    samples.truncate(32);
+    BoundedCadCurveEvaluationSamples {
+        samples,
+        live_sample_count,
+        rejected_count: rejected_count.saturating_add(overflow_rejected),
+    }
+}
+
 fn apply_cad_curve_samples(
     curves: &mut CurveDiscretization,
-    cad_edges_by_source_edge: &BTreeMap<u32, &runmat_meshing_cad::CadEdge>,
+    evaluator_samples_by_source_edge: &BTreeMap<u32, BoundedCadCurveEvaluationSamples>,
 ) {
     for node in &mut curves.nodes {
         if node.parameter <= 1.0e-12 || node.parameter >= 1.0 - 1.0e-12 {
             continue;
         }
-        let Some(cad_edge) = cad_edges_by_source_edge.get(&node.source_edge_id) else {
+        let Some(samples) = evaluator_samples_by_source_edge.get(&node.source_edge_id) else {
             continue;
         };
-        let Some(sample) = cad_edge.evaluator_samples.iter().find(|sample| {
+        let Some(sample) = samples.samples.iter().find(|sample| {
             sample.parameter.is_finite()
                 && (sample.parameter - node.parameter).abs() <= 1.0e-12
                 && sample.point_m.iter().all(|value| value.is_finite())
@@ -243,6 +376,24 @@ fn apply_cad_curve_samples(
             element.length_m = distance(*left, *right);
         }
     }
+}
+
+fn cad_curve_sample_is_valid(sample: &CadCurveEvaluationSample) -> bool {
+    sample.parameter.is_finite()
+        && (0.0..=1.0).contains(&sample.parameter)
+        && sample.point_m.iter().all(|value| value.is_finite())
+        && sample
+            .projected_point_m
+            .is_none_or(|point| point.iter().all(|value| value.is_finite()))
+        && sample
+            .tangent_m
+            .is_none_or(|point| point.iter().all(|value| value.is_finite()))
+        && sample
+            .curvature_1_per_m
+            .is_none_or(|curvature| curvature.is_finite())
+        && sample
+            .projection_error_m
+            .is_none_or(|error| error.is_finite() && error >= 0.0)
 }
 
 fn validate_curve_options(
@@ -456,6 +607,63 @@ mod tests {
     }
 
     #[test]
+    fn cad_curve_discretization_uses_live_evaluator_provider_samples() {
+        let topology = line_topology(1.0);
+        let mut cad_topology = cad_topology_for_line(&topology);
+        cad_topology.edges[0].evaluator_samples.clear();
+
+        let cad_curves = discretize_cad_topology_curves_with_sizing_and_provider(
+            &topology,
+            &cad_topology,
+            CurveDiscretizationOptions {
+                target_size_m: 0.5,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 16,
+            },
+            None,
+            &LiveCurveEvaluatorProvider,
+        )
+        .expect("provider-backed CAD curves should discretize");
+
+        assert_eq!(cad_curves.curves.elements.len(), 2);
+        assert_eq!(cad_curves.curves.nodes[0].coordinates_m, [0.0, 0.0, 0.0]);
+        assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.3, 0.0]);
+        assert_eq!(cad_curves.curves.nodes[2].coordinates_m, [1.0, 0.0, 0.0]);
+        let provenance = &cad_curves.edge_provenance[0];
+        assert_eq!(provenance.evaluator_sample_count, 1);
+        assert!(provenance.live_query_backed);
+        assert_eq!(provenance.live_query_sample_count, 1);
+        assert_eq!(provenance.rejected_evaluator_sample_count, 0);
+    }
+
+    #[test]
+    fn cad_curve_discretization_rejects_invalid_live_evaluator_samples() {
+        let topology = line_topology(1.0);
+        let mut cad_topology = cad_topology_for_line(&topology);
+        cad_topology.edges[0].evaluator_samples.clear();
+
+        let cad_curves = discretize_cad_topology_curves_with_sizing_and_provider(
+            &topology,
+            &cad_topology,
+            CurveDiscretizationOptions {
+                target_size_m: 0.5,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 16,
+            },
+            None,
+            &InvalidCurveEvaluatorProvider,
+        )
+        .expect("invalid provider samples should be bounded and rejected");
+
+        assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.0, 0.0]);
+        let provenance = &cad_curves.edge_provenance[0];
+        assert_eq!(provenance.evaluator_sample_count, 0);
+        assert!(!provenance.live_query_backed);
+        assert_eq!(provenance.live_query_sample_count, 0);
+        assert_eq!(provenance.rejected_evaluator_sample_count, 1);
+    }
+
+    #[test]
     fn cad_curve_discretization_requires_matching_cad_edge() {
         let topology = line_topology(1.0);
         let mut cad_topology = cad_topology_for_line(&topology);
@@ -572,6 +780,49 @@ mod tests {
                 hole_loop_count: 0,
                 closed_shell_count: 0,
             },
+        }
+    }
+
+    struct LiveCurveEvaluatorProvider;
+
+    impl CadCurveEvaluatorProvider for LiveCurveEvaluatorProvider {
+        fn evaluate_curve(
+            &self,
+            request: &CadCurveEvaluationRequest<'_>,
+        ) -> Vec<CadCurveEvaluationSample> {
+            assert_eq!(request.cad_edge_id, "cad_edge_0");
+            assert_eq!(request.source_edge_id, 0);
+            assert_eq!(request.imported_curve_id, Some(12));
+            assert_eq!(request.evaluator_id, Some("cad_curve_12"));
+            assert_eq!(request.parameters, &[0.5]);
+            vec![CadCurveEvaluationSample {
+                source: CadCurveEvaluationSampleSource::BackendQuery,
+                parameter: 0.5,
+                point_m: [0.5, 0.25, 0.0],
+                projected_point_m: Some([0.5, 0.3, 0.0]),
+                tangent_m: Some([1.0, 0.2, 0.0]),
+                curvature_1_per_m: Some(0.25),
+                projection_error_m: Some(0.05),
+            }]
+        }
+    }
+
+    struct InvalidCurveEvaluatorProvider;
+
+    impl CadCurveEvaluatorProvider for InvalidCurveEvaluatorProvider {
+        fn evaluate_curve(
+            &self,
+            _request: &CadCurveEvaluationRequest<'_>,
+        ) -> Vec<CadCurveEvaluationSample> {
+            vec![CadCurveEvaluationSample {
+                source: CadCurveEvaluationSampleSource::BackendQuery,
+                parameter: 0.5,
+                point_m: [f64::NAN, 0.25, 0.0],
+                projected_point_m: Some([0.5, 0.3, 0.0]),
+                tangent_m: Some([1.0, 0.2, 0.0]),
+                curvature_1_per_m: Some(0.25),
+                projection_error_m: Some(0.05),
+            }]
         }
     }
 }

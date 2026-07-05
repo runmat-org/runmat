@@ -6,10 +6,12 @@ pub mod discretize;
 pub mod validate;
 
 pub use discretize::{
-    discretize_cad_topology_curves_with_sizing, discretize_topology_curves,
+    discretize_cad_topology_curves_with_sizing,
+    discretize_cad_topology_curves_with_sizing_and_provider, discretize_topology_curves,
     discretize_topology_curves_with_sizing, CadCurveDiscretization, CadCurveEdgeProvenance,
-    CurveDiscretization, CurveDiscretizationError, CurveDiscretizationOptions, CurveElement,
-    CurveNode,
+    CadCurveEvaluationRequest, CadCurveEvaluatorProvider, CurveDiscretization,
+    CurveDiscretizationError, CurveDiscretizationOptions, CurveElement, CurveNode,
+    NoopCadCurveEvaluatorProvider,
 };
 pub use validate::{
     validate_curve_discretization, CurveValidationError, CurveValidationOptions,

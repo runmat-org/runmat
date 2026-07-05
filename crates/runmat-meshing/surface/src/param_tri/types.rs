@@ -75,6 +75,9 @@ pub struct SurfaceCadCurveBoundaryProvenanceReport {
     pub imported_curve_edge_count: usize,
     pub evaluator_curve_edge_count: usize,
     pub evaluator_sample_count: usize,
+    pub live_query_edge_count: usize,
+    pub live_query_sample_count: usize,
+    pub rejected_evaluator_sample_count: usize,
     pub edges: Vec<SurfaceCadCurveBoundaryEdgeProvenance>,
 }
 
@@ -96,6 +99,12 @@ pub struct SurfaceCadCurveBoundaryEdgeProvenance {
     pub evaluator_supports_curvature: bool,
     #[serde(default)]
     pub evaluator_sample_count: usize,
+    #[serde(default)]
+    pub live_query_backed: bool,
+    #[serde(default)]
+    pub live_query_sample_count: usize,
+    #[serde(default)]
+    pub rejected_evaluator_sample_count: usize,
     pub boundary_segment_count: usize,
 }
 

@@ -101,6 +101,9 @@ impl SurfaceCadCurveBoundaryProvenanceAccumulator {
                     evaluator_supports_tangent: source.evaluator_supports_tangent,
                     evaluator_supports_curvature: source.evaluator_supports_curvature,
                     evaluator_sample_count: source.evaluator_sample_count,
+                    live_query_backed: source.live_query_backed,
+                    live_query_sample_count: source.live_query_sample_count,
+                    rejected_evaluator_sample_count: source.rejected_evaluator_sample_count,
                     boundary_segment_count: 1,
                 });
         }
@@ -121,6 +124,12 @@ impl SurfaceCadCurveBoundaryProvenanceAccumulator {
                 .filter(|edge| edge.evaluator_id.is_some())
                 .count(),
             evaluator_sample_count: edges.iter().map(|edge| edge.evaluator_sample_count).sum(),
+            live_query_edge_count: edges.iter().filter(|edge| edge.live_query_backed).count(),
+            live_query_sample_count: edges.iter().map(|edge| edge.live_query_sample_count).sum(),
+            rejected_evaluator_sample_count: edges
+                .iter()
+                .map(|edge| edge.rejected_evaluator_sample_count)
+                .sum(),
             edges,
         }
     }
