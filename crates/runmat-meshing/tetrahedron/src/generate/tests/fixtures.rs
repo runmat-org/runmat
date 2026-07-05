@@ -68,6 +68,24 @@ pub(super) fn octahedron_with_extra_interior_node_plc() -> ProtectedBoundaryComp
     plc
 }
 
+pub(super) fn nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetra_plc();
+    plc.complex_id = "nested_tetrahedron_shells".to_string();
+    plc.nodes.extend([
+        node("10", [0.2, 0.2, 0.2]),
+        node("11", [0.3, 0.2, 0.2]),
+        node("12", [0.2, 0.3, 0.2]),
+        node("13", [0.2, 0.2, 0.3]),
+    ]);
+    plc.facets.extend([
+        facet("10", ["10", "12", "11"]),
+        facet("11", ["10", "11", "13"]),
+        facet("12", ["11", "12", "13"]),
+        facet("13", ["12", "10", "13"]),
+    ]);
+    plc
+}
+
 pub(super) fn box_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "box".to_string(),

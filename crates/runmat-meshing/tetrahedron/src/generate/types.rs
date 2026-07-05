@@ -2,17 +2,30 @@ use runmat_meshing_plc::validate::PlcValidationError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TetrahedronGenerationError {
-    InvalidProtectedBoundaryComplex { error: PlcValidationError },
-    MissingPlcNode { node_id: String },
-    NonFinitePlcNode { node_id: String },
+    InvalidProtectedBoundaryComplex {
+        error: PlcValidationError,
+    },
+    MissingPlcNode {
+        node_id: String,
+    },
+    NonFinitePlcNode {
+        node_id: String,
+    },
     NonFiniteInteriorPoint,
     DegeneratePlcBounds,
     UnsupportedStructuredBoxPlc,
     UnsupportedSingleTetrahedronPlc,
+    UnsupportedNestedShellPlc {
+        outer_shell_count: usize,
+        nested_shell_count: usize,
+        max_nesting_depth: usize,
+    },
     DegenerateSingleTetrahedronPlc,
     UnsupportedConvexPolyhedronPlc,
     DegenerateConvexPolyhedronPlc,
-    DegenerateBoundaryFacet { facet_id: String },
+    DegenerateBoundaryFacet {
+        facet_id: String,
+    },
 }
 
 impl std::fmt::Display for TetrahedronGenerationError {
@@ -48,6 +61,14 @@ impl std::fmt::Display for TetrahedronGenerationError {
                     "validated PLC is not a single Tetrahedron4 boundary"
                 )
             }
+            Self::UnsupportedNestedShellPlc {
+                outer_shell_count,
+                nested_shell_count,
+                max_nesting_depth,
+            } => write!(
+                formatter,
+                "validated PLC has unsupported shell nesting: {outer_shell_count} outer shells, {nested_shell_count} nested shells, max nesting depth {max_nesting_depth}"
+            ),
             Self::DegenerateSingleTetrahedronPlc => {
                 write!(formatter, "validated single Tetrahedron4 PLC is degenerate")
             }

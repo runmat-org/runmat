@@ -57,6 +57,30 @@ fn rejects_unvalidated_plc_before_tetrahedron_generation() {
 }
 
 #[test]
+fn rejects_nested_shell_plc_before_initial_tetrahedron_generation() {
+    assert_eq!(
+        generate_initial_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc()),
+        Err(TetrahedronGenerationError::UnsupportedNestedShellPlc {
+            outer_shell_count: 1,
+            nested_shell_count: 1,
+            max_nesting_depth: 1,
+        })
+    );
+}
+
+#[test]
+fn rejects_nested_shell_plc_before_solver_tetrahedron_generation() {
+    assert_eq!(
+        generate_solver_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc()),
+        Err(TetrahedronGenerationError::UnsupportedNestedShellPlc {
+            outer_shell_count: 1,
+            nested_shell_count: 1,
+            max_nesting_depth: 1,
+        })
+    );
+}
+
+#[test]
 fn rejects_degenerate_plc_facet() {
     let mut plc = tetra_plc();
     plc.nodes[2].coordinates_m = plc.nodes[1].coordinates_m;
