@@ -49,6 +49,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     sizing: &MeshSizingField,
     surface: &SurfaceDiscretization,
     recovery_queue: &TetrahedronRecoveryQueue,
+    initial_backend_quality: BackendQualityEvidence,
     tetrahedron_mesh: TetrahedronMesh,
 ) -> AnalysisMeshArtifact {
     let node_id_map = tetrahedron_mesh
@@ -875,8 +876,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ACCEPTED_COUNT,
             ),
             tetrahedron_sliver_count: backend_quality.sliver_count,
-            tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
-            tetrahedron_optimization_skipped_target_seed_count: backend_quality
+            tetrahedron_optimization_target_seed_count: initial_backend_quality
+                .quality_repair_target_count,
+            tetrahedron_optimization_skipped_target_seed_count: initial_backend_quality
                 .quality_repair_target_count,
             tetrahedron_optimization_interior_smoothing_attempt_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
@@ -944,9 +946,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     &tetrahedron_mesh,
                     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
                 ),
-            tetrahedron_optimization_initial_max_aspect_ratio: backend_quality.max_aspect_ratio,
+            tetrahedron_optimization_initial_max_aspect_ratio: initial_backend_quality
+                .max_aspect_ratio,
             tetrahedron_optimization_final_max_aspect_ratio: backend_quality.max_aspect_ratio,
-            tetrahedron_optimization_initial_min_exact_scaled_jacobian: backend_quality
+            tetrahedron_optimization_initial_min_exact_scaled_jacobian: initial_backend_quality
                 .min_exact_scaled_jacobian,
             tetrahedron_optimization_final_min_exact_scaled_jacobian: backend_quality
                 .min_exact_scaled_jacobian,
@@ -964,13 +967,75 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     artifact
 }
 
-struct BackendQualityEvidence {
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct BackendQualityEvidence {
     min_exact_scaled_jacobian: f64,
     exact_scaled_jacobian_below_threshold_count: usize,
     exact_scaled_jacobian_bins: BTreeMap<String, usize>,
     sliver_count: usize,
     quality_repair_target_count: usize,
     max_aspect_ratio: f64,
+}
+
+pub(super) fn backend_quality_evidence_from_tetrahedron_mesh(
+    tetrahedron_mesh: &TetrahedronMesh,
+) -> BackendQualityEvidence {
+    let coordinates_by_node_id = tetrahedron_mesh
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let elements = tetrahedron_mesh
+        .elements
+        .iter()
+        .filter_map(|element| {
+            let points = [
+                *coordinates_by_node_id.get(&element.node_ids[0])?,
+                *coordinates_by_node_id.get(&element.node_ids[1])?,
+                *coordinates_by_node_id.get(&element.node_ids[2])?,
+                *coordinates_by_node_id.get(&element.node_ids[3])?,
+            ];
+            Some(ElementQuality {
+                element_id: element.element_id.id.clone(),
+                scaled_jacobian: tetrahedron_scaled_jacobian(points),
+                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points),
+                aspect_ratio: tetrahedron_edge_aspect_ratio(points),
+                volume_m3: tetrahedron_volume(points),
+            })
+        })
+        .collect::<Vec<_>>();
+    backend_quality_evidence(&AnalysisMeshQualityReport {
+        min_scaled_jacobian: elements
+            .iter()
+            .map(|element| element.scaled_jacobian)
+            .fold(f64::INFINITY, f64::min)
+            .min(1.0),
+        min_exact_scaled_jacobian: elements
+            .iter()
+            .map(|element| element.exact_scaled_jacobian)
+            .fold(f64::INFINITY, f64::min)
+            .min(1.0),
+        mean_aspect_ratio: if elements.is_empty() {
+            0.0
+        } else {
+            elements
+                .iter()
+                .map(|element| element.aspect_ratio)
+                .sum::<f64>()
+                / elements.len() as f64
+        },
+        max_aspect_ratio: elements
+            .iter()
+            .map(|element| element.aspect_ratio)
+            .fold(0.0_f64, f64::max),
+        inverted_element_count: elements
+            .iter()
+            .filter(|element| element.volume_m3 <= 0.0)
+            .count(),
+        mean_boundary_projection_error_m: 0.0,
+        max_boundary_projection_error_m: 0.0,
+        elements,
+    })
 }
 
 fn backend_quality_evidence(quality: &AnalysisMeshQualityReport) -> BackendQualityEvidence {
@@ -1367,5 +1432,71 @@ fn quality_report(
         mean_boundary_projection_error_m: 0.0,
         max_boundary_projection_error_m: 0.0,
         elements,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_meshing_core::contracts::{StageEvidence, Tetrahedron4Element, TetrahedronMeshNode};
+
+    #[test]
+    fn backend_quality_evidence_from_tetrahedron_mesh_classifies_sliver_targets() {
+        let evidence = backend_quality_evidence_from_tetrahedron_mesh(&tetrahedron_quality_mesh([
+            0.01, 0.01, 0.001,
+        ]));
+
+        assert!(evidence.sliver_count > 0);
+        assert!(evidence.quality_repair_target_count > 0);
+        assert!(evidence.max_aspect_ratio > SliverRecoveryOptions::default().sliver_aspect_ratio);
+        assert!(evidence.min_exact_scaled_jacobian.is_finite());
+    }
+
+    #[test]
+    fn backend_quality_evidence_from_tetrahedron_mesh_reports_regular_mesh_without_targets() {
+        let evidence = backend_quality_evidence_from_tetrahedron_mesh(&tetrahedron_quality_mesh([
+            0.0, 0.0, 1.0,
+        ]));
+
+        assert_eq!(evidence.sliver_count, 0);
+        assert_eq!(evidence.quality_repair_target_count, 0);
+        assert!(evidence.min_exact_scaled_jacobian >= 0.15);
+    }
+
+    fn tetrahedron_quality_mesh(apex: [f64; 3]) -> TetrahedronMesh {
+        let node_ids = [entity("n0"), entity("n1"), entity("n2"), entity("n3")];
+        TetrahedronMesh {
+            mesh_id: "quality_fixture".to_string(),
+            tetrahedron_generation_family: "test".to_string(),
+            nodes: vec![
+                node(node_ids[0].clone(), [0.0, 0.0, 0.0]),
+                node(node_ids[1].clone(), [1.0, 0.0, 0.0]),
+                node(node_ids[2].clone(), [0.0, 1.0, 0.0]),
+                node(node_ids[3].clone(), apex),
+            ],
+            elements: vec![Tetrahedron4Element {
+                element_id: entity("e0"),
+                node_ids,
+                material_region_id: "material".to_string(),
+            }],
+            boundary_faces: Vec::new(),
+            recovery_complete: true,
+            quality_optimized: false,
+            evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+        }
+    }
+
+    fn node(node_id: TopologyEntityId, coordinates_m: [f64; 3]) -> TetrahedronMeshNode {
+        TetrahedronMeshNode {
+            node_id,
+            coordinates_m,
+        }
+    }
+
+    fn entity(id: &str) -> TopologyEntityId {
+        TopologyEntityId {
+            stage: MeshingStage::TetrahedronMesh,
+            id: id.to_string(),
+        }
     }
 }

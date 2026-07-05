@@ -36,7 +36,9 @@ mod sizing;
 mod stage_options;
 mod tetrahedron_stage;
 
-use artifact::analysis_artifact_from_tetrahedron_mesh;
+use artifact::{
+    analysis_artifact_from_tetrahedron_mesh, backend_quality_evidence_from_tetrahedron_mesh,
+};
 pub use error::SolidMeshingError;
 use options::validate_solid_options;
 use stage_options::{curve_discretization_options, surface_discretization_options};
@@ -137,6 +139,8 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
     let mut recovery = recover_tetrahedron_mesh_from_plc(&plc, tetrahedron_mesh)
         .map_err(SolidMeshingError::TetrahedronRecovery)?;
+    let initial_backend_quality =
+        backend_quality_evidence_from_tetrahedron_mesh(&recovery.tetrahedron_mesh);
     improve_tetrahedron_mesh_with_local_flips(
         &mut recovery.tetrahedron_mesh,
         TetrahedronMeshLocalReconnectionOptions::default(),
@@ -158,6 +162,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         sizing,
         &surface,
         &recovery.recovery_queue,
+        initial_backend_quality,
         recovery.tetrahedron_mesh,
     ))
 }
