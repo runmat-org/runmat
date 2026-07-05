@@ -6,7 +6,7 @@ use runmat_meshing_core::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
-        SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        SourceEntityKind, SurfaceMesh, TopologyEntityId, VolumeElementKind,
         TETRAHEDRON_EXACT_QUALITY_REPAIR_PASS_COUNT,
         TETRAHEDRON_EXACT_QUALITY_SEED_STAR_RELOCATION_COUNT,
         TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_INTERIOR_SEED_COUNT,
@@ -47,7 +47,6 @@ use runmat_meshing_opt::sliver::{
     classify_sliver_tetrahedra, evaluate_sliver_removal, SliverRecoveryOptions,
     SliverTetrahedronQuality,
 };
-use runmat_meshing_surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID};
 use runmat_meshing_tetrahedron::{
     generate::TetrahedronMesh,
     recover::{TetrahedronRecoveryKind, TetrahedronRecoveryQueue, TetrahedronRecoveryStatus},
@@ -59,7 +58,7 @@ const MAX_REPORTED_RECOVERY_IDS: usize = 64;
 pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     geometry: &GeometryAsset,
     sizing: &MeshSizingField,
-    surface: &SurfaceDiscretization,
+    surface: &SurfaceMesh,
     recovery_queue: &TetrahedronRecoveryQueue,
     initial_backend_quality: BackendQualityEvidence,
     tetrahedron_mesh: TetrahedronMesh,
@@ -176,7 +175,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
         backend: MeshBackendSummary {
             backend: "solid".to_string(),
             algorithm: SOLID_PLC_TETRAHEDRON_ALGORITHM.to_string(),
-            surface_element_count: surface.elements.len(),
+            surface_element_count: surface.triangles.len(),
             plc_input_node_count: tetrahedron_entity_count(&tetrahedron_mesh, "input_plc_nodes"),
             plc_input_facet_count: tetrahedron_entity_count(&tetrahedron_mesh, "input_plc_facets"),
             plc_input_protected_edge_count: tetrahedron_entity_count(
@@ -1278,33 +1277,33 @@ fn bounded_missing_recovery_ids(
 
 fn source_edge_provenance_by_boundary_edge(
     geometry: &GeometryAsset,
-    surface: &SurfaceDiscretization,
+    surface: &SurfaceMesh,
     node_id_map: &BTreeMap<TopologyEntityId, u32>,
 ) -> BTreeMap<[u32; 2], MeshEntityProvenance> {
     let mut provenance_by_edge = BTreeMap::<[u32; 2], MeshEntityProvenance>::new();
-    for element in &surface.elements {
-        for (source_edge_id, edge) in element.source_edge_ids.into_iter().zip([
-            sorted_edge(element.node_ids[0], element.node_ids[1]),
-            sorted_edge(element.node_ids[1], element.node_ids[2]),
-            sorted_edge(element.node_ids[2], element.node_ids[0]),
+    for triangle in &surface.triangles {
+        for (source_edge_id, edge) in triangle.source_edge_ids.iter().zip([
+            sorted_topology_edge(triangle.node_ids[0].clone(), triangle.node_ids[1].clone()),
+            sorted_topology_edge(triangle.node_ids[1].clone(), triangle.node_ids[2].clone()),
+            sorted_topology_edge(triangle.node_ids[2].clone(), triangle.node_ids[0].clone()),
         ]) {
-            if source_edge_id == INTERNAL_SOURCE_EDGE_ID {
+            let Some(source_edge_id) = source_edge_id else {
                 continue;
-            }
+            };
             let Some(edge) = analysis_edge_from_surface_edge(edge, node_id_map) else {
                 continue;
             };
             provenance_by_edge
                 .entry(edge)
                 .and_modify(|entry| {
-                    append_unique_region_ids(&mut entry.region_ids, &element.region_ids)
+                    append_unique_region_ids(&mut entry.region_ids, &triangle.region_ids)
                 })
                 .or_insert_with(|| MeshEntityProvenance {
                     source_geometry_id: geometry.geometry_id.clone(),
                     source_geometry_revision: geometry.revision,
                     source_entity_kind: SourceEntityKind::Edge,
-                    source_entity_id: source_edge_id.to_string(),
-                    region_ids: element.region_ids.clone(),
+                    source_entity_id: source_edge_id.id.clone(),
+                    region_ids: triangle.region_ids.clone(),
                 });
         }
     }
@@ -1313,7 +1312,7 @@ fn source_edge_provenance_by_boundary_edge(
 
 fn tetrahedron_source_edge_provenance_by_boundary_edge(
     geometry: &GeometryAsset,
-    surface: &SurfaceDiscretization,
+    surface: &SurfaceMesh,
     node_id_map: &BTreeMap<TopologyEntityId, u32>,
     tetrahedron_mesh: &TetrahedronMesh,
 ) -> BTreeMap<[u32; 2], MeshEntityProvenance> {
@@ -1361,11 +1360,11 @@ fn merge_surface_source_edge_provenance(
 }
 
 fn analysis_edge_from_surface_edge(
-    edge: [u32; 2],
+    edge: [TopologyEntityId; 2],
     node_id_map: &BTreeMap<TopologyEntityId, u32>,
 ) -> Option<[u32; 2]> {
-    let left = node_id_map.get(&surface_node_plc_id(edge[0]))?;
-    let right = node_id_map.get(&surface_node_plc_id(edge[1]))?;
+    let left = node_id_map.get(&surface_node_plc_id(&edge[0]))?;
+    let right = node_id_map.get(&surface_node_plc_id(&edge[1]))?;
     Some(sorted_edge(*left, *right))
 }
 
@@ -1384,10 +1383,10 @@ fn sorted_topology_edge(left: TopologyEntityId, right: TopologyEntityId) -> [Top
     edge
 }
 
-fn surface_node_plc_id(node_id: u32) -> TopologyEntityId {
+fn surface_node_plc_id(node_id: &TopologyEntityId) -> TopologyEntityId {
     TopologyEntityId {
         stage: MeshingStage::ProtectedBoundaryComplex,
-        id: node_id.to_string(),
+        id: node_id.id.clone(),
     }
 }
 
@@ -1407,15 +1406,12 @@ fn adjacent_volume_element_ids(
         .collect()
 }
 
-fn surface_region_ids(surface: &SurfaceDiscretization, source_face_id: &str) -> Vec<String> {
-    let Ok(source_face_id) = source_face_id.parse::<u32>() else {
-        return Vec::new();
-    };
+fn surface_region_ids(surface: &SurfaceMesh, source_face_id: &str) -> Vec<String> {
     surface
-        .elements
+        .triangles
         .iter()
-        .find(|element| element.source_face_id == source_face_id)
-        .map(|element| element.region_ids.clone())
+        .find(|triangle| triangle.source_face_id.id == source_face_id)
+        .map(|triangle| triangle.region_ids.clone())
         .unwrap_or_default()
 }
 

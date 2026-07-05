@@ -150,7 +150,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,
         sizing,
-        &surface,
+        &surface_mesh_contract,
         &recovery.recovery_queue,
         initial_backend_quality,
         recovery.tetrahedron_mesh,
