@@ -7,7 +7,7 @@ use runmat_meshing_core::{
     quality::tolerance::MeshingTolerance,
 };
 
-use super::evidence::record_input_plc_evidence;
+use super::evidence::{record_input_plc_evidence, record_tetrahedron_material_evidence};
 use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
@@ -130,6 +130,7 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
         "interior_smoothing_accepted_points".to_string(),
         usize::from(interior_selection.improved),
     );
+    record_tetrahedron_material_evidence(&elements, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
 
     Ok(TetrahedronMesh {

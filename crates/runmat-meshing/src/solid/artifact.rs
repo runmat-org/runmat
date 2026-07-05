@@ -180,7 +180,23 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "input_plc_max_shell_nesting_depth",
             ),
+            plc_input_material_region_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_material_regions",
+            ),
+            plc_input_material_region_facet_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_material_region_facets",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
+            tetrahedron_material_region_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "tetrahedron_material_regions",
+            ),
+            tetrahedron_unclassified_material_element_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "unclassified_tetrahedron_material_elements",
+            ),
             tetrahedron_min_exact_scaled_jacobian: backend_quality.min_exact_scaled_jacobian,
             tetrahedron_exact_scaled_jacobian_below_threshold_count: backend_quality
                 .exact_scaled_jacobian_below_threshold_count,

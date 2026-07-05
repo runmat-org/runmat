@@ -27,6 +27,23 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
         1
     );
     assert_eq!(mesh.evidence.entity_counts["input_plc_outer_shells"], 1);
+    assert_eq!(mesh.evidence.entity_counts["input_plc_material_regions"], 1);
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_material_region_facets"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["tetrahedron_material_regions"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["unclassified_tetrahedron_material_elements"],
+        0
+    );
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "body"));
     let min_scaled_jacobian = mesh.evidence.min_scaled_jacobian.expect("quality evidence");
     assert!(min_scaled_jacobian > 0.0);
     assert!((min_scaled_jacobian - min_generated_scaled_jacobian(&mesh)).abs() <= f64::EPSILON);
@@ -43,6 +60,11 @@ fn initial_generation_keeps_ambiguous_material_ownership_unclassified() {
         .elements
         .iter()
         .all(|element| element.material_region_id == "unclassified"));
+    assert_eq!(mesh.evidence.entity_counts["input_plc_material_regions"], 2);
+    assert_eq!(
+        mesh.evidence.entity_counts["unclassified_tetrahedron_material_elements"],
+        mesh.elements.len()
+    );
 }
 
 #[test]

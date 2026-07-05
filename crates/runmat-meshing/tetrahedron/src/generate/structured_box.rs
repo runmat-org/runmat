@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 mod boundary;
 mod shape;
 
-use super::evidence::record_input_plc_evidence;
+use super::evidence::{record_input_plc_evidence, record_tetrahedron_material_evidence};
 use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
 use super::{
@@ -88,6 +88,7 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
         .entity_counts
         .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
     record_input_plc_evidence(plc, &mut evidence);
+    record_tetrahedron_material_evidence(&elements, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
 
     Ok(TetrahedronMesh {
@@ -230,6 +231,7 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
         usize::from(interior_selection.improved),
     );
     record_input_plc_evidence(plc, &mut evidence);
+    record_tetrahedron_material_evidence(&elements, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
 
     Ok(TetrahedronMesh {

@@ -125,11 +125,19 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub plc_input_max_shell_nesting_depth: usize,
     #[serde(default)]
+    pub plc_input_material_region_count: usize,
+    #[serde(default)]
+    pub plc_input_material_region_facet_count: usize,
+    #[serde(default)]
     pub volume_component_count: usize,
     #[serde(default)]
     pub interior_seed_point_count: usize,
     #[serde(default)]
     pub tetrahedron_element_count: usize,
+    #[serde(default)]
+    pub tetrahedron_material_region_count: usize,
+    #[serde(default)]
+    pub tetrahedron_unclassified_material_element_count: usize,
     #[serde(default)]
     pub tetrahedron_recovered_component_ratio: f64,
     #[serde(default)]
