@@ -1,4 +1,4 @@
-use runmat_geometry_core::CadFaceEvaluationSample;
+use runmat_geometry_core::{CadCurveEvaluationSample, CadFaceEvaluationSample};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +49,8 @@ pub struct CadEdge {
     pub evaluator_supports_tangent: bool,
     #[serde(default)]
     pub evaluator_supports_curvature: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evaluator_samples: Vec<CadCurveEvaluationSample>,
     pub vertex_ids: [String; 2],
     pub adjacent_face_ids: Vec<String>,
     pub length_m: f64,

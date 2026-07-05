@@ -60,6 +60,8 @@ pub struct CadCurveEvaluator {
     pub supports_projection: bool,
     pub supports_tangent: bool,
     pub supports_curvature: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evaluation_samples: Vec<CadCurveEvaluationSample>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +82,29 @@ pub struct CadFaceEvaluationSample {
     pub projected_point_m: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_normal: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_error_m: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CadCurveEvaluationSampleSource {
+    BackendQuery,
+    TessellationEstimate,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadCurveEvaluationSample {
+    pub source: CadCurveEvaluationSampleSource,
+    pub parameter: f64,
+    pub point_m: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_point_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tangent_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curvature_1_per_m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projection_error_m: Option<f64>,
 }

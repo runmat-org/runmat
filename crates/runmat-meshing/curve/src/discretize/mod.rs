@@ -62,6 +62,8 @@ pub struct CadCurveEdgeProvenance {
     pub evaluator_supports_tangent: bool,
     #[serde(default)]
     pub evaluator_supports_curvature: bool,
+    #[serde(default)]
+    pub evaluator_sample_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,7 +172,7 @@ pub fn discretize_cad_topology_curves_with_sizing(
     options: CurveDiscretizationOptions,
     sizing: Option<&MeshSizingField>,
 ) -> Result<CadCurveDiscretization, CurveDiscretizationError> {
-    let curves = discretize_topology_curves_with_sizing(topology, options, sizing)?;
+    let mut curves = discretize_topology_curves_with_sizing(topology, options, sizing)?;
     let cad_edges_by_source_edge = cad_topology
         .edges
         .iter()
@@ -192,12 +194,55 @@ pub fn discretize_cad_topology_curves_with_sizing(
             evaluator_supports_projection: cad_edge.evaluator_supports_projection,
             evaluator_supports_tangent: cad_edge.evaluator_supports_tangent,
             evaluator_supports_curvature: cad_edge.evaluator_supports_curvature,
+            evaluator_sample_count: cad_edge.evaluator_samples.len(),
         });
     }
+    apply_cad_curve_samples(&mut curves, &cad_edges_by_source_edge);
     Ok(CadCurveDiscretization {
         curves,
         edge_provenance,
     })
+}
+
+fn apply_cad_curve_samples(
+    curves: &mut CurveDiscretization,
+    cad_edges_by_source_edge: &BTreeMap<u32, &runmat_meshing_cad::CadEdge>,
+) {
+    for node in &mut curves.nodes {
+        if node.parameter <= 1.0e-12 || node.parameter >= 1.0 - 1.0e-12 {
+            continue;
+        }
+        let Some(cad_edge) = cad_edges_by_source_edge.get(&node.source_edge_id) else {
+            continue;
+        };
+        let Some(sample) = cad_edge.evaluator_samples.iter().find(|sample| {
+            sample.parameter.is_finite()
+                && (sample.parameter - node.parameter).abs() <= 1.0e-12
+                && sample.point_m.iter().all(|value| value.is_finite())
+        }) else {
+            continue;
+        };
+        if let Some(projected_point_m) = sample.projected_point_m {
+            if projected_point_m.iter().all(|value| value.is_finite()) {
+                node.coordinates_m = projected_point_m;
+                continue;
+            }
+        }
+        node.coordinates_m = sample.point_m;
+    }
+    let nodes_by_id = curves
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    for element in &mut curves.elements {
+        if let (Some(left), Some(right)) = (
+            nodes_by_id.get(&element.node_ids[0]),
+            nodes_by_id.get(&element.node_ids[1]),
+        ) {
+            element.length_m = distance(*left, *right);
+        }
+    }
 }
 
 fn validate_curve_options(
@@ -267,8 +312,9 @@ fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
 mod tests {
     use super::*;
     use runmat_meshing_cad::{
-        CadEdge, CadEntityId, CadEntityKind, CadTopologyModel, CadTopologyReport,
-        CadTopologySource, SourceTopologyEdge, SourceTopologyModel, SourceTopologyVertex,
+        CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadEdge, CadEntityId,
+        CadEntityKind, CadTopologyModel, CadTopologyReport, CadTopologySource, SourceTopologyEdge,
+        SourceTopologyModel, SourceTopologyVertex,
     };
     use runmat_meshing_size::field::{MeshSizingField, SizingSample};
 
@@ -398,6 +444,15 @@ mod tests {
         assert!(provenance.evaluator_supports_projection);
         assert!(provenance.evaluator_supports_tangent);
         assert!(provenance.evaluator_supports_curvature);
+        assert_eq!(provenance.evaluator_sample_count, 1);
+        assert_eq!(cad_curves.curves.nodes[0].coordinates_m, [0.0, 0.0, 0.0]);
+        assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.2, 0.0]);
+        assert_eq!(cad_curves.curves.nodes[2].coordinates_m, [1.0, 0.0, 0.0]);
+        assert!(cad_curves
+            .curves
+            .elements
+            .iter()
+            .all(|element| element.length_m > 0.5));
     }
 
     #[test]
@@ -483,6 +538,15 @@ mod tests {
                 evaluator_supports_projection: true,
                 evaluator_supports_tangent: true,
                 evaluator_supports_curvature: true,
+                evaluator_samples: vec![CadCurveEvaluationSample {
+                    source: CadCurveEvaluationSampleSource::BackendQuery,
+                    parameter: 0.5,
+                    point_m: [0.5, 0.1, 0.0],
+                    projected_point_m: Some([0.5, 0.2, 0.0]),
+                    tangent_m: Some([1.0, 0.0, 0.0]),
+                    curvature_1_per_m: Some(0.5),
+                    projection_error_m: Some(0.1),
+                }],
                 vertex_ids: ["cad_vertex_0".to_string(), "cad_vertex_1".to_string()],
                 adjacent_face_ids: Vec::new(),
                 length_m: 1.0,

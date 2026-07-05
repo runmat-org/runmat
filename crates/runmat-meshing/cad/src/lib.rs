@@ -3,6 +3,8 @@
 pub const CRATE_PURPOSE: &str =
     "CAD topology, evaluators, region mapping, and bounded healing for meshing";
 
+pub use runmat_geometry_core::{CadCurveEvaluationSample, CadCurveEvaluationSampleSource};
+
 mod math;
 
 pub mod eval;

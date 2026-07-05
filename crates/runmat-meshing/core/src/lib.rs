@@ -28,6 +28,7 @@ pub use cad::topology::{
     CadLoop, CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource,
     CadVertex, CadVolume,
 };
+pub use cad::{CadCurveEvaluationSample, CadCurveEvaluationSampleSource};
 pub use contracts::artifact::{
     analysis_mesh_field_topology, AnalysisBoundaryEdge, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,

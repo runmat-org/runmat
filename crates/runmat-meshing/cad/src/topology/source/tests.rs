@@ -1,5 +1,6 @@
 use super::*;
 use crate::extract_source_topology;
+use runmat_geometry_core::{CadCurveEvaluationSample, CadCurveEvaluationSampleSource};
 use runmat_geometry_core::{
     CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership,
     CadSemanticKind, EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
@@ -308,6 +309,9 @@ fn preserves_imported_cad_curve_handles_and_evaluator_capabilities() {
     assert!(curve_edge.evaluator_supports_projection);
     assert!(curve_edge.evaluator_supports_tangent);
     assert!(curve_edge.evaluator_supports_curvature);
+    assert_eq!(curve_edge.evaluator_samples.len(), 1);
+    assert_eq!(curve_edge.evaluator_samples[0].parameter, 0.5);
+    assert_eq!(curve_edge.evaluator_samples[0].point_m, [0.5, 0.1, 0.0]);
 }
 
 #[test]
@@ -434,6 +438,15 @@ fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
             supports_projection: true,
             supports_tangent: true,
             supports_curvature: true,
+            evaluation_samples: vec![CadCurveEvaluationSample {
+                source: CadCurveEvaluationSampleSource::BackendQuery,
+                parameter: 0.5,
+                point_m: [0.5, 0.1, 0.0],
+                projected_point_m: Some([0.5, 0.12, 0.0]),
+                tangent_m: Some([1.0, 0.0, 0.0]),
+                curvature_1_per_m: Some(0.25),
+                projection_error_m: Some(0.02),
+            }],
         });
     geometry
 }

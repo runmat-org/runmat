@@ -150,6 +150,9 @@ pub fn build_cad_topology(
                     .is_some_and(|curve| curve.supports_tangent),
                 evaluator_supports_curvature: evaluator_curve
                     .is_some_and(|curve| curve.supports_curvature),
+                evaluator_samples: evaluator_curve
+                    .map(|curve| curve.evaluation_samples.clone())
+                    .unwrap_or_default(),
                 vertex_ids: [
                     format!("cad_vertex_{}", edge.node_ids[0]),
                     format!("cad_vertex_{}", edge.node_ids[1]),
@@ -499,6 +502,7 @@ fn edge_has_evaluator_metadata(edge: &CadEdge) -> bool {
         || edge.evaluator_supports_projection
         || edge.evaluator_supports_tangent
         || edge.evaluator_supports_curvature
+        || !edge.evaluator_samples.is_empty()
 }
 
 fn validate_face_evaluator_metadata(face: &CadFace) -> Result<(), CadTopologyError> {
