@@ -1,0 +1,65 @@
+{
+  "title": "dummyvar",
+  "category": "stats/summary",
+  "keywords": [
+    "dummyvar",
+    "dummy variables",
+    "one hot",
+    "categorical",
+    "statistics"
+  ],
+  "summary": "Create dummy-variable columns for grouping variables.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Encoding runs on CPU because it depends on class discovery and label matching."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::encoding::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`dummyvar(group)` converts grouping variables into a numeric design matrix with one dummy column per level.",
+  "behaviors": [
+    "Numeric vector inputs use positive integer levels `1:max(group)`; `NaN` rows become `NaN` across that grouping variable's dummy columns.",
+    "Numeric row and column vectors are treated as one grouping variable; nonscalar numeric matrices treat each column as a separate grouping variable and concatenate the dummy columns for each variable.",
+    "Cell arrays can hold multiple grouping variables when supplied as a row cell array; cell-string vectors are encoded by first appearance.",
+    "Categorical inputs use the full category order, including categories not observed in the input values.",
+    "String, character-row, logical, and cell-string grouping variables are supported."
+  ],
+  "examples": [
+    {
+      "description": "Encode numeric group levels",
+      "input": "D = dummyvar([1; 2; 1])",
+      "output": "D is [1 0; 0 1; 1 0]."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `dummyvar` support missing labels?",
+      "answer": "Yes. Numeric `NaN`, empty text, and `<missing>` text are treated as missing; missing numeric rows produce `NaN` dummy values."
+    }
+  ],
+  "links": [
+    {
+      "label": "onehotencode",
+      "url": "./onehotencode"
+    },
+    {
+      "label": "onehotdecode",
+      "url": "./onehotdecode"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding.rs"
+  }
+}

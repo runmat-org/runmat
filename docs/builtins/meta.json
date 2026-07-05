@@ -22553,6 +22553,48 @@
       ]
     },
     {
+      "name": "dummyvar",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "D = dummyvar(group)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dummy-variable design matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.dummyvar.INVALID_ARGUMENT",
+          "identifier": "RunMat:dummyvar:InvalidArgument",
+          "when": "Inputs, dimensions, classes, output types, or options are malformed.",
+          "message": "encoding: invalid argument"
+        },
+        {
+          "code": "RM.dummyvar.INTERNAL",
+          "identifier": "RunMat:dummyvar:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "encoding: internal error"
+        }
+      ]
+    },
+    {
       "name": "duration",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -64822,6 +64864,265 @@
           "identifier": "RunMat:onCleanup:GcFailure",
           "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
           "message": "onCleanup: internal object storage failed"
+        }
+      ]
+    },
+    {
+      "name": "onehotdecode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = onehotdecode(B, classes, featureDim)",
+          "inputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded data."
+            },
+            {
+              "name": "classes",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Class names corresponding to the one-hot feature dimension."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Decoded labels."
+            }
+          ]
+        },
+        {
+          "label": "A = onehotdecode(B, classes, featureDim, typename)",
+          "inputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded data."
+            },
+            {
+              "name": "classes",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Class names corresponding to the one-hot feature dimension."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Requested output type."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Decoded labels."
+            }
+          ]
+        },
+        {
+          "label": "A = onehotdecode(B, classes, featureDim, Name, Value)",
+          "inputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded data."
+            },
+            {
+              "name": "classes",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Class names corresponding to the one-hot feature dimension."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as ClassNames or OutputType."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Decoded labels."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.onehotdecode.INVALID_ARGUMENT",
+          "identifier": "RunMat:onehotdecode:InvalidArgument",
+          "when": "Inputs, dimensions, classes, output types, or options are malformed.",
+          "message": "encoding: invalid argument"
+        },
+        {
+          "code": "RM.onehotdecode.INTERNAL",
+          "identifier": "RunMat:onehotdecode:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "encoding: internal error"
+        }
+      ]
+    },
+    {
+      "name": "onehotencode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = onehotencode(A, featureDim)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input labels to encode."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded array."
+            }
+          ]
+        },
+        {
+          "label": "B = onehotencode(A, featureDim, typename)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input labels to encode."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Requested output type."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded array."
+            }
+          ]
+        },
+        {
+          "label": "B = onehotencode(A, featureDim, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input labels to encode."
+            },
+            {
+              "name": "featureDim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Dimension containing or receiving one-hot feature vectors."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as ClassNames or OutputType."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-hot encoded array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.onehotencode.INVALID_ARGUMENT",
+          "identifier": "RunMat:onehotencode:InvalidArgument",
+          "when": "Inputs, dimensions, classes, output types, or options are malformed.",
+          "message": "encoding: invalid argument"
+        },
+        {
+          "code": "RM.onehotencode.INTERNAL",
+          "identifier": "RunMat:onehotencode:Internal",
+          "when": "Internal conversion or allocation fails.",
+          "message": "encoding: internal error"
         }
       ]
     },

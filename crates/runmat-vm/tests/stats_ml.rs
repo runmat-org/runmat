@@ -177,6 +177,17 @@ fn confusionmat_surface_executes_from_scripts() {
 }
 
 #[test]
+fn encoding_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "D = dummyvar([1;2;1]); labels = [\"red\";\"blue\";\"red\"]; H = onehotencode(labels, 2, 'ClassNames', [\"blue\";\"red\"], 'OutputType', 'logical'); dec = onehotdecode(H, [\"blue\";\"red\"], 2, 'string'); d11 = D(1,1); d22 = D(2,2);",
+    )
+    .expect("encoding script");
+    assert!(has_tensor_shape(&vars, &[3, 2]));
+    assert!(has_logical_shape(&vars, &[3, 2]));
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
 fn kmeans_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; [idx,C,sumd,D] = kmeans(X, 2, 'Start', [0 0; 10 10], 'MaxIter', 20); a = idx(1); b = idx(4); c11 = C(1,1); c22 = C(2,2); dshape = size(D);",

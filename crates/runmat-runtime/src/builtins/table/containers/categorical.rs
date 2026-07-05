@@ -493,7 +493,7 @@ fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<Strin
         .collect())
 }
 
-fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
+pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     match object.properties.get("Categories") {
         Some(Value::StringArray(array)) => Ok(array.data.clone()),
         _ => Err(invalid_variable("categorical: missing Categories property")),
