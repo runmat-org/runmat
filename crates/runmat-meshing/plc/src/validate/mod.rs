@@ -8,7 +8,9 @@ pub use components::{
 };
 pub use errors::PlcValidationError;
 pub use runmat_meshing_core::contracts::PlcValidationSummary;
-use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
+use runmat_meshing_core::contracts::{
+    MeshingStage, ProtectedBoundaryComplex, StageEvidenceStatus, TopologyEntityId,
+};
 
 pub const MODULE_PURPOSE: &str =
     "watertightness, manifold incidence, shell nesting, and material interfaces";
@@ -22,6 +24,16 @@ pub fn validate_protected_boundary_complex(
     if !plc.validation.valid_for_volume_meshing() {
         return Err(PlcValidationError::ValidationSummaryNotVolumeReady {
             summary: plc.validation,
+        });
+    }
+    if plc.evidence.stage != MeshingStage::ProtectedBoundaryComplex {
+        return Err(PlcValidationError::EvidenceStageMismatch {
+            stage: plc.evidence.stage,
+        });
+    }
+    if plc.evidence.status != StageEvidenceStatus::Complete {
+        return Err(PlcValidationError::EvidenceStatusNotComplete {
+            status: plc.evidence.status,
         });
     }
     if plc.nodes.is_empty() {

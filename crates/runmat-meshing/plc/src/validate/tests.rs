@@ -1,6 +1,7 @@
 use super::*;
 use runmat_meshing_core::contracts::{
     MeshingStage, PlcFacet, PlcNode, PlcProtectedEdge, ProtectedBoundaryComplex, StageEvidence,
+    StageEvidenceStatus,
 };
 
 #[test]
@@ -45,6 +46,32 @@ fn rejects_not_volume_ready_validation_summary() {
         validate_protected_boundary_complex(&plc),
         Err(PlcValidationError::ValidationSummaryNotVolumeReady {
             summary: plc.validation,
+        })
+    );
+}
+
+#[test]
+fn rejects_non_plc_evidence_stage() {
+    let mut plc = tetrahedron_plc();
+    plc.evidence.stage = MeshingStage::SurfaceMesh;
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::EvidenceStageMismatch {
+            stage: MeshingStage::SurfaceMesh,
+        })
+    );
+}
+
+#[test]
+fn rejects_failed_plc_stage_evidence() {
+    let mut plc = tetrahedron_plc();
+    plc.evidence.status = StageEvidenceStatus::Failed;
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::EvidenceStatusNotComplete {
+            status: StageEvidenceStatus::Failed,
         })
     );
 }

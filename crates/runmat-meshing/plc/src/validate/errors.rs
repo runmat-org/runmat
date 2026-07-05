@@ -1,9 +1,17 @@
-use runmat_meshing_core::contracts::{PlcValidationSummary, TopologyEntityId};
+use runmat_meshing_core::contracts::{
+    MeshingStage, PlcValidationSummary, StageEvidenceStatus, TopologyEntityId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlcValidationError {
     ValidationSummaryNotVolumeReady {
         summary: PlcValidationSummary,
+    },
+    EvidenceStageMismatch {
+        stage: MeshingStage,
+    },
+    EvidenceStatusNotComplete {
+        status: StageEvidenceStatus,
     },
     EmptyNodes,
     EmptyFacets,
@@ -96,6 +104,14 @@ impl std::fmt::Display for PlcValidationError {
             Self::ValidationSummaryNotVolumeReady { .. } => {
                 write!(formatter, "PLC validation summary is not volume-ready")
             }
+            Self::EvidenceStageMismatch { stage } => write!(
+                formatter,
+                "PLC validation requires ProtectedBoundaryComplex evidence, got {stage:?}"
+            ),
+            Self::EvidenceStatusNotComplete { status } => write!(
+                formatter,
+                "PLC validation requires complete stage evidence, got {status:?}"
+            ),
             Self::EmptyNodes => write!(formatter, "PLC has no nodes"),
             Self::EmptyFacets => write!(formatter, "PLC has no facets"),
             Self::DuplicateNode { node_id } => {
