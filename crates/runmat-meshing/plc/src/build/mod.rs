@@ -274,7 +274,7 @@ pub fn build_protected_boundary_complex(
         "max_boundary_component_nodes".to_string(),
         component_report.max_component_node_count,
     );
-    let shell_classification = classify_shell_nesting(&component_report);
+    let shell_classification = classify_shell_nesting(&plc, &component_report);
     plc.evidence.entity_counts.insert(
         "shell_nesting_classified".to_string(),
         usize::from(shell_classification.shell_nesting_classified),

@@ -202,7 +202,7 @@ pub fn validate_protected_boundary_complex(
         }
     }
     let component_report = classify_boundary_components(plc);
-    let shell_classification = classify_shell_nesting(&component_report);
+    let shell_classification = classify_shell_nesting(plc, &component_report);
     if !shell_classification.shell_nesting_classified {
         return Err(PlcValidationError::DisconnectedBoundaryComponents {
             component_count: component_report.component_count,

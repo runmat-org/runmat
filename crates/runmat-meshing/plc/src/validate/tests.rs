@@ -14,8 +14,9 @@ fn validates_closed_manifold_plc() {
 
 #[test]
 fn reports_boundary_component_evidence_for_closed_shell() {
-    let report = classify_boundary_components(&tetrahedron_plc());
-    let shell_classification = classify_shell_nesting(&report);
+    let plc = tetrahedron_plc();
+    let report = classify_boundary_components(&plc);
+    let shell_classification = classify_shell_nesting(&plc, &report);
 
     assert_eq!(
         report,
@@ -35,6 +36,36 @@ fn reports_boundary_component_evidence_for_closed_shell() {
             max_nesting_depth: 0,
         }
     );
+}
+
+#[test]
+fn classifies_bounded_nested_shell_components() {
+    let plc = nested_tetrahedra_plc();
+    let report = classify_boundary_components(&plc);
+    let shell_classification = classify_shell_nesting(&plc, &report);
+
+    assert_eq!(
+        report,
+        PlcBoundaryComponentReport {
+            component_count: 2,
+            referenced_node_count: 8,
+            min_component_node_count: 4,
+            max_component_node_count: 4,
+        }
+    );
+    assert_eq!(
+        shell_classification,
+        PlcShellClassificationReport {
+            shell_nesting_classified: true,
+            outer_shell_count: 1,
+            nested_shell_count: 1,
+            max_nesting_depth: 1,
+        }
+    );
+
+    let summary =
+        validate_protected_boundary_complex(&plc).expect("nested shell PLC should validate");
+    assert!(summary.valid_for_volume_meshing());
 }
 
 #[test]
@@ -386,7 +417,7 @@ fn rejects_protected_edge_with_non_curve_source_edge_id() {
 }
 
 #[test]
-fn rejects_disconnected_boundary_components_until_shell_nesting_is_classified() {
+fn rejects_disjoint_boundary_components_after_shell_classification() {
     let plc = disconnected_tetrahedra_plc();
     let report = classify_boundary_components(&plc);
 
@@ -394,7 +425,7 @@ fn rejects_disconnected_boundary_components_until_shell_nesting_is_classified() 
     assert_eq!(report.min_component_node_count, 4);
     assert_eq!(report.max_component_node_count, 4);
     assert_eq!(
-        classify_shell_nesting(&report),
+        classify_shell_nesting(&plc, &report),
         PlcShellClassificationReport {
             shell_nesting_classified: false,
             outer_shell_count: 0,
@@ -443,6 +474,24 @@ fn disconnected_tetrahedra_plc() -> ProtectedBoundaryComplex {
         node("11", [4.0, 0.0, 0.0]),
         node("12", [3.0, 1.0, 0.0]),
         node("13", [3.0, 0.0, 1.0]),
+    ]);
+    plc.facets.extend([
+        facet("f10", ["10", "12", "11"]),
+        facet("f11", ["10", "11", "13"]),
+        facet("f12", ["11", "12", "13"]),
+        facet("f13", ["12", "10", "13"]),
+    ]);
+    plc
+}
+
+fn nested_tetrahedra_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetrahedron_plc();
+    plc.complex_id = "nested_tetrahedra_plc".to_string();
+    plc.nodes.extend([
+        node("10", [0.2, 0.2, 0.2]),
+        node("11", [0.3, 0.2, 0.2]),
+        node("12", [0.2, 0.3, 0.2]),
+        node("13", [0.2, 0.2, 0.3]),
     ]);
     plc.facets.extend([
         facet("f10", ["10", "12", "11"]),

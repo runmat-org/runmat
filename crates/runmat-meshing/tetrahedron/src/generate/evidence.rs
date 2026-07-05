@@ -30,7 +30,7 @@ pub(super) fn record_input_plc_evidence(
         component_report.max_component_node_count,
     );
 
-    let shell_classification = classify_shell_nesting(&component_report);
+    let shell_classification = classify_shell_nesting(plc, &component_report);
     evidence.entity_counts.insert(
         "input_plc_shell_nesting_classified".to_string(),
         usize::from(shell_classification.shell_nesting_classified),
