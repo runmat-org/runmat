@@ -1,6 +1,7 @@
 use super::*;
 use runmat_meshing_cad::{
-    CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyModel, CadTopologyReport,
+    CadEntityId, CadEntityKind, CadEvaluationModel, CadEvaluationReport, CadEvaluationSource,
+    CadFace, CadFaceEvaluationFrame, CadShell, CadTopologyModel, CadTopologyReport,
     CadTopologySource, CadVertex, CadVolume, SourceTopologyEdge, SourceTopologyFace,
     SourceTopologyModel, SourceTopologyVertex,
 };
@@ -178,6 +179,77 @@ fn cad_topology_surface_marks_display_diagonal_internal() {
     assert_eq!(loop_coverage.boundary_loop_count, 1);
     assert_eq!(loop_coverage.recovered_source_edge_count, 4);
     assert_eq!(loop_coverage.boundary_segment_count, 4);
+}
+
+#[test]
+fn cad_topology_surface_preserves_holed_face_loops() {
+    let topology = holed_square_topology();
+    let cad_topology = holed_square_cad_topology(&topology);
+    let cad_evaluation = holed_square_cad_evaluation(&topology);
+    let curves = discretize_topology_curves(
+        &topology,
+        CurveDiscretizationOptions {
+            target_size_m: 10.0,
+            min_segments_per_edge: 1,
+            max_segments_per_edge: 1,
+        },
+    )
+    .expect("curves should discretize");
+
+    let surface = discretize_cad_topology_surfaces_with_curves(
+        &cad_topology,
+        &topology,
+        &cad_evaluation,
+        &curves,
+        SurfaceDiscretizationOptions::default(),
+    )
+    .expect("holed CAD face should discretize");
+
+    let loop_coverage = surface
+        .loop_coverage
+        .as_ref()
+        .expect("surface loop coverage evidence");
+    assert_eq!(loop_coverage.source_face_count, 1);
+    assert_eq!(loop_coverage.recovered_face_count, 1);
+    assert_eq!(loop_coverage.boundary_loop_count, 2);
+    assert_eq!(loop_coverage.max_loops_per_face, 2);
+    assert_eq!(loop_coverage.recovered_source_edge_count, 8);
+    assert_eq!(loop_coverage.boundary_segment_count, 8);
+
+    let recovered_area = surface
+        .elements
+        .iter()
+        .map(|element| element.area_m2)
+        .sum::<f64>();
+    assert!(
+        (recovered_area - 0.96).abs() <= 1.0e-12,
+        "recovered_area={recovered_area}"
+    );
+    let hole = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]];
+    assert!(surface.elements.iter().all(|element| {
+        let centroid = triangle_centroid_2d(element.node_ids.map(|node_id| {
+            let point = surface.nodes[node_id as usize].coordinates_m;
+            [point[0], point[1]]
+        }));
+        !point_in_polygon_2d(centroid, &hole)
+    }));
+    assert_surface_edges_are_recovered(
+        &surface.elements,
+        &[
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [0, 3],
+            [4, 5],
+            [5, 6],
+            [6, 7],
+            [4, 7],
+        ],
+    );
+    assert!(surface
+        .elements
+        .iter()
+        .all(|element| element.cad_face_id == Some("cad_face_holed_square".to_string())));
 }
 
 #[test]
@@ -383,6 +455,144 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             evaluator_face_count: 0,
             generic_face_count: 0,
             closed_shell_count: 0,
+        },
+    }
+}
+
+fn holed_square_topology() -> SourceTopologyModel {
+    let vertices = square_with_square_hole_surface_nodes()
+        .into_iter()
+        .map(|node| SourceTopologyVertex {
+            vertex_id: node.node_id,
+            coordinates_m: node.coordinates_m,
+        })
+        .collect::<Vec<_>>();
+    let edges = vec![
+        source_edge(0, [0, 1], 1.0),
+        source_edge(1, [1, 2], 1.0),
+        source_edge(2, [2, 3], 1.0),
+        source_edge(3, [3, 0], 1.0),
+        source_edge(4, [4, 5], 0.2),
+        source_edge(5, [5, 6], 0.2),
+        source_edge(6, [6, 7], 0.2),
+        source_edge(7, [7, 4], 0.2),
+    ];
+    SourceTopologyModel {
+        mesh_id: "holed_square_surface".to_string(),
+        source_geometry_id: "geo_holed_square".to_string(),
+        source_geometry_revision: 1,
+        source_geometry_sha256: None,
+        vertices,
+        edges,
+        faces: vec![SourceTopologyFace {
+            face_id: 0,
+            source_triangle_id: 0,
+            node_ids: [0, 1, 2],
+            edge_ids: [0, 1, 2],
+            region_ids: vec!["face_holed_square".to_string()],
+            area_m2: 0.96,
+            unit_normal: [0.0, 0.0, 1.0],
+        }],
+        bounds_min_m: [0.0, 0.0, 0.0],
+        bounds_max_m: [1.0, 1.0, 0.0],
+        region_ids: vec!["face_holed_square".to_string()],
+    }
+}
+
+fn source_edge(edge_id: u32, node_ids: [u32; 2], length_m: f64) -> SourceTopologyEdge {
+    SourceTopologyEdge {
+        edge_id,
+        node_ids,
+        adjacent_face_ids: vec![0],
+        region_ids: vec!["face_holed_square".to_string()],
+        length_m,
+    }
+}
+
+fn holed_square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
+    let mut cad_topology = square_cad_topology(topology);
+    cad_topology.faces[0] = CadFace {
+        entity_id: CadEntityId {
+            kind: CadEntityKind::Face,
+            id: "cad_face_holed_square".to_string(),
+        },
+        imported_face_id: Some(9),
+        evaluator_id: None,
+        evaluator_supports_point_evaluation: false,
+        evaluator_supports_projection: false,
+        evaluator_supports_normal: false,
+        evaluator_supports_derivatives: false,
+        evaluator_supports_curvature: false,
+        evaluator_reference_point_m: Some([0.5, 0.5, 0.0]),
+        evaluator_unit_normal: Some([0.0, 0.0, 1.0]),
+        evaluator_samples: Vec::new(),
+        source_face_ids: vec![0],
+        source_edge_ids: (0..=7).collect(),
+        loop_edge_ids: (0..=7)
+            .map(|edge_id| format!("cad_edge_{edge_id}"))
+            .collect(),
+        region_ids: vec!["face_holed_square".to_string()],
+        area_m2: 0.96,
+        unit_normal: [0.0, 0.0, 1.0],
+    };
+    cad_topology.shells[0].face_ids = vec!["cad_face_holed_square".to_string()];
+    cad_topology.report.vertex_count = topology.vertices.len();
+    cad_topology.report.edge_count = topology.edges.len();
+    cad_topology
+}
+
+fn holed_square_cad_evaluation(topology: &SourceTopologyModel) -> CadEvaluationModel {
+    CadEvaluationModel {
+        source_geometry_id: topology.source_geometry_id.clone(),
+        source_geometry_revision: topology.source_geometry_revision,
+        source: CadEvaluationSource::PlanarFacetApproximation,
+        face_frames: vec![CadFaceEvaluationFrame {
+            face_id: "cad_face_holed_square".to_string(),
+            source_face_id: 0,
+            origin_m: [0.0, 0.0, 0.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+            unit_normal: [0.0, 0.0, 1.0],
+            area_m2: 0.96,
+            evaluator_backed: false,
+            exact_query_backed: false,
+            live_query_backed: false,
+            evaluator_sample_count: 0,
+            evaluator_rejected_sample_count: 0,
+            evaluator_max_projection_error_m: 0.0,
+            evaluator_samples: Vec::new(),
+            u_derivative_m_per_uv: None,
+            v_derivative_m_per_uv: None,
+            max_curvature_estimate_1_per_m: None,
+            uv_bounds: Some([[0.0, 0.0], [1.0, 1.0]]),
+            uv_bounds_sample_count: 4,
+            uv_domain_source: Some("holed_square_test_domain".to_string()),
+        }],
+        report: CadEvaluationReport {
+            source: CadEvaluationSource::PlanarFacetApproximation,
+            face_frame_count: 1,
+            evaluator_face_count: 0,
+            live_query_face_count: 0,
+            exact_query_face_count: 0,
+            point_evaluation_supported_face_count: 0,
+            projection_supported_face_count: 0,
+            normal_supported_face_count: 0,
+            derivative_supported_face_count: 0,
+            curvature_supported_face_count: 0,
+            missing_exact_query_face_count: 1,
+            missing_derivative_query_face_count: 1,
+            missing_curvature_query_face_count: 1,
+            evaluator_sample_count: 0,
+            evaluator_rejected_sample_count: 0,
+            normal_query_count: 0,
+            projection_query_count: 0,
+            derivative_query_count: 0,
+            curvature_query_count: 0,
+            max_projection_error_m: 0.0,
+            max_normal_deviation: 0.0,
+            uv_domain_face_count: 1,
+            uv_projection_out_of_bounds_count: 0,
+            max_curvature_estimate_1_per_m: None,
         },
     }
 }
