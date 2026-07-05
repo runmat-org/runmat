@@ -114,7 +114,7 @@ fn aligned_partition_divisions(inner_lower_bounds: [f64; 4], inner_scale: f64) -
     })
 }
 
-fn barycentric_coordinates(
+pub(super) fn barycentric_coordinates(
     point: Point3,
     outer_points: &[Point3],
     tolerance: MeshingTolerance,

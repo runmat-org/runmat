@@ -104,6 +104,31 @@ pub(super) fn wider_inner_nested_tetrahedron_shells_plc() -> ProtectedBoundaryCo
     plc
 }
 
+pub(super) fn split_outer_edge_nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetra_plc();
+    plc.complex_id = "split_outer_edge_nested_tetrahedron_shells".to_string();
+    plc.nodes.push(node("4", [0.5, 0.0, 0.0]));
+    plc.nodes.extend([
+        node("10", [0.2, 0.2, 0.2]),
+        node("11", [0.3, 0.2, 0.2]),
+        node("12", [0.2, 0.3, 0.2]),
+        node("13", [0.2, 0.2, 0.3]),
+    ]);
+    plc.facets = vec![
+        facet_with_source("0a", ["0", "2", "4"], "0"),
+        facet_with_source("0b", ["4", "2", "1"], "0"),
+        facet_with_source("1a", ["0", "4", "3"], "1"),
+        facet_with_source("1b", ["4", "1", "3"], "1"),
+        facet("2", ["1", "2", "3"]),
+        facet("3", ["2", "0", "3"]),
+        facet("10", ["10", "12", "11"]),
+        facet("11", ["10", "11", "13"]),
+        facet("12", ["11", "12", "13"]),
+        facet("13", ["12", "10", "13"]),
+    ];
+    plc
+}
+
 pub(super) fn box_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "box".to_string(),
@@ -184,6 +209,10 @@ fn node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
 }
 
 fn facet(id: &str, node_ids: [&str; 3]) -> PlcFacet {
+    facet_with_source(id, node_ids, id)
+}
+
+fn facet_with_source(id: &str, node_ids: [&str; 3], source_face_id: &str) -> PlcFacet {
     PlcFacet {
         facet_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
         node_ids: [
@@ -191,7 +220,7 @@ fn facet(id: &str, node_ids: [&str; 3]) -> PlcFacet {
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[2]),
         ],
-        source_face_id: entity(MeshingStage::SurfaceMesh, id),
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
         material_interface_ids: vec!["body".to_string()],
     }
 }

@@ -90,6 +90,18 @@ impl PartitionBuilder {
     pub(super) fn coordinates(&self, node_id: u32) -> Point3 {
         self.point(self.barycentric_by_id[&node_id])
     }
+
+    pub(super) fn barycentric_for_topology_node(
+        &self,
+        node_id: &TopologyEntityId,
+    ) -> Option<[f64; 4]> {
+        self.cavity_id_to_node_id
+            .iter()
+            .find_map(|(cavity_id, candidate_id)| {
+                (candidate_id == node_id).then(|| self.barycentric_by_id.get(cavity_id).copied())
+            })
+            .flatten()
+    }
 }
 
 fn barycentric_key(barycentric: [f64; 4]) -> [i64; 4] {

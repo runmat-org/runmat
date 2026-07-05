@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::contracts::{PlcFacet, ProtectedBoundaryComplex, TopologyEntityId};
+use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
 
 use crate::{
     cavity::constrained::{ConstrainedCavityBoundaryFace, ConstrainedCavityRefillTetrahedron},
@@ -84,25 +84,40 @@ pub(super) fn partition_boundary_faces(
 
 pub(super) fn shell_source_faces(
     plc: &ProtectedBoundaryComplex,
-    shell_node_ids: &[TopologyEntityId],
+    builder: &PartitionBuilder,
+    face_barycentric_values: [f64; 4],
 ) -> Result<BTreeMap<usize, usize>, TetrahedronGenerationError> {
-    if shell_node_ids.len() != 4 {
-        return Err(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc);
-    }
     let mut source_faces = BTreeMap::<usize, usize>::new();
     for omitted_index in 0..4 {
-        let mut face_nodes = shell_node_ids
-            .iter()
-            .enumerate()
-            .filter_map(|(index, node_id)| (index != omitted_index).then_some(node_id.clone()))
-            .collect::<Vec<_>>();
-        face_nodes.sort();
-        let facet_index = plc
-            .facets
-            .iter()
-            .position(|facet| sorted_plc_facet_nodes(facet) == face_nodes)
+        let mut source_face_id = None::<TopologyEntityId>;
+        let mut source_facet_index = None::<usize>;
+        for (facet_index, facet) in plc.facets.iter().enumerate().filter(|(_, facet)| {
+            facet.node_ids.iter().all(|node_id| {
+                builder
+                    .barycentric_for_topology_node(node_id)
+                    .map(|barycentric| {
+                        (barycentric[omitted_index] - face_barycentric_values[omitted_index]).abs()
+                            <= 1.0e-12
+                    })
+                    .unwrap_or(false)
+            })
+        }) {
+            match &source_face_id {
+                Some(existing_source_face_id)
+                    if existing_source_face_id != &facet.source_face_id =>
+                {
+                    return Err(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc);
+                }
+                None => {
+                    source_face_id = Some(facet.source_face_id.clone());
+                    source_facet_index = Some(facet_index);
+                }
+                _ => {}
+            }
+        }
+        let source_facet_index = source_facet_index
             .ok_or(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
-        source_faces.insert(omitted_index, facet_index);
+        source_faces.insert(omitted_index, source_facet_index);
     }
     Ok(source_faces)
 }
@@ -190,12 +205,6 @@ fn boundary_source_facet_index(
         }
     }
     Err(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)
-}
-
-fn sorted_plc_facet_nodes(facet: &PlcFacet) -> Vec<TopologyEntityId> {
-    let mut node_ids = facet.node_ids.to_vec();
-    node_ids.sort();
-    node_ids
 }
 
 fn tetrahedron_faces(node_ids: [u32; 4]) -> [[u32; 3]; 4] {

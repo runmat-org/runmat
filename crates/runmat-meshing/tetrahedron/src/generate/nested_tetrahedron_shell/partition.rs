@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     quality::predicate::{
         orient_tetrahedron_node_ids, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
     },
+    quality::tolerance::MeshingTolerance,
 };
 
 use crate::{
@@ -28,7 +29,7 @@ use boundary::{
 };
 use builder::PartitionBuilder;
 use cells::{cell_centroid, cell_faces, partition_cells};
-use shape::affine_inner_tetrahedron_partition;
+use shape::{affine_inner_tetrahedron_partition, barycentric_coordinates};
 
 const MIN_PARTITION_SCALED_JACOBIAN: f64 = 0.15;
 
@@ -39,7 +40,7 @@ pub(super) fn barycentric_partition_refill(
     node_id_to_cavity_id: &BTreeMap<TopologyEntityId, u32>,
     target_volume_m3: f64,
 ) -> Result<Option<NestedTetrahedronShellRefill>, TetrahedronGenerationError> {
-    if shell.outer_node_ids.len() != 4 || shell.inner_node_ids.len() != 4 || plc.nodes.len() != 8 {
+    if shell.outer_node_ids.len() != 4 || shell.inner_node_ids.len() != 4 {
         return Ok(None);
     }
     let coordinates_by_node_id = plc
@@ -77,6 +78,20 @@ pub(super) fn barycentric_partition_refill(
         barycentric[index] += partition.inner_scale;
         builder.insert_existing_node(barycentric, cavity_id);
     }
+    for node in &plc.nodes {
+        let Some(barycentric) = barycentric_coordinates(
+            node.coordinates_m,
+            &outer_points,
+            MeshingTolerance::default(),
+        ) else {
+            return Ok(None);
+        };
+        if !barycentric_aligns_to_partition_grid(barycentric, partition.divisions) {
+            return Ok(None);
+        }
+        let cavity_id = cavity_node_id(node_id_to_cavity_id, &node.node_id)?;
+        builder.insert_existing_node(barycentric, cavity_id);
+    }
 
     let cells = partition_cells(
         partition.divisions,
@@ -87,8 +102,8 @@ pub(super) fn barycentric_partition_refill(
         return Ok(None);
     }
 
-    let outer_source_faces = shell_source_faces(plc, &shell.outer_node_ids)?;
-    let inner_source_faces = shell_source_faces(plc, &partition.inner_node_ids)?;
+    let outer_source_faces = shell_source_faces(plc, &builder, [0.0; 4])?;
+    let inner_source_faces = shell_source_faces(plc, &builder, partition.inner_lower_bounds)?;
     let mut face_triangle_cache = BTreeMap::<Vec<u32>, Vec<[u32; 3]>>::new();
     let mut tetrahedra = Vec::<ConstrainedCavityRefillTetrahedron>::new();
     let mut total_volume_m3 = 0.0_f64;
@@ -160,6 +175,15 @@ pub(super) fn barycentric_partition_refill(
             total_volume_m3,
         },
     }))
+}
+
+fn barycentric_aligns_to_partition_grid(barycentric: [f64; 4], divisions: usize) -> bool {
+    barycentric.iter().all(|value| {
+        value.is_finite() && *value >= -1.0e-8 && *value <= 1.0 + 1.0e-8 && {
+            let aligned = (*value * divisions as f64).round() / divisions as f64;
+            (*value - aligned).abs() <= 1.0e-8
+        }
+    })
 }
 
 fn cavity_node_id(

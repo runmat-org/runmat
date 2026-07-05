@@ -278,6 +278,30 @@ fn generates_nested_tetrahedron_shell_mesh_from_wider_inner_shell_plc() {
 }
 
 #[test]
+fn generates_nested_tetrahedron_shell_mesh_from_split_outer_edge_shell_plc() {
+    let mesh = generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
+        &split_outer_edge_nested_tetrahedron_shells_plc(),
+    )
+    .expect("split outer-edge nested Tetrahedron shell PLC should generate a shell volume mesh");
+
+    assert_eq!(
+        mesh.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_barycentric_partition_refills"],
+        1
+    );
+    assert_eq!(mesh.evidence.entity_counts["plc_boundary_nodes"], 9);
+    assert!(mesh.nodes.iter().any(|node| node.node_id.id == "4"));
+    assert!(mesh
+        .boundary_faces
+        .iter()
+        .any(|face| face.node_ids.iter().any(|node_id| node_id.id == "4")));
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+}
+
+#[test]
 fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
     let mesh = generate_solver_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc())
         .expect("nested tetrahedron shell PLC should use nested-shell generation");
