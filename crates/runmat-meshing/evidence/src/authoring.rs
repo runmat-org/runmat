@@ -16,6 +16,12 @@ pub struct MeshAuthoringSummary {
     pub validation_error_message: Option<String>,
     pub backend: String,
     pub tetrahedron_generation_family: String,
+    #[serde(default)]
+    pub tetrahedron_generation_attempted_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_rejected_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_selected_family_index: usize,
     pub topology: MeshAuthoringTopologySummary,
     pub quality: MeshAuthoringQualitySummary,
     pub recovery: MeshAuthoringRecoverySummary,
@@ -100,6 +106,15 @@ pub fn build_mesh_authoring_summary(evidence: &MeshEvidenceArtifact) -> MeshAuth
         validation_error_message: evidence.validation.validation_error_message.clone(),
         backend: evidence.backend.backend.clone(),
         tetrahedron_generation_family: evidence.backend.tetrahedron_generation_family.clone(),
+        tetrahedron_generation_attempted_family_count: evidence
+            .backend
+            .tetrahedron_generation_attempted_family_count,
+        tetrahedron_generation_rejected_family_count: evidence
+            .backend
+            .tetrahedron_generation_rejected_family_count,
+        tetrahedron_generation_selected_family_index: evidence
+            .backend
+            .tetrahedron_generation_selected_family_index,
         topology: MeshAuthoringTopologySummary {
             node_count: evidence.topology.node_count,
             volume_element_count: evidence.topology.volume_element_count,

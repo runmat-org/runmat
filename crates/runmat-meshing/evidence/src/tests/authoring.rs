@@ -52,6 +52,42 @@ fn authoring_summary_exposes_region_readiness_without_raw_samples() {
 }
 
 #[test]
+fn authoring_summary_exposes_tetrahedron_generation_selection_counts() {
+    let mut mesh = minimal_evidence_mesh();
+    mesh.backend.tetrahedron_generation_family = "star_shaped_polyhedron".to_string();
+    mesh.backend.tetrahedron_generation_attempted_family_count = 5;
+    mesh.backend.tetrahedron_generation_rejected_family_count = 4;
+    mesh.backend.tetrahedron_generation_selected_family_index = 5;
+    let evidence = build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
+
+    let summary = build_mesh_authoring_summary(&evidence);
+
+    assert_eq!(
+        summary.tetrahedron_generation_family,
+        "star_shaped_polyhedron"
+    );
+    assert_eq!(summary.tetrahedron_generation_attempted_family_count, 5);
+    assert_eq!(summary.tetrahedron_generation_rejected_family_count, 4);
+    assert_eq!(summary.tetrahedron_generation_selected_family_index, 5);
+
+    let encoded = serde_json::to_value(&summary).expect("serialize authoring summary");
+    assert_eq!(
+        encoded["tetrahedron_generation_attempted_family_count"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        encoded["tetrahedron_generation_rejected_family_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        encoded["tetrahedron_generation_selected_family_index"].as_u64(),
+        Some(5)
+    );
+    assert!(encoded.get("debug").is_none());
+    assert!(encoded.get("mesh").is_none());
+}
+
+#[test]
 fn authoring_summary_marks_failed_quality_thresholds() {
     let mesh = minimal_evidence_mesh();
     let validation = AnalysisMeshValidationOptions {
