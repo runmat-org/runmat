@@ -170,6 +170,17 @@ fn recover_boundary_facet_material_interface_regions(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let material_interfaces_by_source_face = material_interfaces_by_source_face(plc);
+    let boundary_source_faces_by_face = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            (
+                sorted_topology_ids(face.node_ids.clone()),
+                face.source_face_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let mut repaired_material_interfaces = BTreeSet::<String>::new();
     let mut ambiguous_material_interfaces = BTreeSet::<String>::new();
@@ -178,7 +189,15 @@ fn recover_boundary_facet_material_interface_regions(
     for element in &mut tetrahedron_mesh.elements {
         let boundary_material_interfaces = tetrahedron_element_faces(element.node_ids.clone())
             .iter()
-            .filter_map(|face| material_interfaces_by_facet.get(face))
+            .filter_map(|face| {
+                material_interfaces_by_facet.get(face).or_else(|| {
+                    boundary_source_faces_by_face
+                        .get(face)
+                        .and_then(|source_face_id| {
+                            material_interfaces_by_source_face.get(source_face_id)
+                        })
+                })
+            })
             .flat_map(|material_interfaces| material_interfaces.iter().cloned())
             .collect::<BTreeSet<_>>();
         if boundary_material_interfaces.len() != 1 {
@@ -244,13 +263,19 @@ fn recover_interior_material_interface_regions(
         .iter()
         .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
         .collect::<BTreeSet<_>>();
+    let recovered_boundary_faces = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_topology_ids(face.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
     let mut interior_material_interfaces = BTreeSet::<String>::new();
 
     loop {
         let mut face_element_indices = BTreeMap::<_, Vec<usize>>::new();
         for (element_index, element) in tetrahedron_mesh.elements.iter().enumerate() {
             for face in tetrahedron_element_faces(element.node_ids.clone()) {
-                if !plc_boundary_faces.contains(&face) {
+                if !plc_boundary_faces.contains(&face) && !recovered_boundary_faces.contains(&face)
+                {
                     face_element_indices
                         .entry(face)
                         .or_default()
@@ -319,6 +344,20 @@ fn recover_interior_material_interface_regions(
     }
 
     recovery.interior_material_interface_count = interior_material_interfaces.len();
+}
+
+pub(super) fn material_interfaces_by_source_face(
+    plc: &ProtectedBoundaryComplex,
+) -> BTreeMap<TopologyEntityId, BTreeSet<String>> {
+    let mut material_interfaces_by_source_face =
+        BTreeMap::<TopologyEntityId, BTreeSet<String>>::new();
+    for facet in &plc.facets {
+        material_interfaces_by_source_face
+            .entry(facet.source_face_id.clone())
+            .or_default()
+            .extend(facet.material_interface_ids.iter().cloned());
+    }
+    material_interfaces_by_source_face
 }
 
 fn record_interior_material_candidate(

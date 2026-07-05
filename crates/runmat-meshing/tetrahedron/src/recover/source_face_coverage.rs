@@ -60,6 +60,73 @@ pub(super) fn boundary_source_face_area_coverage_complete(
     covered_face_count > 0 && (covered_area - facet_area).abs() <= facet_area.max(1.0) * 1.0e-8
 }
 
+pub(super) fn boundary_source_face_group_area_coverage_complete(
+    exterior_boundary_faces: &[&TetrahedronBoundaryFace],
+    facets: &[PlcFacet],
+    source_face_id: &TopologyEntityId,
+    node_coordinates: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    tolerance: MeshingTolerance,
+) -> bool {
+    let source_facet_triangles = facets
+        .iter()
+        .filter(|facet| &facet.source_face_id == source_face_id)
+        .filter_map(|facet| triangle_for_node_ids(facet.node_ids.clone(), node_coordinates))
+        .collect::<Vec<_>>();
+    if source_facet_triangles.is_empty() {
+        return false;
+    }
+    let source_area = source_facet_triangles
+        .iter()
+        .map(|triangle| triangle_area(*triangle))
+        .try_fold(0.0_f64, |total, area| {
+            (area.is_finite() && area > tolerance.absolute_m * tolerance.absolute_m)
+                .then_some(total + area)
+        });
+    let Some(source_area) = source_area else {
+        return false;
+    };
+
+    let mut covered_area = 0.0_f64;
+    let mut covered_face_count = 0_usize;
+    for boundary_face in exterior_boundary_faces
+        .iter()
+        .filter(|face| &face.source_face_id == source_face_id)
+    {
+        let Some(child_triangle) =
+            triangle_for_node_ids(boundary_face.node_ids.clone(), node_coordinates)
+        else {
+            continue;
+        };
+        if !child_triangle_on_any_source_facet(
+            child_triangle,
+            &source_facet_triangles,
+            tolerance.absolute_m,
+        ) {
+            return false;
+        }
+        let child_area = triangle_area(child_triangle);
+        if !child_area.is_finite() || child_area <= tolerance.absolute_m * tolerance.absolute_m {
+            continue;
+        }
+        covered_area += child_area;
+        covered_face_count += 1;
+    }
+
+    covered_face_count > 0 && (covered_area - source_area).abs() <= source_area.max(1.0) * 1.0e-8
+}
+
+fn child_triangle_on_any_source_facet(
+    child_triangle: Triangle3,
+    source_facet_triangles: &[Triangle3],
+    tolerance_m: f64,
+) -> bool {
+    child_triangle.iter().all(|point| {
+        source_facet_triangles
+            .iter()
+            .any(|source_triangle| point_triangle_distance(*point, *source_triangle) <= tolerance_m)
+    })
+}
+
 fn triangle_for_node_ids(
     node_ids: [TopologyEntityId; 3],
     node_coordinates: &BTreeMap<TopologyEntityId, [f64; 3]>,

@@ -335,6 +335,41 @@ fn nested_tetrahedron_shell_generation_preserves_split_protected_source_edges() 
 }
 
 #[test]
+fn nested_tetrahedron_shell_recovery_queue_accepts_split_source_face_group_coverage() {
+    let plc = with_split_material_ids(split_outer_edge_nested_tetrahedron_shells_plc());
+    let mesh = generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(&plc)
+        .expect("split nested shell PLC should generate a refined shell volume mesh");
+
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+    assert!(mesh.boundary_faces.len() > plc.facets.len());
+
+    let queue = crate::recover::build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("split source-face coverage should build recovery evidence");
+
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 0);
+    assert_eq!(
+        queue.evidence.entity_counts["missing_source_face_absent_face_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_boundary_owned_items"],
+        2
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["missing_material_interface_absent_partition_items"],
+        0
+    );
+    assert_eq!(
+        queue.evidence.entity_counts["source_face_items"],
+        plc.facets.len()
+    );
+    assert_eq!(queue.evidence.entity_counts["material_interface_items"], 2);
+}
+
+#[test]
 fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
     let mesh = generate_solver_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc())
         .expect("nested tetrahedron shell PLC should use nested-shell generation");

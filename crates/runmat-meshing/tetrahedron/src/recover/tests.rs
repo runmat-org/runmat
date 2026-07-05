@@ -948,6 +948,82 @@ fn material_interface_recovery_propagates_through_interior_faces() {
 }
 
 #[test]
+fn material_interface_recovery_uses_refined_boundary_source_face_ownership() {
+    let plc = interior_material_interface_propagation_plc();
+    let initial_queue = TetrahedronRecoveryQueue {
+        items: vec![TetrahedronRecoveryQueueItem {
+            item_id: "material_interface:region_a".to_string(),
+            kind: TetrahedronRecoveryKind::MaterialInterface,
+            status: TetrahedronRecoveryStatus::Missing,
+            source_entity_id: None,
+            source_face_node_ids: None,
+            source_face_topology: None,
+            protected_edge_node_ids: None,
+            protected_edge_topology: None,
+            material_interface_topology: Some(TetrahedronMaterialInterfaceTopology::BoundaryOwned),
+            material_interface_id: Some("region_a".to_string()),
+        }],
+        evidence: StageEvidence::complete(MeshingStage::ConstraintRecovery),
+    };
+    let split_node_id = entity(MeshingStage::TetrahedronMesh, "split_face_a");
+    let mut mesh = TetrahedronMesh {
+        mesh_id: "refined_boundary_source_face_material_tetrahedron".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
+        nodes: vec![
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                [0.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                [1.0, 0.0, 0.0],
+            ),
+            tetrahedron_node(split_node_id.clone(), [0.5, 0.5, 0.0]),
+            tetrahedron_node(
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+                [0.0, 0.0, 1.0],
+            ),
+        ],
+        elements: vec![Tetrahedron4Element {
+            element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_refined_face"),
+            node_ids: [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                split_node_id.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            material_region_id: "unclassified".to_string(),
+        }],
+        boundary_faces: vec![boundary_face_from_ids(
+            "child_face_a",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                split_node_id,
+            ],
+            "face_a",
+            [None, None, None],
+        )],
+        recovery_complete: false,
+        quality_optimized: false,
+        evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+    };
+
+    let recovery = super::material_interfaces::recover_material_interface_regions(
+        &plc,
+        &initial_queue,
+        &mut mesh,
+    );
+
+    assert_eq!(mesh.elements[0].material_region_id, "region_a");
+    assert_eq!(recovery.attempted_material_interface_count, 1);
+    assert_eq!(recovery.repaired_element_count, 1);
+    assert_eq!(recovery.rejected_material_interface_count, 0);
+    assert_eq!(recovery.boundary_owned_material_interface_count, 1);
+    assert_eq!(recovery.interior_material_interface_count, 0);
+}
+
+#[test]
 fn keeps_tetrahedron_mesh_unrecovered_when_recovery_queue_has_missing_items() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();

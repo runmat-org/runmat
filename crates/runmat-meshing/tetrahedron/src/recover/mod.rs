@@ -29,14 +29,14 @@ use boundary_faces::{
 };
 use boundary_leaks::remove_exterior_elements_across_interior_source_faces;
 use input_validation::validate_tetrahedron_recovery_input_mesh;
-use material_interfaces::recover_material_interface_regions;
+use material_interfaces::{material_interfaces_by_source_face, recover_material_interface_regions};
 use material_partitions::recover_absent_material_interface_partitions;
 use source_edges::{
     apply_source_edge_split_refill_recovery, evaluate_source_edge_split_refill_recovery,
 };
 use source_face_coverage::{
-    boundary_source_face_area_coverage_complete, recovery_geometry_tolerance,
-    tetrahedron_node_coordinates,
+    boundary_source_face_area_coverage_complete, boundary_source_face_group_area_coverage_complete,
+    recovery_geometry_tolerance, tetrahedron_node_coordinates,
 };
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
@@ -116,7 +116,14 @@ pub fn build_recovery_queue_from_plc(
             facet,
             &node_coordinates,
             tolerance,
-        );
+        ) || (!recovered_boundary_faces.contains(&face_key.1)
+            && boundary_source_face_group_area_coverage_complete(
+                &exterior_boundary_faces,
+                &plc.facets,
+                &facet.source_face_id,
+                &node_coordinates,
+                tolerance,
+            ));
         let source_face_topology =
             if recovered_boundary_faces.contains(&face_node_ids) || source_face_boundary_complete {
                 TetrahedronSourceFaceTopology::BoundaryFace
@@ -702,6 +709,11 @@ fn material_interface_recovery_topology(
         .iter()
         .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
         .collect::<BTreeSet<_>>();
+    let recovered_boundary_faces = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| sorted_topology_ids(face.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
     let material_interfaces_by_boundary_face = plc
         .facets
         .iter()
@@ -716,18 +728,34 @@ fn material_interface_recovery_topology(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let material_interfaces_by_source_face = material_interfaces_by_source_face(plc);
+    let boundary_source_faces_by_face = tetrahedron_mesh
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            (
+                sorted_topology_ids(face.node_ids.clone()),
+                face.source_face_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
 
     for element in &tetrahedron_mesh.elements {
         if element.material_region_id == material_interface_id {
             continue;
         }
         for face in tetrahedron_faces(element.node_ids.clone()) {
-            if material_interfaces_by_boundary_face
-                .get(&face)
-                .is_some_and(|material_interfaces| {
-                    material_interfaces.contains(material_interface_id)
-                })
-            {
+            let material_interfaces =
+                material_interfaces_by_boundary_face.get(&face).or_else(|| {
+                    boundary_source_faces_by_face
+                        .get(&face)
+                        .and_then(|source_face_id| {
+                            material_interfaces_by_source_face.get(source_face_id)
+                        })
+                });
+            if material_interfaces.is_some_and(|material_interfaces| {
+                material_interfaces.contains(material_interface_id)
+            }) {
                 return TetrahedronMaterialInterfaceTopology::BoundaryOwned;
             }
         }
@@ -736,7 +764,7 @@ fn material_interface_recovery_topology(
     let mut material_regions_by_interior_face = BTreeMap::<_, Vec<String>>::new();
     for element in &tetrahedron_mesh.elements {
         for face in tetrahedron_faces(element.node_ids.clone()) {
-            if !plc_boundary_faces.contains(&face) {
+            if !plc_boundary_faces.contains(&face) && !recovered_boundary_faces.contains(&face) {
                 material_regions_by_interior_face
                     .entry(face)
                     .or_default()
