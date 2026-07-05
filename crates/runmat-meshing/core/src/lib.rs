@@ -55,7 +55,8 @@ pub use contracts::{
     TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
 };
 pub use curve::{
-    discretize_topology_curves, CurveDiscretization, CurveDiscretizationError,
+    discretize_cad_topology_curves_with_sizing, discretize_topology_curves, CadCurveDiscretization,
+    CadCurveEdgeProvenance, CurveDiscretization, CurveDiscretizationError,
     CurveDiscretizationOptions, CurveElement, CurveNode,
 };
 pub use opt::sliver::recovery::{
