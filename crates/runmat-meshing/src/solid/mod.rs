@@ -18,12 +18,8 @@ use runmat_meshing_surface::{
 };
 use runmat_meshing_tetrahedron::{
     optimize::{
-        smooth_tetrahedron_mesh_boundary_with_projector, smooth_tetrahedron_mesh_interior,
+        optimize_recovered_tetrahedron_mesh, RecoveredTetrahedronMeshOptimizationOptions,
         TetrahedronBoundarySmoothingProjection, TetrahedronBoundarySmoothingProjector,
-        TetrahedronMeshBoundarySmoothingOptions, TetrahedronMeshInteriorSmoothingOptions,
-    },
-    reconnect::{
-        improve_tetrahedron_mesh_with_local_flips, TetrahedronMeshLocalReconnectionOptions,
     },
     recover::recover_tetrahedron_mesh_from_plc,
     structured_grid,
@@ -141,20 +137,12 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         .map_err(SolidMeshingError::TetrahedronRecovery)?;
     let initial_backend_quality =
         backend_quality_evidence_from_tetrahedron_mesh(&recovery.tetrahedron_mesh);
-    improve_tetrahedron_mesh_with_local_flips(
-        &mut recovery.tetrahedron_mesh,
-        TetrahedronMeshLocalReconnectionOptions::default(),
-    );
-    smooth_tetrahedron_mesh_interior(
-        &mut recovery.tetrahedron_mesh,
-        TetrahedronMeshInteriorSmoothingOptions::default(),
-    );
-    smooth_tetrahedron_mesh_boundary_with_projector(
+    optimize_recovered_tetrahedron_mesh(
         &mut recovery.tetrahedron_mesh,
         &CadFaceBoundarySmoothingProjector {
             cad_evaluation: &cad_evaluation,
         },
-        TetrahedronMeshBoundarySmoothingOptions::default(),
+        RecoveredTetrahedronMeshOptimizationOptions::default(),
     );
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
