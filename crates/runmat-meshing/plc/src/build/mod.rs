@@ -209,6 +209,8 @@ pub fn build_protected_boundary_complex(
         if loop_coverage.recovered_face_count != surface_source_face_count
             || loop_coverage.boundary_loop_count < surface_source_face_count
             || loop_coverage.max_loops_per_face == 0
+            || loop_coverage.boundary_node_count == 0
+            || loop_coverage.boundary_node_count > surface.nodes.len()
             || loop_coverage.recovered_source_edge_count < protected_source_edge_count
             || loop_coverage.boundary_segment_count < protected_source_edge_count
         {
@@ -217,6 +219,7 @@ pub fn build_protected_boundary_complex(
                 surface_source_face_count,
                 boundary_loop_count: loop_coverage.boundary_loop_count,
                 max_loops_per_face: loop_coverage.max_loops_per_face,
+                boundary_node_count: loop_coverage.boundary_node_count,
                 recovered_source_edge_count: loop_coverage.recovered_source_edge_count,
                 protected_source_edge_count,
                 boundary_segment_count: loop_coverage.boundary_segment_count,
@@ -266,6 +269,10 @@ pub fn build_protected_boundary_complex(
         evidence.entity_counts.insert(
             "surface_boundary_segments".to_string(),
             loop_coverage.boundary_segment_count,
+        );
+        evidence.entity_counts.insert(
+            "surface_boundary_nodes".to_string(),
+            loop_coverage.boundary_node_count,
         );
         evidence.entity_counts.insert(
             "recovered_surface_source_edges".to_string(),

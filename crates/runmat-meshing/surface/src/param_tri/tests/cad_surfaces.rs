@@ -110,6 +110,7 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
         loop_coverage.recovered_source_edge_count,
         topology.edges.len()
     );
+    assert_eq!(loop_coverage.boundary_node_count, curves.elements.len());
     assert_eq!(loop_coverage.boundary_segment_count, curves.elements.len());
     assert_eq!(loop_coverage.max_loops_per_face, 1);
     assert!(surface
