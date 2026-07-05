@@ -1,5 +1,5 @@
-mod bounds;
-mod shape;
+pub(super) mod bounds;
+pub(super) mod shape;
 
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},

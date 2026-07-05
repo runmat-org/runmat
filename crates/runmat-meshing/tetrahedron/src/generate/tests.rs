@@ -96,6 +96,17 @@ fn rejects_degenerate_plc_facet() {
 }
 
 #[test]
+fn initial_generation_rejects_nonconvex_boundary_facet() {
+    let mut plc = octahedron_plc();
+    plc.nodes[1].coordinates_m = [-0.1, 0.0, 0.1];
+
+    assert_eq!(
+        generate_initial_tetrahedron_mesh_from_plc(&plc),
+        Err(TetrahedronGenerationError::UnsupportedConvexPolyhedronPlc)
+    );
+}
+
+#[test]
 fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
     let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&box_plc())
         .expect("validated box PLC should generate structured Tetrahedron mesh");

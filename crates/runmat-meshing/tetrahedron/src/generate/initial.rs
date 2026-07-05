@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
-
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
+    quality::tolerance::MeshingTolerance,
 };
 
+use super::convex_polyhedron::bounds::{plc_coordinates_and_bounds, plc_node_average};
+use super::convex_polyhedron::shape::validate_convex_boundary_facets;
 use super::evidence::record_input_plc_evidence;
 use super::material::plc_material_region_id;
 use super::validation::validate_tetrahedron_generation_plc;
@@ -18,21 +19,11 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
     validate_tetrahedron_generation_plc(plc)?;
 
-    let mut coordinates_by_id = BTreeMap::<TopologyEntityId, [f64; 3]>::new();
-    for node in &plc.nodes {
-        if !node
-            .coordinates_m
-            .iter()
-            .all(|coordinate| coordinate.is_finite())
-        {
-            return Err(TetrahedronGenerationError::NonFinitePlcNode {
-                node_id: node.node_id.id.clone(),
-            });
-        }
-        coordinates_by_id.insert(node.node_id.clone(), node.coordinates_m);
-    }
-
+    let (coordinates_by_id, bounds) = plc_coordinates_and_bounds(plc)?;
     let interior = plc_node_average(plc)?;
+    let tolerance = MeshingTolerance::from_bounds(bounds[0], bounds[1]);
+    validate_convex_boundary_facets(plc, &coordinates_by_id, interior, tolerance)?;
+
     let material_region_id = plc_material_region_id(plc);
     let interior_id = TopologyEntityId {
         stage: MeshingStage::TetrahedronMesh,
@@ -138,22 +129,4 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
         quality_optimized: false,
         evidence,
     })
-}
-
-fn plc_node_average(
-    plc: &ProtectedBoundaryComplex,
-) -> Result<[f64; 3], TetrahedronGenerationError> {
-    let mut sum = [0.0; 3];
-    for node in &plc.nodes {
-        for (axis, coordinate) in node.coordinates_m.iter().enumerate() {
-            sum[axis] += coordinate;
-        }
-    }
-    let count = plc.nodes.len() as f64;
-    let interior = [sum[0] / count, sum[1] / count, sum[2] / count];
-    if interior.iter().all(|coordinate| coordinate.is_finite()) {
-        Ok(interior)
-    } else {
-        Err(TetrahedronGenerationError::NonFiniteInteriorPoint)
-    }
 }

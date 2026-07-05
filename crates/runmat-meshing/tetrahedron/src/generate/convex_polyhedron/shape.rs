@@ -8,7 +8,7 @@ use runmat_meshing_core::{
 
 use super::super::TetrahedronGenerationError;
 
-pub(super) fn validate_convex_boundary_facets(
+pub(in crate::generate) fn validate_convex_boundary_facets(
     plc: &ProtectedBoundaryComplex,
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
     interior: [f64; 3],

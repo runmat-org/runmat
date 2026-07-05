@@ -4,7 +4,7 @@ use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId}
 
 use super::super::TetrahedronGenerationError;
 
-pub(super) fn plc_coordinates_and_bounds(
+pub(in crate::generate) fn plc_coordinates_and_bounds(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<(BTreeMap<TopologyEntityId, [f64; 3]>, [[f64; 3]; 2]), TetrahedronGenerationError> {
     let mut coordinates_by_id = BTreeMap::<TopologyEntityId, [f64; 3]>::new();
@@ -32,7 +32,7 @@ pub(super) fn plc_coordinates_and_bounds(
     Ok((coordinates_by_id, [min, max]))
 }
 
-pub(super) fn plc_node_average(
+pub(in crate::generate) fn plc_node_average(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<[f64; 3], TetrahedronGenerationError> {
     let mut sum = [0.0; 3];
@@ -50,7 +50,7 @@ pub(super) fn plc_node_average(
     }
 }
 
-pub(super) fn bounds_span(bounds: [[f64; 3]; 2]) -> f64 {
+pub(in crate::generate) fn bounds_span(bounds: [[f64; 3]; 2]) -> f64 {
     (0..3)
         .map(|axis| bounds[1][axis] - bounds[0][axis])
         .filter(|span| span.is_finite())
