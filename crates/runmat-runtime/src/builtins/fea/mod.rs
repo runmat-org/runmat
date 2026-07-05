@@ -2723,7 +2723,9 @@ fn plot_overlay_option_mesh_source(
         "solver" | "mesh" | "boundary" | "solver_boundary" | "solverboundary" => {
             Ok(crate::analysis::AnalysisFigureMeshSource::Solver)
         }
-        "cad" | "geometry" | "surface" => Ok(crate::analysis::AnalysisFigureMeshSource::Auto),
+        "cad" | "cad_reference" | "reference" | "geometry" | "surface" => {
+            Ok(crate::analysis::AnalysisFigureMeshSource::CadReference)
+        }
         other => Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,
@@ -4093,7 +4095,7 @@ run:
         assert!(!request.options.apply_deformation_overlay);
         assert_eq!(
             request.options.mesh_source,
-            crate::analysis::AnalysisFigureMeshSource::Auto
+            crate::analysis::AnalysisFigureMeshSource::CadReference
         );
     }
 

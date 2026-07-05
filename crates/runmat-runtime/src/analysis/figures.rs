@@ -48,6 +48,7 @@ pub enum AnalysisFigureMeshSource {
     Auto,
     Solver,
     Cad,
+    CadReference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -995,21 +996,9 @@ fn base_mesh_figure_for_run_source(
     let title = title.into();
     match options.mesh_source {
         AnalysisFigureMeshSource::Auto => {
-            if let Ok(mut figure) = geometry_preview_figure(
-                geometry,
-                title.clone(),
-                GeometryPreviewFigureOptions {
-                    edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
-                    presentation: crate::geometry::GeometryPreviewPresentation::Cad,
-                    ..GeometryPreviewFigureOptions::default()
-                },
-            ) {
-                normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
-                if let Some(topology) = render_topology {
-                    if let Ok(solver) = render_topology_figure(topology, title.clone(), options) {
-                        append_mesh_plots(&mut figure, &solver);
-                    }
-                }
+            if let Some(figure) =
+                cad_reference_mesh_figure(geometry, render_topology, title.clone(), options)
+            {
                 return Some(figure);
             }
             if let Some(topology) = render_topology {
@@ -1039,7 +1028,41 @@ fn base_mesh_figure_for_run_source(
             },
         )
         .ok(),
+        AnalysisFigureMeshSource::CadReference => {
+            cad_reference_mesh_figure(geometry, render_topology, title.clone(), options).or_else(
+                || {
+                    render_topology
+                        .and_then(|topology| render_topology_figure(topology, title, options).ok())
+                },
+            )
+        }
     }
+}
+
+fn cad_reference_mesh_figure(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
+    title: impl Into<String>,
+    options: AnalysisFigureGenerationOptions,
+) -> Option<Figure> {
+    let title = title.into();
+    let mut figure = geometry_preview_figure(
+        geometry,
+        title.clone(),
+        GeometryPreviewFigureOptions {
+            edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+            presentation: crate::geometry::GeometryPreviewPresentation::Cad,
+            ..GeometryPreviewFigureOptions::default()
+        },
+    )
+    .ok()?;
+    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
+    if let Some(topology) = render_topology {
+        if let Ok(solver) = render_topology_figure(topology, title, options) {
+            append_mesh_plots(&mut figure, &solver);
+        }
+    }
+    Some(figure)
 }
 
 fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSystem) {
@@ -2562,6 +2585,31 @@ mod tests {
     }
 
     #[test]
+    fn base_mesh_figure_can_force_cad_reference_with_solver_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "CAD reference result",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::CadReference,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("CAD reference source should layer CAD and solver topology");
+
+        let mesh_ids = figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+    }
+
+    #[test]
     fn auto_layered_result_scales_geometry_context_to_solver_meters() {
         let mut geometry =
             simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Millimeter);
@@ -2640,6 +2688,56 @@ mod tests {
             .as_deref()
             .is_some_and(|label| label.contains("boundary projection")));
         assert!(figures[0].warnings.is_empty());
+    }
+
+    #[test]
+    fn cad_reference_result_overlay_maps_fields_only_to_solver_mesh() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(2), Some(0), Some(1)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            mesh_source: AnalysisFigureMeshSource::CadReference,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
+
+        assert_eq!(figures.len(), 1);
+        let mesh_ids = figures[0]
+            .figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+
+        let cad_plot = figures[0]
+            .figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("cad_surface") => Some(mesh),
+                _ => None,
+            })
+            .expect("CAD context mesh should be present");
+        assert!(cad_plot.scalar_field().is_none());
+
+        let scalar = analysis_mesh_plot(&figures[0].figure)
+            .scalar_field()
+            .expect("scalar field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Triangle);
+        assert_eq!(scalar.values, vec![30.0, 10.0, 20.0]);
     }
 
     #[test]
