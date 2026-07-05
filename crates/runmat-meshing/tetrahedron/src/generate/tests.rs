@@ -172,15 +172,52 @@ fn rejects_nested_shell_plc_before_initial_tetrahedron_generation() {
 }
 
 #[test]
-fn rejects_nested_shell_plc_before_solver_tetrahedron_generation() {
+fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
+    let plc = nested_tetrahedron_shells_plc();
+    let mesh = generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(&plc)
+        .expect("nested tetrahedron shell PLC should generate a shell volume mesh");
+
+    assert_eq!(mesh.mesh_id, "nested_tetrahedron_shell_tetrahedron_mesh");
     assert_eq!(
-        generate_solver_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc()),
-        Err(TetrahedronGenerationError::UnsupportedNestedShellPlc {
-            outer_shell_count: 1,
-            nested_shell_count: 1,
-            max_nesting_depth: 1,
-        })
+        mesh.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
     );
+    assert_eq!(mesh.nodes.len(), plc.nodes.len());
+    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
+    assert!(mesh.elements.len() > plc.facets.len());
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_facets"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_inner_facets"],
+        4
+    );
+    assert_eq!(mesh.evidence.entity_counts["input_plc_nested_shells"], 1);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") > 0.0);
+    for element in &mesh.elements {
+        let points = element.node_ids.clone().map(|node_id| {
+            mesh.nodes
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .expect("node exists")
+                .coordinates_m
+        });
+        assert!(tetrahedron_signed_volume(points) > 0.0);
+    }
+}
+
+#[test]
+fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
+    let mesh = generate_solver_tetrahedron_mesh_from_plc(&nested_tetrahedron_shells_plc())
+        .expect("nested tetrahedron shell PLC should use nested-shell generation");
+
+    assert_eq!(mesh.mesh_id, "nested_tetrahedron_shell_tetrahedron_mesh");
+    assert_eq!(
+        mesh.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
+    );
+    assert_eq!(mesh.boundary_faces.len(), 8);
 }
 
 #[test]

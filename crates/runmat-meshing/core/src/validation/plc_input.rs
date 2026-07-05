@@ -22,7 +22,14 @@ pub(super) fn validate_plc_input_evidence(
     if mesh.backend.plc_input_boundary_component_count == 0 {
         return missing("missing_plc_boundary_components");
     }
-    if mesh.backend.plc_input_boundary_component_count != 1 {
+    if mesh.backend.plc_input_boundary_component_count
+        != mesh.backend.plc_input_outer_shell_count + mesh.backend.plc_input_nested_shell_count
+    {
+        return missing("inconsistent_plc_shell_component_count");
+    }
+    if mesh.backend.plc_input_boundary_component_count != 1
+        && mesh.backend.tetrahedron_generation_family != "nested_tetrahedron_shell"
+    {
         return missing("unsupported_plc_boundary_component_count");
     }
     if mesh.backend.plc_input_boundary_component_node_count == 0 {
@@ -37,8 +44,16 @@ pub(super) fn validate_plc_input_evidence(
     if mesh.backend.plc_input_outer_shell_count != 1 {
         return missing("unsupported_plc_outer_shell_count");
     }
-    if mesh.backend.plc_input_nested_shell_count > 0 {
+    if mesh.backend.plc_input_nested_shell_count > 0
+        && mesh.backend.tetrahedron_generation_family != "nested_tetrahedron_shell"
+    {
         return missing("unsupported_nested_plc_shell");
+    }
+    if mesh.backend.tetrahedron_generation_family == "nested_tetrahedron_shell"
+        && (mesh.backend.plc_input_nested_shell_count == 0
+            || mesh.backend.plc_input_max_shell_nesting_depth != 1)
+    {
+        return missing("inconsistent_nested_plc_shell_evidence");
     }
     if mesh.backend.tetrahedron_material_region_count == 0 {
         return missing("missing_tetrahedron_material_region_evidence");

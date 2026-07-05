@@ -31,6 +31,41 @@ fn accepts_solid_mesh_with_classified_plc_input_evidence() {
 }
 
 #[test]
+fn accepts_solid_mesh_with_nested_shell_generation_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_family = "nested_tetrahedron_shell".to_string();
+    mesh.backend.plc_input_node_count = 8;
+    mesh.backend.plc_input_facet_count = 8;
+    mesh.backend.plc_input_boundary_component_count = 2;
+    mesh.backend.plc_input_boundary_component_node_count = 8;
+    mesh.backend.plc_input_max_boundary_component_node_count = 4;
+    mesh.backend.plc_input_nested_shell_count = 1;
+    mesh.backend.plc_input_max_shell_nesting_depth = 1;
+
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("nested-shell generation evidence should satisfy solid validation");
+}
+
+#[test]
+fn rejects_nested_plc_shell_without_nested_generation_family() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_boundary_component_count = 2;
+    mesh.backend.plc_input_boundary_component_node_count = 8;
+    mesh.backend.plc_input_nested_shell_count = 1;
+    mesh.backend.plc_input_max_shell_nesting_depth = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("nested PLC evidence requires matching generation family");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "unsupported_plc_boundary_component_count".to_string(),
+        }
+    );
+}
+
+#[test]
 fn accepts_solid_mesh_with_consistent_plc_cad_curve_evidence() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     mesh.backend.plc_input_protected_edge_count = 3;

@@ -488,6 +488,30 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
 }
 
 #[test]
+fn auto_backend_generates_nested_tetrahedron_shell_solid() {
+    let mesh = generate_analysis_mesh(
+        &nested_tetrahedron_shell_geometry(),
+        VolumeMeshingOptions {
+            target_size: MeshTargetSize::LengthM(10.0),
+            ..VolumeMeshingOptions::default()
+        },
+    )
+    .expect("nested tetrahedron shell solid should run through the root solid pipeline");
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
+    );
+    assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
+    assert_eq!(mesh.backend.plc_input_nested_shell_count, 1);
+    assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 1);
+    assert_eq!(mesh.boundary_faces.len(), 8);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian > 0.0);
+}
+
+#[test]
 fn auto_backend_generates_star_shaped_dented_corner_solid() {
     let mesh = generate_analysis_mesh(
         &dented_corner_box_geometry(),
@@ -795,6 +819,67 @@ fn tetrahedron_geometry() -> GeometryAsset {
             "region_boundary",
             "tetrahedron_surface",
             4,
+        )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn nested_tetrahedron_shell_geometry() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo_root_meshing_nested_tetrahedron_shell".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/generic_nested_tetrahedron_shell.step".to_string(),
+            sha256: "generic-nested-tetrahedron-shell".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "nested_tetrahedron_shell_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 8,
+            element_count: 8,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "nested_tetrahedron_shell_surface",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.2, 0.2, 0.2],
+                [0.3, 0.2, 0.2],
+                [0.2, 0.3, 0.2],
+                [0.2, 0.2, 0.3],
+            ],
+            vec![
+                [0, 2, 1],
+                [0, 1, 3],
+                [1, 2, 3],
+                [2, 0, 3],
+                [4, 6, 5],
+                [4, 5, 7],
+                [5, 6, 7],
+                [6, 4, 7],
+            ],
+        )],
+        regions: vec![Region {
+            region_id: "region_boundary".to_string(),
+            name: "boundary".to_string(),
+            tag: Some("boundary".to_string()),
+            cad_ownership: None,
+        }],
+        region_entity_mappings: vec![RegionEntityMapping::all_faces(
+            "region_boundary",
+            "nested_tetrahedron_shell_surface",
+            8,
         )],
         diagnostics: Vec::new(),
     }

@@ -20,6 +20,8 @@ pub enum TetrahedronGenerationError {
         nested_shell_count: usize,
         max_nesting_depth: usize,
     },
+    UnsupportedNestedTetrahedronShellPlc,
+    DegenerateNestedTetrahedronShellPlc,
     DegenerateSingleTetrahedronPlc,
     UnsupportedConvexPolyhedronPlc,
     DegenerateConvexPolyhedronPlc,
@@ -71,6 +73,18 @@ impl std::fmt::Display for TetrahedronGenerationError {
                 formatter,
                 "validated PLC has unsupported shell nesting: {outer_shell_count} outer shells, {nested_shell_count} nested shells, max nesting depth {max_nesting_depth}"
             ),
+            Self::UnsupportedNestedTetrahedronShellPlc => {
+                write!(
+                    formatter,
+                    "validated PLC is not a supported nested Tetrahedron shell"
+                )
+            }
+            Self::DegenerateNestedTetrahedronShellPlc => {
+                write!(
+                    formatter,
+                    "validated nested Tetrahedron shell PLC would create degenerate Tetrahedron4 elements"
+                )
+            }
             Self::DegenerateSingleTetrahedronPlc => {
                 write!(formatter, "validated single Tetrahedron4 PLC is degenerate")
             }
