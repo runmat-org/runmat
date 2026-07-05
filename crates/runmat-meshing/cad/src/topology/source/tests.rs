@@ -58,6 +58,12 @@ fn preserves_semantic_cad_face_regions() {
         semantic_face.evaluator_reference_point_m,
         Some([0.5, 0.5, 0.0])
     );
+    assert_eq!(semantic_face.evaluator_id.as_deref(), Some("cad_face_1"));
+    assert!(semantic_face.evaluator_supports_point_evaluation);
+    assert!(semantic_face.evaluator_supports_projection);
+    assert!(semantic_face.evaluator_supports_normal);
+    assert!(semantic_face.evaluator_supports_derivatives);
+    assert!(semantic_face.evaluator_supports_curvature);
     assert_eq!(semantic_face.source_face_ids, vec![0, 1]);
     assert_eq!(semantic_face.source_edge_ids.len(), 5);
     assert_eq!(semantic_face.loop_ids.len(), 1);
@@ -195,6 +201,89 @@ fn rejects_cad_topology_report_count_mismatch() {
             field: "loop_count",
             expected: cad.loops.len(),
             actual: cad.report.loop_count,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_topology_imported_face_count_mismatch() {
+    let geometry = cube_geometry(true);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.report.imported_face_count += 1;
+
+    let err = validate_cad_topology_model(&cad).expect_err("stale imported count should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::ReportCountMismatch {
+            field: "imported_face_count",
+            expected: 1,
+            actual: 2,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_topology_evaluator_face_count_mismatch() {
+    let geometry = cube_geometry(true);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.report.evaluator_face_count = 0;
+
+    let err = validate_cad_topology_model(&cad).expect_err("stale evaluator count should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::ReportCountMismatch {
+            field: "evaluator_face_count",
+            expected: 1,
+            actual: 0,
+        }
+    );
+}
+
+#[test]
+fn rejects_evaluator_metadata_without_imported_face_handle() {
+    let geometry = cube_geometry(true);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let face = cad
+        .faces
+        .iter_mut()
+        .find(|face| face.evaluator_id.is_some())
+        .expect("evaluator-backed face should exist");
+    let face_id = face.entity_id.id.clone();
+    face.imported_face_id = None;
+
+    let err = validate_cad_topology_model(&cad).expect_err("missing imported handle should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::EvaluatorMetadataWithoutImportedFace { face_id }
+    );
+}
+
+#[test]
+fn rejects_evaluator_capability_without_evaluator_id() {
+    let geometry = cube_geometry(true);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let face = cad
+        .faces
+        .iter_mut()
+        .find(|face| face.evaluator_id.is_some())
+        .expect("evaluator-backed face should exist");
+    let face_id = face.entity_id.id.clone();
+    face.evaluator_id = None;
+
+    let err = validate_cad_topology_model(&cad).expect_err("missing evaluator id should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::EvaluatorCapabilityWithoutEvaluator {
+            face_id,
+            capability: "point_evaluation",
         }
     );
 }

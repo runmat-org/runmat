@@ -313,6 +313,7 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         }
     }
     for face in &model.faces {
+        validate_face_evaluator_metadata(face)?;
         for loop_id in &face.loop_ids {
             require_reference(
                 CadEntityKind::Face,
@@ -371,6 +372,32 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         model.report.volume_count,
     )?;
     validate_report_count(
+        "imported_face_count",
+        model
+            .faces
+            .iter()
+            .filter(|face| face.imported_face_id.is_some())
+            .count(),
+        model.report.imported_face_count,
+    )?;
+    validate_report_count(
+        "evaluator_face_count",
+        model
+            .faces
+            .iter()
+            .filter(|face| face_has_evaluator_metadata(face))
+            .count(),
+        model.report.evaluator_face_count,
+    )?;
+    validate_report_count(
+        "generic_face_count",
+        model
+            .faces
+            .len()
+            .saturating_sub(model.report.semantic_face_count),
+        model.report.generic_face_count,
+    )?;
+    validate_report_count(
         "hole_loop_count",
         model
             .loops
@@ -385,6 +412,39 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         model.report.closed_shell_count,
     )?;
     Ok(())
+}
+
+fn validate_face_evaluator_metadata(face: &CadFace) -> Result<(), CadTopologyError> {
+    if face_has_evaluator_metadata(face) && face.imported_face_id.is_none() {
+        return Err(CadTopologyError::EvaluatorMetadataWithoutImportedFace {
+            face_id: face.entity_id.id.clone(),
+        });
+    }
+    for (capability, supported) in [
+        ("point_evaluation", face.evaluator_supports_point_evaluation),
+        ("projection", face.evaluator_supports_projection),
+        ("normal", face.evaluator_supports_normal),
+        ("derivatives", face.evaluator_supports_derivatives),
+        ("curvature", face.evaluator_supports_curvature),
+    ] {
+        if supported && face.evaluator_id.is_none() {
+            return Err(CadTopologyError::EvaluatorCapabilityWithoutEvaluator {
+                face_id: face.entity_id.id.clone(),
+                capability,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn face_has_evaluator_metadata(face: &CadFace) -> bool {
+    face.evaluator_id.is_some()
+        || face.evaluator_supports_point_evaluation
+        || face.evaluator_supports_projection
+        || face.evaluator_supports_normal
+        || face.evaluator_supports_derivatives
+        || face.evaluator_supports_curvature
+        || !face.evaluator_samples.is_empty()
 }
 
 fn require_face_lists_loop(

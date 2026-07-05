@@ -159,6 +159,13 @@ pub enum CadTopologyError {
         face_id: String,
         loop_id: String,
     },
+    EvaluatorMetadataWithoutImportedFace {
+        face_id: String,
+    },
+    EvaluatorCapabilityWithoutEvaluator {
+        face_id: String,
+        capability: &'static str,
+    },
     ReportCountMismatch {
         field: &'static str,
         expected: usize,
@@ -201,6 +208,17 @@ impl std::fmt::Display for CadTopologyError {
             Self::MissingFaceLoopReference { face_id, loop_id } => write!(
                 formatter,
                 "CAD loop {loop_id} belongs to face {face_id} but the face does not list it"
+            ),
+            Self::EvaluatorMetadataWithoutImportedFace { face_id } => write!(
+                formatter,
+                "CAD face {face_id} carries evaluator metadata without an imported face handle"
+            ),
+            Self::EvaluatorCapabilityWithoutEvaluator {
+                face_id,
+                capability,
+            } => write!(
+                formatter,
+                "CAD face {face_id} declares evaluator capability {capability} without an evaluator id"
             ),
             Self::ReportCountMismatch {
                 field,
