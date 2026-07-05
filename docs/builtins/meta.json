@@ -84708,6 +84708,90 @@
       ]
     },
     {
+      "name": "statget",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "val = statget(options, field)",
+          "inputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            },
+            {
+              "name": "field",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Option field name or unique leading prefix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "val",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Option field value."
+            }
+          ]
+        },
+        {
+          "label": "val = statget(options, field, defaultData)",
+          "inputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            },
+            {
+              "name": "field",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Option field name or unique leading prefix."
+            },
+            {
+              "name": "defaultData",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Value returned when the selected option is empty."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "val",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Option field value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STATGET.INVALID_ARGUMENT",
+          "identifier": "RunMat:statget:InvalidArgument",
+          "when": "Argument grammar does not match statget forms.",
+          "message": "statget: invalid argument"
+        },
+        {
+          "code": "RM.STATGET.INVALID_OPTION",
+          "identifier": "RunMat:statget:InvalidOption",
+          "when": "The options argument is not a struct or the field argument is not text.",
+          "message": "statget: invalid option"
+        }
+      ]
+    },
+    {
       "name": "stats",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -84752,6 +84836,158 @@
           "identifier": "RunMat:memoize:GcFailure",
           "when": "The memoized object target cannot be allocated or accessed.",
           "message": "memoize: internal object storage failed"
+        }
+      ]
+    },
+    {
+      "name": "statset",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "options = statset()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            }
+          ]
+        },
+        {
+          "label": "options = statset(statfun)",
+          "inputs": [
+            {
+              "name": "statfun",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics function name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            }
+          ]
+        },
+        {
+          "label": "options = statset(name, value, ...)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Option field name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value and additional name-value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            }
+          ]
+        },
+        {
+          "label": "options = statset(oldopts, newopts)",
+          "inputs": [
+            {
+              "name": "oldopts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing statistics options structure."
+            },
+            {
+              "name": "newopts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Replacement statistics options structure. Nonempty fields override oldopts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            }
+          ]
+        },
+        {
+          "label": "options = statset(oldopts, name, value, ...)",
+          "inputs": [
+            {
+              "name": "oldopts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing statistics options structure."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Option field name or replacement options structure."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value and additional name-value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Statistics options structure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STATSET.INVALID_ARGUMENT",
+          "identifier": "RunMat:statset:InvalidArgument",
+          "when": "Argument grammar does not match supported statset forms.",
+          "message": "statset: invalid argument"
+        },
+        {
+          "code": "RM.STATSET.INVALID_OPTION",
+          "identifier": "RunMat:statset:InvalidOption",
+          "when": "An option name or value is malformed.",
+          "message": "statset: invalid option"
+        },
+        {
+          "code": "RM.STATSET.INVALID_STATFUN",
+          "identifier": "RunMat:statset:InvalidStatfun",
+          "when": "The statfun argument is not a supported statistics function name.",
+          "message": "statset: invalid statistics function"
         }
       ]
     },

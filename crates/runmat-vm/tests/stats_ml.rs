@@ -125,6 +125,32 @@ fn tsne_surface_executes_from_scripts() {
 }
 
 #[test]
+fn statset_and_statget_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "opts = statset('nbinfit'); opts = statset(opts, 'TolX', 1e-8, 'UseParallel', 'off'); tx = statget(opts, 'TolX'); mi = statget(opts, 'MaxIter'); tf = statget(opts, 'TolFun', 7); up = statget(opts, 'UseParallel'); missing = statget(opts, 'OutputFcn', 42);",
+    )
+    .expect("statset/statget script");
+    assert!(has_num(&vars, 1.0e-8));
+    assert!(has_num(&vars, 200.0));
+    assert!(has_num(&vars, 1.0e-6));
+    assert!(has_num(&vars, 42.0));
+    assert!(has_bool(&vars, false));
+}
+
+#[test]
+fn statset_options_feed_named_stats_builtins() {
+    let vars = execute_source(
+        "X = [0 0; 0.2 0.1; 9.8 9.9; 10 10.1]; kopts = statset('kmeans'); [idx,C] = kmeans(X, 2, 'Start', [0 0; 10 10], 'Options', kopts); rng('default'); topts = statset('tsne'); Y = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'Options', topts); ks = size(C); ts = size(Y); krows = ks(1); kcols = ks(2); trows = ts(1); tcols = ts(2);",
+    )
+    .expect("statset options should feed supported stats builtins");
+    assert!(has_tensor_shape(&vars, &[4, 1]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_tensor_shape(&vars, &[4, 2]));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 4.0));
+}
+
+#[test]
 fn classify_surface_executes_from_scripts() {
     let vars = execute_source(
         "training = [0; 0.5; 2; 2.5]; group = [1; 1; 2; 2]; [class,err,posterior,logp,coeff] = classify([0.2; 2.2], training, group, 'linear', 'empirical'); c1 = class(1); c2 = class(2); p11 = posterior(1,1); k = coeff(1,2).const;",

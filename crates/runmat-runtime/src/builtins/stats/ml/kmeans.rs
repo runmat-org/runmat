@@ -426,6 +426,9 @@ fn is_empty_numeric(value: &Value) -> bool {
 
 fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinResult<()> {
     for (name, field) in &value.fields {
+        if is_empty_option_value(field) {
+            continue;
+        }
         match name.to_ascii_lowercase().as_str() {
             "maxiter" => options.max_iter = parse_positive_usize(field, "Options.MaxIter")?,
             "display" => {
@@ -469,6 +472,17 @@ fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinRe
         }
     }
     Ok(())
+}
+
+fn is_empty_option_value(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::LogicalArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(array) => array.data.is_empty(),
+        Value::CharArray(array) => array.data.is_empty(),
+        _ => false,
+    }
 }
 
 fn bool_option(value: &Value) -> BuiltinResult<bool> {

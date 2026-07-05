@@ -358,12 +358,26 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
         return Err(invalid("tsne: Options must be a struct"));
     };
     for (name, field) in &fields.fields {
+        if is_empty_option_value(field) {
+            continue;
+        }
         match name.to_ascii_lowercase().as_str() {
             "maxiter" => {
                 options.max_iter =
                     bounded_positive_integer(field, "Options.MaxIter", MAX_ITERATIONS)?
             }
             "tolfun" => options.tol_fun = positive_scalar(field, "Options.TolFun")?,
+            "display" => {
+                let display = text_scalar(field, "Options.Display")?;
+                match display.to_ascii_lowercase().as_str() {
+                    "off" | "final" | "iter" => {}
+                    other => {
+                        return Err(invalid(format!(
+                            "tsne: unsupported Options.Display '{other}'"
+                        )))
+                    }
+                }
+            }
             "outputfcn" => {
                 if !is_empty_numeric(field) {
                     return Err(invalid(
@@ -379,6 +393,17 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
         }
     }
     Ok(())
+}
+
+fn is_empty_option_value(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::LogicalArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(array) => array.data.is_empty(),
+        Value::CharArray(array) => array.data.is_empty(),
+        _ => false,
+    }
 }
 
 fn compute_tsne(x: Tensor, options: Options) -> BuiltinResult<EmbeddingResult> {
