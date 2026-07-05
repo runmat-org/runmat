@@ -31,6 +31,116 @@ fn accepts_solid_mesh_with_classified_plc_input_evidence() {
 }
 
 #[test]
+fn accepts_solid_mesh_with_consistent_plc_cad_curve_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_protected_edge_count = 3;
+    mesh.backend.plc_input_cad_curve_boundary_source_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 3;
+    mesh.backend.plc_input_cad_curve_imported_edge_count = 1;
+    mesh.backend.plc_input_cad_curve_evaluator_edge_count = 1;
+    mesh.backend.plc_input_cad_curve_evaluator_sample_count = 4;
+    mesh.backend.plc_input_cad_curve_live_query_edge_count = 1;
+    mesh.backend.plc_input_cad_curve_live_query_sample_count = 2;
+    mesh.backend
+        .plc_input_cad_curve_rejected_evaluator_sample_count = 1;
+    mesh.backend.plc_input_cad_curve_curvature_sized_edge_count = 1;
+    mesh.backend.plc_input_cad_curve_curvature_sample_count = 2;
+
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("consistent CAD curve PLC input evidence should satisfy validation");
+}
+
+#[test]
+fn rejects_plc_cad_curve_evidence_without_source_edge_count() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("CAD curve PLC evidence must identify source edges");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_plc_cad_curve_boundary_source_edges".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_plc_cad_curve_source_edges_exceeding_protected_edges() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_protected_edge_count = 1;
+    mesh.backend.plc_input_cad_curve_boundary_source_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("CAD curve source edges must be bounded by protected PLC edges");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_plc_cad_curve_source_edge_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_plc_cad_curve_boundary_segments_below_source_edges() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_protected_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_source_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("each CAD curve source edge must contribute a boundary segment");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_plc_cad_curve_boundary_segment_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_plc_cad_curve_live_query_edges_without_evaluator_edges() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_protected_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_source_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 2;
+    mesh.backend.plc_input_cad_curve_live_query_edge_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("live CAD curve queries must be backed by evaluator edges");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_plc_cad_curve_live_query_edge_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_plc_cad_curve_samples_without_imported_or_evaluator_edges() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.plc_input_protected_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_source_edge_count = 2;
+    mesh.backend.plc_input_cad_curve_boundary_segment_count = 2;
+    mesh.backend.plc_input_cad_curve_evaluator_sample_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("CAD curve samples must be backed by imported or evaluator edges");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_plc_cad_curve_sample_edge_evidence".to_string(),
+        }
+    );
+}
+
+#[test]
 fn rejects_solid_mesh_with_unclassified_plc_shell_evidence() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     mesh.backend.plc_input_shell_nesting_classified = false;

@@ -56,6 +56,72 @@ pub(super) fn validate_plc_input_evidence(
     {
         return missing("missing_plc_material_region_facet_evidence");
     }
+    validate_plc_input_cad_curve_evidence(mesh)?;
+    Ok(())
+}
+
+fn validate_plc_input_cad_curve_evidence(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let backend = &mesh.backend;
+    let source_edge_count = backend.plc_input_cad_curve_boundary_source_edge_count;
+    let boundary_segment_count = backend.plc_input_cad_curve_boundary_segment_count;
+    let imported_edge_count = backend.plc_input_cad_curve_imported_edge_count;
+    let evaluator_edge_count = backend.plc_input_cad_curve_evaluator_edge_count;
+    let evaluator_sample_count = backend.plc_input_cad_curve_evaluator_sample_count;
+    let live_query_edge_count = backend.plc_input_cad_curve_live_query_edge_count;
+    let live_query_sample_count = backend.plc_input_cad_curve_live_query_sample_count;
+    let rejected_sample_count = backend.plc_input_cad_curve_rejected_evaluator_sample_count;
+    let curvature_sized_edge_count = backend.plc_input_cad_curve_curvature_sized_edge_count;
+    let curvature_sample_count = backend.plc_input_cad_curve_curvature_sample_count;
+
+    if source_edge_count == 0 {
+        let any_cad_curve_evidence = boundary_segment_count
+            + imported_edge_count
+            + evaluator_edge_count
+            + evaluator_sample_count
+            + live_query_edge_count
+            + live_query_sample_count
+            + rejected_sample_count
+            + curvature_sized_edge_count
+            + curvature_sample_count;
+        if any_cad_curve_evidence > 0 {
+            return missing("missing_plc_cad_curve_boundary_source_edges");
+        }
+        return Ok(());
+    }
+
+    if source_edge_count > backend.plc_input_protected_edge_count {
+        return missing("inconsistent_plc_cad_curve_source_edge_count");
+    }
+    if boundary_segment_count < source_edge_count {
+        return missing("inconsistent_plc_cad_curve_boundary_segment_count");
+    }
+    if imported_edge_count > source_edge_count {
+        return missing("inconsistent_plc_cad_curve_imported_edge_count");
+    }
+    if evaluator_edge_count > source_edge_count {
+        return missing("inconsistent_plc_cad_curve_evaluator_edge_count");
+    }
+    if live_query_edge_count > evaluator_edge_count {
+        return missing("inconsistent_plc_cad_curve_live_query_edge_count");
+    }
+    if curvature_sized_edge_count > source_edge_count {
+        return missing("inconsistent_plc_cad_curve_curvature_sized_edge_count");
+    }
+    if evaluator_sample_count > 0 && imported_edge_count + evaluator_edge_count == 0 {
+        return missing("missing_plc_cad_curve_sample_edge_evidence");
+    }
+    if live_query_sample_count > 0 && live_query_edge_count == 0 {
+        return missing("missing_plc_cad_curve_live_query_edge_evidence");
+    }
+    if rejected_sample_count > 0 && imported_edge_count + evaluator_edge_count == 0 {
+        return missing("missing_plc_cad_curve_rejected_sample_edge_evidence");
+    }
+    if curvature_sample_count > 0 && source_edge_count == 0 {
+        return missing("missing_plc_cad_curve_curvature_source_edge_evidence");
+    }
+
     Ok(())
 }
 
