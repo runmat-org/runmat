@@ -123,13 +123,15 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         surface_discretization_options(),
     )
     .map_err(SolidMeshingError::Surface)?;
-    validate_cad_topology_surface_discretization(
+    let surface_validation = validate_cad_topology_surface_discretization(
         &cad_topology,
         &topology,
         &surface,
         SurfaceValidationOptions::default(),
     )
     .map_err(SolidMeshingError::SurfaceValidation)?;
+    let _surface_mesh_contract =
+        crate::build_surface_mesh_contract("solid_surface_mesh", &surface, &surface_validation);
     let plc = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;

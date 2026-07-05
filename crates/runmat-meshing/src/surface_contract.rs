@@ -1,0 +1,240 @@
+use runmat_meshing_core::{
+    MeshingStage, StageEvidence, SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle,
+    TopologyEntityId,
+};
+use runmat_meshing_surface::{
+    SurfaceDiscretization, SurfaceValidationReport, INTERNAL_SOURCE_EDGE_ID,
+};
+
+pub fn build_surface_mesh_contract(
+    mesh_id: impl Into<String>,
+    surface: &SurfaceDiscretization,
+    validation: &SurfaceValidationReport,
+) -> SurfaceMesh {
+    let node_provenance = surface_node_provenance(surface);
+    let mut evidence = StageEvidence::complete(MeshingStage::SurfaceMesh);
+    evidence
+        .entity_counts
+        .insert("source_faces".to_string(), validation.source_face_count);
+    evidence
+        .entity_counts
+        .insert("nodes".to_string(), surface.nodes.len());
+    evidence
+        .entity_counts
+        .insert("triangles".to_string(), validation.surface_element_count);
+    evidence.entity_counts.insert(
+        "source_edge_loops".to_string(),
+        validation.source_edge_loop_count,
+    );
+    evidence.entity_counts.insert(
+        "closed_source_edge_loops".to_string(),
+        validation.closed_source_edge_loop_count,
+    );
+    evidence.entity_counts.insert(
+        "conforming_source_edges".to_string(),
+        validation.conforming_source_edge_count,
+    );
+    evidence.entity_counts.insert(
+        "missing_source_edges".to_string(),
+        validation.missing_source_edge_count,
+    );
+    evidence.entity_counts.insert(
+        "material_regions".to_string(),
+        surface
+            .elements
+            .iter()
+            .flat_map(|element| element.material_region_ids.iter())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+    );
+    evidence.max_projection_error_m = Some(validation.max_projection_error_m);
+
+    SurfaceMesh {
+        mesh_id: mesh_id.into(),
+        nodes: surface
+            .nodes
+            .iter()
+            .map(|node| SurfaceMeshNode {
+                node_id: surface_entity_id(node.node_id),
+                coordinates_m: node.coordinates_m,
+                source_edge_id: node_provenance
+                    .get(&node.node_id)
+                    .and_then(|provenance| provenance.source_edge_id.map(curve_entity_id)),
+                source_face_id: surface_entity_id(
+                    node_provenance
+                        .get(&node.node_id)
+                        .map(|provenance| provenance.source_face_id)
+                        .unwrap_or_default(),
+                ),
+            })
+            .collect(),
+        triangles: surface
+            .elements
+            .iter()
+            .map(|element| SurfaceMeshTriangle {
+                triangle_id: surface_entity_id(element.element_id),
+                source_face_id: surface_entity_id(element.source_face_id),
+                source_edge_ids: element
+                    .source_edge_ids
+                    .iter()
+                    .copied()
+                    .filter(|source_edge_id| *source_edge_id != INTERNAL_SOURCE_EDGE_ID)
+                    .map(curve_entity_id)
+                    .collect(),
+                node_ids: [
+                    surface_entity_id(element.node_ids[0]),
+                    surface_entity_id(element.node_ids[1]),
+                    surface_entity_id(element.node_ids[2]),
+                ],
+                region_ids: element.region_ids.clone(),
+                material_region_ids: element.material_region_ids.clone(),
+                area_m2: element.area_m2,
+            })
+            .collect(),
+        evidence,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SurfaceNodeProvenance {
+    source_face_id: u32,
+    source_edge_id: Option<u32>,
+}
+
+fn surface_node_provenance(
+    surface: &SurfaceDiscretization,
+) -> std::collections::BTreeMap<u32, SurfaceNodeProvenance> {
+    let mut provenance = std::collections::BTreeMap::<u32, SurfaceNodeProvenance>::new();
+    for element in &surface.elements {
+        for node_id in element.node_ids {
+            provenance.entry(node_id).or_insert(SurfaceNodeProvenance {
+                source_face_id: element.source_face_id,
+                source_edge_id: None,
+            });
+        }
+        for (edge_index, source_edge_id) in element.source_edge_ids.into_iter().enumerate() {
+            if source_edge_id == INTERNAL_SOURCE_EDGE_ID {
+                continue;
+            }
+            let left = element.node_ids[edge_index];
+            let right = element.node_ids[(edge_index + 1) % element.node_ids.len()];
+            for node_id in [left, right] {
+                let entry = provenance.entry(node_id).or_insert(SurfaceNodeProvenance {
+                    source_face_id: element.source_face_id,
+                    source_edge_id: None,
+                });
+                if entry.source_edge_id.is_none() {
+                    entry.source_edge_id = Some(source_edge_id);
+                }
+            }
+        }
+    }
+    provenance
+}
+
+fn surface_entity_id(id: impl ToString) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::SurfaceMesh,
+        id: id.to_string(),
+    }
+}
+
+fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::CurveMesh,
+        id: id.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_meshing_core::{MeshingStage, StageEvidenceStatus};
+    use runmat_meshing_surface::{
+        SurfaceDiscretization, SurfaceElement, SurfaceNode, SurfaceValidationReport,
+        INTERNAL_SOURCE_EDGE_ID,
+    };
+
+    use super::build_surface_mesh_contract;
+
+    #[test]
+    fn surface_contract_preserves_source_and_material_regions() {
+        let surface = SurfaceDiscretization {
+            nodes: vec![
+                node(0, [0.0, 0.0, 0.0]),
+                node(1, [1.0, 0.0, 0.0]),
+                node(2, [0.0, 1.0, 0.0]),
+            ],
+            elements: vec![SurfaceElement {
+                element_id: 7,
+                source_face_id: 3,
+                cad_face_id: Some("cad_face_3".to_string()),
+                source_edge_ids: [11, INTERNAL_SOURCE_EDGE_ID, 12],
+                node_ids: [0, 1, 2],
+                parametric_node_uv: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                max_projection_error_m: 2.0e-10,
+                region_ids: vec!["fixed_face".to_string(), "load_face".to_string()],
+                material_region_ids: vec!["body".to_string()],
+                area_m2: 0.5,
+                unit_normal: [0.0, 0.0, 1.0],
+            }],
+            curve_boundary_validation: None,
+            loop_coverage: None,
+            cad_curve_boundary_provenance: None,
+            exact_cad_sample_node_count: 0,
+            rejected_exact_cad_sample_count: 0,
+        };
+        let validation = SurfaceValidationReport {
+            source_face_count: 1,
+            surface_element_count: 1,
+            source_edge_loop_count: 1,
+            closed_source_edge_loop_count: 1,
+            conforming_source_edge_count: 2,
+            missing_source_edge_count: 0,
+            max_projection_error_m: 2.0e-10,
+            min_orientation_alignment: 1.0,
+            face_coverage_ratio: 1.0,
+        };
+
+        let contract = build_surface_mesh_contract("surface", &surface, &validation);
+
+        assert_eq!(contract.mesh_id, "surface");
+        assert_eq!(contract.evidence.stage, MeshingStage::SurfaceMesh);
+        assert_eq!(contract.evidence.status, StageEvidenceStatus::Complete);
+        assert_eq!(contract.evidence.entity_counts["source_faces"], 1);
+        assert_eq!(contract.evidence.entity_counts["nodes"], 3);
+        assert_eq!(contract.evidence.entity_counts["triangles"], 1);
+        assert_eq!(contract.evidence.entity_counts["material_regions"], 1);
+        assert_eq!(contract.evidence.max_projection_error_m, Some(2.0e-10));
+        assert!(contract
+            .nodes
+            .iter()
+            .all(|node| node.node_id.stage == MeshingStage::SurfaceMesh));
+        let triangle = &contract.triangles[0];
+        assert_eq!(triangle.triangle_id.stage, MeshingStage::SurfaceMesh);
+        assert_eq!(triangle.source_face_id.stage, MeshingStage::SurfaceMesh);
+        assert_eq!(
+            triangle
+                .source_edge_ids
+                .iter()
+                .map(|source_edge_id| (source_edge_id.stage, source_edge_id.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (MeshingStage::CurveMesh, "11"),
+                (MeshingStage::CurveMesh, "12")
+            ]
+        );
+        assert_eq!(
+            triangle.region_ids,
+            vec!["fixed_face".to_string(), "load_face".to_string()]
+        );
+        assert_eq!(triangle.material_region_ids, vec!["body".to_string()]);
+    }
+
+    fn node(node_id: u32, coordinates_m: [f64; 3]) -> SurfaceNode {
+        SurfaceNode {
+            node_id,
+            source_vertex_id: node_id,
+            coordinates_m,
+        }
+    }
+}

@@ -30,5 +30,7 @@ pub struct SurfaceMeshTriangle {
     pub node_ids: [TopologyEntityId; 3],
     #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
     pub area_m2: f64,
 }
