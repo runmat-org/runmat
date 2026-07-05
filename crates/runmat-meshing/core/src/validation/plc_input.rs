@@ -55,6 +55,7 @@ pub(super) fn validate_plc_input_evidence(
     {
         return missing("inconsistent_nested_plc_shell_evidence");
     }
+    validate_tetrahedron_generation_selection_evidence(mesh)?;
     if mesh.backend.tetrahedron_material_region_count == 0 {
         return missing("missing_tetrahedron_material_region_evidence");
     }
@@ -72,6 +73,34 @@ pub(super) fn validate_plc_input_evidence(
         return missing("missing_plc_material_region_facet_evidence");
     }
     validate_plc_input_cad_curve_evidence(mesh)?;
+    Ok(())
+}
+
+fn validate_tetrahedron_generation_selection_evidence(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let backend = &mesh.backend;
+    if backend.tetrahedron_generation_family == "unknown" {
+        return missing("missing_tetrahedron_generation_family");
+    }
+    if backend.tetrahedron_generation_attempted_family_count == 0 {
+        return missing("missing_tetrahedron_generation_family_attempts");
+    }
+    if backend.tetrahedron_generation_selected_family_index == 0 {
+        return missing("missing_tetrahedron_generation_selected_family");
+    }
+    if backend.tetrahedron_generation_selected_family_index
+        > backend.tetrahedron_generation_attempted_family_count
+    {
+        return missing("inconsistent_tetrahedron_generation_selected_family_index");
+    }
+    if backend
+        .tetrahedron_generation_rejected_family_count
+        .checked_add(1)
+        != Some(backend.tetrahedron_generation_attempted_family_count)
+    {
+        return missing("inconsistent_tetrahedron_generation_rejected_family_count");
+    }
     Ok(())
 }
 

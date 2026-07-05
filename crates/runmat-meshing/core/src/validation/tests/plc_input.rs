@@ -47,6 +47,90 @@ fn accepts_solid_mesh_with_nested_shell_generation_evidence() {
 }
 
 #[test]
+fn rejects_solid_mesh_without_tetrahedron_generation_family() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_family = "unknown".to_string();
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("solid Tetrahedron artifacts must identify the selected generation family");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_tetrahedron_generation_family".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_solid_mesh_without_tetrahedron_generation_attempts() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_attempted_family_count = 0;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("solid Tetrahedron artifacts must report attempted generation families");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_tetrahedron_generation_family_attempts".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_solid_mesh_without_selected_tetrahedron_generation_family_index() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_selected_family_index = 0;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("solid Tetrahedron artifacts must report the selected generation family index");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "missing_tetrahedron_generation_selected_family".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_selected_tetrahedron_generation_family_index_beyond_attempts() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_attempted_family_count = 2;
+    mesh.backend.tetrahedron_generation_rejected_family_count = 1;
+    mesh.backend.tetrahedron_generation_selected_family_index = 3;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("selected generation family index must be bounded by attempted families");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_tetrahedron_generation_selected_family_index".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_tetrahedron_generation_rejected_family_count_mismatch() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend.tetrahedron_generation_attempted_family_count = 3;
+    mesh.backend.tetrahedron_generation_rejected_family_count = 1;
+    mesh.backend.tetrahedron_generation_selected_family_index = 2;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("attempted generation families must reconcile with one selected family");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_tetrahedron_generation_rejected_family_count".to_string(),
+        }
+    );
+}
+
+#[test]
 fn rejects_nested_plc_shell_without_nested_generation_family() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     mesh.backend.plc_input_boundary_component_count = 2;
