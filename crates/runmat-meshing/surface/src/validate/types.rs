@@ -74,6 +74,9 @@ pub enum SurfaceValidationError {
     InvalidElementNormal {
         element_id: u32,
     },
+    InvalidElementArea {
+        element_id: u32,
+    },
     ProjectionError {
         element_id: u32,
         error_m: f64,
@@ -158,6 +161,10 @@ impl std::fmt::Display for SurfaceValidationError {
             Self::InvalidElementNormal { element_id } => write!(
                 formatter,
                 "surface element {element_id} has invalid unit-normal evidence"
+            ),
+            Self::InvalidElementArea { element_id } => write!(
+                formatter,
+                "surface element {element_id} has invalid area evidence"
             ),
             Self::ProjectionError {
                 element_id,

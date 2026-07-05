@@ -162,6 +162,38 @@ fn rejects_non_unit_cad_surface_element_normal_evidence() {
 }
 
 #[test]
+fn rejects_non_finite_surface_element_area_evidence() {
+    let topology = cube_topology();
+    let mut surface =
+        discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
+            .expect("surface should discretize");
+    surface.elements[0].area_m2 = f64::NAN;
+
+    assert_eq!(
+        validate_surface_discretization(&topology, &surface, SurfaceValidationOptions::default()),
+        Err(SurfaceValidationError::InvalidElementArea { element_id: 0 })
+    );
+}
+
+#[test]
+fn rejects_non_positive_cad_surface_element_area_evidence() {
+    let topology = square_split_by_display_diagonal_topology();
+    let cad_topology = square_cad_topology(&topology);
+    let mut surface = square_cad_surface(false);
+    surface.elements[0].area_m2 = 0.0;
+
+    assert_eq!(
+        validate_cad_topology_surface_discretization(
+            &cad_topology,
+            &topology,
+            &surface,
+            SurfaceValidationOptions::default(),
+        ),
+        Err(SurfaceValidationError::InvalidElementArea { element_id: 0 })
+    );
+}
+
+#[test]
 fn edge_conformity_failure_reports_recovered_segment_count() {
     let topology = cube_topology();
     let mut surface =
