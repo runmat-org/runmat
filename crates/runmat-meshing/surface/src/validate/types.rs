@@ -71,6 +71,9 @@ pub enum SurfaceValidationError {
     DegenerateElement {
         element_id: u32,
     },
+    InvalidElementNormal {
+        element_id: u32,
+    },
     ProjectionError {
         element_id: u32,
         error_m: f64,
@@ -152,6 +155,10 @@ impl std::fmt::Display for SurfaceValidationError {
             Self::DegenerateElement { element_id } => {
                 write!(formatter, "surface element {element_id} is degenerate")
             }
+            Self::InvalidElementNormal { element_id } => write!(
+                formatter,
+                "surface element {element_id} has invalid unit-normal evidence"
+            ),
             Self::ProjectionError {
                 element_id,
                 error_m,

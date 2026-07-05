@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    math::{dot, point_triangle_distance, triangle_area, MeshingTolerance},
-    SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID,
+    math::{dot, norm, point_triangle_distance, triangle_area, MeshingTolerance},
+    SurfaceDiscretization, SurfaceElement, INTERNAL_SOURCE_EDGE_ID,
 };
 use runmat_meshing_cad::{CadFace, CadTopologyModel, SourceTopologyEdge, SourceTopologyModel};
 
@@ -72,7 +72,8 @@ pub fn validate_surface_discretization(
             unit_normal(points).ok_or(SurfaceValidationError::DegenerateElement {
                 element_id: element.element_id,
             })?;
-        let alignment = dot(surface_normal, element.unit_normal);
+        let element_normal = validate_element_unit_normal(element)?;
+        let alignment = dot(surface_normal, element_normal);
         min_orientation_alignment = min_orientation_alignment.min(alignment);
         if alignment < options.min_orientation_alignment {
             return Err(SurfaceValidationError::OrientationMismatch {
@@ -229,7 +230,8 @@ pub fn validate_cad_topology_surface_discretization(
             unit_normal(points).ok_or(SurfaceValidationError::DegenerateElement {
                 element_id: element.element_id,
             })?;
-        let alignment = dot(surface_normal, element.unit_normal);
+        let element_normal = validate_element_unit_normal(element)?;
+        let alignment = dot(surface_normal, element_normal);
         min_orientation_alignment = min_orientation_alignment.min(alignment);
         if alignment < options.min_orientation_alignment {
             return Err(SurfaceValidationError::OrientationMismatch {
@@ -363,4 +365,25 @@ fn validate_options(options: SurfaceValidationOptions) -> Result<(), SurfaceVali
         return Err(SurfaceValidationError::InvalidOptions);
     }
     Ok(())
+}
+
+fn validate_element_unit_normal(
+    element: &SurfaceElement,
+) -> Result<[f64; 3], SurfaceValidationError> {
+    if !element
+        .unit_normal
+        .iter()
+        .all(|component| component.is_finite())
+    {
+        return Err(SurfaceValidationError::InvalidElementNormal {
+            element_id: element.element_id,
+        });
+    }
+    let normal_length = norm(element.unit_normal);
+    if (normal_length - 1.0).abs() > 1.0e-8 {
+        return Err(SurfaceValidationError::InvalidElementNormal {
+            element_id: element.element_id,
+        });
+    }
+    Ok(element.unit_normal)
 }

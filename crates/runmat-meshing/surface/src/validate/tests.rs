@@ -130,6 +130,38 @@ fn orientation_mismatch_reports_source_face() {
 }
 
 #[test]
+fn rejects_non_finite_surface_element_normal_evidence() {
+    let topology = cube_topology();
+    let mut surface =
+        discretize_topology_surfaces(&topology, SurfaceDiscretizationOptions::default())
+            .expect("surface should discretize");
+    surface.elements[0].unit_normal = [f64::NAN, 0.0, 1.0];
+
+    assert_eq!(
+        validate_surface_discretization(&topology, &surface, SurfaceValidationOptions::default()),
+        Err(SurfaceValidationError::InvalidElementNormal { element_id: 0 })
+    );
+}
+
+#[test]
+fn rejects_non_unit_cad_surface_element_normal_evidence() {
+    let topology = square_split_by_display_diagonal_topology();
+    let cad_topology = square_cad_topology(&topology);
+    let mut surface = square_cad_surface(false);
+    surface.elements[0].unit_normal = [0.0, 0.0, 2.0];
+
+    assert_eq!(
+        validate_cad_topology_surface_discretization(
+            &cad_topology,
+            &topology,
+            &surface,
+            SurfaceValidationOptions::default(),
+        ),
+        Err(SurfaceValidationError::InvalidElementNormal { element_id: 0 })
+    );
+}
+
+#[test]
 fn edge_conformity_failure_reports_recovered_segment_count() {
     let topology = cube_topology();
     let mut surface =
