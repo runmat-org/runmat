@@ -379,6 +379,22 @@ fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
         mesh.tetrahedron_generation_family,
         "nested_tetrahedron_shell"
     );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_attempted_families"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_rejected_families"],
+        0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_family_index"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_nested_tetrahedron_shell"],
+        1
+    );
     assert_eq!(mesh.boundary_faces.len(), 404);
     assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
 }
@@ -623,10 +639,48 @@ fn solver_generation_supports_box_and_single_tetrahedron_plcs() {
 
     assert_eq!(box_mesh.elements.len(), 6);
     assert_eq!(box_mesh.tetrahedron_generation_family, "structured_box");
+    assert_eq!(
+        box_mesh.evidence.entity_counts["solver_generation_attempted_families"],
+        2
+    );
+    assert_eq!(
+        box_mesh.evidence.entity_counts["solver_generation_rejected_families"],
+        1
+    );
+    assert_eq!(
+        box_mesh.evidence.entity_counts["solver_generation_selected_family_index"],
+        2
+    );
+    assert_eq!(
+        box_mesh
+            .evidence
+            .entity_counts["solver_generation_rejected_nested_tetrahedron_shell_unsupported_nested_tetrahedron_shell_plc"],
+        1
+    );
+    assert_eq!(
+        box_mesh.evidence.entity_counts["solver_generation_selected_structured_box"],
+        1
+    );
     assert_eq!(tetrahedron_mesh.elements.len(), 1);
     assert_eq!(
         tetrahedron_mesh.tetrahedron_generation_family,
         "single_tetrahedron"
+    );
+    assert_eq!(
+        tetrahedron_mesh.evidence.entity_counts["solver_generation_attempted_families"],
+        3
+    );
+    assert_eq!(
+        tetrahedron_mesh.evidence.entity_counts["solver_generation_rejected_families"],
+        2
+    );
+    assert_eq!(
+        tetrahedron_mesh.evidence.entity_counts["solver_generation_selected_family_index"],
+        3
+    );
+    assert_eq!(
+        tetrahedron_mesh.evidence.entity_counts["solver_generation_selected_single_tetrahedron"],
+        1
     );
 }
 
@@ -692,6 +746,22 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
     assert_eq!(mesh.mesh_id, "convex_polyhedron_tetrahedron_mesh");
     assert_eq!(mesh.tetrahedron_generation_family, "convex_polyhedron");
     assert_eq!(mesh.elements.len(), 8);
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_attempted_families"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_rejected_families"],
+        3
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_family_index"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_convex_polyhedron"],
+        1
+    );
 }
 
 #[test]
@@ -802,6 +872,27 @@ fn solver_generation_supports_star_shaped_polyhedron_plcs() {
     assert_eq!(mesh.mesh_id, "star_shaped_polyhedron_tetrahedron_mesh");
     assert_eq!(mesh.tetrahedron_generation_family, "star_shaped_polyhedron");
     assert_eq!(mesh.elements.len(), 12);
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_attempted_families"],
+        5
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_rejected_families"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_family_index"],
+        5
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_star_shaped_polyhedron"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["solver_generation_rejected_convex_polyhedron_unsupported_convex_polyhedron_plc"],
+        1
+    );
 }
 
 #[test]
