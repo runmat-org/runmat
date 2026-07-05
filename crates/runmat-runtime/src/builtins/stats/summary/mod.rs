@@ -15,6 +15,7 @@ pub(crate) mod mode;
 pub(crate) mod normalize;
 pub(crate) mod order_stats;
 pub(crate) mod outliers;
+pub(crate) mod qqplot;
 pub(crate) mod refline;
 
 pub use corrcoef::corrcoef_from_tensors;

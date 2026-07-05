@@ -24,6 +24,11 @@ fn has_bool(vars: &[Value], expected: bool) -> bool {
         .any(|value| matches!(value, Value::Bool(value) if *value == expected))
 }
 
+fn has_string(vars: &[Value], expected: &str) -> bool {
+    vars.iter()
+        .any(|value| matches!(value, Value::String(value) if value == expected))
+}
+
 fn has_logical_shape(vars: &[Value], shape: &[usize]) -> bool {
     vars.iter().any(|value| match value {
         Value::LogicalArray(LogicalArray {
@@ -216,6 +221,24 @@ fn perfcurve_surface_executes_from_scripts() {
     assert!(has_num(&vars, 5.0));
     assert!(has_num(&vars, 1.0));
     assert!(has_num(&vars, 0.5));
+}
+
+#[test]
+fn qqplot_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h = qqplot([1;2;4;8]); xd = get(h(1), 'XData'); yd = get(h(1), 'YData'); mk = get(h(1), 'Marker'); qstyle = get(h(2), 'LineStyle'); rstyle = get(h(3), 'LineStyle'); n = length(h); first = yd(1); last = yd(end); h2 = qqplot([0;10;20], [], [25 50 75]); yd2 = get(h2(1), 'YData'); mid = yd2(2); h3 = qqplot([0.1;0.2], [0.3;0.4]); n3 = length(h3);",
+    )
+    .expect("qqplot script");
+    assert!(has_tensor_shape(&vars, &[3, 1]));
+    assert!(has_tensor_shape(&vars, &[1, 4]));
+    assert!(has_num(&vars, 3.0));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 8.0));
+    assert!(has_num(&vars, 10.0));
+    assert!(has_string(&vars, "+"));
+    assert!(has_string(&vars, "-"));
+    assert!(has_string(&vars, "--"));
 }
 
 #[test]

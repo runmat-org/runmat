@@ -72467,6 +72467,205 @@
       ]
     },
     {
+      "name": "qqplot",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "qqplot(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "qqplot(x, y)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional comparison sample data vector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "qqplot(x, y, pvec)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional comparison sample data vector."
+            },
+            {
+              "name": "pvec",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional quantile percentages in the closed interval [0, 100]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "qqplot(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = qqplot(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handles for the quantile points, quartile line, and fitted reference line."
+            }
+          ]
+        },
+        {
+          "label": "h = qqplot(x, y, pvec)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional comparison sample data vector."
+            },
+            {
+              "name": "pvec",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional quantile percentages in the closed interval [0, 100]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handles for the quantile points, quartile line, and fitted reference line."
+            }
+          ]
+        },
+        {
+          "label": "h = qqplot(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data vector or matrix."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional comparison sample data vector."
+            },
+            {
+              "name": "pvec",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional quantile percentages in the closed interval [0, 100]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handles for the quantile points, quartile line, and fitted reference line."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.QQPLOT.INVALID_ARGUMENT",
+          "identifier": "RunMat:qqplot:InvalidArgument",
+          "when": "Inputs, probabilities, or axes handles are malformed.",
+          "message": "qqplot: invalid argument"
+        },
+        {
+          "code": "RM.QQPLOT.INTERNAL",
+          "identifier": "RunMat:qqplot:Internal",
+          "when": "RunMat cannot construct quantile pairs or plotting primitives.",
+          "message": "qqplot: internal error"
+        }
+      ]
+    },
+    {
       "name": "qr",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
