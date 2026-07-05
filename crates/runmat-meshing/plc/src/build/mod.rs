@@ -177,13 +177,19 @@ pub fn build_protected_boundary_complex(
     }
     if let Some(loop_coverage) = &surface.loop_coverage {
         if loop_coverage.recovered_face_count != surface_source_face_count
+            || loop_coverage.boundary_loop_count < surface_source_face_count
+            || loop_coverage.max_loops_per_face == 0
             || loop_coverage.recovered_source_edge_count < protected_source_edge_count
+            || loop_coverage.boundary_segment_count < protected_source_edge_count
         {
             return Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
                 recovered_face_count: loop_coverage.recovered_face_count,
                 surface_source_face_count,
+                boundary_loop_count: loop_coverage.boundary_loop_count,
+                max_loops_per_face: loop_coverage.max_loops_per_face,
                 recovered_source_edge_count: loop_coverage.recovered_source_edge_count,
                 protected_source_edge_count,
+                boundary_segment_count: loop_coverage.boundary_segment_count,
             });
         }
     }

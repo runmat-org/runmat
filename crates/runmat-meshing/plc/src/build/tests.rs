@@ -66,8 +66,53 @@ fn rejects_surface_with_inconsistent_loop_coverage_evidence() {
         Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
             recovered_face_count: 4,
             surface_source_face_count: 4,
+            boundary_loop_count: 4,
+            max_loops_per_face: 1,
             recovered_source_edge_count: 5,
             protected_source_edge_count: 6,
+            boundary_segment_count: 12,
+        })
+    );
+}
+
+#[test]
+fn rejects_surface_with_inconsistent_boundary_loop_count_evidence() {
+    let mut surface = tetra_surface();
+    let mut loop_coverage = loop_coverage();
+    loop_coverage.boundary_loop_count = 3;
+    surface.loop_coverage = Some(loop_coverage);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
+            recovered_face_count: 4,
+            surface_source_face_count: 4,
+            boundary_loop_count: 3,
+            max_loops_per_face: 1,
+            recovered_source_edge_count: 6,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 12,
+        })
+    );
+}
+
+#[test]
+fn rejects_surface_with_inconsistent_boundary_segment_count_evidence() {
+    let mut surface = tetra_surface();
+    let mut loop_coverage = loop_coverage();
+    loop_coverage.boundary_segment_count = 5;
+    surface.loop_coverage = Some(loop_coverage);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
+            recovered_face_count: 4,
+            surface_source_face_count: 4,
+            boundary_loop_count: 4,
+            max_loops_per_face: 1,
+            recovered_source_edge_count: 6,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 5,
         })
     );
 }
