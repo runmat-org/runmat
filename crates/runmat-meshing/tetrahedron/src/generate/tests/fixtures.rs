@@ -86,6 +86,24 @@ pub(super) fn nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
     plc
 }
 
+pub(super) fn wider_inner_nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
+    let mut plc = tetra_plc();
+    plc.complex_id = "wider_inner_nested_tetrahedron_shells".to_string();
+    plc.nodes.extend([
+        node("10", [0.2, 0.2, 0.2]),
+        node("11", [0.5, 0.2, 0.2]),
+        node("12", [0.2, 0.5, 0.2]),
+        node("13", [0.2, 0.2, 0.5]),
+    ]);
+    plc.facets.extend([
+        facet("10", ["10", "12", "11"]),
+        facet("11", ["10", "11", "13"]),
+        facet("12", ["11", "12", "13"]),
+        facet("13", ["12", "10", "13"]),
+    ]);
+    plc
+}
+
 pub(super) fn box_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "box".to_string(),

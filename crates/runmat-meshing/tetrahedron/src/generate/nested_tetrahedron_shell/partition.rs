@@ -28,7 +28,7 @@ use boundary::{
 };
 use builder::PartitionBuilder;
 use cells::{cell_centroid, cell_faces, partition_cells};
-use shape::central_inner_tetrahedron_partition;
+use shape::affine_inner_tetrahedron_partition;
 
 const MIN_PARTITION_SCALED_JACOBIAN: f64 = 0.15;
 
@@ -59,7 +59,7 @@ pub(super) fn barycentric_partition_refill(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let partition =
-        central_inner_tetrahedron_partition(shell, &coordinates_by_node_id, &outer_points)?;
+        affine_inner_tetrahedron_partition(shell, &coordinates_by_node_id, &outer_points)?;
     let Some(partition) = partition else {
         return Ok(None);
     };

@@ -15,18 +15,18 @@ use super::super::shell::NestedTetrahedronShell;
 const MAX_BARYCENTRIC_PARTITION_DIVISIONS: usize = 12;
 
 #[derive(Debug, Clone)]
-pub(super) struct CentralInnerTetrahedronPartition {
+pub(super) struct AffineInnerTetrahedronPartition {
     pub(super) inner_lower_bounds: [f64; 4],
     pub(super) inner_scale: f64,
     pub(super) divisions: usize,
     pub(super) inner_node_ids: [TopologyEntityId; 4],
 }
 
-pub(super) fn central_inner_tetrahedron_partition(
+pub(super) fn affine_inner_tetrahedron_partition(
     shell: &NestedTetrahedronShell,
     coordinates_by_node_id: &BTreeMap<TopologyEntityId, Point3>,
     outer_points: &[Point3],
-) -> Result<Option<CentralInnerTetrahedronPartition>, TetrahedronGenerationError> {
+) -> Result<Option<AffineInnerTetrahedronPartition>, TetrahedronGenerationError> {
     let tolerance = MeshingTolerance::default();
     let mut candidates = Vec::<(TopologyEntityId, [f64; 4])>::new();
     let mut inner_lower_bounds = [f64::INFINITY; 4];
@@ -58,20 +58,9 @@ pub(super) fn central_inner_tetrahedron_partition(
     if !inner_scale.is_finite() || inner_scale <= 0.0 {
         return Ok(None);
     }
-    let divisions = (1.0 / inner_scale).round() as usize;
-    if !(2..=MAX_BARYCENTRIC_PARTITION_DIVISIONS).contains(&divisions) {
+    let Some(divisions) = aligned_partition_divisions(inner_lower_bounds, inner_scale) else {
         return Ok(None);
-    }
-    let aligned_scale = 1.0 / divisions as f64;
-    if (inner_scale - aligned_scale).abs() > 1.0e-8 {
-        return Ok(None);
-    }
-    for lower_bound in &inner_lower_bounds {
-        let aligned = (lower_bound * divisions as f64).round() / divisions as f64;
-        if (*lower_bound - aligned).abs() > 1.0e-8 {
-            return Ok(None);
-        }
-    }
+    };
     let mut inner_node_ids = [(); 4].map(|_| TopologyEntityId {
         stage: MeshingStage::ProtectedBoundaryComplex,
         id: String::new(),
@@ -105,12 +94,24 @@ pub(super) fn central_inner_tetrahedron_partition(
     if seen.len() != 4 {
         return Ok(None);
     }
-    Ok(Some(CentralInnerTetrahedronPartition {
+    Ok(Some(AffineInnerTetrahedronPartition {
         inner_lower_bounds,
         inner_scale,
         divisions,
         inner_node_ids,
     }))
+}
+
+fn aligned_partition_divisions(inner_lower_bounds: [f64; 4], inner_scale: f64) -> Option<usize> {
+    (2..=MAX_BARYCENTRIC_PARTITION_DIVISIONS).find(|divisions| {
+        inner_lower_bounds
+            .iter()
+            .chain(std::iter::once(&inner_scale))
+            .all(|value| {
+                let aligned = (*value * *divisions as f64).round() / *divisions as f64;
+                (*value - aligned).abs() <= 1.0e-8
+            })
+    })
 }
 
 fn barycentric_coordinates(
