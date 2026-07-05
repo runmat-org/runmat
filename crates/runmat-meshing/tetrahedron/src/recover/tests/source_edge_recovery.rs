@@ -56,6 +56,19 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["attempted_source_edge_split_refill_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["accepted_source_edge_split_refill_candidate_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["rejected_source_edge_split_refill_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["deferred_absent_source_edge_recovery_items"],
         0
     );
@@ -111,6 +124,21 @@ fn recovery_stage_result_records_cad_curve_source_edge_recovered_by_boundary_fac
         result.recovery_queue.evidence.entity_counts
             ["recovered_cad_curve_protected_edge_boundary_faces"],
         2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_cad_curve_source_edge_split_refill_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["accepted_cad_curve_source_edge_split_refill_candidate_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_cad_curve_source_edge_split_refill_items"],
+        0
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts

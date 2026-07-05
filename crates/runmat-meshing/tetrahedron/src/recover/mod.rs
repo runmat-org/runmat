@@ -6,6 +6,7 @@ pub mod boundary_queue;
 mod input_validation;
 mod material_interfaces;
 mod material_partitions;
+mod source_edges;
 mod source_faces;
 mod topology;
 mod types;
@@ -29,6 +30,7 @@ use boundary_leaks::remove_exterior_elements_across_interior_source_faces;
 use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
 use material_partitions::recover_absent_material_interface_partitions;
+use source_edges::evaluate_source_edge_split_refill_recovery;
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
@@ -726,6 +728,8 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         &mut tetrahedron_mesh,
     );
+    let source_edge_split_refill_recovery =
+        evaluate_source_edge_split_refill_recovery(plc, &initial_recovery_queue, &tetrahedron_mesh);
     let recovered_material_partitions = recover_absent_material_interface_partitions(
         plc,
         &initial_recovery_queue,
@@ -832,6 +836,36 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "recovered_cad_curve_interior_edge_source_edge_items".to_string(),
         recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_source_edge_split_refill_items".to_string(),
+        source_edge_split_refill_recovery.attempted_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "attempted_cad_curve_source_edge_split_refill_items".to_string(),
+        source_edge_split_refill_recovery.attempted_cad_curve_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "accepted_source_edge_split_refill_candidate_items".to_string(),
+        source_edge_split_refill_recovery.accepted_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "accepted_cad_curve_source_edge_split_refill_candidate_items".to_string(),
+        source_edge_split_refill_recovery.accepted_cad_curve_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_source_edge_split_refill_items".to_string(),
+        source_edge_split_refill_recovery.rejected_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_cad_curve_source_edge_split_refill_items".to_string(),
+        source_edge_split_refill_recovery.rejected_cad_curve_source_edge_count,
+    );
+    for (reason_key, count) in source_edge_split_refill_recovery.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(reason_key, count);
+    }
     recovery_queue.evidence.entity_counts.insert(
         "absent_edge_source_edge_recovery_items".to_string(),
         absent_edge_source_edge_recovery_item_count,
