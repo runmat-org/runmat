@@ -33,7 +33,8 @@ use runmat_meshing_core::{
     size::field::MeshSizingField,
 };
 use runmat_meshing_opt::sliver::{
-    classify_sliver_tetrahedra, SliverRecoveryOptions, SliverTetrahedronQuality,
+    classify_sliver_tetrahedra, evaluate_sliver_removal, SliverRecoveryOptions,
+    SliverTetrahedronQuality,
 };
 use runmat_meshing_surface::{SurfaceDiscretization, INTERNAL_SOURCE_EDGE_ID};
 use runmat_meshing_tetrahedron::{
@@ -977,6 +978,7 @@ pub(super) struct BackendQualityEvidence {
     sliver_count: usize,
     quality_repair_target_count: usize,
     max_aspect_ratio: f64,
+    sliver_inputs: Vec<SliverTetrahedronQuality>,
 }
 
 pub(super) fn backend_quality_evidence_from_tetrahedron_mesh(
@@ -1054,9 +1056,14 @@ fn optimization_target_evidence(
     OptimizationTargetEvidence {
         target_seed_count: initial.quality_repair_target_count,
         skipped_target_seed_count: final_quality.quality_repair_target_count,
-        sliver_removed_count: initial
-            .sliver_count
-            .saturating_sub(final_quality.sliver_count),
+        sliver_removed_count: evaluate_sliver_removal(
+            &initial.sliver_inputs,
+            &final_quality.sliver_inputs,
+            SliverRecoveryOptions::default(),
+        )
+        .ok()
+        .filter(|evaluation| evaluation.accepted)
+        .map_or(0, |evaluation| evaluation.removed_sliver_count),
     }
 }
 
@@ -1102,6 +1109,7 @@ fn backend_quality_evidence(quality: &AnalysisMeshQualityReport) -> BackendQuali
         sliver_count,
         quality_repair_target_count: sliver_count.max(exact_scaled_jacobian_below_threshold_count),
         max_aspect_ratio: quality.max_aspect_ratio,
+        sliver_inputs,
     }
 }
 
@@ -1520,6 +1528,41 @@ mod tests {
             initial.quality_repair_target_count
         );
         assert_eq!(targets.sliver_removed_count, 0);
+    }
+
+    #[test]
+    fn optimization_target_evidence_rejects_sliver_removal_when_exact_quality_regresses() {
+        let initial = BackendQualityEvidence {
+            min_exact_scaled_jacobian: 0.42,
+            exact_scaled_jacobian_below_threshold_count: 0,
+            exact_scaled_jacobian_bins: BTreeMap::new(),
+            sliver_count: 1,
+            quality_repair_target_count: 1,
+            max_aspect_ratio: 30.0,
+            sliver_inputs: vec![SliverTetrahedronQuality {
+                tetrahedron_id: 1,
+                aspect_ratio: 30.0,
+                exact_scaled_jacobian: 0.42,
+            }],
+        };
+        let final_quality = BackendQualityEvidence {
+            min_exact_scaled_jacobian: 0.05,
+            exact_scaled_jacobian_below_threshold_count: 1,
+            exact_scaled_jacobian_bins: BTreeMap::new(),
+            sliver_count: 0,
+            quality_repair_target_count: 1,
+            max_aspect_ratio: 10.0,
+            sliver_inputs: vec![SliverTetrahedronQuality {
+                tetrahedron_id: 1,
+                aspect_ratio: 10.0,
+                exact_scaled_jacobian: 0.05,
+            }],
+        };
+
+        let targets = optimization_target_evidence(&initial, &final_quality);
+
+        assert_eq!(targets.sliver_removed_count, 0);
+        assert_eq!(targets.skipped_target_seed_count, 1);
     }
 
     fn tetrahedron_quality_mesh(apex: [f64; 3]) -> TetrahedronMesh {
