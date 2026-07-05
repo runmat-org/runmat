@@ -4,7 +4,10 @@ use runmat_meshing_core::contracts::{
     PlcFacet, ProtectedBoundaryComplex, TetrahedronBoundaryFace, TetrahedronMesh, TopologyEntityId,
 };
 
-use crate::protected_edges::{face_edges, sorted_edge, source_edge_ids_for_face_edges};
+use crate::protected_edges::{
+    face_edges, sorted_edge, source_edge_ids_for_boundary_face_edges,
+    source_edge_ids_for_face_edges,
+};
 
 use super::{
     topology::sorted_topology_ids, TetrahedronProtectedEdgeTopology, TetrahedronRecoveryKind,
@@ -335,10 +338,15 @@ pub(super) fn repair_boundary_source_edge_provenance(
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
+    let tolerance_m = geometry_tolerance(&coordinates_by_id);
     for boundary_face in &mut tetrahedron_mesh.boundary_faces {
         let face_edges = face_edges(boundary_face.node_ids.clone());
-        let expected_source_edge_ids =
-            boundary_face_source_edge_ids(plc, &coordinates_by_id, boundary_face.node_ids.clone());
+        let expected_source_edge_ids = source_edge_ids_for_boundary_face_edges(
+            &plc.protected_edges,
+            &coordinates_by_id,
+            boundary_face.node_ids.clone(),
+            tolerance_m,
+        );
         for (edge_index, expected_source_edge_id) in
             expected_source_edge_ids.into_iter().enumerate()
         {
@@ -361,53 +369,21 @@ pub(super) fn repair_boundary_source_edge_provenance(
     repair
 }
 
-fn boundary_face_source_edge_ids(
-    plc: &ProtectedBoundaryComplex,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    node_ids: [TopologyEntityId; 3],
-) -> [Option<TopologyEntityId>; 3] {
-    let mut source_edge_ids =
-        source_edge_ids_for_face_edges(&plc.protected_edges, node_ids.clone());
-    for edge_index in 0..3 {
-        if source_edge_ids[edge_index].is_some() {
-            continue;
+fn geometry_tolerance(coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>) -> f64 {
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for coordinates in coordinates_by_id.values() {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(coordinates[axis]);
+            max[axis] = max[axis].max(coordinates[axis]);
         }
-        let left = &node_ids[edge_index];
-        let right = &node_ids[(edge_index + 1) % 3];
-        let Some(left_point) = coordinates_by_id.get(left).copied() else {
-            continue;
-        };
-        let Some(right_point) = coordinates_by_id.get(right).copied() else {
-            continue;
-        };
-        source_edge_ids[edge_index] = plc.protected_edges.iter().find_map(|protected_edge| {
-            let start = coordinates_by_id
-                .get(&protected_edge.node_ids[0])
-                .copied()?;
-            let end = coordinates_by_id
-                .get(&protected_edge.node_ids[1])
-                .copied()?;
-            (point_lies_on_segment(left_point, start, end)
-                && point_lies_on_segment(right_point, start, end))
-            .then_some(protected_edge.source_edge_id.clone())
-        });
     }
-    source_edge_ids
-}
-
-fn point_lies_on_segment(point: [f64; 3], start: [f64; 3], end: [f64; 3]) -> bool {
-    let length = distance(start, end);
-    let tolerance_m = 1.0e-10_f64.max(length * 1.0e-9);
-    if length <= tolerance_m {
-        return distance(point, start) <= tolerance_m;
-    }
-    let distance_sum = distance(start, point) + distance(point, end);
-    (distance_sum - length).abs() <= tolerance_m
-}
-
-fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
-    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
-        .sqrt()
+    let span = (0..3)
+        .map(|axis| max[axis] - min[axis])
+        .filter(|span| span.is_finite())
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    1.0e-10_f64.max(span * 1.0e-10)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
