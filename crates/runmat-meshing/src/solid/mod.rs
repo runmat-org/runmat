@@ -8,6 +8,7 @@ use runmat_meshing_core::{
     TopologyEntityId, VolumeMeshingOptions,
 };
 use runmat_meshing_curve::discretize_topology_curves_with_sizing;
+use runmat_meshing_curve::CurveValidationOptions;
 use runmat_meshing_plc::build::build_protected_boundary_complex;
 use runmat_meshing_surface::{
     discretize_cad_topology_surfaces_with_curves, validate_cad_topology_surface_discretization,
@@ -101,6 +102,13 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let curve_options = curve_discretization_options(options, geometry);
     let curves = discretize_topology_curves_with_sizing(&topology, curve_options, Some(sizing))
         .map_err(SolidMeshingError::Curve)?;
+    let _curve_mesh_contract = crate::build_curve_mesh_contract(
+        "solid_curve_mesh",
+        &topology,
+        &curves,
+        CurveValidationOptions::default(),
+    )
+    .map_err(SolidMeshingError::CurveValidation)?;
     let surface = discretize_cad_topology_surfaces_with_curves(
         &cad_topology,
         &topology,

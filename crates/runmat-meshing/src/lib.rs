@@ -1,6 +1,7 @@
 //! Topology-first meshing pipeline orchestration.
 
 pub mod analysis_prep;
+pub mod curve_contract;
 pub mod solid;
 pub mod visualization;
 
@@ -9,6 +10,7 @@ pub use analysis_prep::{
     MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
     PreparedMeshDescriptor, RegionMeshMapping,
 };
+pub use curve_contract::build_curve_mesh_contract;
 pub use solid::{
     generate_analysis_mesh, generate_analysis_mesh_with_sizing, generate_solid_analysis_mesh,
     generate_solid_analysis_mesh_with_sizing, SolidMeshingError,
