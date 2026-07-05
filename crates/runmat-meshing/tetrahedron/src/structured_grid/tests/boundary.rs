@@ -25,9 +25,11 @@ fn boundary_triangle_centroids_mark_intersected_cells_occupied() {
             triangle_id: 0,
             node_ids: [0, 1, 2],
             region_ids: vec!["region".to_string()],
+            material_region_ids: Vec::new(),
             provenance: Vec::new(),
         }],
         region_ids: vec!["region".to_string()],
+        material_region_ids: Vec::new(),
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [2.0, 1.0, 1.0],
     };

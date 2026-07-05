@@ -5,7 +5,7 @@ use runmat_meshing_core::{
         AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode, AnalysisVolumeElement,
         BoundaryElementKind, BoundaryMeshInput, MeshBackendKind, MeshEntityProvenance,
         MeshKindRequest, MeshProfile, MeshTargetSize, SourceEntityKind, VolumeElementKind,
-        VolumeMeshingOptions,
+        VolumeMeshingOptions, DEFAULT_MATERIAL_REGION_ID,
     },
     quality::boundary::{
         evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,

@@ -26,26 +26,31 @@ pub(super) fn cube_topology() -> SourceTopologyModel {
                 triangle_id: 0,
                 node_ids: [0, 2, 1],
                 region_ids: Vec::new(),
+                material_region_ids: Vec::new(),
             },
             source_mesh::SourceTopologyTriangle {
                 triangle_id: 1,
                 node_ids: [0, 3, 2],
                 region_ids: Vec::new(),
+                material_region_ids: Vec::new(),
             },
             source_mesh::SourceTopologyTriangle {
                 triangle_id: 2,
                 node_ids: [4, 5, 6],
                 region_ids: Vec::new(),
+                material_region_ids: Vec::new(),
             },
             source_mesh::SourceTopologyTriangle {
                 triangle_id: 3,
                 node_ids: [4, 6, 7],
                 region_ids: Vec::new(),
+                material_region_ids: Vec::new(),
             },
         ],
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 1.0],
         region_ids: Vec::new(),
+        material_region_ids: Vec::new(),
     })
 }
 

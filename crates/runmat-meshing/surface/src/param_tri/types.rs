@@ -37,7 +37,10 @@ pub struct SurfaceElement {
     pub parametric_node_uv: [[f64; 2]; 3],
     #[serde(default)]
     pub max_projection_error_m: f64,
+    #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
     pub area_m2: f64,
     pub unit_normal: [f64; 3],
 }

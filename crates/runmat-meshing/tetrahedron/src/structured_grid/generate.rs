@@ -13,16 +13,16 @@ pub(super) fn generate_grid_tetrahedra(
     occupied_cells: &[bool],
 ) -> GeneratedGridTetrahedrons {
     let material_region_id = input
-        .region_ids
+        .material_region_ids
         .first()
         .cloned()
-        .unwrap_or_else(|| "region_default".to_string());
+        .unwrap_or_else(|| DEFAULT_MATERIAL_REGION_ID.to_string());
     let provenance = vec![MeshEntityProvenance {
         source_geometry_id: input.source_geometry_id.clone(),
         source_geometry_revision: input.source_geometry_revision,
         source_entity_kind: SourceEntityKind::Mesh,
         source_entity_id: input.mesh_id.clone(),
-        region_ids: input.region_ids.clone(),
+        region_ids: input.material_region_ids.clone(),
     }];
 
     let mut cell_tetrahedron_ids = vec![None; grid.cell_count()];

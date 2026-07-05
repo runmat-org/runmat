@@ -61,6 +61,7 @@ pub(crate) fn source_topology_from_boundary_input(
             node_ids: triangle.node_ids,
             edge_ids: face_edge_ids,
             region_ids: triangle.region_ids.clone(),
+            material_region_ids: triangle.material_region_ids.clone(),
             area_m2: triangle_area(vertices),
             unit_normal: triangle_unit_normal(vertices),
         });
@@ -97,6 +98,7 @@ pub(crate) fn source_topology_from_boundary_input(
         bounds_min_m: input.bounds_min_m,
         bounds_max_m: input.bounds_max_m,
         region_ids: input.region_ids.clone(),
+        material_region_ids: input.material_region_ids.clone(),
     }
 }
 

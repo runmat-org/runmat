@@ -1,7 +1,8 @@
 use super::*;
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
 };
 
 #[test]
@@ -103,6 +104,65 @@ fn boundary_input_converts_millimeter_vertices_to_meters() {
         .vertices
         .iter()
         .any(|vertex| *vertex == [1.0, 1.0, 1.0]));
+}
+
+#[test]
+fn boundary_input_keeps_boundary_regions_out_of_material_regions() {
+    let mut geometry = cube_geometry_with_shared_vertices();
+    geometry.regions = vec![
+        Region {
+            region_id: "fixed_face".to_string(),
+            name: "fixed face".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "load_face".to_string(),
+            name: "load face".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "body".to_string(),
+            name: "body".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+    ];
+    geometry.region_entity_mappings = vec![
+        RegionEntityMapping::new(
+            "fixed_face",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 2)],
+        ),
+        RegionEntityMapping::new(
+            "load_face",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(10, 2)],
+        ),
+        RegionEntityMapping::all_faces("body", "cube_surface", 12),
+    ];
+
+    let input = boundary_input_from_geometry(&geometry)
+        .expect("closed cube with role-tagged regions should extract");
+
+    assert_eq!(input.material_region_ids, vec!["body".to_string()]);
+    assert!(input.triangles.iter().any(|triangle| {
+        triangle
+            .region_ids
+            .iter()
+            .any(|region| region == "fixed_face")
+            && triangle.material_region_ids == ["body".to_string()]
+    }));
+    assert!(input.triangles.iter().any(|triangle| {
+        triangle
+            .region_ids
+            .iter()
+            .any(|region| region == "load_face")
+            && triangle.material_region_ids == ["body".to_string()]
+    }));
 }
 
 fn cube_geometry_with_shared_vertices() -> GeometryAsset {

@@ -418,6 +418,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
                 node_ids: [0, 1, 2],
                 edge_ids: [0, 1, 2],
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -427,6 +428,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
                 node_ids: [0, 2, 3],
                 edge_ids: [2, 3, 4],
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -434,6 +436,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 0.0],
         region_ids: vec!["face_square".to_string()],
+        material_region_ids: Vec::new(),
     }
 }
 
@@ -463,6 +466,7 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             "cad_edge_4".to_string(),
         ],
         region_ids: vec!["face_square".to_string()],
+        material_region_ids: Vec::new(),
         area_m2: 1.0,
         unit_normal: [0.0, 0.0, 1.0],
     };
@@ -561,12 +565,14 @@ fn holed_square_topology() -> SourceTopologyModel {
             node_ids: [0, 1, 2],
             edge_ids: [0, 1, 2],
             region_ids: vec!["face_holed_square".to_string()],
+            material_region_ids: Vec::new(),
             area_m2: 0.96,
             unit_normal: [0.0, 0.0, 1.0],
         }],
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 0.0],
         region_ids: vec!["face_holed_square".to_string()],
+        material_region_ids: Vec::new(),
     }
 }
 
@@ -607,6 +613,7 @@ fn holed_square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel
             .map(|edge_id| format!("cad_edge_{edge_id}"))
             .collect(),
         region_ids: vec!["face_holed_square".to_string()],
+        material_region_ids: Vec::new(),
         area_m2: 0.96,
         unit_normal: [0.0, 0.0, 1.0],
     };

@@ -68,12 +68,14 @@ pub(super) fn single_triangle_topology() -> SourceTopologyModel {
             node_ids: [0, 1, 2],
             edge_ids: [0, 1, 2],
             region_ids: vec!["face_a".to_string()],
+            material_region_ids: Vec::new(),
             area_m2: 0.5,
             unit_normal: [0.0, 0.0, 1.0],
         }],
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 0.0],
         region_ids: vec!["face_a".to_string()],
+        material_region_ids: Vec::new(),
     }
 }
 

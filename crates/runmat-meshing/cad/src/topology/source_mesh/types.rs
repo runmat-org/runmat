@@ -21,7 +21,10 @@ pub struct SourceTopologyFace {
     pub source_triangle_id: u32,
     pub node_ids: [u32; 3],
     pub edge_ids: [u32; 3],
+    #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
     pub area_m2: f64,
     pub unit_normal: [f64; 3],
 }
@@ -38,6 +41,8 @@ pub struct SourceTopologyModel {
     pub bounds_min_m: [f64; 3],
     pub bounds_max_m: [f64; 3],
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +51,8 @@ pub(crate) struct SourceTopologyTriangle {
     pub node_ids: [u32; 3],
     #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +67,8 @@ pub(crate) struct SourceTopologyInput {
     pub bounds_max_m: [f64; 3],
     #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

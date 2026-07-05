@@ -128,11 +128,13 @@ pub(super) fn boundary_projection_fixture() -> (
             triangle_id: 0,
             node_ids: [0, 1, 2],
             region_ids: vec!["region_surface".to_string()],
+            material_region_ids: Vec::new(),
             provenance: Vec::new(),
         }],
         bounds_min_m: [-10.0, -10.0, 0.0],
         bounds_max_m: [10.0, 10.0, 2.0],
         region_ids: vec!["region_surface".to_string()],
+        material_region_ids: Vec::new(),
     };
     let nodes = vec![
         AnalysisMeshNode {

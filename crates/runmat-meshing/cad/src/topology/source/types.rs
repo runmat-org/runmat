@@ -84,7 +84,10 @@ pub struct CadFace {
     #[serde(default)]
     pub loop_ids: Vec<String>,
     pub loop_edge_ids: Vec<String>,
+    #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
     pub area_m2: f64,
     pub unit_normal: [f64; 3],
 }

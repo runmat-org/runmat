@@ -34,6 +34,23 @@ fn builds_valid_plc_from_closed_tetra_surface() {
 }
 
 #[test]
+fn material_interfaces_use_material_regions_not_boundary_regions() {
+    let mut surface = tetra_surface();
+    for element in &mut surface.elements {
+        element.region_ids = vec!["fixed_face".to_string(), "load_face".to_string()];
+        element.material_region_ids = vec!["body".to_string()];
+    }
+
+    let plc = build_protected_boundary_complex(&surface)
+        .expect("closed tetra surface should build a PLC");
+
+    assert!(plc
+        .facets
+        .iter()
+        .all(|facet| facet.material_interface_ids == ["body".to_string()]));
+}
+
+#[test]
 fn carries_cad_curve_boundary_provenance_into_stage_evidence() {
     let mut surface = tetra_surface();
     surface.cad_curve_boundary_provenance = Some(cad_curve_boundary_provenance(vec![
@@ -498,6 +515,7 @@ fn element(element_id: u32, node_ids: [u32; 3], source_edge_ids: [u32; 3]) -> Su
         parametric_node_uv: [[0.0, 0.0]; 3],
         max_projection_error_m: 0.0,
         region_ids: vec!["body".to_string()],
+        material_region_ids: vec!["body".to_string()],
         area_m2: 0.5,
         unit_normal: [0.0, 0.0, 1.0],
     }

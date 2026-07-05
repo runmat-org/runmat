@@ -174,7 +174,7 @@ pub fn build_protected_boundary_complex(
                 topology_entity_id(MeshingStage::ProtectedBoundaryComplex, element.node_ids[2]),
             ],
             source_face_id: topology_entity_id(MeshingStage::SurfaceMesh, element.source_face_id),
-            material_interface_ids: element.region_ids.clone(),
+            material_interface_ids: element.material_region_ids.clone(),
         });
     }
 

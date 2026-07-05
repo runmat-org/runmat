@@ -60,6 +60,7 @@ pub fn discretize_topology_surfaces(
             parametric_node_uv: [[0.0, 0.0]; 3],
             max_projection_error_m: 0.0,
             region_ids: face.region_ids.clone(),
+            material_region_ids: face.material_region_ids.clone(),
             area_m2: face.area_m2,
             unit_normal: face.unit_normal,
         });
@@ -164,6 +165,7 @@ pub fn discretize_cad_surfaces(
                 parametric_node_uv,
                 max_projection_error_m,
                 region_ids: face.region_ids.clone(),
+                material_region_ids: face.material_region_ids.clone(),
                 area_m2: face.area_m2,
                 unit_normal: frame.unit_normal,
             });
@@ -420,6 +422,7 @@ fn cad_face_surface_seed(
         node_ids: [node_ids[0], node_ids[1], node_ids[2]],
         edge_ids: [source_edge_ids[0], source_edge_ids[1], source_edge_ids[2]],
         region_ids: cad_face.region_ids.clone(),
+        material_region_ids: cad_face.material_region_ids.clone(),
         area_m2: cad_face.area_m2,
         unit_normal: cad_face.unit_normal,
     })

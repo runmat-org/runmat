@@ -33,6 +33,7 @@ pub fn generic_line_source_topology(length_m: f64) -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [length_m, 0.0, 0.0],
         region_ids: vec!["generic_line_edge".to_string()],
+        material_region_ids: Vec::new(),
     }
 }
 
@@ -123,6 +124,7 @@ fn source_topology_from_triangles(
             node_ids,
             edge_ids: face_edge_ids,
             region_ids: face_region_ids,
+            material_region_ids: Vec::new(),
             area_m2: triangle_area(triangle_vertices),
             unit_normal: triangle_unit_normal(triangle_vertices),
         });
@@ -158,6 +160,7 @@ fn source_topology_from_triangles(
         bounds_min_m: bounds_min(&vertices_m),
         bounds_max_m: bounds_max(&vertices_m),
         region_ids,
+        material_region_ids: Vec::new(),
     }
 }
 

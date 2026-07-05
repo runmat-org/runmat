@@ -8,6 +8,7 @@ fn curve_driven_face_elements_triangulate_holed_loop_domain() {
         node_ids: [0, 1, 2],
         edge_ids: [0, 1, 2],
         region_ids: vec!["face_a".to_string()],
+        material_region_ids: Vec::new(),
         area_m2: 0.96,
         unit_normal: [0.0, 0.0, 1.0],
     };

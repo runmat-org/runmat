@@ -107,6 +107,7 @@ fn cube_topology() -> SourceTopologyModel {
             face_id as u32 * 3 + 2,
         ],
         region_ids: Vec::new(),
+        material_region_ids: Vec::new(),
         area_m2: 0.5,
         unit_normal,
     })
@@ -123,5 +124,6 @@ fn cube_topology() -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 1.0],
         region_ids: Vec::new(),
+        material_region_ids: Vec::new(),
     }
 }

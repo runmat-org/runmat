@@ -137,6 +137,7 @@ pub(super) fn append_curve_driven_face_elements(
             parametric_node_uv,
             max_projection_error_m,
             region_ids: face.region_ids.clone(),
+            material_region_ids: face.material_region_ids.clone(),
             area_m2: triangle_area(coordinates),
             unit_normal: frame.unit_normal,
         });
@@ -212,6 +213,7 @@ pub(super) fn append_curve_fan_face_elements(
             parametric_node_uv,
             max_projection_error_m,
             region_ids: face.region_ids.clone(),
+            material_region_ids: face.material_region_ids.clone(),
             area_m2: triangle_area(points),
             unit_normal: frame.unit_normal,
         });
@@ -270,6 +272,7 @@ fn append_curve_triangle_face_element(
         parametric_node_uv,
         max_projection_error_m,
         region_ids: face.region_ids.clone(),
+        material_region_ids: face.material_region_ids.clone(),
         area_m2: triangle_area(points),
         unit_normal: frame.unit_normal,
     });

@@ -25,6 +25,11 @@ fn extracts_deterministic_closed_shell_topology() {
         .faces
         .iter()
         .all(|face| super::geometry::norm(face.unit_normal) > 0.999999));
+    assert!(topology.material_region_ids.is_empty());
+    assert!(topology
+        .faces
+        .iter()
+        .all(|face| face.material_region_ids.is_empty()));
 }
 
 #[test]
@@ -38,6 +43,32 @@ fn topology_converts_geometry_units_to_meters() {
     assert!(topology.edges.iter().any(|edge| {
         (edge.length_m - 0.001).abs() < 1.0e-12
             && edge.region_ids.iter().any(|region| region == "root")
+    }));
+}
+
+#[test]
+fn topology_separates_boundary_regions_from_material_regions() {
+    let mut geometry = cube_geometry();
+    geometry.regions.push(Region {
+        region_id: "body".to_string(),
+        name: "body".to_string(),
+        tag: Some("material".to_string()),
+        cad_ownership: None,
+    });
+    geometry
+        .region_entity_mappings
+        .push(RegionEntityMapping::all_faces("body", "cube_surface", 12));
+
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+
+    assert_eq!(topology.material_region_ids, vec!["body".to_string()]);
+    assert!(topology.faces.iter().any(|face| {
+        face.region_ids.iter().any(|region| region == "root")
+            && face.material_region_ids == ["body".to_string()]
+    }));
+    assert!(topology.faces.iter().any(|face| {
+        face.region_ids.iter().any(|region| region == "tip")
+            && face.material_region_ids == ["body".to_string()]
     }));
 }
 

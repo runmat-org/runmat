@@ -106,6 +106,13 @@ pub(super) fn boundary_input_from_geometry(
         .collect::<Vec<_>>();
     all_region_ids.sort();
     all_region_ids.dedup();
+    let material_region_ids = geometry
+        .regions
+        .iter()
+        .filter(|region| region.has_material_role())
+        .map(|region| region.region_id.clone())
+        .collect::<BTreeSet<_>>();
+    let all_material_region_ids = material_region_ids.iter().cloned().collect::<Vec<_>>();
 
     let mut triangles = Vec::with_capacity(welded_triangles.len());
     for (triangle_id, node_ids) in welded_triangles {
@@ -121,13 +128,20 @@ pub(super) fn boundary_input_from_geometry(
             .collect::<Vec<_>>();
         region_ids.sort();
         region_ids.dedup();
+        let mut triangle_material_region_ids = region_ids
+            .iter()
+            .filter(|region_id| material_region_ids.contains(*region_id))
+            .cloned()
+            .collect::<Vec<_>>();
         if region_ids.is_empty() {
             region_ids = all_region_ids.clone();
+            triangle_material_region_ids = all_material_region_ids.clone();
         }
         triangles.push(BoundaryMeshTriangle {
             triangle_id: triangle_id as u32,
             node_ids,
             region_ids: region_ids.clone(),
+            material_region_ids: triangle_material_region_ids,
             provenance: vec![MeshEntityProvenance {
                 source_geometry_id: geometry.geometry_id.clone(),
                 source_geometry_revision: geometry.revision,
@@ -144,6 +158,12 @@ pub(super) fn boundary_input_from_geometry(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    let material_region_ids = triangles
+        .iter()
+        .flat_map(|triangle| triangle.material_region_ids.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     Ok(BoundaryMeshInput {
         mesh_id: surface.mesh_id.clone(),
@@ -155,6 +175,7 @@ pub(super) fn boundary_input_from_geometry(
         bounds_min_m: min,
         bounds_max_m: max,
         region_ids,
+        material_region_ids,
     })
 }
 

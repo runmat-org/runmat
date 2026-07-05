@@ -9,6 +9,8 @@ pub struct BoundaryMeshTriangle {
     #[serde(default)]
     pub region_ids: Vec<String>,
     #[serde(default)]
+    pub material_region_ids: Vec<String>,
+    #[serde(default)]
     pub provenance: Vec<MeshEntityProvenance>,
 }
 
@@ -24,4 +26,6 @@ pub struct BoundaryMeshInput {
     pub bounds_max_m: [f64; 3],
     #[serde(default)]
     pub region_ids: Vec<String>,
+    #[serde(default)]
+    pub material_region_ids: Vec<String>,
 }

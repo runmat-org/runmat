@@ -20,6 +20,9 @@ pub(super) fn merge_stable_cad_faces(face_seeds: Vec<CadFace>) -> Vec<CadFace> {
                     .source_edge_ids
                     .extend(face.source_edge_ids.iter().copied());
                 existing.region_ids.extend(face.region_ids.iter().cloned());
+                existing
+                    .material_region_ids
+                    .extend(face.material_region_ids.iter().cloned());
                 existing.unit_normal = area_weighted_normal(
                     existing.unit_normal,
                     existing.area_m2,
@@ -45,6 +48,8 @@ pub(super) fn merge_stable_cad_faces(face_seeds: Vec<CadFace>) -> Vec<CadFace> {
             face.source_edge_ids.dedup();
             face.region_ids.sort();
             face.region_ids.dedup();
+            face.material_region_ids.sort();
+            face.material_region_ids.dedup();
             face.loop_edge_ids = edge_counts
                 .into_iter()
                 .filter_map(|(edge_id, count)| (count == 1).then(|| format!("cad_edge_{edge_id}")))

@@ -368,6 +368,7 @@ fn square_cad_surface(mark_display_diagonal_as_source_edge: bool) -> SurfaceDisc
                 parametric_node_uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
                 max_projection_error_m: 0.0,
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -380,6 +381,7 @@ fn square_cad_surface(mark_display_diagonal_as_source_edge: bool) -> SurfaceDisc
                 parametric_node_uv: [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 max_projection_error_m: 0.0,
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -460,6 +462,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
                 node_ids: [0, 1, 2],
                 edge_ids: [0, 1, 2],
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -469,6 +472,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
                 node_ids: [0, 2, 3],
                 edge_ids: [2, 3, 4],
                 region_ids: vec!["face_square".to_string()],
+                material_region_ids: Vec::new(),
                 area_m2: 0.5,
                 unit_normal: [0.0, 0.0, 1.0],
             },
@@ -476,6 +480,7 @@ fn square_split_by_display_diagonal_topology() -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 0.0],
         region_ids: vec!["face_square".to_string()],
+        material_region_ids: Vec::new(),
     }
 }
 
@@ -523,6 +528,7 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
                 "cad_edge_4".to_string(),
             ],
             region_ids: vec!["face_square".to_string()],
+            material_region_ids: Vec::new(),
             area_m2: 1.0,
             unit_normal: [0.0, 0.0, 1.0],
         }],
@@ -646,6 +652,7 @@ fn cube_topology() -> SourceTopologyModel {
             node_ids,
             edge_ids: face_edge_ids,
             region_ids: Vec::new(),
+            material_region_ids: Vec::new(),
             area_m2: 0.5,
             unit_normal: face_normals[face_id],
         });
@@ -676,5 +683,6 @@ fn cube_topology() -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [1.0, 1.0, 1.0],
         region_ids: Vec::new(),
+        material_region_ids: Vec::new(),
     }
 }

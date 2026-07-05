@@ -15,7 +15,7 @@ use semantics::{
     cad_topology_source, edge_regions_by_source_edge, evaluator_curves_by_imported_id,
     evaluator_faces_by_imported_id, face_regions_by_source_face, imported_curve_id_for_regions,
     imported_curve_ids_by_region, imported_face_id_for_regions, imported_face_ids_by_region,
-    semantic_face_regions,
+    material_regions_by_source_face, semantic_face_regions,
 };
 pub use types::{
     CadEdge, CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyError,
@@ -37,6 +37,7 @@ pub fn build_cad_topology(
     let evaluator_faces = evaluator_faces_by_imported_id(geometry);
     let evaluator_curves = evaluator_curves_by_imported_id(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
+    let material_region_by_source_face = material_regions_by_source_face(geometry);
     let edge_region_by_source_edge = edge_regions_by_source_edge(geometry);
     let generic_face_ids_by_source_face = if source == CadTopologySource::GenericCadMesh {
         generic_coplanar_face_ids(topology, &face_region_by_source_face)
@@ -64,6 +65,10 @@ pub fn build_cad_topology(
             let mapped_region_ids = face_region_by_source_face
                 .get(&face.source_triangle_id)
                 .cloned();
+            let material_region_ids = material_region_by_source_face
+                .get(&face.source_triangle_id)
+                .cloned()
+                .unwrap_or_else(|| face.material_region_ids.clone());
             let identity_region_ids = mapped_region_ids.clone().unwrap_or_default();
             let region_ids = mapped_region_ids.unwrap_or_else(|| face.region_ids.clone());
             let imported_face_id =
@@ -105,6 +110,7 @@ pub fn build_cad_topology(
                     .map(|edge_id| format!("cad_edge_{edge_id}"))
                     .collect(),
                 region_ids,
+                material_region_ids,
                 area_m2: face.area_m2,
                 unit_normal: face.unit_normal,
             }

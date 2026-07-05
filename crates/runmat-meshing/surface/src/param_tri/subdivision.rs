@@ -45,6 +45,7 @@ pub(super) fn append_centroid_subdivision(
             parametric_node_uv,
             max_projection_error_m: corner_projection_error_m,
             region_ids: face.region_ids.clone(),
+            material_region_ids: face.material_region_ids.clone(),
             area_m2: face.area_m2 / 3.0,
             unit_normal: frame.unit_normal,
         });
