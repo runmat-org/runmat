@@ -127,6 +127,26 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_recovered_absent_face_source_face_recovery_item_count,
         backend.tetrahedron_absent_face_source_face_recovery_item_count,
     )?;
+    validate_recovered_count(
+        "material_interface",
+        backend.tetrahedron_recovered_material_interface_recovery_item_count,
+        backend.tetrahedron_material_interface_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "boundary_owned_material_interface",
+        backend.tetrahedron_recovered_boundary_owned_material_interface_recovery_item_count,
+        backend.tetrahedron_boundary_owned_material_interface_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "interior_face_material_interface",
+        backend.tetrahedron_recovered_interior_face_material_interface_recovery_item_count,
+        backend.tetrahedron_interior_material_interface_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "absent_partition_material_interface",
+        backend.tetrahedron_recovered_absent_partition_material_interface_recovery_item_count,
+        backend.tetrahedron_missing_material_interface_absent_partition_recovery_item_count,
+    )?;
     Ok(())
 }
 

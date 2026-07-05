@@ -211,6 +211,48 @@ fn rejects_recovered_source_face_count_that_exceeds_typed_input_count() {
 }
 
 #[test]
+fn rejects_recovered_material_interface_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_material_interface_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_recovered_material_interface_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("recovered material-interface evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+            family: "material_interface".to_string(),
+            recovered_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_recovered_absent_material_partition_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_missing_material_interface_absent_partition_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_recovered_absent_partition_material_interface_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("recovered absent material partition evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+            family: "absent_partition_material_interface".to_string(),
+            recovered_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
