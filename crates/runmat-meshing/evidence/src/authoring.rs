@@ -22,6 +22,10 @@ pub struct MeshAuthoringSummary {
     pub tetrahedron_generation_rejected_family_count: usize,
     #[serde(default)]
     pub tetrahedron_generation_selected_family_index: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_candidate_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_accepted_count: usize,
     pub topology: MeshAuthoringTopologySummary,
     pub quality: MeshAuthoringQualitySummary,
     pub recovery: MeshAuthoringRecoverySummary,
@@ -115,6 +119,12 @@ pub fn build_mesh_authoring_summary(evidence: &MeshEvidenceArtifact) -> MeshAuth
         tetrahedron_generation_selected_family_index: evidence
             .backend
             .tetrahedron_generation_selected_family_index,
+        tetrahedron_generation_interior_support_candidate_count: evidence
+            .backend
+            .tetrahedron_generation_interior_support_candidate_count,
+        tetrahedron_generation_interior_support_accepted_count: evidence
+            .backend
+            .tetrahedron_generation_interior_support_accepted_count,
         topology: MeshAuthoringTopologySummary {
             node_count: evidence.topology.node_count,
             volume_element_count: evidence.topology.volume_element_count,

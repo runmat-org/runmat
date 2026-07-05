@@ -84,6 +84,8 @@ impl Default for MeshBackendSummary {
             tetrahedron_generation_attempted_family_count: 0,
             tetrahedron_generation_rejected_family_count: 0,
             tetrahedron_generation_selected_family_index: 0,
+            tetrahedron_generation_interior_support_candidate_count: 0,
+            tetrahedron_generation_interior_support_accepted_count: 0,
             tetrahedron_element_count: 0,
             tetrahedron_material_region_count: 0,
             tetrahedron_unclassified_material_element_count: 0,

@@ -271,6 +271,14 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "solver_generation_selected_family_index",
             ),
+            tetrahedron_generation_interior_support_candidate_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "interior_support_candidate_points",
+            ),
+            tetrahedron_generation_interior_support_accepted_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "interior_support_accepted_points",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,

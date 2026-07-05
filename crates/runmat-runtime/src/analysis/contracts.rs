@@ -1894,6 +1894,10 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub tetrahedron_generation_rejected_family_count: usize,
     #[serde(default)]
     pub tetrahedron_generation_selected_family_index: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_candidate_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_interior_support_accepted_count: usize,
     pub selected_material_region_id: String,
     pub selected_fixed_boundary_region_id: String,
     pub selected_load_boundary_region_id: String,

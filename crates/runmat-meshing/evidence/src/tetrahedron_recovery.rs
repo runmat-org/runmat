@@ -58,6 +58,10 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub generation_rejected_family_count: usize,
     #[serde(default)]
     pub generation_selected_family_index: usize,
+    #[serde(default)]
+    pub generation_interior_support_candidate_count: usize,
+    #[serde(default)]
+    pub generation_interior_support_accepted_count: usize,
     pub element_count: usize,
     #[serde(default)]
     pub material_region_count: usize,
@@ -515,6 +519,12 @@ pub(super) fn tetrahedron_recovery_evidence(
         generation_selected_family_index: mesh
             .backend
             .tetrahedron_generation_selected_family_index,
+        generation_interior_support_candidate_count: mesh
+            .backend
+            .tetrahedron_generation_interior_support_candidate_count,
+        generation_interior_support_accepted_count: mesh
+            .backend
+            .tetrahedron_generation_interior_support_accepted_count,
         element_count: mesh.backend.tetrahedron_element_count,
         material_region_count: mesh.backend.tetrahedron_material_region_count,
         unclassified_material_element_count: mesh

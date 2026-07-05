@@ -58,6 +58,10 @@ fn authoring_summary_exposes_tetrahedron_generation_selection_counts() {
     mesh.backend.tetrahedron_generation_attempted_family_count = 5;
     mesh.backend.tetrahedron_generation_rejected_family_count = 4;
     mesh.backend.tetrahedron_generation_selected_family_index = 5;
+    mesh.backend
+        .tetrahedron_generation_interior_support_candidate_count = 29;
+    mesh.backend
+        .tetrahedron_generation_interior_support_accepted_count = 1;
     let evidence = build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
 
     let summary = build_mesh_authoring_summary(&evidence);
@@ -69,6 +73,14 @@ fn authoring_summary_exposes_tetrahedron_generation_selection_counts() {
     assert_eq!(summary.tetrahedron_generation_attempted_family_count, 5);
     assert_eq!(summary.tetrahedron_generation_rejected_family_count, 4);
     assert_eq!(summary.tetrahedron_generation_selected_family_index, 5);
+    assert_eq!(
+        summary.tetrahedron_generation_interior_support_candidate_count,
+        29
+    );
+    assert_eq!(
+        summary.tetrahedron_generation_interior_support_accepted_count,
+        1
+    );
 
     let encoded = serde_json::to_value(&summary).expect("serialize authoring summary");
     assert_eq!(
@@ -82,6 +94,14 @@ fn authoring_summary_exposes_tetrahedron_generation_selection_counts() {
     assert_eq!(
         encoded["tetrahedron_generation_selected_family_index"].as_u64(),
         Some(5)
+    );
+    assert_eq!(
+        encoded["tetrahedron_generation_interior_support_candidate_count"].as_u64(),
+        Some(29)
+    );
+    assert_eq!(
+        encoded["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
+        Some(1)
     );
     assert!(encoded.get("debug").is_none());
     assert!(encoded.get("mesh").is_none());

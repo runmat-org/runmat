@@ -181,6 +181,8 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_generation_attempted_family_count: 5,
             tetrahedron_generation_rejected_family_count: 4,
             tetrahedron_generation_selected_family_index: 5,
+            tetrahedron_generation_interior_support_candidate_count: 29,
+            tetrahedron_generation_interior_support_accepted_count: 1,
             tetrahedron_element_count: 12,
             tetrahedron_material_region_count: 2,
             tetrahedron_unclassified_material_element_count: 0,

@@ -244,6 +244,8 @@ mod tests {
                 "tetrahedron_generation_attempted_family_count": 2,
                 "tetrahedron_generation_rejected_family_count": 1,
                 "tetrahedron_generation_selected_family_index": 2,
+                "tetrahedron_generation_interior_support_candidate_count": 17,
+                "tetrahedron_generation_interior_support_accepted_count": 1,
                 "topology": {
                     "node_count": 4,
                     "volume_element_count": 1,

@@ -2445,6 +2445,8 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
     summary.tetrahedron_generation_attempted_family_count = 5;
     summary.tetrahedron_generation_rejected_family_count = 4;
     summary.tetrahedron_generation_selected_family_index = 5;
+    summary.tetrahedron_generation_interior_support_candidate_count = 29;
+    summary.tetrahedron_generation_interior_support_accepted_count = 1;
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
@@ -2519,6 +2521,20 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
             .tetrahedron_generation_selected_family_index,
         5
     );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_interior_support_candidate_count,
+        29
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_interior_support_accepted_count,
+        1
+    );
 
     let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
         .expect("authored study should validate");
@@ -2551,6 +2567,14 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
     assert_eq!(
         artifact["evidence"]["tetrahedron_generation_selected_family_index"].as_u64(),
         Some(5)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_interior_support_candidate_count"].as_u64(),
+        Some(29)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
+        Some(1)
     );
 
     let _ = fs::remove_dir_all(&root);

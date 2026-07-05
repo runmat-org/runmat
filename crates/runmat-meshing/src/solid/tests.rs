@@ -487,6 +487,16 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
     );
     assert_eq!(mesh.volume_elements.len(), 8);
     assert_eq!(mesh.boundary_faces.len(), 8);
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_interior_support_candidate_count
+            > 1
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_interior_support_accepted_count
+            <= 1
+    );
     assert_eq!(mesh.backend.tetrahedron_source_face_recovery_item_count, 8);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
     validate_analysis_mesh(&mesh, QualityThresholds::default())
@@ -542,6 +552,16 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
     );
     assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 4);
     assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 5);
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_interior_support_candidate_count
+            > 1
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_interior_support_accepted_count
+            <= 1
+    );
     assert_eq!(
         mesh.volume_elements.len(),
         mesh.backend.surface_element_count
