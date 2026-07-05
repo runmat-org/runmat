@@ -9,7 +9,8 @@ use crate::math::{cross, dot, sub};
 use runmat_geometry_core::{CadFaceEvaluationSample, CadFaceEvaluationSampleSource};
 use runmat_meshing_cad::{build_cad_evaluation_model, build_cad_topology, SourceTopologyFace};
 use runmat_meshing_curve::{
-    discretize_topology_curves, CurveDiscretizationOptions, CurveValidationError,
+    discretize_cad_topology_curves_with_sizing, discretize_topology_curves,
+    CurveDiscretizationOptions, CurveValidationError,
 };
 
 mod cad_surfaces;

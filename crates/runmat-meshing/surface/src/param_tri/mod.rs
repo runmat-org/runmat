@@ -5,7 +5,8 @@ use runmat_meshing_cad::{
     SourceTopologyFace, SourceTopologyModel,
 };
 use runmat_meshing_curve::{
-    validate_curve_discretization, CurveDiscretization, CurveValidationOptions,
+    validate_curve_discretization, CadCurveDiscretization, CadCurveEdgeProvenance,
+    CurveDiscretization, CurveValidationOptions,
 };
 
 mod boundary;
@@ -21,10 +22,11 @@ use boundary::{
     curve_nodes_by_source_edge, curve_segments_for_source_edges, face_curve_segment_loops,
     oriented_face_curve_segments,
 };
-use coverage::SurfaceLoopCoverageAccumulator;
+use coverage::{SurfaceCadCurveBoundaryProvenanceAccumulator, SurfaceLoopCoverageAccumulator};
 use elements::append_curve_driven_face_elements;
 use subdivision::{append_centroid_subdivision, triangle_centroid};
 pub use types::{
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
     SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
 };
@@ -68,6 +70,7 @@ pub fn discretize_topology_surfaces(
         elements,
         curve_boundary_validation: None,
         loop_coverage: None,
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -172,6 +175,7 @@ pub fn discretize_cad_surfaces(
         elements,
         curve_boundary_validation: None,
         loop_coverage: None,
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     })
@@ -245,6 +249,7 @@ pub fn discretize_cad_surfaces_with_curves(
         elements,
         curve_boundary_validation: Some(curve_boundary_validation),
         loop_coverage: Some(loop_coverage.finish()),
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
     })
@@ -255,6 +260,41 @@ pub fn discretize_cad_topology_surfaces_with_curves(
     topology: &SourceTopologyModel,
     cad_evaluation: &CadEvaluationModel,
     curves: &CurveDiscretization,
+    options: SurfaceDiscretizationOptions,
+) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
+    discretize_cad_topology_surfaces_with_curve_inputs(
+        cad_topology,
+        topology,
+        cad_evaluation,
+        curves,
+        None,
+        options,
+    )
+}
+
+pub fn discretize_cad_topology_surfaces_with_cad_curves(
+    cad_topology: &CadTopologyModel,
+    topology: &SourceTopologyModel,
+    cad_evaluation: &CadEvaluationModel,
+    cad_curves: &CadCurveDiscretization,
+    options: SurfaceDiscretizationOptions,
+) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
+    discretize_cad_topology_surfaces_with_curve_inputs(
+        cad_topology,
+        topology,
+        cad_evaluation,
+        &cad_curves.curves,
+        Some(&cad_curves.edge_provenance),
+        options,
+    )
+}
+
+fn discretize_cad_topology_surfaces_with_curve_inputs(
+    cad_topology: &CadTopologyModel,
+    topology: &SourceTopologyModel,
+    cad_evaluation: &CadEvaluationModel,
+    curves: &CurveDiscretization,
+    cad_curve_edge_provenance: Option<&[CadCurveEdgeProvenance]>,
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
     let curve_boundary_validation =
@@ -281,9 +321,18 @@ pub fn discretize_cad_topology_surfaces_with_curves(
         .collect::<BTreeMap<_, _>>();
     let curve_nodes_by_edge = curve_nodes_by_source_edge(curves);
     let mut curve_node_to_surface_node = BTreeMap::<u32, u32>::new();
+    let cad_curve_provenance_by_source_edge = cad_curve_edge_provenance.map(|edge_provenance| {
+        edge_provenance
+            .iter()
+            .map(|provenance| (provenance.source_edge_id, provenance))
+            .collect::<BTreeMap<_, _>>()
+    });
 
     let mut elements = Vec::<SurfaceElement>::new();
     let mut loop_coverage = SurfaceLoopCoverageAccumulator::new(cad_topology.faces.len());
+    let mut cad_curve_boundary_provenance = cad_curve_provenance_by_source_edge
+        .as_ref()
+        .map(|_| SurfaceCadCurveBoundaryProvenanceAccumulator::new());
     let mut exact_cad_sample_node_count = 0_usize;
     let mut rejected_exact_cad_sample_count = 0_usize;
     for cad_face in &cad_topology.faces {
@@ -306,6 +355,12 @@ pub fn discretize_cad_topology_surfaces_with_curves(
         )?;
         let segment_loops = face_curve_segment_loops(face.face_id, &segments)?;
         loop_coverage.record_face_edges(&source_edge_ids, &segment_loops);
+        if let (Some(accumulator), Some(provenance_by_source_edge)) = (
+            cad_curve_boundary_provenance.as_mut(),
+            cad_curve_provenance_by_source_edge.as_ref(),
+        ) {
+            accumulator.record_segments(&segment_loops, provenance_by_source_edge)?;
+        }
         let sample_report = append_curve_driven_face_elements(
             &face,
             frame,
@@ -322,6 +377,8 @@ pub fn discretize_cad_topology_surfaces_with_curves(
         elements,
         curve_boundary_validation: Some(curve_boundary_validation),
         loop_coverage: Some(loop_coverage.finish()),
+        cad_curve_boundary_provenance: cad_curve_boundary_provenance
+            .map(SurfaceCadCurveBoundaryProvenanceAccumulator::finish),
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
     })

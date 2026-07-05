@@ -51,6 +51,8 @@ pub struct SurfaceDiscretization {
     #[serde(default)]
     pub loop_coverage: Option<SurfaceLoopCoverageReport>,
     #[serde(default)]
+    pub cad_curve_boundary_provenance: Option<SurfaceCadCurveBoundaryProvenanceReport>,
+    #[serde(default)]
     pub exact_cad_sample_node_count: usize,
     #[serde(default)]
     pub rejected_exact_cad_sample_count: usize,
@@ -64,6 +66,37 @@ pub struct SurfaceLoopCoverageReport {
     pub recovered_source_edge_count: usize,
     pub boundary_segment_count: usize,
     pub max_loops_per_face: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceCadCurveBoundaryProvenanceReport {
+    pub recovered_source_edge_count: usize,
+    pub boundary_segment_count: usize,
+    pub imported_curve_edge_count: usize,
+    pub evaluator_curve_edge_count: usize,
+    pub evaluator_sample_count: usize,
+    pub edges: Vec<SurfaceCadCurveBoundaryEdgeProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceCadCurveBoundaryEdgeProvenance {
+    pub source_edge_id: u32,
+    pub cad_edge_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_curve_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_id: Option<String>,
+    #[serde(default)]
+    pub evaluator_supports_point_evaluation: bool,
+    #[serde(default)]
+    pub evaluator_supports_projection: bool,
+    #[serde(default)]
+    pub evaluator_supports_tangent: bool,
+    #[serde(default)]
+    pub evaluator_supports_curvature: bool,
+    #[serde(default)]
+    pub evaluator_sample_count: usize,
+    pub boundary_segment_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +121,9 @@ pub enum SurfaceDiscretizationError {
         loop_edge_id: String,
     },
     MissingCurveEdge {
+        source_edge_id: u32,
+    },
+    MissingCadCurveProvenance {
         source_edge_id: u32,
     },
     InvalidFaceEdgeOrientation {
@@ -140,6 +176,10 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             Self::MissingCurveEdge { source_edge_id } => write!(
                 formatter,
                 "source edge {source_edge_id} does not have curve discretization nodes"
+            ),
+            Self::MissingCadCurveProvenance { source_edge_id } => write!(
+                formatter,
+                "source edge {source_edge_id} does not have CAD curve provenance"
             ),
             Self::InvalidFaceEdgeOrientation { face_id, edge_id } => write!(
                 formatter,

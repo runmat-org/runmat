@@ -386,6 +386,7 @@ fn square_cad_surface(mark_display_diagonal_as_source_edge: bool) -> SurfaceDisc
         ],
         curve_boundary_validation: None,
         loop_coverage: None,
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }

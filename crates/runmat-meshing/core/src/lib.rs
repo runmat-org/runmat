@@ -105,7 +105,9 @@ pub use surface::validate::{
     SurfaceValidationReport,
 };
 pub use surface::{
-    discretize_cad_surfaces, discretize_cad_surfaces_with_curves, discretize_topology_surfaces,
+    discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
+    discretize_cad_topology_surfaces_with_cad_curves, discretize_topology_surfaces,
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
     SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
     SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };

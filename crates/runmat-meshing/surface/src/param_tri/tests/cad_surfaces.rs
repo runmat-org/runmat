@@ -131,6 +131,63 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
 }
 
 #[test]
+fn cad_topology_surface_carries_cad_curve_boundary_provenance() {
+    let topology = single_triangle_topology();
+    let cad_topology =
+        build_cad_topology(&geometry_for_topology(), &topology).expect("cad topology");
+    let cad_evaluation =
+        build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+    let cad_curves = discretize_cad_topology_curves_with_sizing(
+        &topology,
+        &cad_topology,
+        CurveDiscretizationOptions {
+            target_size_m: 0.25,
+            min_segments_per_edge: 2,
+            max_segments_per_edge: 2,
+        },
+        None,
+    )
+    .expect("CAD curves should discretize");
+
+    let surface = discretize_cad_topology_surfaces_with_cad_curves(
+        &cad_topology,
+        &topology,
+        &cad_evaluation,
+        &cad_curves,
+        SurfaceDiscretizationOptions {
+            max_curve_segments_per_edge: 2,
+            ..SurfaceDiscretizationOptions::default()
+        },
+    )
+    .expect("CAD curve-owned surface should discretize");
+
+    let provenance = surface
+        .cad_curve_boundary_provenance
+        .as_ref()
+        .expect("CAD curve boundary provenance");
+    assert_eq!(provenance.recovered_source_edge_count, topology.edges.len());
+    assert_eq!(
+        provenance.boundary_segment_count,
+        cad_curves.curves.elements.len()
+    );
+    assert_eq!(provenance.imported_curve_edge_count, 0);
+    assert_eq!(provenance.evaluator_curve_edge_count, 0);
+    assert_eq!(provenance.evaluator_sample_count, 0);
+    assert_eq!(provenance.edges.len(), topology.edges.len());
+    for edge in &topology.edges {
+        let entry = provenance
+            .edges
+            .iter()
+            .find(|entry| entry.source_edge_id == edge.edge_id)
+            .expect("source edge provenance");
+        assert_eq!(entry.cad_edge_id, format!("cad_edge_{}", edge.edge_id));
+        assert_eq!(entry.boundary_segment_count, 2);
+        assert!(entry.imported_curve_id.is_none());
+        assert!(entry.evaluator_id.is_none());
+    }
+}
+
+#[test]
 fn cad_topology_surface_marks_display_diagonal_internal() {
     let topology = square_split_by_display_diagonal_topology();
     let cad_topology = square_cad_topology(&topology);

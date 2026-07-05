@@ -245,6 +245,7 @@ fn tetra_surface() -> SurfaceDiscretization {
             max_adjacent_length_ratio: 1.0,
         }),
         loop_coverage: Some(loop_coverage()),
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }
@@ -272,6 +273,7 @@ fn edge_shared_tetrahedra_surface() -> SurfaceDiscretization {
         ],
         curve_boundary_validation: None,
         loop_coverage: None,
+        cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
     }
