@@ -1,6 +1,9 @@
 use runmat_meshing_core::{
     contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
-    quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
+    quality::predicate::{
+        point_in_closed_triangle_surface, tetrahedron_scaled_jacobian, tetrahedron_signed_volume,
+        PointInClosedSurface, Triangle3,
+    },
     quality::tolerance::MeshingTolerance,
 };
 
@@ -164,9 +167,13 @@ fn select_interior_point(
     let mut best = None::<InteriorPointSelection>;
 
     for candidate in candidates.drain(..) {
-        let Ok(min_scaled_jacobian) =
-            min_scaled_jacobian_for_interior(plc, coordinates_by_id, candidate, volume_epsilon)
-        else {
+        let Ok(min_scaled_jacobian) = min_scaled_jacobian_for_interior(
+            plc,
+            coordinates_by_id,
+            candidate,
+            volume_epsilon,
+            tolerance,
+        ) else {
             continue;
         };
         let baseline = *baseline_quality.get_or_insert(min_scaled_jacobian);
@@ -229,9 +236,16 @@ fn min_scaled_jacobian_for_interior(
     coordinates_by_id: &std::collections::BTreeMap<TopologyEntityId, [f64; 3]>,
     interior: [f64; 3],
     volume_epsilon: f64,
+    tolerance: MeshingTolerance,
 ) -> Result<f64, TetrahedronGenerationError> {
     if interior.iter().any(|coordinate| !coordinate.is_finite()) {
         return Err(TetrahedronGenerationError::NonFiniteInteriorPoint);
+    }
+    let boundary_triangles = plc_boundary_triangles(plc, coordinates_by_id);
+    if point_in_closed_triangle_surface(interior, &boundary_triangles, tolerance)
+        != PointInClosedSurface::Inside
+    {
+        return Err(TetrahedronGenerationError::UnsupportedStarShapedPolyhedronPlc);
     }
     let mut orientation_sign = 0_i8;
     let mut min_scaled_jacobian = f64::INFINITY;
@@ -258,6 +272,22 @@ fn min_scaled_jacobian_for_interior(
         min_scaled_jacobian = min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
     }
     Ok(min_scaled_jacobian)
+}
+
+fn plc_boundary_triangles(
+    plc: &ProtectedBoundaryComplex,
+    coordinates_by_id: &std::collections::BTreeMap<TopologyEntityId, [f64; 3]>,
+) -> Vec<Triangle3> {
+    plc.facets
+        .iter()
+        .map(|facet| {
+            [
+                coordinates_by_id[&facet.node_ids[0]],
+                coordinates_by_id[&facet.node_ids[1]],
+                coordinates_by_id[&facet.node_ids[2]],
+            ]
+        })
+        .collect()
 }
 
 fn bounds_center(bounds: [[f64; 3]; 2]) -> [f64; 3] {
