@@ -24,8 +24,9 @@ pub use cad::eval::{
     CadFaceEvaluatorProvider, CadFaceProjection, NoopCadFaceEvaluatorProvider,
 };
 pub use cad::topology::{
-    build_cad_topology, CadEdge, CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell,
-    CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
+    build_cad_topology, validate_cad_topology_model, CadEdge, CadEntityId, CadEntityKind, CadFace,
+    CadLoop, CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource,
+    CadVertex, CadVolume,
 };
 pub use contracts::artifact::{
     analysis_mesh_field_topology, AnalysisBoundaryEdge, AnalysisBoundaryFace,

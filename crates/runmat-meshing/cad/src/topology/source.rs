@@ -194,7 +194,7 @@ pub fn build_cad_topology(
         closed_shell_count: usize::from(closed),
     };
 
-    Ok(CadTopologyModel {
+    let model = CadTopologyModel {
         source_geometry_id: topology.source_geometry_id.clone(),
         source_geometry_revision: topology.source_geometry_revision,
         source_geometry_sha256: topology.source_geometry_sha256.clone(),
@@ -206,7 +206,9 @@ pub fn build_cad_topology(
         shells: vec![shell],
         volumes: closed.then_some(volume).into_iter().collect(),
         report,
-    })
+    };
+    validate_cad_topology_model(&model)?;
+    Ok(model)
 }
 
 fn attach_outer_loops(faces: &mut [CadFace]) -> Vec<CadLoop> {
@@ -225,6 +227,261 @@ fn attach_outer_loops(faces: &mut [CadFace]) -> Vec<CadLoop> {
         });
     }
     loops
+}
+
+pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTopologyError> {
+    let vertex_ids = collect_entity_ids(
+        CadEntityKind::Vertex,
+        model.vertices.iter().map(|vertex| &vertex.entity_id),
+    )?;
+    let edge_ids = collect_entity_ids(
+        CadEntityKind::Edge,
+        model.edges.iter().map(|edge| &edge.entity_id),
+    )?;
+    let loop_ids = collect_entity_ids(
+        CadEntityKind::Loop,
+        model.loops.iter().map(|cad_loop| &cad_loop.entity_id),
+    )?;
+    let face_ids = collect_entity_ids(
+        CadEntityKind::Face,
+        model.faces.iter().map(|face| &face.entity_id),
+    )?;
+    let shell_ids = collect_entity_ids(
+        CadEntityKind::Shell,
+        model.shells.iter().map(|shell| &shell.entity_id),
+    )?;
+    let _volume_ids = collect_entity_ids(
+        CadEntityKind::Volume,
+        model.volumes.iter().map(|volume| &volume.entity_id),
+    )?;
+    let loop_face_ids = model
+        .loops
+        .iter()
+        .map(|cad_loop| (cad_loop.entity_id.id.as_str(), cad_loop.face_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let face_loop_ids = model
+        .faces
+        .iter()
+        .map(|face| {
+            (
+                face.entity_id.id.as_str(),
+                face.loop_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for edge in &model.edges {
+        for vertex_id in &edge.vertex_ids {
+            require_reference(
+                CadEntityKind::Edge,
+                &edge.entity_id.id,
+                CadEntityKind::Vertex,
+                vertex_id,
+                &vertex_ids,
+            )?;
+        }
+        for face_id in &edge.adjacent_face_ids {
+            require_reference(
+                CadEntityKind::Edge,
+                &edge.entity_id.id,
+                CadEntityKind::Face,
+                face_id,
+                &face_ids,
+            )?;
+        }
+    }
+    for cad_loop in &model.loops {
+        require_reference(
+            CadEntityKind::Loop,
+            &cad_loop.entity_id.id,
+            CadEntityKind::Face,
+            &cad_loop.face_id,
+            &face_ids,
+        )?;
+        require_face_lists_loop(&cad_loop.face_id, &cad_loop.entity_id.id, &face_loop_ids)?;
+        for edge_id in &cad_loop.edge_ids {
+            require_reference(
+                CadEntityKind::Loop,
+                &cad_loop.entity_id.id,
+                CadEntityKind::Edge,
+                edge_id,
+                &edge_ids,
+            )?;
+        }
+    }
+    for face in &model.faces {
+        for loop_id in &face.loop_ids {
+            require_reference(
+                CadEntityKind::Face,
+                &face.entity_id.id,
+                CadEntityKind::Loop,
+                loop_id,
+                &loop_ids,
+            )?;
+            require_loop_belongs_to_face(&face.entity_id.id, loop_id, &loop_face_ids)?;
+        }
+        for edge_id in &face.loop_edge_ids {
+            require_reference(
+                CadEntityKind::Face,
+                &face.entity_id.id,
+                CadEntityKind::Edge,
+                edge_id,
+                &edge_ids,
+            )?;
+        }
+    }
+    for shell in &model.shells {
+        for face_id in &shell.face_ids {
+            require_reference(
+                CadEntityKind::Shell,
+                &shell.entity_id.id,
+                CadEntityKind::Face,
+                face_id,
+                &face_ids,
+            )?;
+        }
+    }
+    for volume in &model.volumes {
+        for shell_id in &volume.shell_ids {
+            require_reference(
+                CadEntityKind::Volume,
+                &volume.entity_id.id,
+                CadEntityKind::Shell,
+                shell_id,
+                &shell_ids,
+            )?;
+        }
+    }
+
+    validate_report_count(
+        "vertex_count",
+        model.vertices.len(),
+        model.report.vertex_count,
+    )?;
+    validate_report_count("edge_count", model.edges.len(), model.report.edge_count)?;
+    validate_report_count("loop_count", model.loops.len(), model.report.loop_count)?;
+    validate_report_count("face_count", model.faces.len(), model.report.face_count)?;
+    validate_report_count("shell_count", model.shells.len(), model.report.shell_count)?;
+    validate_report_count(
+        "volume_count",
+        model.volumes.len(),
+        model.report.volume_count,
+    )?;
+    validate_report_count(
+        "hole_loop_count",
+        model
+            .loops
+            .iter()
+            .filter(|cad_loop| !cad_loop.is_outer)
+            .count(),
+        model.report.hole_loop_count,
+    )?;
+    validate_report_count(
+        "closed_shell_count",
+        model.shells.iter().filter(|shell| shell.closed).count(),
+        model.report.closed_shell_count,
+    )?;
+    Ok(())
+}
+
+fn require_face_lists_loop(
+    face_id: &str,
+    loop_id: &str,
+    face_loop_ids: &BTreeMap<&str, BTreeSet<&str>>,
+) -> Result<(), CadTopologyError> {
+    if face_loop_ids
+        .get(face_id)
+        .is_some_and(|loop_ids| loop_ids.contains(loop_id))
+    {
+        Ok(())
+    } else {
+        Err(CadTopologyError::MissingFaceLoopReference {
+            face_id: face_id.to_string(),
+            loop_id: loop_id.to_string(),
+        })
+    }
+}
+
+fn require_loop_belongs_to_face(
+    face_id: &str,
+    loop_id: &str,
+    loop_face_ids: &BTreeMap<&str, &str>,
+) -> Result<(), CadTopologyError> {
+    match loop_face_ids.get(loop_id) {
+        Some(loop_face_id) if *loop_face_id == face_id => Ok(()),
+        Some(loop_face_id) => Err(CadTopologyError::LoopFaceMismatch {
+            loop_id: loop_id.to_string(),
+            expected_face_id: face_id.to_string(),
+            actual_face_id: (*loop_face_id).to_string(),
+        }),
+        None => Err(CadTopologyError::MissingEntityReference {
+            owner_kind: CadEntityKind::Face,
+            owner_id: face_id.to_string(),
+            reference_kind: CadEntityKind::Loop,
+            reference_id: loop_id.to_string(),
+        }),
+    }
+}
+
+fn collect_entity_ids<'a>(
+    expected_kind: CadEntityKind,
+    ids: impl Iterator<Item = &'a CadEntityId>,
+) -> Result<BTreeSet<String>, CadTopologyError> {
+    let mut seen = BTreeSet::<String>::new();
+    for entity_id in ids {
+        if entity_id.kind != expected_kind {
+            return Err(CadTopologyError::EntityKindMismatch {
+                expected: expected_kind,
+                actual: entity_id.kind,
+                id: entity_id.id.clone(),
+            });
+        }
+        if !seen.insert(entity_id.id.clone()) {
+            return Err(CadTopologyError::DuplicateEntityId {
+                kind: expected_kind,
+                id: entity_id.id.clone(),
+            });
+        }
+    }
+    Ok(seen)
+}
+
+fn require_reference(
+    owner_kind: CadEntityKind,
+    owner_id: &str,
+    reference_kind: CadEntityKind,
+    reference_id: &str,
+    valid_ids: &BTreeSet<String>,
+) -> Result<(), CadTopologyError> {
+    if valid_ids.contains(reference_id) {
+        Ok(())
+    } else {
+        Err(CadTopologyError::MissingEntityReference {
+            owner_kind,
+            owner_id: owner_id.to_string(),
+            reference_kind,
+            reference_id: reference_id.to_string(),
+        })
+    }
+}
+
+fn validate_report_count(
+    field: &'static str,
+    expected: usize,
+    actual: usize,
+) -> Result<(), CadTopologyError> {
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(CadTopologyError::ReportCountMismatch {
+            field,
+            expected,
+            actual,
+        })
+    }
 }
 
 #[cfg(test)]

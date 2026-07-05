@@ -135,12 +135,81 @@ pub struct CadTopologyModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadTopologyError {
     EmptyTopology,
+    DuplicateEntityId {
+        kind: CadEntityKind,
+        id: String,
+    },
+    EntityKindMismatch {
+        expected: CadEntityKind,
+        actual: CadEntityKind,
+        id: String,
+    },
+    MissingEntityReference {
+        owner_kind: CadEntityKind,
+        owner_id: String,
+        reference_kind: CadEntityKind,
+        reference_id: String,
+    },
+    LoopFaceMismatch {
+        loop_id: String,
+        expected_face_id: String,
+        actual_face_id: String,
+    },
+    MissingFaceLoopReference {
+        face_id: String,
+        loop_id: String,
+    },
+    ReportCountMismatch {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 impl std::fmt::Display for CadTopologyError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyTopology => write!(formatter, "source topology has no vertices or faces"),
+            Self::DuplicateEntityId { kind, id } => {
+                write!(formatter, "duplicate CAD {kind:?} entity id {id}")
+            }
+            Self::EntityKindMismatch {
+                expected,
+                actual,
+                id,
+            } => write!(
+                formatter,
+                "CAD entity {id} has kind {actual:?}, expected {expected:?}"
+            ),
+            Self::MissingEntityReference {
+                owner_kind,
+                owner_id,
+                reference_kind,
+                reference_id,
+            } => write!(
+                formatter,
+                "CAD {owner_kind:?} {owner_id} references missing {reference_kind:?} {reference_id}"
+            ),
+            Self::LoopFaceMismatch {
+                loop_id,
+                expected_face_id,
+                actual_face_id,
+            } => write!(
+                formatter,
+                "CAD loop {loop_id} is listed by face {expected_face_id} but belongs to face {actual_face_id}"
+            ),
+            Self::MissingFaceLoopReference { face_id, loop_id } => write!(
+                formatter,
+                "CAD loop {loop_id} belongs to face {face_id} but the face does not list it"
+            ),
+            Self::ReportCountMismatch {
+                field,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "CAD topology report field {field} is {actual}, expected {expected}"
+            ),
         }
     }
 }

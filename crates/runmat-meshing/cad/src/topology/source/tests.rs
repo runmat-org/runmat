@@ -73,6 +73,132 @@ fn preserves_semantic_cad_face_regions() {
     assert_eq!(semantic_face.unit_normal, [0.0, 0.0, -1.0]);
 }
 
+#[test]
+fn validates_normalized_cad_topology_references_and_report_counts() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+
+    validate_cad_topology_model(&cad).expect("builder output should validate");
+}
+
+#[test]
+fn rejects_duplicate_cad_entity_ids() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.edges[1].entity_id.id = cad.edges[0].entity_id.id.clone();
+
+    let err = validate_cad_topology_model(&cad).expect_err("duplicate edge IDs should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::DuplicateEntityId {
+            kind: CadEntityKind::Edge,
+            id: cad.edges[0].entity_id.id.clone()
+        }
+    );
+}
+
+#[test]
+fn rejects_stale_cad_loop_edge_references() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.loops[0].edge_ids[0] = "cad_edge_missing".to_string();
+
+    let err = validate_cad_topology_model(&cad).expect_err("stale loop edge should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::MissingEntityReference {
+            owner_kind: CadEntityKind::Loop,
+            owner_id: cad.loops[0].entity_id.id.clone(),
+            reference_kind: CadEntityKind::Edge,
+            reference_id: "cad_edge_missing".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_loop_listed_by_wrong_face() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let wrong_loop_id = cad.faces[1].loop_ids[0].clone();
+    cad.faces[0].loop_ids = vec![wrong_loop_id.clone()];
+
+    let err = validate_cad_topology_model(&cad).expect_err("wrong face-loop owner should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::MissingFaceLoopReference {
+            face_id: cad.loops[0].face_id.clone(),
+            loop_id: cad.loops[0].entity_id.id.clone(),
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_loop_with_stale_owning_face_reference() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let original_face_id = cad.loops[0].face_id.clone();
+    cad.loops[0].face_id = cad.faces[1].entity_id.id.clone();
+
+    let err = validate_cad_topology_model(&cad).expect_err("stale loop owner should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::MissingFaceLoopReference {
+            face_id: cad.loops[0].face_id.clone(),
+            loop_id: cad.loops[0].entity_id.id.clone(),
+        }
+    );
+    assert_ne!(original_face_id, cad.loops[0].face_id);
+}
+
+#[test]
+fn rejects_cad_loop_owned_by_a_different_face() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let wrong_loop_id = cad.faces[1].loop_ids[0].clone();
+    let wrong_loop_face_id = cad.loops[1].face_id.clone();
+    cad.faces[0].loop_ids.push(wrong_loop_id.clone());
+
+    let err = validate_cad_topology_model(&cad).expect_err("foreign loop should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::LoopFaceMismatch {
+            loop_id: wrong_loop_id,
+            expected_face_id: cad.faces[0].entity_id.id.clone(),
+            actual_face_id: wrong_loop_face_id,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_topology_report_count_mismatch() {
+    let geometry = cube_geometry(false);
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.report.loop_count += 1;
+
+    let err = validate_cad_topology_model(&cad).expect_err("stale report count should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::ReportCountMismatch {
+            field: "loop_count",
+            expected: cad.loops.len(),
+            actual: cad.report.loop_count,
+        }
+    );
+}
+
 fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {
     let face_region = Region {
         region_id: "face_000001".to_string(),

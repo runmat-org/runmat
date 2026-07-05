@@ -17,8 +17,8 @@ pub use eval::{
     CadFaceEvaluatorProvider, CadFaceProjection, NoopCadFaceEvaluatorProvider,
 };
 pub use topology::{
-    build_cad_topology, extract_source_topology, CadEdge, CadEntityId, CadEntityKind, CadFace,
-    CadLoop, CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource,
-    CadVertex, CadVolume, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
-    SourceTopologyModel, SourceTopologyVertex,
+    build_cad_topology, extract_source_topology, validate_cad_topology_model, CadEdge, CadEntityId,
+    CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyError, CadTopologyModel,
+    CadTopologyReport, CadTopologySource, CadVertex, CadVolume, SourceTopologyEdge,
+    SourceTopologyError, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
 };
