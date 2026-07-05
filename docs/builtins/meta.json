@@ -75885,6 +75885,168 @@
       ]
     },
     {
+      "name": "refline",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "refline()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "refline(coeffs)",
+          "inputs": [
+            {
+              "name": "coeffs",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element vector [slope intercept]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "refline(m, b)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line slope."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line y-intercept."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "refline(___, LineSpec, Name, Value)",
+          "inputs": [
+            {
+              "name": "coeffs",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element vector [slope intercept]."
+            },
+            {
+              "name": "style",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional LineSpec or line Name/Value pairs."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "refline(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "style",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional LineSpec or line Name/Value pairs."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = refline(___)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line slope."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line y-intercept."
+            },
+            {
+              "name": "style",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional LineSpec or line Name/Value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle."
+            }
+          ]
+        },
+        {
+          "label": "h = refline(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "style",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional LineSpec or line Name/Value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.REFLINE.INVALID_ARGUMENT",
+          "identifier": "RunMat:refline:InvalidArgument",
+          "when": "Axes handle, coefficient inputs, or style options are malformed.",
+          "message": "refline: invalid argument"
+        },
+        {
+          "code": "RM.REFLINE.INTERNAL",
+          "identifier": "RunMat:refline:Internal",
+          "when": "RunMat cannot construct or register the reference line.",
+          "message": "refline: internal error"
+        }
+      ]
+    },
+    {
       "name": "regexp",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

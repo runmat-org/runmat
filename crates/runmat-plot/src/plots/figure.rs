@@ -1186,6 +1186,33 @@ impl Figure {
         self.bounds.unwrap()
     }
 
+    /// Get the combined bounds of visible data plots assigned to one axes.
+    ///
+    /// Reference lines are intentionally excluded so helpers that need the axes'
+    /// data extent do not feed previously-created reference annotations back into
+    /// their own range calculations.
+    pub fn data_bounds_for_axes(&mut self, axes_index: usize) -> BoundingBox {
+        let axes_index = self.normalize_axes_index(axes_index);
+        let mut combined_bounds = None;
+
+        for (plot_index, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(plot_index).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            if !plot.is_visible() || matches!(plot, PlotElement::ReferenceLine(_)) {
+                continue;
+            }
+
+            let plot_bounds = plot.bounds();
+            combined_bounds = match combined_bounds {
+                None => Some(plot_bounds),
+                Some(existing) => Some(existing.union(&plot_bounds)),
+            };
+        }
+
+        combined_bounds.unwrap_or_default()
+    }
+
     /// Compute the combined bounds from all plots
     fn compute_bounds(&mut self) {
         if self.plots.is_empty() {
