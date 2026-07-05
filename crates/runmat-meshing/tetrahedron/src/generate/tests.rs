@@ -13,9 +13,9 @@ mod recovery;
 use fixtures::*;
 
 #[test]
-fn generates_positive_tetrahedra_from_validated_tetra_plc() {
-    let mesh = generate_initial_tetrahedron_mesh_from_plc(&tetra_plc())
-        .expect("validated tetra PLC should generate an initial Tetrahedron mesh");
+fn generates_positive_tetrahedra_from_validated_tetrahedron_plc() {
+    let mesh = generate_initial_tetrahedron_mesh_from_plc(&tetrahedron_plc())
+        .expect("validated Tetrahedron PLC should generate an initial Tetrahedron mesh");
 
     assert_eq!(mesh.nodes.len(), 5);
     assert_eq!(mesh.tetrahedron_generation_family, "initial_plc");
@@ -53,7 +53,7 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
 
 #[test]
 fn initial_generation_keeps_ambiguous_material_ownership_unclassified() {
-    let plc = with_split_material_ids(tetra_plc());
+    let plc = with_split_material_ids(tetrahedron_plc());
 
     let mesh = generate_initial_tetrahedron_mesh_from_plc(&plc)
         .expect("validated PLC should generate initial Tetrahedron mesh");
@@ -71,7 +71,7 @@ fn initial_generation_keeps_ambiguous_material_ownership_unclassified() {
 
 #[test]
 fn generated_tetrahedron_mesh_preserves_input_plc_cad_curve_evidence() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.evidence
         .entity_counts
         .insert("cad_curve_boundary_source_edges".to_string(), 2);
@@ -150,7 +150,7 @@ fn generated_tetrahedron_mesh_preserves_input_plc_cad_curve_evidence() {
 
 #[test]
 fn generated_tetrahedron_mesh_preserves_input_plc_surface_boundary_node_evidence() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.evidence
         .entity_counts
         .insert("surface_boundary_nodes".to_string(), 4);
@@ -166,7 +166,7 @@ fn generated_tetrahedron_mesh_preserves_input_plc_surface_boundary_node_evidence
 
 #[test]
 fn rejects_unvalidated_plc_before_tetrahedron_generation() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.validation.watertight = false;
 
     assert!(matches!(
@@ -417,7 +417,7 @@ fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
 
 #[test]
 fn rejects_degenerate_plc_facet() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.nodes[2].coordinates_m = plc.nodes[1].coordinates_m;
 
     assert!(matches!(
@@ -596,8 +596,8 @@ fn structured_box_generation_preserves_split_protected_source_edges() {
 
 #[test]
 fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
-    let mesh = generate_single_tetrahedron_mesh_from_plc(&tetra_plc())
-        .expect("tetrahedron PLC should generate one solver Tetrahedron4");
+    let mesh = generate_single_tetrahedron_mesh_from_plc(&tetrahedron_plc())
+        .expect("Tetrahedron PLC should generate one solver Tetrahedron4");
 
     assert_eq!(mesh.nodes.len(), 4);
     assert_eq!(mesh.elements.len(), 1);
@@ -617,10 +617,10 @@ fn generates_single_tetrahedron_mesh_from_tetrahedron_plc() {
 
 #[test]
 fn single_tetrahedron_generation_keeps_ambiguous_material_ownership_unclassified() {
-    let plc = with_split_material_ids(tetra_plc());
+    let plc = with_split_material_ids(tetrahedron_plc());
 
     let mesh = generate_single_tetrahedron_mesh_from_plc(&plc)
-        .expect("tetrahedron PLC should generate one solver Tetrahedron4");
+        .expect("Tetrahedron PLC should generate one solver Tetrahedron4");
 
     assert_eq!(mesh.elements[0].material_region_id, "unclassified");
 }
@@ -650,8 +650,8 @@ fn min_generated_scaled_jacobian(mesh: &TetrahedronMesh) -> f64 {
 fn solver_generation_supports_box_and_single_tetrahedron_plcs() {
     let box_mesh = generate_solver_tetrahedron_mesh_from_plc(&box_plc())
         .expect("box PLC should use structured box solver generation");
-    let tetrahedron_mesh = generate_solver_tetrahedron_mesh_from_plc(&tetra_plc())
-        .expect("tetrahedron PLC should use single Tetrahedron solver generation");
+    let tetrahedron_mesh = generate_solver_tetrahedron_mesh_from_plc(&tetrahedron_plc())
+        .expect("Tetrahedron PLC should use single Tetrahedron solver generation");
 
     assert_eq!(box_mesh.elements.len(), 6);
     assert_eq!(box_mesh.tetrahedron_generation_family, "structured_box");
@@ -921,7 +921,7 @@ fn solver_generation_rejects_unreferenced_plc_nodes_before_shape_selection() {
 
 #[test]
 fn solver_generation_rejects_open_plc_even_when_summary_claims_ready() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.facets.pop();
 
     assert!(matches!(
@@ -940,7 +940,7 @@ fn single_tetrahedron_generation_rejects_non_tetrahedron_plc() {
 
 #[test]
 fn structured_box_generation_rejects_degenerate_bounds() {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     for node in &mut plc.nodes {
         node.coordinates_m[2] = 0.0;
     }
@@ -958,7 +958,7 @@ fn structured_box_generation_rejects_degenerate_bounds() {
 #[test]
 fn structured_box_generation_rejects_non_box_plc() {
     assert_eq!(
-        generate_structured_box_tetrahedron_mesh_from_plc(&tetra_plc()),
+        generate_structured_box_tetrahedron_mesh_from_plc(&tetrahedron_plc()),
         Err(TetrahedronGenerationError::UnsupportedStructuredBoxPlc)
     );
 }

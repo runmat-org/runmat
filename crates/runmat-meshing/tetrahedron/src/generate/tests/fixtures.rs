@@ -3,9 +3,9 @@ use runmat_meshing_core::contracts::{
     ProtectedBoundaryComplex, StageEvidence, TopologyEntityId,
 };
 
-pub(super) fn tetra_plc() -> ProtectedBoundaryComplex {
+pub(super) fn tetrahedron_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
-        complex_id: "tetra".to_string(),
+        complex_id: "tetrahedron".to_string(),
         nodes: vec![
             node("0", [0.0, 0.0, 0.0]),
             node("1", [1.0, 0.0, 0.0]),
@@ -69,7 +69,7 @@ pub(super) fn octahedron_with_extra_interior_node_plc() -> ProtectedBoundaryComp
 }
 
 pub(super) fn nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.complex_id = "nested_tetrahedron_shells".to_string();
     plc.nodes.extend([
         node("10", [0.2, 0.2, 0.2]),
@@ -87,7 +87,7 @@ pub(super) fn nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
 }
 
 pub(super) fn wider_inner_nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.complex_id = "wider_inner_nested_tetrahedron_shells".to_string();
     plc.nodes.extend([
         node("10", [0.2, 0.2, 0.2]),
@@ -105,7 +105,7 @@ pub(super) fn wider_inner_nested_tetrahedron_shells_plc() -> ProtectedBoundaryCo
 }
 
 pub(super) fn split_outer_edge_nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex {
-    let mut plc = tetra_plc();
+    let mut plc = tetrahedron_plc();
     plc.complex_id = "split_outer_edge_nested_tetrahedron_shells".to_string();
     plc.nodes.push(node("4", [0.5, 0.0, 0.0]));
     plc.nodes.extend([

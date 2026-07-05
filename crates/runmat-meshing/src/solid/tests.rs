@@ -389,7 +389,7 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
             ..VolumeMeshingOptions::default()
         },
     )
-    .expect("tetrahedron PLC should run through the root solid pipeline");
+    .expect("Tetrahedron PLC should run through the root solid pipeline");
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(
