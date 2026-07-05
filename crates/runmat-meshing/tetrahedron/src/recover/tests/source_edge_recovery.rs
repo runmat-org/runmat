@@ -69,6 +69,10 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
         0
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts["applied_source_edge_split_refill_items"],
+        0
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["deferred_absent_source_edge_recovery_items"],
         0
     );
@@ -179,6 +183,49 @@ fn recovery_queue_accepts_split_boundary_face_chain_for_protected_source_edge() 
             item.status == TetrahedronRecoveryStatus::Recovered
                 && item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
         }));
+}
+
+#[test]
+fn source_edge_split_refill_application_closes_remaining_volume_edge_chain() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "1")))
+    });
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("missing protected edge should be available for split/refill recovery");
+
+    let recovery = crate::recover::source_edges::apply_source_edge_split_refill_recovery(
+        &tetrahedron_plc(),
+        &queue,
+        &mut mesh,
+    );
+
+    assert_eq!(recovery.attempted_source_edge_count, 1);
+    assert_eq!(recovery.accepted_source_edge_count, 1);
+    assert_eq!(recovery.applied_source_edge_count, 1);
+    assert_eq!(recovery.rejected_source_edge_count, 0);
+    assert!(mesh.nodes.iter().any(|node| {
+        node.node_id == entity(MeshingStage::TetrahedronMesh, "source_edge_split_0_1")
+            && node.coordinates_m == [0.5, 0.0, 0.0]
+    }));
+    assert_eq!(mesh.elements.len(), 2);
+
+    let recovered_queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("split/refill recovery should leave an auditable mesh");
+    assert_eq!(recovered_queue.evidence.entity_counts["missing_items"], 0);
+    assert_eq!(
+        recovered_queue.evidence.entity_counts["missing_source_edge_items"],
+        0
+    );
+    assert_eq!(
+        recovered_queue.evidence.entity_counts["missing_source_face_items"],
+        0
+    );
 }
 
 fn split_boundary_face(

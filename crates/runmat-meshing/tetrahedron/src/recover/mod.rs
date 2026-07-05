@@ -30,7 +30,9 @@ use boundary_leaks::remove_exterior_elements_across_interior_source_faces;
 use input_validation::validate_tetrahedron_recovery_input_mesh;
 use material_interfaces::recover_material_interface_regions;
 use material_partitions::recover_absent_material_interface_partitions;
-use source_edges::evaluate_source_edge_split_refill_recovery;
+use source_edges::{
+    apply_source_edge_split_refill_recovery, evaluate_source_edge_split_refill_recovery,
+};
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
 pub use types::{
@@ -874,6 +876,12 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_source_face_provenance(&initial_recovery_queue, &mut tetrahedron_mesh);
     let repaired_source_edge_provenance =
         repair_boundary_source_edge_provenance(plc, &mut tetrahedron_mesh);
+    let split_refill_application_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
+    let applied_source_edge_split_refill_recovery = apply_source_edge_split_refill_recovery(
+        plc,
+        &split_refill_application_queue,
+        &mut tetrahedron_mesh,
+    );
     let material_interface_recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     let material_interface_recovery = recover_material_interface_regions(
         plc,
@@ -969,6 +977,36 @@ pub fn recover_tetrahedron_mesh_from_plc(
         "rejected_cad_curve_source_edge_split_refill_items".to_string(),
         source_edge_split_refill_recovery.rejected_cad_curve_source_edge_count,
     );
+    recovery_queue.evidence.entity_counts.insert(
+        "post_repair_attempted_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.attempted_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "post_repair_attempted_cad_curve_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.attempted_cad_curve_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "applied_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.applied_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "applied_cad_curve_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.applied_cad_curve_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "post_repair_rejected_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.rejected_source_edge_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "post_repair_rejected_cad_curve_source_edge_split_refill_items".to_string(),
+        applied_source_edge_split_refill_recovery.rejected_cad_curve_source_edge_count,
+    );
+    for (reason_key, count) in applied_source_edge_split_refill_recovery.rejection_counts {
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(format!("post_repair_{reason_key}"), count);
+    }
     for (reason_key, count) in source_edge_split_refill_recovery.rejection_counts {
         recovery_queue
             .evidence
