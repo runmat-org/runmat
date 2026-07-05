@@ -87,6 +87,7 @@ mod figures;
 mod policy;
 mod promotion;
 pub mod storage;
+mod study_authoring;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -174,6 +175,7 @@ pub use contracts::{
     AnalysisRenderTopologySource, AnalysisRenderTriangleRange, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
     AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec,
     AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
     AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
@@ -197,9 +199,12 @@ pub use figures::{
     analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
     AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
+pub use study_authoring::analysis_author_study_op;
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
+const ANALYSIS_AUTHOR_STUDY_OPERATION: &str = "fea.author_study";
+const ANALYSIS_AUTHOR_STUDY_OP_VERSION: &str = "fea.author_study/v1";
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
 const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "fea.validate_study/v1";
 const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";

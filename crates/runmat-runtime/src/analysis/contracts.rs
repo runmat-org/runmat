@@ -4,6 +4,7 @@ use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing::RegionMeshMapping;
 use runmat_meshing_core::VolumeMeshingOptions;
+use runmat_meshing_evidence::MeshAuthoringSummary;
 use serde::{Deserialize, Serialize};
 
 fn default_prep_coordinate_span_m() -> f64 {
@@ -1843,6 +1844,47 @@ pub struct AnalysisStudySpec {
     pub nonlinear_run_options: Option<AnalysisNonlinearRunOptions>,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringIntent {
+    pub study_id: String,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    pub geometry: GeometryAsset,
+    pub mesh_authoring_summary: MeshAuthoringSummary,
+    pub profile: AnalysisCreateModelProfile,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+    #[serde(default)]
+    pub material_region_id: Option<String>,
+    #[serde(default)]
+    pub fixed_boundary_region_id: Option<String>,
+    #[serde(default)]
+    pub load_boundary_region_id: Option<String>,
+    #[serde(default)]
+    pub force_n: Option<[f64; 3]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringData {
+    pub study: AnalysisStudySpec,
+    pub evidence: AnalysisStudyAuthoringEvidence,
+    pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyAuthoringEvidence {
+    pub schema_version: String,
+    pub mesh_id: String,
+    pub mesh_authoring_summary_schema_version: String,
+    pub selected_material_region_id: String,
+    pub selected_fixed_boundary_region_id: String,
+    pub selected_load_boundary_region_id: String,
+    pub selected_force_n: [f64; 3],
+    pub material_region_source: String,
+    pub fixed_boundary_region_source: String,
+    pub load_boundary_region_source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

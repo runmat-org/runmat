@@ -2420,6 +2420,126 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
 }
 
 #[test]
+fn analysis_author_study_uses_mesh_authoring_summary_regions() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-mesh-summary");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_static".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            material_region_id: None,
+            fixed_boundary_region_id: None,
+            load_boundary_region_id: None,
+            force_n: Some([25.0, -50.0, 0.0]),
+        },
+        OperationContext::new(Some("trace-author-study".to_string()), None),
+    )
+    .expect("authoring should produce a valid study");
+
+    let study = &authored.data.study;
+    let model = study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(model.loads[0].region_id, "tip");
+    assert_eq!(
+        model.loads[0].kind,
+        LoadKind::Force {
+            fx: 25.0,
+            fy: -50.0,
+            fz: 0.0
+        }
+    );
+    assert_eq!(
+        authored.data.evidence.selected_material_region_id,
+        "solid".to_string()
+    );
+    assert_eq!(
+        authored.data.evidence.selected_fixed_boundary_region_id,
+        "root".to_string()
+    );
+    assert_eq!(
+        authored.data.evidence.selected_load_boundary_region_id,
+        "tip".to_string()
+    );
+
+    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
+        .expect("authored study should validate");
+    assert!(validation.data.valid);
+
+    let artifact: serde_json::Value = serde_json::from_slice(
+        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
+    )
+    .expect("parse authoring artifact");
+    assert_eq!(
+        artifact["schema_version"].as_str(),
+        Some("fea_study_authoring_artifact/v1")
+    );
+    assert_eq!(
+        artifact["evidence"]["selected_load_boundary_region_id"].as_str(),
+        Some("tip")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
+    let _guard = analysis_test_guard();
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
+        &mesh,
+        &runmat_meshing_core::AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["missing".to_string()],
+            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+        },
+    );
+    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+
+    let err = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "rejected_static".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            material_region_id: None,
+            fixed_boundary_region_id: None,
+            load_boundary_region_id: None,
+            force_n: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("not solve-ready summary should fail closed");
+
+    assert_eq!(err.error_code, "RM.FEA.AUTHOR_STUDY.MESH_NOT_SOLVE_READY");
+}
+
+#[test]
 fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
