@@ -243,6 +243,69 @@ fn rejects_recovered_source_edge_count_that_exceeds_typed_input_count() {
 }
 
 #[test]
+fn rejects_recovered_cad_curve_source_edge_count_that_exceeds_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_cad_curve_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_recovered_cad_curve_source_edge_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("recovered CAD curve source-edge evidence cannot exceed CAD-backed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+            family: "cad_curve_source_edge".to_string(),
+            recovered_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_curve_source_edge_status_count_that_does_not_match_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_cad_curve_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_recovered_cad_curve_source_edge_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("CAD curve source-edge status counts must reconcile with input count");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "cad_curve_source_edge_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_curve_source_edge_missing_reason_count_that_does_not_match_missing_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_cad_curve_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_missing_cad_curve_source_edge_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("CAD curve source-edge missing reasons must reconcile with missing count");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "cad_curve_source_edge_missing_reason_items".to_string(),
+            aggregate_count: 1,
+            typed_count: 0,
+        }
+    );
+}
+
+#[test]
 fn rejects_recovered_source_face_count_that_exceeds_typed_input_count() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

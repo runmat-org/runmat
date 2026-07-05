@@ -270,6 +270,38 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_missing_recovery_item_count,
         backend.tetrahedron_recovery_item_count,
     )?;
+    validate_recovered_count(
+        "cad_curve_source_edge",
+        backend.tetrahedron_recovered_cad_curve_source_edge_recovery_item_count,
+        backend.tetrahedron_cad_curve_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "missing_cad_curve_source_edge",
+        backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+        backend.tetrahedron_cad_curve_source_edge_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "cad_curve_source_edge_status_items",
+        backend.tetrahedron_cad_curve_source_edge_recovery_item_count,
+        backend.tetrahedron_recovered_cad_curve_source_edge_recovery_item_count
+            + backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "missing_cad_curve_source_edge_topology",
+        backend.tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count,
+        backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "missing_cad_curve_source_edge_provenance",
+        backend.tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count,
+        backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "cad_curve_source_edge_missing_reason_items",
+        backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+        backend.tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count
+            + backend.tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count,
+    )?;
     Ok(())
 }
 
