@@ -753,7 +753,7 @@ pub fn recover_tetrahedron_mesh_from_plc(
         repair_boundary_face_identity(plc, &mut tetrahedron_mesh);
     let repaired_source_face_provenance_count =
         repair_boundary_source_face_provenance(&initial_recovery_queue, &mut tetrahedron_mesh);
-    let repaired_source_edge_provenance_count =
+    let repaired_source_edge_provenance =
         repair_boundary_source_edge_provenance(plc, &mut tetrahedron_mesh);
     let material_interface_recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     let material_interface_recovery = recover_material_interface_regions(
@@ -903,7 +903,11 @@ pub fn recover_tetrahedron_mesh_from_plc(
     );
     recovery_queue.evidence.entity_counts.insert(
         "repaired_source_edge_provenance_items".to_string(),
-        repaired_source_edge_provenance_count,
+        repaired_source_edge_provenance.repaired_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "repaired_cad_curve_source_edge_provenance_items".to_string(),
+        repaired_source_edge_provenance.repaired_cad_curve_source_edge_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "attempted_boundary_leak_recovery_items".to_string(),

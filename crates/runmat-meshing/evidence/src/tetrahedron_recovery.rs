@@ -187,6 +187,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub repaired_source_edge_provenance_count: usize,
     #[serde(default)]
+    pub repaired_cad_curve_source_edge_provenance_count: usize,
+    #[serde(default)]
     pub repaired_material_interface_element_count: usize,
     #[serde(default)]
     pub attempted_material_interface_recovery_item_count: usize,
@@ -647,6 +649,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         repaired_source_edge_provenance_count: mesh
             .backend
             .tetrahedron_repaired_source_edge_provenance_count,
+        repaired_cad_curve_source_edge_provenance_count: mesh
+            .backend
+            .tetrahedron_repaired_cad_curve_source_edge_provenance_count,
         repaired_material_interface_element_count: mesh
             .backend
             .tetrahedron_repaired_material_interface_element_count,

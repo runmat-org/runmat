@@ -538,6 +538,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "repaired_source_edge_provenance_items",
             ),
+            tetrahedron_repaired_cad_curve_source_edge_provenance_count: recovery_entity_count(
+                recovery_queue,
+                "repaired_cad_curve_source_edge_provenance_items",
+            ),
             tetrahedron_repaired_material_interface_element_count: recovery_entity_count(
                 recovery_queue,
                 "repaired_material_interface_elements",

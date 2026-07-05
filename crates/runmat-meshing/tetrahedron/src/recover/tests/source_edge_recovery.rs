@@ -305,6 +305,51 @@ fn recovery_stage_result_repairs_boundary_source_edge_provenance_before_audit() 
 }
 
 #[test]
+fn recovery_stage_result_repairs_cad_curve_source_edge_provenance_before_audit() {
+    let mut mesh = tetrahedron_mesh();
+    for boundary_face in &mut mesh.boundary_faces {
+        boundary_face.source_edge_ids = [None, None, None];
+    }
+
+    let initial_queue = build_recovery_queue_from_plc(&cad_curve_tetrahedron_plc(), &mesh)
+        .expect("missing CAD curve source-edge provenance should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_provenance_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&cad_curve_tetrahedron_plc(), mesh)
+        .expect("matching boundary topology should repair CAD curve source-edge provenance");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_source_edge_provenance_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["repaired_cad_curve_source_edge_provenance_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn recovery_stage_result_repairs_partial_boundary_source_edge_provenance_before_audit() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces[0].source_edge_ids[2] = None;
@@ -427,7 +472,7 @@ fn source_edge_provenance_repair_normalizes_boundary_slots_without_recovering_vo
     let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
         .expect("volume-edge source edge should be reported before recovery");
 
-    let repaired_count =
+    let repair =
         crate::recover::boundary_faces::repair_boundary_source_edge_provenance(&plc, &mut mesh);
 
     assert_eq!(
@@ -438,7 +483,8 @@ fn source_edge_provenance_repair_normalizes_boundary_slots_without_recovering_vo
         initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         0
     );
-    assert_eq!(repaired_count, 2);
+    assert_eq!(repair.repaired_count, 2);
+    assert_eq!(repair.repaired_cad_curve_source_edge_count, 0);
     assert!(mesh.boundary_faces.iter().all(|face| {
         crate::protected_edges::face_edges(face.node_ids.clone())
             .into_iter()

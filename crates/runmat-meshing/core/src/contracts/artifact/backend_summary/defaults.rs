@@ -150,6 +150,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_rejected_boundary_leak_closed_surface_coordinate_count: 0,
             tetrahedron_repaired_source_face_provenance_count: 0,
             tetrahedron_repaired_source_edge_provenance_count: 0,
+            tetrahedron_repaired_cad_curve_source_edge_provenance_count: 0,
             tetrahedron_repaired_material_interface_element_count: 0,
             tetrahedron_attempted_material_interface_recovery_item_count: 0,
             tetrahedron_rejected_material_interface_recovery_item_count: 0,

@@ -298,21 +298,49 @@ fn boundary_face_preference_score(
 pub(super) fn repair_boundary_source_edge_provenance(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
-) -> usize {
-    let mut repaired_count = 0;
+) -> SourceEdgeProvenanceRepair {
+    let cad_curve_source_edges = plc
+        .protected_edges
+        .iter()
+        .filter(|edge| edge.cad_curve_boundary.is_some())
+        .map(|edge| {
+            (
+                sorted_edge(edge.node_ids.clone()),
+                edge.source_edge_id.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let mut repair = SourceEdgeProvenanceRepair::default();
     for boundary_face in &mut tetrahedron_mesh.boundary_faces {
+        let face_edges = face_edges(boundary_face.node_ids.clone());
         let expected_source_edge_ids =
             source_edge_ids_for_face_edges(&plc.protected_edges, boundary_face.node_ids.clone());
         for (edge_index, expected_source_edge_id) in
             expected_source_edge_ids.into_iter().enumerate()
         {
             if boundary_face.source_edge_ids[edge_index] != expected_source_edge_id {
+                let is_cad_curve_source_edge =
+                    expected_source_edge_id
+                        .as_ref()
+                        .is_some_and(|source_edge_id| {
+                            cad_curve_source_edges
+                                .contains(&(face_edges[edge_index].clone(), source_edge_id.clone()))
+                        });
                 boundary_face.source_edge_ids[edge_index] = expected_source_edge_id;
-                repaired_count += 1;
+                repair.repaired_count += 1;
+                if is_cad_curve_source_edge {
+                    repair.repaired_cad_curve_source_edge_count += 1;
+                }
             }
         }
     }
-    repaired_count
+    repair
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct SourceEdgeProvenanceRepair {
+    pub repaired_count: usize,
+    pub repaired_cad_curve_source_edge_count: usize,
 }
 
 pub(super) fn boundary_face_source_edges(

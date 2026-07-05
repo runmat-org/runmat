@@ -295,6 +295,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_repaired_source_edge_provenance_count: usize,
     #[serde(default)]
+    pub tetrahedron_repaired_cad_curve_source_edge_provenance_count: usize,
+    #[serde(default)]
     pub tetrahedron_repaired_material_interface_element_count: usize,
     #[serde(default)]
     pub tetrahedron_attempted_material_interface_recovery_item_count: usize,
