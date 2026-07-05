@@ -2,6 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 use runmat_geometry_core::{
+    CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
     UnitSystem,
@@ -214,6 +215,66 @@ fn field_topology_count(
                 && descriptor.element_kind.as_deref() == element_kind
         })
         .map(|descriptor| descriptor.entity_count)
+}
+
+#[test]
+fn solid_curve_evaluator_provider_filters_geometry_curve_samples() {
+    let mut geometry = cube_geometry();
+    geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
+        evaluator_id: "cad_evaluator_test".to_string(),
+        backend: "test".to_string(),
+        format_name: "step".to_string(),
+        requires_source_geometry: true,
+        faces: Vec::new(),
+        curves: vec![CadCurveEvaluator {
+            evaluator_id: "cad_curve_12".to_string(),
+            imported_curve_id: 12,
+            name: "edge".to_string(),
+            supports_point_evaluation: true,
+            supports_projection: true,
+            supports_tangent: true,
+            supports_curvature: true,
+            evaluation_samples: vec![
+                CadCurveEvaluationSample {
+                    source: CadCurveEvaluationSampleSource::BackendQuery,
+                    parameter: 0.5,
+                    point_m: [0.5, 0.1, 0.0],
+                    projected_point_m: Some([0.5, 0.2, 0.0]),
+                    tangent_m: Some([1.0, 0.0, 0.0]),
+                    curvature_1_per_m: Some(0.5),
+                    projection_error_m: Some(0.1),
+                },
+                CadCurveEvaluationSample {
+                    source: CadCurveEvaluationSampleSource::BackendQuery,
+                    parameter: 0.25,
+                    point_m: [0.25, 0.0, 0.0],
+                    projected_point_m: None,
+                    tangent_m: None,
+                    curvature_1_per_m: None,
+                    projection_error_m: None,
+                },
+            ],
+        }],
+    }];
+    let provider = GeometryCadCurveEvaluatorProvider {
+        geometry: &geometry,
+    };
+
+    let samples = provider.evaluate_curve(&CadCurveEvaluationRequest {
+        cad_edge_id: "cad_edge_0",
+        source_edge_id: 0,
+        imported_curve_id: Some(12),
+        evaluator_id: Some("cad_curve_12"),
+        supports_point_evaluation: true,
+        supports_projection: true,
+        supports_tangent: true,
+        supports_curvature: true,
+        parameters: &[0.5],
+    });
+
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].parameter, 0.5);
+    assert_eq!(samples[0].projected_point_m, Some([0.5, 0.2, 0.0]));
 }
 
 #[test]

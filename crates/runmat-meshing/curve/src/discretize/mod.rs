@@ -323,7 +323,12 @@ fn cad_curve_evaluator_samples(
     }
     for sample in cad_edge.evaluator_samples.clone() {
         if cad_curve_sample_is_valid(&sample) {
-            samples.push(sample);
+            if !samples
+                .iter()
+                .any(|existing| same_curve_sample_parameter(existing.parameter, sample.parameter))
+            {
+                samples.push(sample);
+            }
         } else {
             rejected_count += 1;
         }
@@ -394,6 +399,10 @@ fn cad_curve_sample_is_valid(sample: &CadCurveEvaluationSample) -> bool {
         && sample
             .projection_error_m
             .is_none_or(|error| error.is_finite() && error >= 0.0)
+}
+
+fn same_curve_sample_parameter(left: f64, right: f64) -> bool {
+    left.is_finite() && right.is_finite() && (left - right).abs() <= 1.0e-12
 }
 
 fn validate_curve_options(
@@ -629,6 +638,32 @@ mod tests {
         assert_eq!(cad_curves.curves.nodes[0].coordinates_m, [0.0, 0.0, 0.0]);
         assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.3, 0.0]);
         assert_eq!(cad_curves.curves.nodes[2].coordinates_m, [1.0, 0.0, 0.0]);
+        let provenance = &cad_curves.edge_provenance[0];
+        assert_eq!(provenance.evaluator_sample_count, 1);
+        assert!(provenance.live_query_backed);
+        assert_eq!(provenance.live_query_sample_count, 1);
+        assert_eq!(provenance.rejected_evaluator_sample_count, 0);
+    }
+
+    #[test]
+    fn cad_curve_discretization_prefers_live_sample_over_imported_duplicate() {
+        let topology = line_topology(1.0);
+        let cad_topology = cad_topology_for_line(&topology);
+
+        let cad_curves = discretize_cad_topology_curves_with_sizing_and_provider(
+            &topology,
+            &cad_topology,
+            CurveDiscretizationOptions {
+                target_size_m: 0.5,
+                min_segments_per_edge: 1,
+                max_segments_per_edge: 16,
+            },
+            None,
+            &LiveCurveEvaluatorProvider,
+        )
+        .expect("provider-backed CAD curves should discretize");
+
+        assert_eq!(cad_curves.curves.nodes[1].coordinates_m, [0.5, 0.3, 0.0]);
         let provenance = &cad_curves.edge_provenance[0];
         assert_eq!(provenance.evaluator_sample_count, 1);
         assert!(provenance.live_query_backed);

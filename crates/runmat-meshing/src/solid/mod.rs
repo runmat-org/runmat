@@ -1,4 +1,4 @@
-use runmat_geometry_core::GeometryAsset;
+use runmat_geometry_core::{CadCurveEvaluationSample, GeometryAsset};
 use runmat_meshing_cad::{
     build_cad_evaluation_model, build_cad_topology, extract_source_topology, project_to_face,
     CadEvaluationModel,
@@ -7,8 +7,10 @@ use runmat_meshing_core::{
     quality::predicate::Point3, AnalysisMeshArtifact, MeshBackendKind, MeshSizingField,
     TopologyEntityId, VolumeMeshingOptions,
 };
-use runmat_meshing_curve::discretize_cad_topology_curves_with_sizing;
-use runmat_meshing_curve::CurveValidationOptions;
+use runmat_meshing_curve::{
+    discretize_cad_topology_curves_with_sizing_and_provider, CadCurveEvaluationRequest,
+    CadCurveEvaluatorProvider, CurveValidationOptions,
+};
 use runmat_meshing_plc::build::build_protected_boundary_complex;
 use runmat_meshing_surface::{
     discretize_cad_topology_surfaces_with_cad_curves, validate_cad_topology_surface_discretization,
@@ -100,11 +102,12 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let cad_evaluation = build_cad_evaluation_model(&cad_topology, &topology)
         .map_err(SolidMeshingError::CadEvaluation)?;
     let curve_options = curve_discretization_options(options, geometry);
-    let cad_curves = discretize_cad_topology_curves_with_sizing(
+    let cad_curves = discretize_cad_topology_curves_with_sizing_and_provider(
         &topology,
         &cad_topology,
         curve_options,
         Some(sizing),
+        &GeometryCadCurveEvaluatorProvider { geometry },
     )
     .map_err(SolidMeshingError::Curve)?;
     let _curve_mesh_contract = crate::build_curve_mesh_contract(
@@ -157,6 +160,40 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         &recovery.recovery_queue,
         recovery.tetrahedron_mesh,
     ))
+}
+
+struct GeometryCadCurveEvaluatorProvider<'a> {
+    geometry: &'a GeometryAsset,
+}
+
+impl CadCurveEvaluatorProvider for GeometryCadCurveEvaluatorProvider<'_> {
+    fn evaluate_curve(
+        &self,
+        request: &CadCurveEvaluationRequest<'_>,
+    ) -> Vec<CadCurveEvaluationSample> {
+        self.geometry
+            .source_geometry
+            .cad_evaluators
+            .iter()
+            .flat_map(|set| set.curves.iter())
+            .filter(|curve| {
+                request
+                    .imported_curve_id
+                    .is_some_and(|curve_id| curve.imported_curve_id == curve_id)
+                    && request
+                        .evaluator_id
+                        .is_none_or(|evaluator_id| curve.evaluator_id == evaluator_id)
+            })
+            .flat_map(|curve| curve.evaluation_samples.iter())
+            .filter(|sample| {
+                request
+                    .parameters
+                    .iter()
+                    .any(|parameter| (*parameter - sample.parameter).abs() <= 1.0e-12)
+            })
+            .cloned()
+            .collect()
+    }
 }
 
 struct CadFaceBoundarySmoothingProjector<'a> {
