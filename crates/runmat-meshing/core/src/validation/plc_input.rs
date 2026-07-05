@@ -40,6 +40,22 @@ pub(super) fn validate_plc_input_evidence(
     if mesh.backend.plc_input_nested_shell_count > 0 {
         return missing("unsupported_nested_plc_shell");
     }
+    if mesh.backend.tetrahedron_material_region_count == 0 {
+        return missing("missing_tetrahedron_material_region_evidence");
+    }
+    if mesh.backend.tetrahedron_unclassified_material_element_count > 0 {
+        return missing("unclassified_tetrahedron_material_ownership");
+    }
+    if mesh.backend.plc_input_material_region_count == 1
+        && mesh.backend.tetrahedron_material_region_count != 1
+    {
+        return missing("inconsistent_single_material_region_ownership");
+    }
+    if mesh.backend.plc_input_material_region_count > 0
+        && mesh.backend.plc_input_material_region_facet_count == 0
+    {
+        return missing("missing_plc_material_region_facet_evidence");
+    }
     Ok(())
 }
 

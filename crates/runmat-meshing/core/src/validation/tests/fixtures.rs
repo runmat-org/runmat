@@ -76,6 +76,10 @@ pub(super) fn solid_tetrahedron_mesh_with_plc_input_evidence() -> AnalysisMeshAr
     mesh.backend.plc_input_max_boundary_component_node_count = 4;
     mesh.backend.plc_input_shell_nesting_classified = true;
     mesh.backend.plc_input_outer_shell_count = 1;
+    mesh.backend.plc_input_material_region_count = 1;
+    mesh.backend.plc_input_material_region_facet_count = 4;
+    mesh.backend.tetrahedron_material_region_count = 1;
+    mesh.backend.tetrahedron_unclassified_material_element_count = 0;
     mesh.boundary_faces[0]
         .provenance
         .push(source_provenance(SourceEntityKind::Face, "source_face_1"));

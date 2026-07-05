@@ -6,7 +6,7 @@ use runmat_meshing_core::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
-        SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        SourceEntityKind, TopologyEntityId, VolumeElementKind, UNCLASSIFIED_MATERIAL_REGION_ID,
     },
     quality::{
         predicate::{
@@ -189,14 +189,11 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 "input_plc_material_region_facets",
             ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
-            tetrahedron_material_region_count: tetrahedron_entity_count(
+            tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,
-                "tetrahedron_material_regions",
             ),
-            tetrahedron_unclassified_material_element_count: tetrahedron_entity_count(
-                &tetrahedron_mesh,
-                "unclassified_tetrahedron_material_elements",
-            ),
+            tetrahedron_unclassified_material_element_count:
+                tetrahedron_unclassified_material_element_count(&tetrahedron_mesh),
             tetrahedron_min_exact_scaled_jacobian: backend_quality.min_exact_scaled_jacobian,
             tetrahedron_exact_scaled_jacobian_below_threshold_count: backend_quality
                 .exact_scaled_jacobian_below_threshold_count,
@@ -797,6 +794,23 @@ fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> us
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+fn tetrahedron_material_region_count(tetrahedron_mesh: &TetrahedronMesh) -> usize {
+    tetrahedron_mesh
+        .elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+fn tetrahedron_unclassified_material_element_count(tetrahedron_mesh: &TetrahedronMesh) -> usize {
+    tetrahedron_mesh
+        .elements
+        .iter()
+        .filter(|element| element.material_region_id == UNCLASSIFIED_MATERIAL_REGION_ID)
+        .count()
 }
 
 fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
