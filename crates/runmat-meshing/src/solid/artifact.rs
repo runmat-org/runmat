@@ -336,6 +336,16 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     recovery_queue,
                     "recovered_interior_edge_source_edge_items",
                 ),
+            tetrahedron_cad_curve_interior_edge_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "cad_curve_interior_edge_source_edge_recovery_items",
+                ),
+            tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_cad_curve_interior_edge_source_edge_items",
+                ),
             tetrahedron_absent_edge_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "absent_edge_source_edge_recovery_items",

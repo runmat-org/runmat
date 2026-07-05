@@ -200,6 +200,8 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_recovered_boundary_edge_source_edge_recovery_item_count: 1,
             tetrahedron_interior_edge_source_edge_recovery_item_count: 1,
             tetrahedron_recovered_interior_edge_source_edge_recovery_item_count: 1,
+            tetrahedron_cad_curve_interior_edge_source_edge_recovery_item_count: 1,
+            tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count: 1,
             tetrahedron_absent_edge_source_edge_recovery_item_count: 2,
             tetrahedron_recovered_absent_edge_source_edge_recovery_item_count: 1,
             tetrahedron_boundary_face_source_face_recovery_item_count: 1,

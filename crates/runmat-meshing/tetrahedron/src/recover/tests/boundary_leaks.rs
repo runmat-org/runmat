@@ -99,6 +99,39 @@ fn recovery_stage_result_removes_exterior_elements_across_interior_source_faces(
 }
 
 #[test]
+fn recovery_stage_result_records_cad_curve_interior_edge_recovered_by_boundary_leak() {
+    let result = recover_tetrahedron_mesh_from_plc(
+        &cad_curve_tetrahedron_plc(),
+        interior_source_edge_leak_mesh(),
+    )
+    .expect("outside elements across CAD-backed PLC facets should be removed before final audit");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["interior_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["cad_curve_interior_edge_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_cad_curve_interior_edge_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn boundary_leak_recovery_rejects_when_closed_surface_coordinates_are_missing() {
     let error = recover_tetrahedron_mesh_from_plc(
         &split_opposite_face_plc_with_missing_generated_node(),

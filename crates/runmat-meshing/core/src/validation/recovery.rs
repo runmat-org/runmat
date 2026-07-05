@@ -129,6 +129,21 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_recovered_interior_edge_source_edge_recovery_item_count,
         backend.tetrahedron_interior_edge_source_edge_recovery_item_count,
     )?;
+    validate_recovery_item_count(
+        "cad_curve_interior_edge_source_edge",
+        backend.tetrahedron_cad_curve_interior_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_interior_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "cad_curve_interior_edge_source_edge",
+        backend.tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_cad_curve_interior_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "recovered_cad_curve_interior_edge_source_edge",
+        backend.tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_recovered_interior_edge_source_edge_recovery_item_count,
+    )?;
     validate_recovered_count(
         "absent_edge_source_edge",
         backend.tetrahedron_recovered_absent_edge_source_edge_recovery_item_count,

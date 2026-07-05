@@ -249,6 +249,14 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         recovery.recovered_interior_edge_source_edge_recovery_item_count,
         1
     );
+    assert_eq!(
+        recovery.cad_curve_interior_edge_source_edge_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.absent_edge_source_edge_recovery_item_count, 2);
     assert_eq!(
         recovery.recovered_absent_edge_source_edge_recovery_item_count,

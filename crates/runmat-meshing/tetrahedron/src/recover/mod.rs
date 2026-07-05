@@ -678,6 +678,12 @@ pub fn recover_tetrahedron_mesh_from_plc(
         &initial_recovery_queue,
         TetrahedronProtectedEdgeTopology::InteriorEdge,
     );
+    let cad_curve_interior_edge_source_edge_recovery_item_count =
+        recovery_cad_curve_source_edge_item_count_by_topology(
+            &initial_recovery_queue,
+            plc,
+            TetrahedronProtectedEdgeTopology::InteriorEdge,
+        );
     let absent_edge_source_edge_recovery_item_count = recovery_source_edge_item_count_by_topology(
         &initial_recovery_queue,
         TetrahedronProtectedEdgeTopology::Absent,
@@ -763,6 +769,14 @@ pub fn recover_tetrahedron_mesh_from_plc(
     );
     let mut recovery_queue = build_recovery_queue_from_plc(plc, &tetrahedron_mesh)?;
     record_recovered_queue_item_counts(&initial_recovery_queue, &mut recovery_queue);
+    let recovered_cad_curve_interior_edge_source_edge_recovery_item_count =
+        cad_curve_interior_edge_source_edge_recovery_item_count.saturating_sub(
+            recovery_cad_curve_source_edge_item_count_by_topology(
+                &recovery_queue,
+                plc,
+                TetrahedronProtectedEdgeTopology::InteriorEdge,
+            ),
+        );
     recovery_queue.evidence.entity_counts.insert(
         "recovered_missing_boundary_faces".to_string(),
         protected_edge_boundary_faces.recovered_boundary_face_count
@@ -809,6 +823,14 @@ pub fn recover_tetrahedron_mesh_from_plc(
     recovery_queue.evidence.entity_counts.insert(
         "interior_edge_source_edge_recovery_items".to_string(),
         interior_edge_source_edge_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "cad_curve_interior_edge_source_edge_recovery_items".to_string(),
+        cad_curve_interior_edge_source_edge_recovery_item_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "recovered_cad_curve_interior_edge_source_edge_items".to_string(),
+        recovered_cad_curve_interior_edge_source_edge_recovery_item_count,
     );
     recovery_queue.evidence.entity_counts.insert(
         "absent_edge_source_edge_recovery_items".to_string(),
@@ -1222,6 +1244,34 @@ fn recovery_source_edge_item_count_by_topology(
             item.kind == TetrahedronRecoveryKind::SourceEdge
                 && item.status == TetrahedronRecoveryStatus::Missing
                 && item.protected_edge_topology == Some(topology)
+        })
+        .count()
+}
+
+fn recovery_cad_curve_source_edge_item_count_by_topology(
+    recovery_queue: &TetrahedronRecoveryQueue,
+    plc: &ProtectedBoundaryComplex,
+    topology: TetrahedronProtectedEdgeTopology,
+) -> usize {
+    let cad_curve_source_edge_ids = plc
+        .protected_edges
+        .iter()
+        .filter(|edge| edge.cad_curve_boundary.is_some())
+        .map(|edge| edge.source_edge_id.clone())
+        .collect::<BTreeSet<_>>();
+    recovery_queue
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == TetrahedronRecoveryKind::SourceEdge
+                && item.status == TetrahedronRecoveryStatus::Missing
+                && item.protected_edge_topology == Some(topology)
+                && item
+                    .source_entity_id
+                    .as_ref()
+                    .is_some_and(|source_edge_id| {
+                        cad_curve_source_edge_ids.contains(source_edge_id)
+                    })
         })
         .count()
 }

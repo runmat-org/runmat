@@ -200,6 +200,10 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_recovered_interior_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_cad_curve_interior_edge_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_recovered_cad_curve_interior_edge_source_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_absent_edge_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_recovered_absent_edge_source_edge_recovery_item_count: usize,
