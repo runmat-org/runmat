@@ -1079,6 +1079,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
+                    curve_id: None,
                     label: None,
                     owner_path: Vec::new(),
                     layers: Vec::new(),
@@ -1092,6 +1093,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
                 tag: Some("cad_body".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1".to_string(),
                         name: "Bracket".to_string(),
@@ -1172,6 +1174,7 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:1".to_string(),
                         name: "Face 1".to_string(),
@@ -1189,6 +1192,7 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(1),
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:2".to_string(),
                         name: "Face 2".to_string(),

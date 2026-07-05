@@ -82,6 +82,7 @@ pub(super) fn geometry_with_face_evaluator() -> GeometryAsset {
         tag: Some("cad_face".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: Some(1),
+            curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:1".to_string(),
                 name: "face".to_string(),

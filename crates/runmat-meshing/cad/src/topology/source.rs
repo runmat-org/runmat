@@ -12,8 +12,10 @@ mod types;
 use generic::generic_coplanar_face_ids;
 use merge::merge_stable_cad_faces;
 use semantics::{
-    cad_topology_source, evaluator_faces_by_imported_id, face_regions_by_source_face,
-    imported_face_id_for_regions, imported_face_ids_by_region, semantic_face_regions,
+    cad_topology_source, edge_regions_by_source_edge, evaluator_curves_by_imported_id,
+    evaluator_faces_by_imported_id, face_regions_by_source_face, imported_curve_id_for_regions,
+    imported_curve_ids_by_region, imported_face_id_for_regions, imported_face_ids_by_region,
+    semantic_face_regions,
 };
 pub use types::{
     CadEdge, CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyError,
@@ -31,8 +33,11 @@ pub fn build_cad_topology(
     let source = cad_topology_source(geometry);
     let semantic_face_regions = semantic_face_regions(geometry);
     let imported_face_ids_by_region = imported_face_ids_by_region(geometry);
+    let imported_curve_ids_by_region = imported_curve_ids_by_region(geometry);
     let evaluator_faces = evaluator_faces_by_imported_id(geometry);
+    let evaluator_curves = evaluator_curves_by_imported_id(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
+    let edge_region_by_source_edge = edge_regions_by_source_edge(geometry);
     let generic_face_ids_by_source_face = if source == CadTopologySource::GenericCadMesh {
         generic_coplanar_face_ids(topology, &face_region_by_source_face)
     } else {
@@ -120,24 +125,44 @@ pub fn build_cad_topology(
     let edges = topology
         .edges
         .iter()
-        .map(|edge| CadEdge {
-            entity_id: CadEntityId {
-                kind: CadEntityKind::Edge,
-                id: format!("cad_edge_{}", edge.edge_id),
-            },
-            source_edge_id: edge.edge_id,
-            vertex_ids: [
-                format!("cad_vertex_{}", edge.node_ids[0]),
-                format!("cad_vertex_{}", edge.node_ids[1]),
-            ],
-            adjacent_face_ids: edge
-                .adjacent_face_ids
-                .iter()
-                .filter_map(|face_id| face_ids_by_source_face.get(face_id).cloned())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-            length_m: edge.length_m,
+        .map(|edge| {
+            let region_ids = edge_region_by_source_edge
+                .get(&edge.edge_id)
+                .cloned()
+                .unwrap_or_default();
+            let imported_curve_id =
+                imported_curve_id_for_regions(&imported_curve_ids_by_region, &region_ids);
+            let evaluator_curve =
+                imported_curve_id.and_then(|curve_id| evaluator_curves.get(&curve_id));
+            CadEdge {
+                entity_id: CadEntityId {
+                    kind: CadEntityKind::Edge,
+                    id: format!("cad_edge_{}", edge.edge_id),
+                },
+                source_edge_id: edge.edge_id,
+                imported_curve_id,
+                evaluator_id: evaluator_curve.map(|curve| curve.evaluator_id.clone()),
+                evaluator_supports_point_evaluation: evaluator_curve
+                    .is_some_and(|curve| curve.supports_point_evaluation),
+                evaluator_supports_projection: evaluator_curve
+                    .is_some_and(|curve| curve.supports_projection),
+                evaluator_supports_tangent: evaluator_curve
+                    .is_some_and(|curve| curve.supports_tangent),
+                evaluator_supports_curvature: evaluator_curve
+                    .is_some_and(|curve| curve.supports_curvature),
+                vertex_ids: [
+                    format!("cad_vertex_{}", edge.node_ids[0]),
+                    format!("cad_vertex_{}", edge.node_ids[1]),
+                ],
+                adjacent_face_ids: edge
+                    .adjacent_face_ids
+                    .iter()
+                    .filter_map(|face_id| face_ids_by_source_face.get(face_id).cloned())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                length_m: edge.length_m,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -177,6 +202,17 @@ pub fn build_cad_topology(
                 .is_some_and(|face_id| evaluator_faces.contains_key(&face_id))
         })
         .count();
+    let imported_curve_count = edges
+        .iter()
+        .filter(|edge| edge.imported_curve_id.is_some())
+        .count();
+    let evaluator_curve_count = edges
+        .iter()
+        .filter(|edge| {
+            edge.imported_curve_id
+                .is_some_and(|curve_id| evaluator_curves.contains_key(&curve_id))
+        })
+        .count();
     let generic_face_count = faces.len().saturating_sub(semantic_face_count);
     let report = CadTopologyReport {
         source,
@@ -188,6 +224,8 @@ pub fn build_cad_topology(
         semantic_face_count,
         imported_face_count,
         evaluator_face_count,
+        imported_curve_count,
+        evaluator_curve_count,
         generic_face_count,
         loop_count: loops.len(),
         hole_loop_count: loops.iter().filter(|cad_loop| !cad_loop.is_outer).count(),
@@ -274,6 +312,7 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         .collect::<BTreeMap<_, _>>();
 
     for edge in &model.edges {
+        validate_edge_evaluator_metadata(edge)?;
         for vertex_id in &edge.vertex_ids {
             require_reference(
                 CadEntityKind::Edge,
@@ -363,6 +402,24 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         model.report.vertex_count,
     )?;
     validate_report_count("edge_count", model.edges.len(), model.report.edge_count)?;
+    validate_report_count(
+        "imported_curve_count",
+        model
+            .edges
+            .iter()
+            .filter(|edge| edge.imported_curve_id.is_some())
+            .count(),
+        model.report.imported_curve_count,
+    )?;
+    validate_report_count(
+        "evaluator_curve_count",
+        model
+            .edges
+            .iter()
+            .filter(|edge| edge_has_evaluator_metadata(edge))
+            .count(),
+        model.report.evaluator_curve_count,
+    )?;
     validate_report_count("loop_count", model.loops.len(), model.report.loop_count)?;
     validate_report_count("face_count", model.faces.len(), model.report.face_count)?;
     validate_report_count("shell_count", model.shells.len(), model.report.shell_count)?;
@@ -412,6 +469,36 @@ pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTo
         model.report.closed_shell_count,
     )?;
     Ok(())
+}
+
+fn validate_edge_evaluator_metadata(edge: &CadEdge) -> Result<(), CadTopologyError> {
+    if edge_has_evaluator_metadata(edge) && edge.imported_curve_id.is_none() {
+        return Err(CadTopologyError::EvaluatorMetadataWithoutImportedCurve {
+            edge_id: edge.entity_id.id.clone(),
+        });
+    }
+    for (capability, supported) in [
+        ("point_evaluation", edge.evaluator_supports_point_evaluation),
+        ("projection", edge.evaluator_supports_projection),
+        ("tangent", edge.evaluator_supports_tangent),
+        ("curvature", edge.evaluator_supports_curvature),
+    ] {
+        if supported && edge.evaluator_id.is_none() {
+            return Err(CadTopologyError::CurveEvaluatorCapabilityWithoutEvaluator {
+                edge_id: edge.entity_id.id.clone(),
+                capability,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn edge_has_evaluator_metadata(edge: &CadEdge) -> bool {
+    edge.evaluator_id.is_some()
+        || edge.evaluator_supports_point_evaluation
+        || edge.evaluator_supports_projection
+        || edge.evaluator_supports_tangent
+        || edge.evaluator_supports_curvature
 }
 
 fn validate_face_evaluator_metadata(face: &CadFace) -> Result<(), CadTopologyError> {

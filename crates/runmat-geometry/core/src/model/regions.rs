@@ -65,6 +65,8 @@ pub struct CadRegionOwnership {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<CadLabelRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owner_path: Vec<CadLabelRef>,

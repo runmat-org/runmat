@@ -472,6 +472,7 @@ fn accumulate_semantic_regions(
                 tag: Some(format!("cad_{}", cad_kind_tag(owner.kind))),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(owner.clone()),
                     owner_path: vec![owner.clone()],
                     layers: Vec::new(),
@@ -495,6 +496,7 @@ fn accumulate_semantic_regions(
             tag: Some("cad_layer".to_string()),
             cad_ownership: Some(CadRegionOwnership {
                 face_id: None,
+                curve_id: None,
                 label: Some(CadLabelRef {
                     label_entry: format!("layer:{layer}"),
                     name: layer.to_string(),
@@ -519,6 +521,7 @@ fn accumulate_semantic_regions(
                 tag: Some("cad_color".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: format!("color:{hex}"),
                         name: hex.to_string(),
@@ -548,6 +551,7 @@ fn accumulate_semantic_regions(
                 tag: Some("cad_material".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: if material.label_entry.is_empty() {
                             format!("material:{name}")
@@ -694,6 +698,7 @@ mod tests {
                 name: "Mount Face".to_string(),
                 ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
+                    curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1:7".to_string(),
                         name: "Mount Face".to_string(),

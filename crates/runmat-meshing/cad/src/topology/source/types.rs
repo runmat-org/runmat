@@ -37,6 +37,18 @@ pub struct CadVertex {
 pub struct CadEdge {
     pub entity_id: CadEntityId,
     pub source_edge_id: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_curve_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_id: Option<String>,
+    #[serde(default)]
+    pub evaluator_supports_point_evaluation: bool,
+    #[serde(default)]
+    pub evaluator_supports_projection: bool,
+    #[serde(default)]
+    pub evaluator_supports_tangent: bool,
+    #[serde(default)]
+    pub evaluator_supports_curvature: bool,
     pub vertex_ids: [String; 2],
     pub adjacent_face_ids: Vec<String>,
     pub length_m: f64,
@@ -108,6 +120,10 @@ pub struct CadTopologyReport {
     pub semantic_face_count: usize,
     pub imported_face_count: usize,
     pub evaluator_face_count: usize,
+    #[serde(default)]
+    pub imported_curve_count: usize,
+    #[serde(default)]
+    pub evaluator_curve_count: usize,
     pub generic_face_count: usize,
     #[serde(default)]
     pub loop_count: usize,
@@ -162,8 +178,15 @@ pub enum CadTopologyError {
     EvaluatorMetadataWithoutImportedFace {
         face_id: String,
     },
+    EvaluatorMetadataWithoutImportedCurve {
+        edge_id: String,
+    },
     EvaluatorCapabilityWithoutEvaluator {
         face_id: String,
+        capability: &'static str,
+    },
+    CurveEvaluatorCapabilityWithoutEvaluator {
+        edge_id: String,
         capability: &'static str,
     },
     ReportCountMismatch {
@@ -213,12 +236,23 @@ impl std::fmt::Display for CadTopologyError {
                 formatter,
                 "CAD face {face_id} carries evaluator metadata without an imported face handle"
             ),
+            Self::EvaluatorMetadataWithoutImportedCurve { edge_id } => write!(
+                formatter,
+                "CAD edge {edge_id} carries evaluator metadata without an imported curve handle"
+            ),
             Self::EvaluatorCapabilityWithoutEvaluator {
                 face_id,
                 capability,
             } => write!(
                 formatter,
                 "CAD face {face_id} declares evaluator capability {capability} without an evaluator id"
+            ),
+            Self::CurveEvaluatorCapabilityWithoutEvaluator {
+                edge_id,
+                capability,
+            } => write!(
+                formatter,
+                "CAD edge {edge_id} declares evaluator capability {capability} without an evaluator id"
             ),
             Self::ReportCountMismatch {
                 field,

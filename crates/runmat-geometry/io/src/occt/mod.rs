@@ -449,6 +449,7 @@ fn face_ownership_by_id(
 
         let entry = CadRegionOwnership {
             face_id: Some(row.face_id),
+            curve_id: None,
             label,
             owner_path,
             layers: row.layer_names.into_iter().filter_map(non_empty).collect(),

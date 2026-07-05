@@ -38,6 +38,7 @@ pub(in crate::param_tri::tests) fn geometry_with_face_domain_sample(
         tag: Some("cad_face".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: Some(7),
+            curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:7".to_string(),
                 name: "face".to_string(),

@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    CadFaceEvaluator, CadSemanticKind, EntityKind, GeometryAsset, SourceGeometryKind,
+    CadCurveEvaluator, CadFaceEvaluator, CadSemanticKind, EntityKind, GeometryAsset,
+    SourceGeometryKind,
 };
 
 use super::CadTopologySource;
@@ -52,6 +53,20 @@ pub(super) fn imported_face_ids_by_region(geometry: &GeometryAsset) -> BTreeMap<
         .collect()
 }
 
+pub(super) fn imported_curve_ids_by_region(geometry: &GeometryAsset) -> BTreeMap<String, u64> {
+    geometry
+        .regions
+        .iter()
+        .filter_map(|region| {
+            region
+                .cad_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.curve_id)
+                .map(|curve_id| (region.region_id.clone(), curve_id))
+        })
+        .collect()
+}
+
 pub(super) fn imported_face_id_for_regions(
     imported_face_ids_by_region: &BTreeMap<String, u64>,
     region_ids: &[String],
@@ -59,6 +74,15 @@ pub(super) fn imported_face_id_for_regions(
     region_ids
         .iter()
         .find_map(|region_id| imported_face_ids_by_region.get(region_id).copied())
+}
+
+pub(super) fn imported_curve_id_for_regions(
+    imported_curve_ids_by_region: &BTreeMap<String, u64>,
+    region_ids: &[String],
+) -> Option<u64> {
+    region_ids
+        .iter()
+        .find_map(|region_id| imported_curve_ids_by_region.get(region_id).copied())
 }
 
 pub(super) fn evaluator_faces_by_imported_id(
@@ -73,6 +97,22 @@ pub(super) fn evaluator_faces_by_imported_id(
                 .faces
                 .iter()
                 .map(|face| (face.imported_face_id, face))
+        })
+        .collect()
+}
+
+pub(super) fn evaluator_curves_by_imported_id(
+    geometry: &GeometryAsset,
+) -> BTreeMap<u64, &CadCurveEvaluator> {
+    geometry
+        .source_geometry
+        .cad_evaluators
+        .iter()
+        .flat_map(|evaluator| {
+            evaluator
+                .curves
+                .iter()
+                .map(|curve| (curve.imported_curve_id, curve))
         })
         .collect()
 }
@@ -95,5 +135,26 @@ pub(super) fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<
     regions
         .into_iter()
         .map(|(face_id, region_ids)| (face_id, region_ids.into_iter().collect()))
+        .collect()
+}
+
+pub(super) fn edge_regions_by_source_edge(geometry: &GeometryAsset) -> BTreeMap<u32, Vec<String>> {
+    let mut regions = BTreeMap::<u32, BTreeSet<String>>::new();
+    for mapping in &geometry.region_entity_mappings {
+        if !matches!(mapping.entity_kind, EntityKind::Edge) {
+            continue;
+        }
+        for range in &mapping.ranges {
+            for entity_id in range.start..range.start.saturating_add(range.count) {
+                regions
+                    .entry(entity_id as u32)
+                    .or_default()
+                    .insert(mapping.region_id.clone());
+            }
+        }
+    }
+    regions
+        .into_iter()
+        .map(|(edge_id, region_ids)| (edge_id, region_ids.into_iter().collect()))
         .collect()
 }

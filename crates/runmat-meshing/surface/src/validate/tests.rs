@@ -565,6 +565,8 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             semantic_face_count: 1,
             imported_face_count: 1,
             evaluator_face_count: 0,
+            imported_curve_count: 0,
+            evaluator_curve_count: 0,
             generic_face_count: 0,
             loop_count: 1,
             hole_loop_count: 0,

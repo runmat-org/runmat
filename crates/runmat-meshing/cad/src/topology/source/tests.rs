@@ -1,8 +1,8 @@
 use super::*;
 use crate::extract_source_topology;
 use runmat_geometry_core::{
-    CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership, CadSemanticKind,
-    EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
+    CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluator, CadLabelRef, CadRegionOwnership,
+    CadSemanticKind, EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
     UnitSystem,
 };
@@ -288,6 +288,156 @@ fn rejects_evaluator_capability_without_evaluator_id() {
     );
 }
 
+#[test]
+fn preserves_imported_cad_curve_handles_and_evaluator_capabilities() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+
+    let cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+
+    let curve_edge = cad
+        .edges
+        .iter()
+        .find(|edge| edge.source_edge_id == 0)
+        .expect("mapped curve edge should exist");
+    assert_eq!(cad.report.imported_curve_count, 1);
+    assert_eq!(cad.report.evaluator_curve_count, 1);
+    assert_eq!(curve_edge.imported_curve_id, Some(4));
+    assert_eq!(curve_edge.evaluator_id.as_deref(), Some("cad_curve_4"));
+    assert!(curve_edge.evaluator_supports_point_evaluation);
+    assert!(curve_edge.evaluator_supports_projection);
+    assert!(curve_edge.evaluator_supports_tangent);
+    assert!(curve_edge.evaluator_supports_curvature);
+}
+
+#[test]
+fn rejects_cad_topology_imported_curve_count_mismatch() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.report.imported_curve_count = 0;
+
+    let err =
+        validate_cad_topology_model(&cad).expect_err("stale imported curve count should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::ReportCountMismatch {
+            field: "imported_curve_count",
+            expected: 1,
+            actual: 0,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_topology_evaluator_curve_count_mismatch() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    cad.report.evaluator_curve_count = 0;
+
+    let err =
+        validate_cad_topology_model(&cad).expect_err("stale evaluator curve count should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::ReportCountMismatch {
+            field: "evaluator_curve_count",
+            expected: 1,
+            actual: 0,
+        }
+    );
+}
+
+#[test]
+fn rejects_curve_evaluator_metadata_without_imported_curve_handle() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let edge = cad
+        .edges
+        .iter_mut()
+        .find(|edge| edge.evaluator_id.is_some())
+        .expect("evaluator-backed edge should exist");
+    let edge_id = edge.entity_id.id.clone();
+    edge.imported_curve_id = None;
+
+    let err = validate_cad_topology_model(&cad).expect_err("missing curve handle should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::EvaluatorMetadataWithoutImportedCurve { edge_id }
+    );
+}
+
+#[test]
+fn rejects_curve_evaluator_capability_without_evaluator_id() {
+    let geometry = cube_geometry_with_curve_evaluator();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+    let mut cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+    let edge = cad
+        .edges
+        .iter_mut()
+        .find(|edge| edge.evaluator_id.is_some())
+        .expect("evaluator-backed edge should exist");
+    let edge_id = edge.entity_id.id.clone();
+    edge.evaluator_id = None;
+
+    let err =
+        validate_cad_topology_model(&cad).expect_err("missing curve evaluator id should fail");
+
+    assert_eq!(
+        err,
+        CadTopologyError::CurveEvaluatorCapabilityWithoutEvaluator {
+            edge_id,
+            capability: "point_evaluation",
+        }
+    );
+}
+
+fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
+    let mut geometry = cube_geometry(true);
+    geometry.regions.push(Region {
+        region_id: "curve_000004".to_string(),
+        name: "Curve 4".to_string(),
+        tag: Some("cad_curve".to_string()),
+        cad_ownership: Some(CadRegionOwnership {
+            face_id: None,
+            curve_id: Some(4),
+            label: Some(CadLabelRef {
+                label_entry: "0:1:curve:4".to_string(),
+                name: "Curve 4".to_string(),
+                kind: CadSemanticKind::Subshape,
+            }),
+            owner_path: Vec::new(),
+            layers: Vec::new(),
+            color: None,
+            material: None,
+        }),
+    });
+    geometry
+        .region_entity_mappings
+        .push(RegionEntityMapping::new(
+            "curve_000004",
+            "cube_surface",
+            EntityKind::Edge,
+            vec![EntityIdRange::new(0, 1)],
+        ));
+    geometry.source_geometry.cad_evaluators[0]
+        .curves
+        .push(CadCurveEvaluator {
+            evaluator_id: "cad_curve_4".to_string(),
+            imported_curve_id: 4,
+            name: "Curve 4".to_string(),
+            supports_point_evaluation: true,
+            supports_projection: true,
+            supports_tangent: true,
+            supports_curvature: true,
+        });
+    geometry
+}
+
 fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {
     let face_region = Region {
         region_id: "face_000001".to_string(),
@@ -295,6 +445,7 @@ fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsse
         tag: Some("cad_face".to_string()),
         cad_ownership: with_semantic_face.then(|| CadRegionOwnership {
             face_id: Some(1),
+            curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:1".to_string(),
                 name: "face".to_string(),
