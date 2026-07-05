@@ -8,6 +8,7 @@ use runmat_meshing_core::quality::predicate::{
 use runmat_meshing_plc::validate::PlcValidationError;
 
 mod fixtures;
+mod recovery;
 
 use fixtures::*;
 

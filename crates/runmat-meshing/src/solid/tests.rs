@@ -340,6 +340,16 @@ fn explicit_sizing_refines_recovered_cube_source_edges() {
         0
     );
     assert_eq!(
+        mesh.backend
+            .tetrahedron_attempted_source_edge_split_refill_item_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_applied_source_edge_split_refill_item_count,
+        0
+    );
+    assert_eq!(
         mesh.volume_elements.len(),
         mesh.backend.surface_element_count
     );
