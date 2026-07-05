@@ -19,6 +19,24 @@ fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
     })
 }
 
+fn has_tensor_data(vars: &[Value], shape: &[usize], expected: &[f64]) -> bool {
+    vars.iter().any(|value| match value {
+        Value::Tensor(Tensor {
+            shape: tensor_shape,
+            data,
+            ..
+        }) => {
+            tensor_shape == shape
+                && data.len() == expected.len()
+                && data
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| (*actual - *expected).abs() < 1.0e-8)
+        }
+        _ => false,
+    })
+}
+
 fn has_bool(vars: &[Value], expected: bool) -> bool {
     vars.iter()
         .any(|value| matches!(value, Value::Bool(value) if *value == expected))
@@ -239,6 +257,24 @@ fn qqplot_surface_executes_from_scripts() {
     assert!(has_string(&vars, "+"));
     assert!(has_string(&vars, "-"));
     assert!(has_string(&vars, "--"));
+}
+
+#[test]
+fn binscatter_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h = binscatter([0;0.2;0.8;1], [0;0.1;0.9;1], [2 2]); vals = get(h, 'Values'); nb = get(h, 'NumBins'); typ = get(h, 'Type'); set(h, 'NumBins', [1 1]); vals_after = get(h, 'Values'); nb_after = get(h, 'NumBins'); h2 = binscatter([0;1;2], [0;1;2], 'NumBins', [2 2], 'XLimits', [0 2], 'YLimits', [0 2], 'ShowEmptyBins', 'on', 'FaceAlpha', 0.5, 'DisplayName', 'density'); alpha = get(h2, 'FaceAlpha'); show = get(h2, 'ShowEmptyBins'); edges = get(h2, 'XBinEdges'); name = get(h2, 'DisplayName');",
+    )
+    .expect("binscatter script");
+    assert!(has_tensor_data(&vars, &[2, 2], &[2.0, 0.0, 0.0, 2.0]));
+    assert!(has_tensor_data(&vars, &[1, 2], &[2.0, 2.0]));
+    assert!(has_tensor_data(&vars, &[1, 1], &[4.0]));
+    assert!(has_tensor_data(&vars, &[1, 2], &[1.0, 1.0]));
+    assert!(has_tensor_data(&vars, &[1, 3], &[0.0, 1.0, 2.0]));
+    assert!(has_num(&vars, 0.5));
+    assert!(has_bool(&vars, true));
+    assert!(has_string(&vars, "binscatter"));
+    assert!(has_string(&vars, "density"));
 }
 
 #[test]

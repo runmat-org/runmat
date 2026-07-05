@@ -16,8 +16,10 @@ use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
+use crate::builtins::stats::summary::binscatter;
 use crate::BuiltinResult;
 
 const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
@@ -28,13 +30,13 @@ pub enum PlotHandle {
     Axes(FigureHandle, usize),
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
-    PlotChild(super::state::PlotChildHandleState),
+    PlotChild(Box<super::state::PlotChildHandleState>),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
     let scalar = handle_scalar(value, builtin)?;
     if let Ok(state) = super::state::plot_child_handle_snapshot(scalar) {
-        return Ok(PlotHandle::PlotChild(state));
+        return Ok(PlotHandle::PlotChild(Box::new(state)));
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
         if axes_handle_exists(handle, axes_index) {
@@ -1350,6 +1352,68 @@ fn get_histogram_property(
     }
 }
 
+fn get_binscatter_property(
+    binscatter: &super::state::BinscatterHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = child_base_struct("binscatter", binscatter.figure, binscatter.axes_index);
+            st.insert("Values", Value::Tensor(binscatter.values.clone()));
+            st.insert("XData", tensor_from_vec(binscatter.x_data.clone()));
+            st.insert("YData", tensor_from_vec(binscatter.y_data.clone()));
+            st.insert("XBinEdges", tensor_from_vec(binscatter.x_bin_edges.clone()));
+            st.insert("YBinEdges", tensor_from_vec(binscatter.y_bin_edges.clone()));
+            st.insert("NumBins", tensor_from_vec(num_bins_value(binscatter)));
+            st.insert("XLimits", tensor_from_vec(binscatter_x_limits(binscatter)));
+            st.insert("YLimits", tensor_from_vec(binscatter_y_limits(binscatter)));
+            st.insert("ShowEmptyBins", Value::Bool(binscatter.show_empty_bins));
+            st.insert("FaceAlpha", Value::Num(binscatter.face_alpha));
+            st.insert(
+                "DisplayName",
+                Value::String(binscatter.display_name.clone().unwrap_or_default()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("binscatter".into())),
+        Some("parent") => Ok(child_parent_handle(
+            binscatter.figure,
+            binscatter.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("values") | Some("bindata") => Ok(Value::Tensor(binscatter.values.clone())),
+        Some("xdata") => Ok(tensor_from_vec(binscatter.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(binscatter.y_data.clone())),
+        Some("xbinedges") => Ok(tensor_from_vec(binscatter.x_bin_edges.clone())),
+        Some("ybinedges") => Ok(tensor_from_vec(binscatter.y_bin_edges.clone())),
+        Some("numbins") => Ok(tensor_from_vec(num_bins_value(binscatter))),
+        Some("xlimits") => Ok(tensor_from_vec(binscatter_x_limits(binscatter))),
+        Some("ylimits") => Ok(tensor_from_vec(binscatter_y_limits(binscatter))),
+        Some("showemptybins") => Ok(Value::Bool(binscatter.show_empty_bins)),
+        Some("facealpha") => Ok(Value::Num(binscatter.face_alpha)),
+        Some("displayname") => Ok(Value::String(
+            binscatter.display_name.clone().unwrap_or_default(),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported binscatter property `{other}`"),
+        )),
+    }
+}
+
+fn num_bins_value(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
+    vec![binscatter.num_bins[0] as f64, binscatter.num_bins[1] as f64]
+}
+
+fn binscatter_x_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
+    vec![binscatter.x_limits.0, binscatter.x_limits.1]
+}
+
+fn binscatter_y_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
+    vec![binscatter.y_limits.0, binscatter.y_limits.1]
+}
+
 fn get_plot_child_property(
     state: &super::state::PlotChildHandleState,
     property: Option<&str>,
@@ -1383,6 +1447,9 @@ fn get_plot_child_property(
         }
         super::state::PlotChildHandleState::Heatmap(heatmap) => {
             get_heatmap_property(heatmap, property, builtin)
+        }
+        super::state::PlotChildHandleState::Binscatter(binscatter) => {
+            get_binscatter_property(binscatter, property, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
             get_area_property(area, property, builtin)
@@ -1451,6 +1518,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::Heatmap(heatmap) => {
             apply_heatmap_property(heatmap, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Binscatter(binscatter) => {
+            apply_binscatter_property(binscatter, key, value, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
             apply_area_property(area, key, value, builtin)
@@ -3313,6 +3383,141 @@ fn apply_surface_property(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_binscatter_property(
+    binscatter: &super::state::BinscatterHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let mut next = binscatter.clone();
+    match key {
+        "numbins" => {
+            next.num_bins = binscatter::parse_num_bins(value)?;
+            next.auto_bins = false;
+        }
+        "showemptybins" => {
+            next.show_empty_bins = binscatter::option_bool(value, "ShowEmptyBins")?;
+        }
+        "xlimits" => {
+            next.x_limits_option = Some(binscatter::parse_limits(value, "XLimits")?);
+        }
+        "ylimits" => {
+            next.y_limits_option = Some(binscatter::parse_limits(value, "YLimits")?);
+        }
+        "xdata" => {
+            next.x_data = binscatter_numeric_data(value, "XData", builtin)?;
+        }
+        "ydata" => {
+            next.y_data = binscatter_numeric_data(value, "YData", builtin)?;
+        }
+        "facealpha" => {
+            let alpha = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
+            })?;
+            binscatter::validate_face_alpha(alpha)?;
+            next.face_alpha = alpha;
+        }
+        "displayname" => {
+            next.display_name = value_as_string(value).map(|s| s.to_string());
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported binscatter property `{other}`"),
+        ))?,
+    }
+    recompute_binscatter_chart(next, builtin)
+}
+
+fn binscatter_numeric_data(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<Vec<f64>> {
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
+    Ok(tensor.data)
+}
+
+fn recompute_binscatter_chart(
+    mut next: super::state::BinscatterHandleState,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if next.x_data.len() != next.y_data.len() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: XData and YData must contain the same number of elements"),
+        ));
+    }
+    if next.auto_bins {
+        next.num_bins = [
+            binscatter::auto_bin_count(&next.x_data, next.x_limits_option, 100)?,
+            binscatter::auto_bin_count(&next.y_data, next.y_limits_option, 100)?,
+        ];
+    }
+    let color_limits = current_binscatter_color_limits(&next, builtin)?;
+    let chart = binscatter::build_binscatter_chart(
+        &next.x_data,
+        &next.y_data,
+        next.num_bins,
+        next.x_limits_option,
+        next.y_limits_option,
+        next.show_empty_bins,
+        next.face_alpha,
+        next.display_name.as_deref(),
+        color_limits,
+    )?;
+    let x_limits = (
+        *chart.x_bin_edges.first().unwrap_or(&0.0),
+        *chart.x_bin_edges.last().unwrap_or(&1.0),
+    );
+    let y_limits = (
+        *chart.y_bin_edges.first().unwrap_or(&0.0),
+        *chart.y_bin_edges.last().unwrap_or(&1.0),
+    );
+    let surface = chart.surface.clone();
+    super::state::update_image_plot(next.figure, next.plot_index, |existing| {
+        *existing = surface;
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    super::state::update_binscatter_handle_for_plot(next.figure, next.plot_index, |state| {
+        state.values = chart.values;
+        state.x_bin_edges = chart.x_bin_edges;
+        state.y_bin_edges = chart.y_bin_edges;
+        state.x_data = next.x_data;
+        state.y_data = next.y_data;
+        state.num_bins = next.num_bins;
+        state.auto_bins = next.auto_bins;
+        state.x_limits_option = next.x_limits_option;
+        state.y_limits_option = next.y_limits_option;
+        state.x_limits = x_limits;
+        state.y_limits = y_limits;
+        state.show_empty_bins = next.show_empty_bins;
+        state.face_alpha = next.face_alpha;
+        state.display_name = next.display_name;
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn current_binscatter_color_limits(
+    binscatter: &super::state::BinscatterHandleState,
+    builtin: &'static str,
+) -> BuiltinResult<Option<(f64, f64)>> {
+    let figure = super::state::clone_figure(binscatter.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid binscatter figure")))?;
+    let plot = figure
+        .plots()
+        .nth(binscatter.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid binscatter handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid binscatter handle"),
+        ));
+    };
+    Ok(surface.color_limits)
 }
 
 fn apply_patch_property(

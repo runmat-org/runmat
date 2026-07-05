@@ -1,0 +1,54 @@
+{
+  "title": "binscatter",
+  "slug": "binscatter",
+  "keywords": [
+    "binscatter",
+    "binned scatter",
+    "2d histogram",
+    "statistics",
+    "plotting",
+    "density"
+  ],
+  "summary": "Visualize point density with a two-dimensional binned scatter plot.",
+  "description": "`binscatter(x,y)` bins paired observations and displays the bin counts as a colored tile plot. `binscatter(x,y,nbins)` accepts a scalar or two-element bin count. `binscatter(tbl,xvar,yvar)` reads numeric variables from a table or timetable. Name-value options support `NumBins`, `XLimits`, `YLimits`, `ShowEmptyBins`, `FaceAlpha`, `DisplayName`, and `DisplayStyle` set to `\"tile\"`.",
+  "notes": [
+    "Default bin counts use Scott-rule estimates capped at 100 bins per dimension. Explicit `NumBins` entries must be positive integers no greater than 250.",
+    "The returned handle has type `binscatter` and exposes `Values`, `XData`, `YData`, `NumBins`, `XBinEdges`, `YBinEdges`, `XLimits`, `YLimits`, `ShowEmptyBins`, `FaceAlpha`, and `DisplayName` through `get`.",
+    "`set` supports recomputing the chart after updates to `NumBins`, `ShowEmptyBins`, `XLimits`, `YLimits`, `XData`, `YData`, `FaceAlpha`, and `DisplayName`.",
+    "Empty bins are hidden from the rendered tile surface by default and are shown when `ShowEmptyBins` is true. The `Values` property preserves the numeric bin values either way.",
+    "RunMat renders `binscatter` as an indexed image surface with a colorbar. MATLAB's interactive chart UI affordances are not modeled."
+  ],
+  "examples": [
+    {
+      "description": "Create a binned scatter plot",
+      "input": "h = binscatter([0; 0.2; 0.8; 1], [0; 0.1; 0.9; 1], [2 2]);\nget(h, 'Values')",
+      "output": "ans =\n     2     0\n     0     2"
+    },
+    {
+      "description": "Use explicit limits and show empty bins",
+      "input": "h = binscatter(x, y, 'NumBins', [20 10], 'XLimits', [0 1], 'YLimits', [-1 1], 'ShowEmptyBins', 'on');",
+      "output": "h is a binscatter chart handle."
+    },
+    {
+      "description": "Read numeric variables from a table",
+      "input": "T = table(x, y);\nh = binscatter(T, 'x', 'y', 25);",
+      "output": "h is a binscatter chart handle."
+    }
+  ],
+  "errors": [
+    {
+      "identifier": "RunMat:binscatter:InvalidArgument",
+      "message": "binscatter: invalid argument"
+    },
+    {
+      "identifier": "RunMat:binscatter:Internal",
+      "message": "binscatter: internal error"
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter.rs"
+    }
+  ]
+}

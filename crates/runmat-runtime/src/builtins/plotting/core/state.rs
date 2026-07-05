@@ -290,6 +290,27 @@ pub struct HeatmapHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct BinscatterHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub values: Tensor,
+    pub x_bin_edges: Vec<f64>,
+    pub y_bin_edges: Vec<f64>,
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<f64>,
+    pub num_bins: [usize; 2],
+    pub auto_bins: bool,
+    pub x_limits_option: Option<(f64, f64)>,
+    pub y_limits_option: Option<(f64, f64)>,
+    pub x_limits: (f64, f64),
+    pub y_limits: (f64, f64),
+    pub show_empty_bins: bool,
+    pub face_alpha: f64,
+    pub display_name: Option<String>,
+}
+
+#[derive(Clone, Debug)]
 pub struct AreaHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
@@ -315,6 +336,7 @@ pub enum PlotChildHandleState {
     Quiver(QuiverHandleState),
     Image(ImageHandleState),
     Heatmap(HeatmapHandleState),
+    Binscatter(BinscatterHandleState),
     Area(AreaHandleState),
     Surface(SimplePlotHandleState),
     Patch(SimplePlotHandleState),
@@ -1482,6 +1504,80 @@ pub fn register_heatmap_handle(
     id as f64
 }
 
+pub fn register_binscatter_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    values: Tensor,
+    x_bin_edges: Vec<f64>,
+    y_bin_edges: Vec<f64>,
+    x_data: Vec<f64>,
+    y_data: Vec<f64>,
+    num_bins: [usize; 2],
+    auto_bins: bool,
+    x_limits_option: Option<(f64, f64)>,
+    y_limits_option: Option<(f64, f64)>,
+    show_empty_bins: bool,
+    face_alpha: f64,
+    display_name: Option<String>,
+) -> f64 {
+    let x_limits = (
+        *x_bin_edges.first().unwrap_or(&0.0),
+        *x_bin_edges.last().unwrap_or(&1.0),
+    );
+    let y_limits = (
+        *y_bin_edges.first().unwrap_or(&0.0),
+        *y_bin_edges.last().unwrap_or(&1.0),
+    );
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Binscatter(BinscatterHandleState {
+            figure,
+            axes_index,
+            plot_index,
+            values,
+            x_bin_edges,
+            y_bin_edges,
+            x_data,
+            y_data,
+            num_bins,
+            auto_bins,
+            x_limits_option,
+            y_limits_option,
+            x_limits,
+            y_limits,
+            show_empty_bins,
+            face_alpha,
+            display_name,
+        }),
+    );
+    id as f64
+}
+
+pub fn update_binscatter_handle_for_plot(
+    figure: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut BinscatterHandleState),
+) -> Result<(), FigureError> {
+    let mut updater = Some(updater);
+    let mut reg = registry();
+    for state in reg.plot_children.values_mut() {
+        if let PlotChildHandleState::Binscatter(binscatter) = state {
+            if binscatter.figure == figure && binscatter.plot_index == plot_index {
+                let Some(updater) = updater.take() else {
+                    return Ok(());
+                };
+                updater(binscatter);
+                return Ok(());
+            }
+        }
+    }
+    Err(FigureError::InvalidPlotObjectHandle)
+}
+
 pub fn register_area_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
     register_simple_plot_handle(figure, axes_index, plot_index, |state| {
         PlotChildHandleState::Area(AreaHandleState {
@@ -1832,6 +1928,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Quiver(quiver) => quiver.figure != handle,
         PlotChildHandleState::Image(image) => image.figure != handle,
         PlotChildHandleState::Heatmap(heatmap) => heatmap.figure != handle,
+        PlotChildHandleState::Binscatter(binscatter) => binscatter.figure != handle,
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
     });
@@ -1870,6 +1967,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Heatmap(heatmap) => {
             !(heatmap.figure == handle && heatmap.axes_index == axes_index)
+        }
+        PlotChildHandleState::Binscatter(binscatter) => {
+            !(binscatter.figure == handle && binscatter.axes_index == axes_index)
         }
         PlotChildHandleState::Area(area) => {
             !(area.figure == handle && area.axes_index == axes_index)

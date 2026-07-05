@@ -5300,6 +5300,286 @@
       ]
     },
     {
+      "name": "binscatter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "binscatter(x, y)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(x, y, nbins)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            },
+            {
+              "name": "nbins",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scalar or two-element bin count."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(___, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Binscatter name-value options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(tbl, xvar, yvar)",
+          "inputs": [
+            {
+              "name": "tbl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or timetable."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(tbl, xvar, yvar, nbins)",
+          "inputs": [
+            {
+              "name": "tbl",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table or timetable."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            },
+            {
+              "name": "nbins",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scalar or two-element bin count."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(ax, ___)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "binscatter(ax, x, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Binscatter name-value options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = binscatter(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the Binscatter chart."
+            }
+          ]
+        },
+        {
+          "label": "h = binscatter(x, y, nbins)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates or table variable selector."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates or table variable selector."
+            },
+            {
+              "name": "nbins",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scalar or two-element bin count."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the Binscatter chart."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BINSCATTER.INVALID_ARGUMENT",
+          "identifier": "RunMat:binscatter:InvalidArgument",
+          "when": "Inputs, bin controls, or chart options are malformed.",
+          "message": "binscatter: invalid argument"
+        },
+        {
+          "code": "RM.BINSCATTER.INTERNAL",
+          "identifier": "RunMat:binscatter:Internal",
+          "when": "RunMat cannot compute bins or render the chart.",
+          "message": "binscatter: internal error"
+        }
+      ]
+    },
+    {
       "name": "bitand",
       "output_mode": "Fixed",
       "completion_policy": "Public",
