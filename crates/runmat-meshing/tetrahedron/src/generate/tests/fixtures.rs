@@ -129,6 +129,17 @@ pub(super) fn split_outer_edge_nested_tetrahedron_shells_plc() -> ProtectedBound
     plc
 }
 
+pub(super) fn split_protected_outer_edge_nested_tetrahedron_shells_plc() -> ProtectedBoundaryComplex
+{
+    let mut plc = split_outer_edge_nested_tetrahedron_shells_plc();
+    plc.complex_id = "split_protected_outer_edge_nested_tetrahedron_shells".to_string();
+    plc.protected_edges = vec![
+        protected_edge("protected_edge_0", ["0", "4"], "source_edge_0"),
+        protected_edge("protected_edge_1", ["4", "1"], "source_edge_0"),
+    ];
+    plc
+}
+
 pub(super) fn box_plc() -> ProtectedBoundaryComplex {
     ProtectedBoundaryComplex {
         complex_id: "box".to_string(),

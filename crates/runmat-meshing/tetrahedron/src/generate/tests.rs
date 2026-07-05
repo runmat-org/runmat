@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
+use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId};
 use runmat_meshing_core::quality::predicate::{
     tetrahedron_scaled_jacobian, tetrahedron_signed_volume,
 };
@@ -299,6 +299,39 @@ fn generates_nested_tetrahedron_shell_mesh_from_split_outer_edge_shell_plc() {
         .iter()
         .any(|face| face.node_ids.iter().any(|node_id| node_id.id == "4")));
     assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+}
+
+#[test]
+fn nested_tetrahedron_shell_generation_preserves_split_protected_source_edges() {
+    let plc = split_protected_outer_edge_nested_tetrahedron_shells_plc();
+    let mesh = generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(&plc)
+        .expect("split protected-edge nested shell PLC should generate a shell volume mesh");
+    let source_edge_id = TopologyEntityId {
+        stage: MeshingStage::CurveMesh,
+        id: "source_edge_0".to_string(),
+    };
+
+    assert!(mesh.boundary_faces.iter().any(|face| {
+        face.node_ids.iter().any(|node_id| node_id.id == "4")
+            && face
+                .source_edge_ids
+                .iter()
+                .any(|candidate| candidate.as_ref() == Some(&source_edge_id))
+    }));
+
+    let queue = crate::recover::build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("split protected-edge chain should satisfy recovery audit");
+    assert_eq!(queue.evidence.entity_counts["source_edge_items"], 2);
+    assert_eq!(queue.evidence.entity_counts["missing_source_edge_items"], 0);
+    assert!(queue.items.iter().all(|item| {
+        item.kind != crate::recover::TetrahedronRecoveryKind::SourceEdge
+            || item.status == crate::recover::TetrahedronRecoveryStatus::Recovered
+    }));
+    assert!(queue.items.iter().any(|item| {
+        item.kind == crate::recover::TetrahedronRecoveryKind::SourceEdge
+            && item.protected_edge_topology
+                == Some(crate::recover::TetrahedronProtectedEdgeTopology::BoundaryEdge)
+    }));
 }
 
 #[test]
