@@ -83,6 +83,70 @@ pub(super) fn validate_tetrahedron_recovery_complete(
     Ok(())
 }
 
+pub(super) fn validate_recovery_evidence_consistency(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let backend = &mesh.backend;
+    validate_recovered_count(
+        "volume_edge_source_edge",
+        backend.tetrahedron_recovered_volume_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_volume_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "boundary_edge_source_edge",
+        backend.tetrahedron_recovered_boundary_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_boundary_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "interior_edge_source_edge",
+        backend.tetrahedron_recovered_interior_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_interior_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "absent_edge_source_edge",
+        backend.tetrahedron_recovered_absent_edge_source_edge_recovery_item_count,
+        backend.tetrahedron_absent_edge_source_edge_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "boundary_face_source_face",
+        backend.tetrahedron_recovered_boundary_face_source_face_recovery_item_count,
+        backend.tetrahedron_boundary_face_source_face_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "interior_face_source_face",
+        backend.tetrahedron_recovered_interior_face_source_face_recovery_item_count,
+        backend.tetrahedron_interior_face_source_face_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "volume_face_source_face",
+        backend.tetrahedron_recovered_volume_face_source_face_recovery_item_count,
+        backend.tetrahedron_volume_face_source_face_recovery_item_count,
+    )?;
+    validate_recovered_count(
+        "absent_face_source_face",
+        backend.tetrahedron_recovered_absent_face_source_face_recovery_item_count,
+        backend.tetrahedron_absent_face_source_face_recovery_item_count,
+    )?;
+    Ok(())
+}
+
+fn validate_recovered_count(
+    family: &str,
+    recovered_count: usize,
+    input_count: usize,
+) -> Result<(), AnalysisMeshValidationError> {
+    if recovered_count > input_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+                family: family.to_string(),
+                recovered_count,
+                input_count,
+            },
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn validate_no_unrepaired_exact_quality(
     mesh: &AnalysisMeshArtifact,
     require_no_unrepaired_exact_quality: bool,

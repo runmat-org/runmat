@@ -165,6 +165,52 @@ fn rejects_incomplete_tetrahedron_recovery_from_aggregate_count() {
 }
 
 #[test]
+fn rejects_recovered_source_edge_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_boundary_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_recovered_boundary_edge_source_edge_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("recovered source-edge evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+            family: "boundary_edge_source_edge".to_string(),
+            recovered_count: 2,
+            input_count: 1,
+        }
+    );
+    assert_eq!(
+        analysis_mesh_validation_error_code(&err),
+        "inconsistent_tetrahedron_recovery_evidence"
+    );
+}
+
+#[test]
+fn rejects_recovered_source_face_count_that_exceeds_typed_input_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_face_source_face_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_recovered_volume_face_source_face_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("recovered source-face evidence cannot exceed typed inputs");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
+            family: "volume_face_source_face".to_string(),
+            recovered_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
