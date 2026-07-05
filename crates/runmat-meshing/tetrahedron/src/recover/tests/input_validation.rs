@@ -88,6 +88,21 @@ fn rejects_recovery_input_element_that_references_unknown_node() {
 }
 
 #[test]
+fn rejects_recovery_input_element_with_empty_material_region() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.elements[0].material_region_id.clear();
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(
+            TetrahedronRecoveryError::TetrahedronElementEmptyMaterialRegion {
+                element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
+            },
+        )
+    );
+}
+
+#[test]
 fn rejects_recovery_input_with_duplicate_boundary_face_id() {
     let mut mesh = tetrahedron_mesh();
     let mut duplicate_face = boundary_face("facet_1", ["0", "3", "1"], "face_2");

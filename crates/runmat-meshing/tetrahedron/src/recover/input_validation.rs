@@ -56,6 +56,13 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 element_id: element.element_id.clone(),
             },
         )?;
+        if element.material_region_id.trim().is_empty() {
+            return Err(
+                TetrahedronRecoveryError::TetrahedronElementEmptyMaterialRegion {
+                    element_id: element.element_id.clone(),
+                },
+            );
+        }
     }
 
     let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();

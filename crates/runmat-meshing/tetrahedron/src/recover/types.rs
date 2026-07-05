@@ -33,6 +33,9 @@ pub enum TetrahedronRecoveryError {
     TetrahedronElementHasRepeatedNode {
         element_id: TopologyEntityId,
     },
+    TetrahedronElementEmptyMaterialRegion {
+        element_id: TopologyEntityId,
+    },
     TetrahedronBoundaryFaceStageMismatch {
         face_id: TopologyEntityId,
     },
@@ -109,6 +112,11 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::TetrahedronElementHasRepeatedNode { element_id } => write!(
                 formatter,
                 "Tetrahedron element {} has repeated nodes",
+                element_id.id
+            ),
+            Self::TetrahedronElementEmptyMaterialRegion { element_id } => write!(
+                formatter,
+                "Tetrahedron element {} has empty material-region ownership",
                 element_id.id
             ),
             Self::TetrahedronBoundaryFaceStageMismatch { face_id } => write!(
