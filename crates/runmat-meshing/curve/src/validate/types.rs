@@ -30,6 +30,7 @@ pub struct CurveValidationReport {
     pub max_projection_error_m: f64,
     pub max_length_error_m: f64,
     pub max_segment_length_m: f64,
+    pub max_parameter_gap: f64,
     pub max_adjacent_length_ratio: f64,
 }
 
@@ -79,6 +80,29 @@ pub enum CurveValidationError {
         measured_length_m: f64,
         error_m: f64,
         max_error_m: f64,
+    },
+    MissingElementChain {
+        source_edge_id: u32,
+    },
+    NonIncreasingElementParameter {
+        source_edge_id: u32,
+        element_id: u32,
+        left_parameter: f64,
+        right_parameter: f64,
+    },
+    ElementParameterGap {
+        source_edge_id: u32,
+        left_element_id: Option<u32>,
+        right_element_id: Option<u32>,
+        expected_parameter: f64,
+        actual_parameter: f64,
+    },
+    ElementParameterOverlap {
+        source_edge_id: u32,
+        left_element_id: u32,
+        right_element_id: u32,
+        expected_parameter: f64,
+        actual_parameter: f64,
     },
     ExcessiveGrowth {
         source_edge_id: u32,
@@ -160,6 +184,39 @@ impl std::fmt::Display for CurveValidationError {
             } => write!(
                 formatter,
                 "curve element {element_id} reports length {reported_length_m:.6e} m but node coordinates measure {measured_length_m:.6e} m; error {error_m:.6e} m exceeds {max_error_m:.6e} m"
+            ),
+            Self::MissingElementChain { source_edge_id } => write!(
+                formatter,
+                "source edge {source_edge_id} has no recovered curve element chain"
+            ),
+            Self::NonIncreasingElementParameter {
+                source_edge_id,
+                element_id,
+                left_parameter,
+                right_parameter,
+            } => write!(
+                formatter,
+                "curve element {element_id} on source edge {source_edge_id} has non-increasing parameters {left_parameter:.6} -> {right_parameter:.6}"
+            ),
+            Self::ElementParameterGap {
+                source_edge_id,
+                left_element_id,
+                right_element_id,
+                expected_parameter,
+                actual_parameter,
+            } => write!(
+                formatter,
+                "source edge {source_edge_id} curve element chain has a parameter gap from {expected_parameter:.6} after element {left_element_id:?} to {actual_parameter:.6} before element {right_element_id:?}"
+            ),
+            Self::ElementParameterOverlap {
+                source_edge_id,
+                left_element_id,
+                right_element_id,
+                expected_parameter,
+                actual_parameter,
+            } => write!(
+                formatter,
+                "source edge {source_edge_id} curve element chain overlaps: element {right_element_id} starts at {actual_parameter:.6} before element {left_element_id} ends at {expected_parameter:.6}"
             ),
             Self::ExcessiveGrowth {
                 source_edge_id,

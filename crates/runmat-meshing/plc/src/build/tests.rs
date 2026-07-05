@@ -241,6 +241,7 @@ fn tetra_surface() -> SurfaceDiscretization {
             max_projection_error_m: 0.0,
             max_length_error_m: 0.0,
             max_segment_length_m: 1.0,
+            max_parameter_gap: 0.0,
             max_adjacent_length_ratio: 1.0,
         }),
         loop_coverage: Some(loop_coverage()),

@@ -6,6 +6,8 @@ use crate::{CurveDiscretization, CurveElement, CurveNode};
 
 use super::types::{CurveValidationError, CurveValidationOptions, CurveValidationReport};
 
+const PARAMETER_TOLERANCE: f64 = 1.0e-12;
+
 pub fn validate_curve_discretization(
     topology: &SourceTopologyModel,
     curves: &CurveDiscretization,
@@ -123,8 +125,12 @@ pub fn validate_curve_discretization(
         )?);
     }
 
-    let max_adjacent_length_ratio =
-        validate_growth(&mut elements_by_edge, options.max_growth_ratio)?;
+    let max_parameter_gap = validate_parameter_chains(topology, &nodes_by_id, &elements_by_edge)?;
+    let max_adjacent_length_ratio = validate_growth(
+        &nodes_by_id,
+        &mut elements_by_edge,
+        options.max_growth_ratio,
+    )?;
 
     Ok(CurveValidationReport {
         source_edge_count: topology.edges.len(),
@@ -134,6 +140,7 @@ pub fn validate_curve_discretization(
         max_projection_error_m,
         max_length_error_m,
         max_segment_length_m,
+        max_parameter_gap,
         max_adjacent_length_ratio,
     })
 }
@@ -235,13 +242,110 @@ fn source_edge_point(
     ])
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ChainElement<'a> {
+    element: &'a CurveElement,
+    start_parameter: f64,
+    end_parameter: f64,
+}
+
+fn validate_parameter_chains(
+    topology: &SourceTopologyModel,
+    nodes_by_id: &BTreeMap<u32, &CurveNode>,
+    elements_by_edge: &BTreeMap<u32, Vec<&CurveElement>>,
+) -> Result<f64, CurveValidationError> {
+    for source_edge in &topology.edges {
+        let Some(elements) = elements_by_edge.get(&source_edge.edge_id) else {
+            return Err(CurveValidationError::MissingElementChain {
+                source_edge_id: source_edge.edge_id,
+            });
+        };
+        let mut chain = Vec::<ChainElement<'_>>::with_capacity(elements.len());
+        for element in elements {
+            let left_node = nodes_by_id.get(&element.node_ids[0]).copied().ok_or(
+                CurveValidationError::UnknownNode {
+                    element_id: element.element_id,
+                    node_id: element.node_ids[0],
+                },
+            )?;
+            let right_node = nodes_by_id.get(&element.node_ids[1]).copied().ok_or(
+                CurveValidationError::UnknownNode {
+                    element_id: element.element_id,
+                    node_id: element.node_ids[1],
+                },
+            )?;
+            if right_node.parameter <= left_node.parameter + PARAMETER_TOLERANCE {
+                return Err(CurveValidationError::NonIncreasingElementParameter {
+                    source_edge_id: source_edge.edge_id,
+                    element_id: element.element_id,
+                    left_parameter: left_node.parameter,
+                    right_parameter: right_node.parameter,
+                });
+            }
+            chain.push(ChainElement {
+                element,
+                start_parameter: left_node.parameter,
+                end_parameter: right_node.parameter,
+            });
+        }
+        chain.sort_by(|left, right| left.start_parameter.total_cmp(&right.start_parameter));
+
+        let mut expected_parameter = 0.0_f64;
+        let mut previous_element_id = None::<u32>;
+        for chain_element in chain {
+            if chain_element.start_parameter > expected_parameter + PARAMETER_TOLERANCE {
+                return Err(CurveValidationError::ElementParameterGap {
+                    source_edge_id: source_edge.edge_id,
+                    left_element_id: previous_element_id,
+                    right_element_id: Some(chain_element.element.element_id),
+                    expected_parameter,
+                    actual_parameter: chain_element.start_parameter,
+                });
+            }
+            if chain_element.start_parameter < expected_parameter - PARAMETER_TOLERANCE {
+                return Err(CurveValidationError::ElementParameterOverlap {
+                    source_edge_id: source_edge.edge_id,
+                    left_element_id: previous_element_id
+                        .unwrap_or(chain_element.element.element_id),
+                    right_element_id: chain_element.element.element_id,
+                    expected_parameter,
+                    actual_parameter: chain_element.start_parameter,
+                });
+            }
+            expected_parameter = expected_parameter.max(chain_element.end_parameter);
+            previous_element_id = Some(chain_element.element.element_id);
+        }
+        if expected_parameter < 1.0 - PARAMETER_TOLERANCE {
+            return Err(CurveValidationError::ElementParameterGap {
+                source_edge_id: source_edge.edge_id,
+                left_element_id: previous_element_id,
+                right_element_id: None,
+                expected_parameter,
+                actual_parameter: 1.0,
+            });
+        }
+    }
+    Ok(0.0)
+}
+
 fn validate_growth(
+    nodes_by_id: &BTreeMap<u32, &CurveNode>,
     elements_by_edge: &mut BTreeMap<u32, Vec<&CurveElement>>,
     max_growth_ratio: f64,
 ) -> Result<f64, CurveValidationError> {
     let mut max_ratio = 1.0_f64;
     for (source_edge_id, elements) in elements_by_edge {
-        elements.sort_by_key(|element| element.node_ids[0].min(element.node_ids[1]));
+        elements.sort_by(|left, right| {
+            let left_parameter = nodes_by_id
+                .get(&left.node_ids[0])
+                .map(|node| node.parameter)
+                .unwrap_or(f64::INFINITY);
+            let right_parameter = nodes_by_id
+                .get(&right.node_ids[0])
+                .map(|node| node.parameter)
+                .unwrap_or(f64::INFINITY);
+            left_parameter.total_cmp(&right_parameter)
+        });
         for pair in elements.windows(2) {
             let left = pair[0];
             let right = pair[1];
