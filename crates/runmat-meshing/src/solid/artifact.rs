@@ -878,6 +878,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ACCEPTED_COUNT,
             ),
             tetrahedron_sliver_count: backend_quality.sliver_count,
+            tetrahedron_sliver_removed_count: optimization_targets.sliver_removed_count,
             tetrahedron_optimization_target_seed_count: optimization_targets.target_seed_count,
             tetrahedron_optimization_skipped_target_seed_count: optimization_targets
                 .skipped_target_seed_count,
@@ -1043,6 +1044,7 @@ pub(super) fn backend_quality_evidence_from_tetrahedron_mesh(
 struct OptimizationTargetEvidence {
     target_seed_count: usize,
     skipped_target_seed_count: usize,
+    sliver_removed_count: usize,
 }
 
 fn optimization_target_evidence(
@@ -1052,6 +1054,9 @@ fn optimization_target_evidence(
     OptimizationTargetEvidence {
         target_seed_count: initial.quality_repair_target_count,
         skipped_target_seed_count: final_quality.quality_repair_target_count,
+        sliver_removed_count: initial
+            .sliver_count
+            .saturating_sub(final_quality.sliver_count),
     }
 }
 
@@ -1494,6 +1499,27 @@ mod tests {
 
         assert!(targets.target_seed_count > 0);
         assert_eq!(targets.skipped_target_seed_count, 0);
+        assert_eq!(targets.sliver_removed_count, initial.sliver_count);
+    }
+
+    #[test]
+    fn optimization_target_evidence_keeps_unresolved_slivers_as_skipped_targets() {
+        let initial = backend_quality_evidence_from_tetrahedron_mesh(&tetrahedron_quality_mesh([
+            0.01, 0.01, 0.001,
+        ]));
+        let final_quality = initial.clone();
+
+        let targets = optimization_target_evidence(&initial, &final_quality);
+
+        assert_eq!(
+            targets.target_seed_count,
+            initial.quality_repair_target_count
+        );
+        assert_eq!(
+            targets.skipped_target_seed_count,
+            initial.quality_repair_target_count
+        );
+        assert_eq!(targets.sliver_removed_count, 0);
     }
 
     fn tetrahedron_quality_mesh(apex: [f64; 3]) -> TetrahedronMesh {
