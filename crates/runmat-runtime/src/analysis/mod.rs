@@ -34,8 +34,10 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing::{
@@ -9942,6 +9944,14 @@ fn primary_solver_mesh_field_expected_count(
     field: &AnalysisField,
     mesh: &AnalysisMeshArtifact,
 ) -> Option<usize> {
+    if matches!(
+        field.field_id.as_str(),
+        FEA_FIELD_STRUCTURAL_ROTATION
+            | FEA_FIELD_STRUCTURAL_REACTION_FORCE
+            | FEA_FIELD_STRUCTURAL_REACTION_MOMENT
+    ) {
+        return None;
+    }
     if let Some(count) = mesh_field_topology_expected_count(field, mesh) {
         return Some(count);
     }
@@ -13673,6 +13683,23 @@ fn generate_and_persist_study_analysis_mesh(
     study_fingerprint: &str,
     context: &OperationContext,
 ) -> Result<Option<StudyAnalysisMeshArtifact>, OperationErrorEnvelope> {
+    if let Some(path) = spec.analysis_mesh_artifact_path.as_deref() {
+        resolve_analysis_mesh_artifact(
+            Some(path),
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+        )?;
+        let evidence_path = match spec.analysis_mesh_evidence_artifact_path.clone() {
+            Some(path) => path,
+            None => analysis_mesh_evidence_path_from_artifact(path, context)?,
+        };
+        return Ok(Some(StudyAnalysisMeshArtifact {
+            path: path.to_string(),
+            evidence_path,
+        }));
+    }
+
     let Some(options) = spec.mesh_options.clone() else {
         return Ok(None);
     };
@@ -13787,6 +13814,70 @@ fn generate_and_persist_study_analysis_mesh(
         path: mesh_path,
         evidence_path,
     }))
+}
+
+fn analysis_mesh_evidence_path_from_artifact(
+    analysis_mesh_artifact_path: &str,
+    context: &OperationContext,
+) -> Result<String, OperationErrorEnvelope> {
+    let bytes = fs_read(analysis_mesh_artifact_path).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                analysis_mesh_artifact_path.to_string(),
+            )]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                analysis_mesh_artifact_path.to_string(),
+            )]),
+        )
+    })?;
+    payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_EVIDENCE_MISSING",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "analysis mesh artifact does not reference a mesh evidence artifact",
+                BTreeMap::from([(
+                    "analysis_mesh_artifact_path".to_string(),
+                    analysis_mesh_artifact_path.to_string(),
+                )]),
+            )
+        })
 }
 
 fn generate_study_analysis_mesh_with_initial_boundary_focus(

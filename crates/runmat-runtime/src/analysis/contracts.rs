@@ -1824,6 +1824,10 @@ pub struct AnalysisStudySpec {
     pub backend: ComputeBackend,
     #[serde(default)]
     pub mesh_options: Option<VolumeMeshingOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
     #[serde(default)]
     pub linear_static_run_options: Option<AnalysisRunOptions>,
     #[serde(default)]
@@ -1857,6 +1861,10 @@ pub struct AnalysisStudyAuthoringIntent {
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    #[serde(default)]
     pub material_region_id: Option<String>,
     #[serde(default)]
     pub fixed_boundary_region_id: Option<String>,
@@ -1882,6 +1890,10 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub selected_fixed_boundary_region_id: String,
     pub selected_load_boundary_region_id: String,
     pub selected_force_n: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_mesh_evidence_artifact_path: Option<String>,
     pub material_region_source: String,
     pub fixed_boundary_region_source: String,
     pub load_boundary_region_source: String,

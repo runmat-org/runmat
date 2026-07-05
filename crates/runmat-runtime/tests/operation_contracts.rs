@@ -163,6 +163,8 @@ fn contract_study_spec(
         run_kind,
         backend: ComputeBackend::Cpu,
         mesh_options: None,
+        analysis_mesh_artifact_path: None,
+        analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,

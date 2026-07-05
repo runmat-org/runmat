@@ -634,6 +634,8 @@ async fn resolve_study(
         run_kind,
         backend: study.run.backend,
         mesh_options,
+        analysis_mesh_artifact_path: None,
+        analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: run_options.linear_static,
         modal_run_options: run_options.modal,
         acoustic_run_options: run_options.acoustic,

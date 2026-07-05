@@ -41,6 +41,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let mut fixed_boundary_region_id = None::<String>;
     let mut load_boundary_region_id = None::<String>;
     let mut force_n = None::<[f64; 3]>;
+    let mut analysis_mesh_artifact_path = None::<String>;
+    let mut analysis_mesh_evidence_artifact_path = None::<String>;
 
     for pair in args[3..].chunks(2) {
         let key = option_key(&pair[0], AUTHOR_STUDY_NAME)?;
@@ -75,6 +77,14 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             "forcen" | "force" | "forcevector" => {
                 force_n = Some(vector3_from_value(AUTHOR_STUDY_NAME, &pair[1], "ForceN")?);
             }
+            "analysismeshartifactpath" | "meshartifactpath" => {
+                analysis_mesh_artifact_path =
+                    Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
+            }
+            "analysismeshevidenceartifactpath" | "meshevidenceartifactpath" => {
+                analysis_mesh_evidence_artifact_path =
+                    Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
+            }
             other => {
                 return Err(builtin_error(
                     AUTHOR_STUDY_NAME,
@@ -94,6 +104,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             profile,
             run_kind,
             backend,
+            analysis_mesh_artifact_path,
+            analysis_mesh_evidence_artifact_path,
             material_region_id,
             fixed_boundary_region_id,
             load_boundary_region_id,
