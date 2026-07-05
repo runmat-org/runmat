@@ -5,6 +5,7 @@ pub mod backend;
 pub mod boundary;
 pub mod cad;
 pub mod curve;
+pub mod material;
 pub mod options;
 pub mod pipeline;
 pub mod plc;
@@ -27,6 +28,7 @@ pub use cad::{
     CadVertexContract, CadVolumeContract,
 };
 pub use curve::{CurveMesh, CurveMeshElement, CurveMeshNode};
+pub use material::{DEFAULT_MATERIAL_REGION_ID, UNCLASSIFIED_MATERIAL_REGION_ID};
 pub use options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,

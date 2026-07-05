@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::contracts::ProtectedBoundaryComplex;
-
-const DEFAULT_MATERIAL_REGION_ID: &str = "solid_body";
-const UNCLASSIFIED_MATERIAL_REGION_ID: &str = "unclassified";
+use runmat_meshing_core::contracts::{
+    ProtectedBoundaryComplex, DEFAULT_MATERIAL_REGION_ID, UNCLASSIFIED_MATERIAL_REGION_ID,
+};
 
 pub(super) fn plc_material_region_id(plc: &ProtectedBoundaryComplex) -> String {
     let material_region_ids = plc

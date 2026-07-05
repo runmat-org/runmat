@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::contracts::AnalysisMeshArtifact;
+use crate::contracts::{AnalysisMeshArtifact, UNCLASSIFIED_MATERIAL_REGION_ID};
 
 use super::AnalysisMeshValidationError;
 
@@ -47,7 +47,7 @@ pub(super) fn validate_volume_elements(
                 element_id: element.element_id.clone(),
             });
         }
-        if element.material_region_id == "unclassified" {
+        if element.material_region_id == UNCLASSIFIED_MATERIAL_REGION_ID {
             return Err(AnalysisMeshValidationError::UnclassifiedMaterialRegion {
                 element_id: element.element_id.clone(),
             });
