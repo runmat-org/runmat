@@ -14,6 +14,8 @@ use super::{
 
 mod flips;
 mod split;
+#[cfg(test)]
+pub(super) use flips::improve_refill_with_local_flips_with_diagnostics;
 pub use flips::{
     flip_refill_tetrahedra_across_shared_face, flip_refill_tetrahedra_around_shared_edge,
 };

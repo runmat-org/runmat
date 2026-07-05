@@ -1,5 +1,6 @@
 use super::*;
 use fixtures::*;
+use std::collections::BTreeMap;
 
 #[test]
 fn rejects_quality_threshold_failures() {
@@ -124,6 +125,80 @@ fn allows_skipped_optimization_targets_without_reported_pass() {
 
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("skipped targets are bookkeeping when no optimization pass ran");
+}
+
+#[test]
+fn rejects_local_reconnection_rejections_that_exceed_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_attempt_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_count = 2;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_by_reason =
+        BTreeMap::from([("quality_does_not_improve".to_string(), 2)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("local reconnection rejections cannot exceed attempts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_local_reconnection_rejections".to_string(),
+            observed_count: 2,
+            limit_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_local_reconnection_rejection_reason_mismatch() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_attempt_count = 3;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_count = 2;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_by_reason =
+        BTreeMap::from([("quality_does_not_improve".to_string(), 1)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("local reconnection rejection reasons must reconcile");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_local_reconnection_rejection_reasons".to_string(),
+            observed_count: 1,
+            limit_count: 2,
+        }
+    );
+}
+
+#[test]
+fn rejects_local_reconnection_attempts_without_reported_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_attempt_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_local_reconnection_rejected_by_reason =
+        BTreeMap::from([("quality_does_not_improve".to_string(), 1)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("local reconnection attempts require a reported repair pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_local_reconnections_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
+        }
+    );
 }
 
 #[test]

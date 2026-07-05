@@ -96,7 +96,10 @@ pub use refill_tetrahedra::{
     split_refill_tetrahedra_across_shared_face_at_barycentric,
 };
 #[cfg(test)]
-use refill_tetrahedra::{refill_is_better, star_refill_candidate_with_rejection_reason};
+use refill_tetrahedra::{
+    improve_refill_with_local_flips_with_diagnostics, refill_is_better,
+    star_refill_candidate_with_rejection_reason,
+};
 pub use retriangulate::retriangulate_constrained_cavity_from_nodes;
 use selection::*;
 pub use selection::{

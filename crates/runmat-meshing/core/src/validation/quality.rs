@@ -79,11 +79,46 @@ fn validate_optimization_evidence(
     let repair_pass_count = backend.tetrahedron_optimization_pass_count
         + backend.tetrahedron_untangling_pass_count
         + backend.tetrahedron_exact_quality_repair_pass_count;
+    let local_reconnection_attempt_count =
+        backend.tetrahedron_optimization_local_reconnection_attempt_count;
+    let local_reconnection_rejected_count =
+        backend.tetrahedron_optimization_local_reconnection_rejected_count;
+    if local_reconnection_rejected_count > local_reconnection_attempt_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_local_reconnection_rejections".to_string(),
+                observed_count: local_reconnection_rejected_count,
+                limit_count: local_reconnection_attempt_count,
+            },
+        );
+    }
+    let local_reconnection_reason_count = backend
+        .tetrahedron_optimization_local_reconnection_rejected_by_reason
+        .values()
+        .sum::<usize>();
+    if local_reconnection_reason_count != local_reconnection_rejected_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_local_reconnection_rejection_reasons".to_string(),
+                observed_count: local_reconnection_reason_count,
+                limit_count: local_reconnection_rejected_count,
+            },
+        );
+    }
     if repair_pass_count == 0 && reported_edit_count > 0 {
         return Err(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
                 family: "optimization_edits_without_pass".to_string(),
                 observed_count: reported_edit_count,
+                limit_count: repair_pass_count,
+            },
+        );
+    }
+    if repair_pass_count == 0 && local_reconnection_attempt_count > 0 {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_local_reconnections_without_pass".to_string(),
+                observed_count: local_reconnection_attempt_count,
                 limit_count: repair_pass_count,
             },
         );

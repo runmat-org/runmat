@@ -517,6 +517,15 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.optimization_target_seed_count, 7);
     assert_eq!(recovery.optimization_skipped_target_seed_count, 4);
     assert_eq!(recovery.optimization_rejected_edit_count, 3);
+    assert_eq!(recovery.optimization_local_reconnection_attempt_count, 5);
+    assert_eq!(recovery.optimization_local_reconnection_rejected_count, 2);
+    assert_eq!(
+        recovery.optimization_local_reconnection_rejected_by_reason,
+        BTreeMap::from([
+            ("quality_does_not_improve".to_string(), 1),
+            ("scaled_jacobian_below_threshold".to_string(), 1),
+        ])
+    );
     assert_eq!(recovery.optimization_initial_max_aspect_ratio, 6.0);
     assert_eq!(recovery.optimization_final_max_aspect_ratio, 4.0);
     assert_eq!(

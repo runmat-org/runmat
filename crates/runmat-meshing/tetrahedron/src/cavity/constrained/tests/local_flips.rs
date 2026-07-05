@@ -73,6 +73,49 @@ fn shared_face_flip_rejects_boundary_face() {
 }
 
 #[test]
+fn local_flip_refill_diagnostics_record_quality_rejections() {
+    let cavity = two_tetrahedron_bipyramid_cavity();
+    let nodes = two_tetrahedron_face_flip_nodes();
+    let options = refill_options();
+    let node_coordinates = nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let tetrahedra = [[0, 1, 2, 3], [0, 2, 1, 4]]
+        .into_iter()
+        .map(|node_ids| {
+            raw_refill_tetrahedron_with_rejection_reason(
+                node_ids,
+                node_ids.map(|node_id| nodes[node_id as usize].coordinates_m),
+                options,
+            )
+            .expect("fixture tetrahedron should pass quality")
+        })
+        .collect::<Vec<_>>();
+    let refill = refill_from_tetrahedra(&cavity, tetrahedra, options.volume_relative_tolerance)
+        .expect("fixture should define a valid refill");
+
+    let (improved, diagnostics) = improve_refill_with_local_flips_with_diagnostics(
+        &cavity,
+        &node_coordinates,
+        &refill,
+        ConstrainedCavityRefillOptions {
+            min_scaled_jacobian: 0.99,
+            ..options
+        },
+    );
+
+    assert!(improved.is_none());
+    assert_eq!(diagnostics.attempted_reconnection_count, 1);
+    assert_eq!(diagnostics.accepted_reconnection_count, 0);
+    assert_eq!(diagnostics.rejected_reconnection_count, 1);
+    assert_eq!(
+        diagnostics.rejected_by_reason,
+        BTreeMap::from([("scaled_jacobian_below_threshold".to_string(), 1)])
+    );
+}
+
+#[test]
 fn shared_edge_flip_preserves_component_boundary_and_volume() {
     let nodes = triangular_edge_ring_nodes();
     let options = refill_options();

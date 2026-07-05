@@ -427,6 +427,12 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_optimization_rejected_edit_count: usize,
     #[serde(default)]
+    pub tetrahedron_optimization_local_reconnection_attempt_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_local_reconnection_rejected_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub tetrahedron_optimization_initial_max_aspect_ratio: f64,
     #[serde(default)]
     pub tetrahedron_optimization_final_max_aspect_ratio: f64,

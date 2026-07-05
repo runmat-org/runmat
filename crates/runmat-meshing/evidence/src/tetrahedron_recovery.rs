@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_core::contracts::AnalysisMeshArtifact;
@@ -285,6 +287,12 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub optimization_skipped_target_seed_count: usize,
     #[serde(default)]
     pub optimization_rejected_edit_count: usize,
+    #[serde(default)]
+    pub optimization_local_reconnection_attempt_count: usize,
+    #[serde(default)]
+    pub optimization_local_reconnection_rejected_count: usize,
+    #[serde(default)]
+    pub optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
     pub optimization_initial_max_aspect_ratio: f64,
     #[serde(default)]
@@ -725,6 +733,16 @@ pub(super) fn tetrahedron_recovery_evidence(
             .backend
             .tetrahedron_optimization_skipped_target_seed_count,
         optimization_rejected_edit_count: mesh.backend.tetrahedron_optimization_rejected_edit_count,
+        optimization_local_reconnection_attempt_count: mesh
+            .backend
+            .tetrahedron_optimization_local_reconnection_attempt_count,
+        optimization_local_reconnection_rejected_count: mesh
+            .backend
+            .tetrahedron_optimization_local_reconnection_rejected_count,
+        optimization_local_reconnection_rejected_by_reason: mesh
+            .backend
+            .tetrahedron_optimization_local_reconnection_rejected_by_reason
+            .clone(),
         optimization_initial_max_aspect_ratio: mesh
             .backend
             .tetrahedron_optimization_initial_max_aspect_ratio,

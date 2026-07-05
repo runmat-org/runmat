@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::super::super::reconnect::{
     evaluate_local_tetrahedron_flip_improvement, three_to_two_edge_flip_candidate,
     two_to_three_face_flip_candidate, LocalTetrahedron, LocalTetrahedronFlipCandidate,
-    LocalTetrahedronFlipQualityThresholds,
+    LocalTetrahedronFlipError, LocalTetrahedronFlipQualityThresholds,
 };
 
 use super::super::topology::{common_tetrahedron_edges, sorted_tetrahedron_nodes};
@@ -14,14 +14,35 @@ pub use direct::{
     flip_refill_tetrahedra_across_shared_face, flip_refill_tetrahedra_around_shared_edge,
 };
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LocalTetrahedronReconnectionDiagnostics {
+    pub attempted_reconnection_count: usize,
+    pub accepted_reconnection_count: usize,
+    pub rejected_reconnection_count: usize,
+    pub rejected_by_reason: BTreeMap<String, usize>,
+}
+
 pub(in super::super) fn improve_refill_with_local_flips(
     cavity: &ConstrainedCavity,
     node_coordinates: &BTreeMap<u32, Point3>,
     refill: &ConstrainedCavityRefill,
     options: ConstrainedCavityRefillOptions,
 ) -> Option<ConstrainedCavityRefill> {
+    improve_refill_with_local_flips_with_diagnostics(cavity, node_coordinates, refill, options).0
+}
+
+pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
+    cavity: &ConstrainedCavity,
+    node_coordinates: &BTreeMap<u32, Point3>,
+    refill: &ConstrainedCavityRefill,
+    options: ConstrainedCavityRefillOptions,
+) -> (
+    Option<ConstrainedCavityRefill>,
+    LocalTetrahedronReconnectionDiagnostics,
+) {
+    let mut diagnostics = LocalTetrahedronReconnectionDiagnostics::default();
     if refill.tetrahedra.len() < 2 {
-        return None;
+        return (None, diagnostics);
     }
     let mut coordinates = node_coordinates.clone();
     for node in &refill.inserted_nodes {
@@ -46,23 +67,25 @@ pub(in super::super) fn improve_refill_with_local_flips(
             let Ok(flip) = two_to_three_face_flip_candidate(left, right) else {
                 continue;
             };
-            if evaluate_local_tetrahedron_flip_improvement(
+            diagnostics.attempted_reconnection_count += 1;
+            if let Err(err) = evaluate_local_tetrahedron_flip_improvement(
                 &[left, right],
                 &flip,
                 &coordinates,
                 thresholds,
-            )
-            .is_err()
-            {
+            ) {
+                diagnostics.record_rejection(local_tetrahedron_flip_error_reason(&err));
                 continue;
             }
 
             let Some(candidate) =
                 refill_from_local_flip_candidate(cavity, &coordinates, refill, &flip, options)
             else {
+                diagnostics.record_rejection("refill_validation");
                 continue;
             };
             if !refill_is_better(&candidate, refill) {
+                diagnostics.record_rejection("refill_not_better");
                 continue;
             }
             if best
@@ -97,14 +120,14 @@ pub(in super::super) fn improve_refill_with_local_flips(
                     let Ok(flip) = three_to_two_edge_flip_candidate(tetrahedra, edge) else {
                         continue;
                     };
-                    if evaluate_local_tetrahedron_flip_improvement(
+                    diagnostics.attempted_reconnection_count += 1;
+                    if let Err(err) = evaluate_local_tetrahedron_flip_improvement(
                         &tetrahedra,
                         &flip,
                         &coordinates,
                         thresholds,
-                    )
-                    .is_err()
-                    {
+                    ) {
+                        diagnostics.record_rejection(local_tetrahedron_flip_error_reason(&err));
                         continue;
                     }
                     let Some(candidate) = refill_from_local_flip_candidate(
@@ -114,9 +137,11 @@ pub(in super::super) fn improve_refill_with_local_flips(
                         &flip,
                         options,
                     ) else {
+                        diagnostics.record_rejection("refill_validation");
                         continue;
                     };
                     if !refill_is_better(&candidate, refill) {
+                        diagnostics.record_rejection("refill_not_better");
                         continue;
                     }
                     if best
@@ -130,7 +155,20 @@ pub(in super::super) fn improve_refill_with_local_flips(
         }
     }
 
-    best
+    if best.is_some() {
+        diagnostics.accepted_reconnection_count = 1;
+    }
+    (best, diagnostics)
+}
+
+impl LocalTetrahedronReconnectionDiagnostics {
+    fn record_rejection(&mut self, reason: &'static str) {
+        self.rejected_reconnection_count += 1;
+        *self
+            .rejected_by_reason
+            .entry(reason.to_string())
+            .or_default() += 1;
+    }
 }
 
 fn refill_from_local_flip_candidate(
@@ -207,4 +245,21 @@ pub(in super::super) fn refill_is_better(
     candidate_min > current_min + 1.0e-12
         || ((candidate_min - current_min).abs() <= 1.0e-12
             && candidate.tetrahedra.len() < current.tetrahedra.len())
+}
+
+fn local_tetrahedron_flip_error_reason(error: &LocalTetrahedronFlipError) -> &'static str {
+    match error {
+        LocalTetrahedronFlipError::DegenerateTetrahedron { .. } => "degenerate_tetrahedron",
+        LocalTetrahedronFlipError::NoSharedFace => "no_shared_face",
+        LocalTetrahedronFlipError::NoSharedEdge => "no_shared_edge",
+        LocalTetrahedronFlipError::InvalidEdgeRing => "invalid_edge_ring",
+        LocalTetrahedronFlipError::InvalidQualityThresholds => "invalid_quality_thresholds",
+        LocalTetrahedronFlipError::MissingNode { .. } => "missing_node",
+        LocalTetrahedronFlipError::NonPositiveVolume { .. } => "non_positive_volume",
+        LocalTetrahedronFlipError::VolumeBelowThreshold { .. } => "volume_below_threshold",
+        LocalTetrahedronFlipError::ScaledJacobianBelowThreshold { .. } => {
+            "scaled_jacobian_below_threshold"
+        }
+        LocalTetrahedronFlipError::QualityDoesNotImprove => "quality_does_not_improve",
+    }
 }
