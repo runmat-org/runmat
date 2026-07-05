@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use super::{StageEvidence, TopologyEntityId};
 
+pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT: &str =
+    "optimization_local_reconnection_attempts";
+pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT: &str =
+    "optimization_local_reconnection_accepted";
+pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT: &str =
+    "optimization_local_reconnection_rejected";
+pub const TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX: &str =
+    "optimization_local_reconnection_rejected_";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {
     pub mesh_id: String,

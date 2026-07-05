@@ -17,7 +17,7 @@ use super::{
     },
     refill_tetrahedra::{
         record_refill_rejection, refill_is_better, refill_validation_reason,
-        star_refill_candidate_with_rejection_reason,
+        star_refill_candidate_with_rejection_reason, LocalTetrahedronReconnectionDiagnostics,
     },
     validation::{validate_constrained_cavity, validate_refill_options},
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefill,
@@ -56,6 +56,7 @@ pub fn evaluate_constrained_cavity_refill_candidates(
     let boundary_node_ids = cavity_boundary_node_ids(cavity);
     let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
     let mut rejected_by_reason = BTreeMap::<String, usize>::new();
+    let mut local_reconnection_diagnostics = LocalTetrahedronReconnectionDiagnostics::default();
 
     if interior_candidate_nodes.is_empty() {
         if boundary_node_ids.len() == 4 {
@@ -67,22 +68,29 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                     &mut rejected_by_reason,
                     "single_tetrahedron_refill_rejected",
                 );
-                return Ok(ConstrainedCavityRefillEvaluation {
-                    refill: None,
+                return Ok(refill_evaluation(
+                    None,
                     rejected_by_reason,
-                });
+                    local_reconnection_diagnostics,
+                ));
             };
-            return Ok(ConstrainedCavityRefillEvaluation {
-                refill: Some(refill),
+            return Ok(refill_evaluation(
+                Some(refill),
                 rejected_by_reason,
-            });
+                local_reconnection_diagnostics,
+            ));
         };
         match boundary_node_refill_candidate(cavity, &boundary_node_map, options) {
-            Ok(Ok(refill)) => {
-                return Ok(ConstrainedCavityRefillEvaluation {
-                    refill: Some(refill),
+            Ok(Ok(candidate)) => {
+                merge_local_reconnection_diagnostics(
+                    &mut local_reconnection_diagnostics,
+                    candidate.local_reconnection_diagnostics,
+                );
+                return Ok(refill_evaluation(
+                    Some(candidate.refill),
                     rejected_by_reason,
-                });
+                    local_reconnection_diagnostics,
+                ));
             }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
             Err(err) => {
@@ -96,20 +104,22 @@ pub fn evaluate_constrained_cavity_refill_candidates(
             options,
         ) {
             Ok(Ok(refill)) => {
-                return Ok(ConstrainedCavityRefillEvaluation {
-                    refill: Some(refill),
+                return Ok(refill_evaluation(
+                    Some(refill),
                     rejected_by_reason,
-                });
+                    local_reconnection_diagnostics,
+                ));
             }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
             Err(err) => {
                 record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
             }
         }
-        return Ok(ConstrainedCavityRefillEvaluation {
-            refill: None,
+        return Ok(refill_evaluation(
+            None,
             rejected_by_reason,
-        });
+            local_reconnection_diagnostics,
+        ));
     }
 
     let mut seen_interior_nodes = BTreeSet::<u32>::new();
@@ -200,7 +210,13 @@ pub fn evaluate_constrained_cavity_refill_candidates(
     }
     if best.is_none() && boundary_node_ids.len() > 4 {
         match boundary_node_refill_candidate(cavity, &boundary_node_map, options) {
-            Ok(Ok(refill)) => best = Some(refill),
+            Ok(Ok(candidate)) => {
+                merge_local_reconnection_diagnostics(
+                    &mut local_reconnection_diagnostics,
+                    candidate.local_reconnection_diagnostics,
+                );
+                best = Some(candidate.refill);
+            }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
             Err(err) => {
                 record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
@@ -208,8 +224,39 @@ pub fn evaluate_constrained_cavity_refill_candidates(
         }
     }
 
-    Ok(ConstrainedCavityRefillEvaluation {
-        refill: best,
+    Ok(refill_evaluation(
+        best,
         rejected_by_reason,
-    })
+        local_reconnection_diagnostics,
+    ))
+}
+
+fn refill_evaluation(
+    refill: Option<ConstrainedCavityRefill>,
+    rejected_by_reason: BTreeMap<String, usize>,
+    local_reconnection_diagnostics: LocalTetrahedronReconnectionDiagnostics,
+) -> ConstrainedCavityRefillEvaluation {
+    ConstrainedCavityRefillEvaluation {
+        refill,
+        rejected_by_reason,
+        local_reconnection_attempt_count: local_reconnection_diagnostics
+            .attempted_reconnection_count,
+        local_reconnection_accepted_count: local_reconnection_diagnostics
+            .accepted_reconnection_count,
+        local_reconnection_rejected_count: local_reconnection_diagnostics
+            .rejected_reconnection_count,
+        local_reconnection_rejected_by_reason: local_reconnection_diagnostics.rejected_by_reason,
+    }
+}
+
+fn merge_local_reconnection_diagnostics(
+    target: &mut LocalTetrahedronReconnectionDiagnostics,
+    source: LocalTetrahedronReconnectionDiagnostics,
+) {
+    target.attempted_reconnection_count += source.attempted_reconnection_count;
+    target.accepted_reconnection_count += source.accepted_reconnection_count;
+    target.rejected_reconnection_count += source.rejected_reconnection_count;
+    for (reason, count) in source.rejected_by_reason {
+        *target.rejected_by_reason.entry(reason).or_default() += count;
+    }
 }

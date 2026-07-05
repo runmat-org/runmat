@@ -1,4 +1,10 @@
 use super::super::*;
+use runmat_meshing_core::contracts::{
+    MeshingStage, TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
+};
 
 #[test]
 fn refill_candidates_preserve_split_boundary_face() {
@@ -111,4 +117,50 @@ fn refill_evaluation_uses_boundary_nodes_for_multi_face_cavity_without_interior_
         1.0e-12,
     )
     .expect("boundary-node refill should preserve volume");
+}
+
+#[test]
+fn refill_evaluation_reports_local_reconnection_diagnostics() {
+    let cavity = two_tetrahedron_bipyramid_cavity();
+    let nodes = two_tetrahedron_face_flip_nodes();
+
+    let evaluation = evaluate_constrained_cavity_refill_candidates(
+        &cavity,
+        &nodes,
+        &[],
+        ConstrainedCavityRefillOptions {
+            min_scaled_jacobian: 0.5,
+            ..refill_options()
+        },
+    )
+    .expect("boundary-node refill should evaluate local reconnections");
+
+    assert!(evaluation.refill.is_some());
+    assert_eq!(evaluation.local_reconnection_attempt_count, 1);
+    assert_eq!(evaluation.local_reconnection_accepted_count, 0);
+    assert_eq!(evaluation.local_reconnection_rejected_count, 1);
+    assert_eq!(
+        evaluation.local_reconnection_rejected_by_reason,
+        BTreeMap::from([("scaled_jacobian_below_threshold".to_string(), 1)])
+    );
+    let evidence = evaluation.optimization_stage_evidence();
+    assert_eq!(evidence.stage, MeshingStage::Optimization);
+    assert_eq!(
+        evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT],
+        1
+    );
+    assert_eq!(
+        evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT],
+        0
+    );
+    assert_eq!(
+        evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT],
+        1
+    );
+    assert_eq!(
+        evidence.rejection_counts[&format!(
+            "{TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX}scaled_jacobian_below_threshold"
+        )],
+        1
+    );
 }

@@ -22,15 +22,6 @@ pub struct LocalTetrahedronReconnectionDiagnostics {
     pub rejected_by_reason: BTreeMap<String, usize>,
 }
 
-pub(in super::super) fn improve_refill_with_local_flips(
-    cavity: &ConstrainedCavity,
-    node_coordinates: &BTreeMap<u32, Point3>,
-    refill: &ConstrainedCavityRefill,
-    options: ConstrainedCavityRefillOptions,
-) -> Option<ConstrainedCavityRefill> {
-    improve_refill_with_local_flips_with_diagnostics(cavity, node_coordinates, refill, options).0
-}
-
 pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
     cavity: &ConstrainedCavity,
     node_coordinates: &BTreeMap<u32, Point3>,

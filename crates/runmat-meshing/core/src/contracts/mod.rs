@@ -51,5 +51,9 @@ pub use stage::{MeshingStage, StageEvidence, StageEvidenceStatus, TopologyEntity
 pub use surface::{SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle};
 pub use tetrahedron::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh, TetrahedronMeshNode,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
 };
 pub use topology::{BoundaryElementKind, VolumeElementKind};

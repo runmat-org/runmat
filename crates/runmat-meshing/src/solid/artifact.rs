@@ -6,7 +6,11 @@ use runmat_meshing_core::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
-        SourceEntityKind, TopologyEntityId, VolumeElementKind, UNCLASSIFIED_MATERIAL_REGION_ID,
+        SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
+        UNCLASSIFIED_MATERIAL_REGION_ID,
     },
     quality::{
         predicate::{
@@ -702,6 +706,19 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
             tetrahedron_optimization_skipped_target_seed_count: backend_quality
                 .quality_repair_target_count,
+            tetrahedron_optimization_local_reconnection_attempt_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+            ),
+            tetrahedron_optimization_local_reconnection_rejected_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+            ),
+            tetrahedron_optimization_local_reconnection_rejected_by_reason:
+                tetrahedron_rejection_counts_by_prefix(
+                    &tetrahedron_mesh,
+                    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
+                ),
             tetrahedron_optimization_initial_max_aspect_ratio: backend_quality.max_aspect_ratio,
             tetrahedron_optimization_final_max_aspect_ratio: backend_quality.max_aspect_ratio,
             tetrahedron_optimization_initial_min_exact_scaled_jacobian: backend_quality
@@ -796,6 +813,22 @@ fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> us
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+fn tetrahedron_rejection_counts_by_prefix(
+    tetrahedron_mesh: &TetrahedronMesh,
+    prefix: &str,
+) -> BTreeMap<String, usize> {
+    tetrahedron_mesh
+        .evidence
+        .rejection_counts
+        .iter()
+        .filter_map(|(reason, count)| {
+            reason
+                .strip_prefix(prefix)
+                .map(|stripped| (stripped.to_string(), *count))
+        })
+        .collect()
 }
 
 fn tetrahedron_material_region_count(tetrahedron_mesh: &TetrahedronMesh) -> usize {

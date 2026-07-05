@@ -81,6 +81,20 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
             .tetrahedron_optimization_skipped_target_seed_count,
         0
     );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_local_reconnection_attempt_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_local_reconnection_rejected_count,
+        0
+    );
+    assert!(mesh
+        .backend
+        .tetrahedron_optimization_local_reconnection_rejected_by_reason
+        .is_empty());
     assert!(mesh
         .backend
         .tetrahedron_missing_source_face_recovery_ids

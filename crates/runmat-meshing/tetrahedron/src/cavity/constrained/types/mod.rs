@@ -2,7 +2,15 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use runmat_meshing_core::quality::predicate::Point3;
+use runmat_meshing_core::{
+    contracts::{
+        MeshingStage, StageEvidence, TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
+    },
+    quality::predicate::Point3,
+};
 
 #[cfg(test)]
 mod diagnostics;
@@ -155,6 +163,39 @@ pub struct ConstrainedCavityRefillEvaluation {
     pub refill: Option<ConstrainedCavityRefill>,
     #[serde(default)]
     pub rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub local_reconnection_attempt_count: usize,
+    #[serde(default)]
+    pub local_reconnection_accepted_count: usize,
+    #[serde(default)]
+    pub local_reconnection_rejected_count: usize,
+    #[serde(default)]
+    pub local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
+}
+
+impl ConstrainedCavityRefillEvaluation {
+    pub fn optimization_stage_evidence(&self) -> StageEvidence {
+        let mut evidence = StageEvidence::complete(MeshingStage::Optimization);
+        evidence.entity_counts.insert(
+            TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT.to_string(),
+            self.local_reconnection_attempt_count,
+        );
+        evidence.entity_counts.insert(
+            TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT.to_string(),
+            self.local_reconnection_accepted_count,
+        );
+        evidence.entity_counts.insert(
+            TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT.to_string(),
+            self.local_reconnection_rejected_count,
+        );
+        for (reason, count) in &self.local_reconnection_rejected_by_reason {
+            evidence.rejection_counts.insert(
+                format!("{TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX}{reason}"),
+                *count,
+            );
+        }
+        evidence
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

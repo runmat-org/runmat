@@ -2,8 +2,9 @@ use super::super::{
     boundary_completion::complete_missing_boundary_face_tetrahedra,
     exact_cover::boundary_node_exact_cover_refill_candidate,
     refill_tetrahedra::{
-        improve_refill_with_local_flips, raw_refill_tetrahedron_with_rejection_reason,
-        refill_validation_reason,
+        improve_refill_with_local_flips_with_diagnostics,
+        raw_refill_tetrahedron_with_rejection_reason, refill_validation_reason,
+        LocalTetrahedronReconnectionDiagnostics,
     },
     tetrahedralize_points, ConnectivityPoint, ConstrainedCavityRefillTetrahedron,
 };
@@ -13,7 +14,7 @@ pub(in super::super) fn boundary_node_refill_candidate(
     cavity: &ConstrainedCavity,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Result<Result<ConstrainedCavityRefill, &'static str>, ConstrainedCavityValidationError> {
+) -> Result<Result<BoundaryNodeRefillCandidate, &'static str>, ConstrainedCavityValidationError> {
     let boundary_triangles = cavity
         .boundary_faces
         .iter()
@@ -64,13 +65,12 @@ pub(in super::super) fn boundary_node_refill_candidate(
             &boundary_triangles,
             options,
         )? {
-            return Ok(Ok(improve_refill_with_local_flips(
+            return Ok(Ok(boundary_node_refill_with_local_flips(
                 cavity,
                 boundary_nodes,
-                &refill,
+                refill,
                 options,
-            )
-            .unwrap_or(refill)));
+            )));
         }
         return Ok(Err(
             first_rejection.unwrap_or("boundary_node_delaunay_empty")
@@ -81,13 +81,12 @@ pub(in super::super) fn boundary_node_refill_candidate(
         refill_tetrahedra.clone(),
         options.volume_relative_tolerance,
     ) {
-        Ok(refill) => Ok(Ok(improve_refill_with_local_flips(
+        Ok(refill) => Ok(Ok(boundary_node_refill_with_local_flips(
             cavity,
             boundary_nodes,
-            &refill,
+            refill,
             options,
-        )
-        .unwrap_or(refill))),
+        ))),
         Err(_) => {
             if let Some(refill) = boundary_node_exact_cover_refill_candidate(
                 cavity,
@@ -95,13 +94,12 @@ pub(in super::super) fn boundary_node_refill_candidate(
                 &boundary_triangles,
                 options,
             )? {
-                return Ok(Ok(improve_refill_with_local_flips(
+                return Ok(Ok(boundary_node_refill_with_local_flips(
                     cavity,
                     boundary_nodes,
-                    &refill,
+                    refill,
                     options,
-                )
-                .unwrap_or(refill)));
+                )));
             }
             let (completed_cavity, completed_tetrahedra, inserted_nodes) =
                 match complete_missing_boundary_face_tetrahedra(
@@ -123,15 +121,33 @@ pub(in super::super) fn boundary_node_refill_candidate(
                 Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
             };
             refill.inserted_nodes = inserted_nodes;
-            refill = improve_refill_with_local_flips(
+            Ok(Ok(boundary_node_refill_with_local_flips(
                 &completed_cavity,
                 boundary_nodes,
-                &refill,
+                refill,
                 options,
-            )
-            .unwrap_or(refill);
-            Ok(Ok(refill))
+            )))
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(in super::super) struct BoundaryNodeRefillCandidate {
+    pub refill: ConstrainedCavityRefill,
+    pub local_reconnection_diagnostics: LocalTetrahedronReconnectionDiagnostics,
+}
+
+fn boundary_node_refill_with_local_flips(
+    cavity: &ConstrainedCavity,
+    boundary_nodes: &BTreeMap<u32, Point3>,
+    refill: ConstrainedCavityRefill,
+    options: ConstrainedCavityRefillOptions,
+) -> BoundaryNodeRefillCandidate {
+    let (improved, local_reconnection_diagnostics) =
+        improve_refill_with_local_flips_with_diagnostics(cavity, boundary_nodes, &refill, options);
+    BoundaryNodeRefillCandidate {
+        refill: improved.unwrap_or(refill),
+        local_reconnection_diagnostics,
     }
 }
 
