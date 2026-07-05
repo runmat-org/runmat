@@ -509,6 +509,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_sliver_removed_count: usize,
     #[serde(default)]
+    pub tetrahedron_optimization_sliver_removal_attempt_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_sliver_removal_accepted_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_sliver_removal_rejected_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_sliver_removal_budget_limited_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_sliver_removal_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub tetrahedron_optimization_target_seed_count: usize,
     #[serde(default)]
     pub tetrahedron_optimization_skipped_target_seed_count: usize,

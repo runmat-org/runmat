@@ -133,9 +133,16 @@ fn validate_optimization_evidence(
         backend.tetrahedron_optimization_boundary_smoothing_accepted_count;
     let boundary_smoothing_rejected_count =
         backend.tetrahedron_optimization_boundary_smoothing_rejected_count;
+    let sliver_removal_attempt_count =
+        backend.tetrahedron_optimization_sliver_removal_attempt_count;
+    let sliver_removal_accepted_count =
+        backend.tetrahedron_optimization_sliver_removal_accepted_count;
+    let sliver_removal_rejected_count =
+        backend.tetrahedron_optimization_sliver_removal_rejected_count;
     let aggregate_budget_limited_count = local_reconnection_budget_limited_count
         + backend.tetrahedron_optimization_interior_smoothing_budget_limited_count
-        + backend.tetrahedron_optimization_boundary_smoothing_budget_limited_count;
+        + backend.tetrahedron_optimization_boundary_smoothing_budget_limited_count
+        + backend.tetrahedron_optimization_sliver_removal_budget_limited_count;
     if backend.tetrahedron_optimization_budget_limited_count != aggregate_budget_limited_count {
         return Err(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
@@ -204,6 +211,30 @@ fn validate_optimization_evidence(
             },
         );
     }
+    let sliver_removal_outcome_count =
+        sliver_removal_accepted_count + sliver_removal_rejected_count;
+    if sliver_removal_outcome_count > sliver_removal_attempt_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_sliver_removal_outcomes".to_string(),
+                observed_count: sliver_removal_outcome_count,
+                limit_count: sliver_removal_attempt_count,
+            },
+        );
+    }
+    let sliver_removal_reason_count = backend
+        .tetrahedron_optimization_sliver_removal_rejected_by_reason
+        .values()
+        .sum::<usize>();
+    if sliver_removal_reason_count != sliver_removal_rejected_count {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_sliver_removal_rejection_reasons".to_string(),
+                observed_count: sliver_removal_reason_count,
+                limit_count: sliver_removal_rejected_count,
+            },
+        );
+    }
     if repair_pass_count == 0 && local_reconnection_attempt_count > 0 {
         return Err(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
@@ -227,6 +258,15 @@ fn validate_optimization_evidence(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
                 family: "optimization_interior_smoothing_without_pass".to_string(),
                 observed_count: interior_smoothing_attempt_count,
+                limit_count: repair_pass_count,
+            },
+        );
+    }
+    if repair_pass_count == 0 && sliver_removal_attempt_count > 0 {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "optimization_sliver_removal_without_pass".to_string(),
+                observed_count: sliver_removal_attempt_count,
                 limit_count: repair_pass_count,
             },
         );

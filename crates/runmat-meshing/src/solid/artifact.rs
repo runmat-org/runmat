@@ -22,7 +22,11 @@ use runmat_meshing_core::{
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_BUDGET_LIMIT_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
-        UNCLASSIFIED_MATERIAL_REGION_ID,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ACCEPTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ATTEMPT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTED_COUNT,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX, UNCLASSIFIED_MATERIAL_REGION_ID,
     },
     quality::{
         predicate::{
@@ -870,6 +874,9 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             ) + tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_BUDGET_LIMIT_COUNT,
+            ) + tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT,
             ),
             tetrahedron_smoothed_point_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
@@ -880,6 +887,27 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             ),
             tetrahedron_sliver_count: backend_quality.sliver_count,
             tetrahedron_sliver_removed_count: optimization_targets.sliver_removed_count,
+            tetrahedron_optimization_sliver_removal_attempt_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ATTEMPT_COUNT,
+            ),
+            tetrahedron_optimization_sliver_removal_accepted_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ACCEPTED_COUNT,
+            ),
+            tetrahedron_optimization_sliver_removal_rejected_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTED_COUNT,
+            ),
+            tetrahedron_optimization_sliver_removal_budget_limited_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT,
+            ),
+            tetrahedron_optimization_sliver_removal_rejected_by_reason:
+                tetrahedron_rejection_counts_by_prefix(
+                    &tetrahedron_mesh,
+                    TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX,
+                ),
             tetrahedron_optimization_target_seed_count: optimization_targets.target_seed_count,
             tetrahedron_optimization_skipped_target_seed_count: optimization_targets
                 .skipped_target_seed_count,

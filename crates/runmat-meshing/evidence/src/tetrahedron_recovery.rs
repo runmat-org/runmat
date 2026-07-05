@@ -370,6 +370,16 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub sliver_removed_count: usize,
     #[serde(default)]
+    pub optimization_sliver_removal_attempt_count: usize,
+    #[serde(default)]
+    pub optimization_sliver_removal_accepted_count: usize,
+    #[serde(default)]
+    pub optimization_sliver_removal_rejected_count: usize,
+    #[serde(default)]
+    pub optimization_sliver_removal_budget_limited_count: usize,
+    #[serde(default)]
+    pub optimization_sliver_removal_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub optimization_target_seed_count: usize,
     #[serde(default)]
     pub optimization_skipped_target_seed_count: usize,
@@ -952,6 +962,22 @@ pub(super) fn tetrahedron_recovery_evidence(
             .clone(),
         sliver_count: mesh.backend.tetrahedron_sliver_count,
         sliver_removed_count: mesh.backend.tetrahedron_sliver_removed_count,
+        optimization_sliver_removal_attempt_count: mesh
+            .backend
+            .tetrahedron_optimization_sliver_removal_attempt_count,
+        optimization_sliver_removal_accepted_count: mesh
+            .backend
+            .tetrahedron_optimization_sliver_removal_accepted_count,
+        optimization_sliver_removal_rejected_count: mesh
+            .backend
+            .tetrahedron_optimization_sliver_removal_rejected_count,
+        optimization_sliver_removal_budget_limited_count: mesh
+            .backend
+            .tetrahedron_optimization_sliver_removal_budget_limited_count,
+        optimization_sliver_removal_rejected_by_reason: mesh
+            .backend
+            .tetrahedron_optimization_sliver_removal_rejected_by_reason
+            .clone(),
         optimization_target_seed_count: mesh.backend.tetrahedron_optimization_target_seed_count,
         optimization_skipped_target_seed_count: mesh
             .backend
