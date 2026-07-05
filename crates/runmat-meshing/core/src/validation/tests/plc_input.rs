@@ -1,4 +1,5 @@
 use super::*;
+use crate::contracts::AnalysisMeshArtifact;
 use fixtures::*;
 
 #[test]
@@ -33,14 +34,7 @@ fn accepts_solid_mesh_with_classified_plc_input_evidence() {
 #[test]
 fn accepts_solid_mesh_with_nested_shell_generation_evidence() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
-    mesh.backend.tetrahedron_generation_family = "nested_tetrahedron_shell".to_string();
-    mesh.backend.plc_input_node_count = 8;
-    mesh.backend.plc_input_facet_count = 8;
-    mesh.backend.plc_input_boundary_component_count = 2;
-    mesh.backend.plc_input_boundary_component_node_count = 8;
-    mesh.backend.plc_input_max_boundary_component_node_count = 4;
-    mesh.backend.plc_input_nested_shell_count = 1;
-    mesh.backend.plc_input_max_shell_nesting_depth = 1;
+    configure_nested_shell_generation_evidence(&mut mesh);
 
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("nested-shell generation evidence should satisfy solid validation");
@@ -169,6 +163,83 @@ fn rejects_tetrahedron_generation_multiple_accepted_support_points() {
 }
 
 #[test]
+fn rejects_nested_shell_generation_without_refill_strategy_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    configure_nested_shell_generation_evidence(&mut mesh);
+    mesh.backend
+        .tetrahedron_generation_nested_shell_barycentric_partition_refill_count = 0;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("nested-shell generation must identify the accepted refill strategy");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_nested_tetrahedron_shell_refill_strategy_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_nested_shell_generation_with_multiple_refill_strategies() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    configure_nested_shell_generation_evidence(&mut mesh);
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("nested-shell generation can accept exactly one refill strategy");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_nested_tetrahedron_shell_refill_strategy_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_nested_shell_generation_with_inconsistent_refinement_attempts() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    configure_nested_shell_generation_evidence(&mut mesh);
+    mesh.backend
+        .tetrahedron_generation_nested_shell_barycentric_partition_refill_count = 0;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count = 0;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("exact-cover fallback requires rejected boundary refinement evidence");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_nested_tetrahedron_shell_refinement_rejection_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_non_nested_generation_with_nested_shell_evidence() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend
+        .tetrahedron_generation_nested_shell_outer_node_count = 4;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("non-nested generation must not carry nested-shell strategy evidence");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "unexpected_nested_tetrahedron_shell_generation_evidence".to_string(),
+        }
+    );
+}
+
+#[test]
 fn rejects_nested_plc_shell_without_nested_generation_family() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     mesh.backend.plc_input_boundary_component_count = 2;
@@ -185,6 +256,31 @@ fn rejects_nested_plc_shell_without_nested_generation_family() {
             reason: "unsupported_plc_boundary_component_count".to_string(),
         }
     );
+}
+
+fn configure_nested_shell_generation_evidence(mesh: &mut AnalysisMeshArtifact) {
+    mesh.backend.tetrahedron_generation_family = "nested_tetrahedron_shell".to_string();
+    mesh.backend.plc_input_node_count = 8;
+    mesh.backend.plc_input_facet_count = 8;
+    mesh.backend.plc_input_boundary_component_count = 2;
+    mesh.backend.plc_input_boundary_component_node_count = 8;
+    mesh.backend.plc_input_max_boundary_component_node_count = 4;
+    mesh.backend.plc_input_nested_shell_count = 1;
+    mesh.backend.plc_input_max_shell_nesting_depth = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_outer_node_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_inner_node_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_generated_node_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_refill_boundary_face_count = 8;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_barycentric_partition_refill_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_outer_facet_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_inner_facet_count = 4;
 }
 
 #[test]

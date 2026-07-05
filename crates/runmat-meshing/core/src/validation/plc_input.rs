@@ -109,6 +109,72 @@ fn validate_tetrahedron_generation_selection_evidence(
     if backend.tetrahedron_generation_interior_support_accepted_count > 1 {
         return missing("unsupported_tetrahedron_generation_interior_support_count");
     }
+    validate_nested_shell_generation_evidence(mesh)?;
+    Ok(())
+}
+
+fn validate_nested_shell_generation_evidence(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let backend = &mesh.backend;
+    let nested_generation_evidence_count = backend
+        .tetrahedron_generation_nested_shell_outer_node_count
+        + backend.tetrahedron_generation_nested_shell_inner_node_count
+        + backend.tetrahedron_generation_nested_shell_generated_node_count
+        + backend.tetrahedron_generation_nested_shell_refill_boundary_face_count
+        + backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count
+        + backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count
+        + backend.tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count
+        + backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count
+        + backend.tetrahedron_generation_nested_shell_barycentric_partition_refill_count
+        + backend.tetrahedron_generation_nested_shell_outer_facet_count
+        + backend.tetrahedron_generation_nested_shell_inner_facet_count;
+
+    if backend.tetrahedron_generation_family != "nested_tetrahedron_shell" {
+        if nested_generation_evidence_count > 0 {
+            return missing("unexpected_nested_tetrahedron_shell_generation_evidence");
+        }
+        return Ok(());
+    }
+
+    if backend.tetrahedron_generation_nested_shell_outer_node_count == 0
+        || backend.tetrahedron_generation_nested_shell_inner_node_count == 0
+        || backend.tetrahedron_generation_nested_shell_outer_facet_count == 0
+        || backend.tetrahedron_generation_nested_shell_inner_facet_count == 0
+        || backend.tetrahedron_generation_nested_shell_refill_boundary_face_count == 0
+    {
+        return missing("missing_nested_tetrahedron_shell_generation_evidence");
+    }
+
+    let exact_cover_refill_count =
+        backend.tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count;
+    let centroid_refill_count =
+        backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count;
+    let barycentric_refill_count =
+        backend.tetrahedron_generation_nested_shell_barycentric_partition_refill_count;
+    let strategy_count =
+        exact_cover_refill_count + centroid_refill_count + barycentric_refill_count;
+    if strategy_count != 1 {
+        return missing("inconsistent_nested_tetrahedron_shell_refill_strategy_count");
+    }
+
+    let refinement_attempt_count =
+        backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count;
+    let refinement_rejected_count =
+        backend.tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count;
+    if refinement_rejected_count > refinement_attempt_count {
+        return missing("inconsistent_nested_tetrahedron_shell_refinement_rejection_count");
+    }
+    if centroid_refill_count > refinement_attempt_count {
+        return missing("inconsistent_nested_tetrahedron_shell_refinement_refill_count");
+    }
+    if refinement_attempt_count != refinement_rejected_count + centroid_refill_count {
+        return missing("inconsistent_nested_tetrahedron_shell_refinement_attempt_count");
+    }
+    if exact_cover_refill_count > refinement_rejected_count {
+        return missing("inconsistent_nested_tetrahedron_shell_exact_cover_refill_count");
+    }
+
     Ok(())
 }
 

@@ -528,6 +528,32 @@ fn auto_backend_generates_nested_tetrahedron_shell_solid() {
     assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_nested_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 1);
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_nested_shell_outer_node_count
+            > 0
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_nested_shell_inner_node_count
+            > 0
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_generation_nested_shell_refill_boundary_face_count
+            > 0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count
+            + mesh
+                .backend
+                .tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count
+            + mesh
+                .backend
+                .tetrahedron_generation_nested_shell_barycentric_partition_refill_count,
+        1
+    );
     assert_eq!(mesh.boundary_faces.len(), 404);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
     assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);

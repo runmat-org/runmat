@@ -62,6 +62,28 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub generation_interior_support_candidate_count: usize,
     #[serde(default)]
     pub generation_interior_support_accepted_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_outer_node_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_inner_node_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_generated_node_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_refill_boundary_face_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_boundary_centroid_refinement_attempt_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_boundary_centroid_refinement_rejected_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_boundary_exact_cover_refill_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_boundary_centroid_refinement_refill_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_barycentric_partition_refill_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_outer_facet_count: usize,
+    #[serde(default)]
+    pub generation_nested_shell_inner_facet_count: usize,
     pub element_count: usize,
     #[serde(default)]
     pub material_region_count: usize,
@@ -525,6 +547,39 @@ pub(super) fn tetrahedron_recovery_evidence(
         generation_interior_support_accepted_count: mesh
             .backend
             .tetrahedron_generation_interior_support_accepted_count,
+        generation_nested_shell_outer_node_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_outer_node_count,
+        generation_nested_shell_inner_node_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_inner_node_count,
+        generation_nested_shell_generated_node_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_generated_node_count,
+        generation_nested_shell_refill_boundary_face_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_refill_boundary_face_count,
+        generation_nested_shell_boundary_centroid_refinement_attempt_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count,
+        generation_nested_shell_boundary_centroid_refinement_rejected_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count,
+        generation_nested_shell_boundary_exact_cover_refill_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count,
+        generation_nested_shell_boundary_centroid_refinement_refill_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count,
+        generation_nested_shell_barycentric_partition_refill_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_barycentric_partition_refill_count,
+        generation_nested_shell_outer_facet_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_outer_facet_count,
+        generation_nested_shell_inner_facet_count: mesh
+            .backend
+            .tetrahedron_generation_nested_shell_inner_facet_count,
         element_count: mesh.backend.tetrahedron_element_count,
         material_region_count: mesh.backend.tetrahedron_material_region_count,
         unclassified_material_element_count: mesh

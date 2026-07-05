@@ -178,13 +178,13 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.plc_input_node_count, 4);
     assert_eq!(recovery.plc_input_facet_count, 4);
     assert_eq!(recovery.plc_input_protected_edge_count, 6);
-    assert_eq!(recovery.plc_input_boundary_component_count, 1);
-    assert_eq!(recovery.plc_input_boundary_component_node_count, 4);
+    assert_eq!(recovery.plc_input_boundary_component_count, 2);
+    assert_eq!(recovery.plc_input_boundary_component_node_count, 8);
     assert_eq!(recovery.plc_input_max_boundary_component_node_count, 4);
     assert!(recovery.plc_input_shell_nesting_classified);
     assert_eq!(recovery.plc_input_outer_shell_count, 1);
-    assert_eq!(recovery.plc_input_nested_shell_count, 0);
-    assert_eq!(recovery.plc_input_max_shell_nesting_depth, 0);
+    assert_eq!(recovery.plc_input_nested_shell_count, 1);
+    assert_eq!(recovery.plc_input_max_shell_nesting_depth, 1);
     assert_eq!(recovery.plc_input_material_region_count, 2);
     assert_eq!(recovery.plc_input_material_region_facet_count, 4);
     assert_eq!(recovery.plc_input_cad_curve_boundary_source_edge_count, 2);
@@ -200,12 +200,41 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     );
     assert_eq!(recovery.plc_input_cad_curve_curvature_sized_edge_count, 1);
     assert_eq!(recovery.plc_input_cad_curve_curvature_sample_count, 2);
-    assert_eq!(recovery.generation_family, "star_shaped_polyhedron");
-    assert_eq!(recovery.generation_attempted_family_count, 5);
-    assert_eq!(recovery.generation_rejected_family_count, 4);
-    assert_eq!(recovery.generation_selected_family_index, 5);
-    assert_eq!(recovery.generation_interior_support_candidate_count, 29);
-    assert_eq!(recovery.generation_interior_support_accepted_count, 1);
+    assert_eq!(recovery.generation_family, "nested_tetrahedron_shell");
+    assert_eq!(recovery.generation_attempted_family_count, 1);
+    assert_eq!(recovery.generation_rejected_family_count, 0);
+    assert_eq!(recovery.generation_selected_family_index, 1);
+    assert_eq!(recovery.generation_interior_support_candidate_count, 0);
+    assert_eq!(recovery.generation_interior_support_accepted_count, 0);
+    assert_eq!(recovery.generation_nested_shell_outer_node_count, 4);
+    assert_eq!(recovery.generation_nested_shell_inner_node_count, 4);
+    assert_eq!(recovery.generation_nested_shell_generated_node_count, 1);
+    assert_eq!(
+        recovery.generation_nested_shell_refill_boundary_face_count,
+        8
+    );
+    assert_eq!(
+        recovery.generation_nested_shell_boundary_centroid_refinement_attempt_count,
+        0
+    );
+    assert_eq!(
+        recovery.generation_nested_shell_boundary_centroid_refinement_rejected_count,
+        0
+    );
+    assert_eq!(
+        recovery.generation_nested_shell_boundary_exact_cover_refill_count,
+        0
+    );
+    assert_eq!(
+        recovery.generation_nested_shell_boundary_centroid_refinement_refill_count,
+        0
+    );
+    assert_eq!(
+        recovery.generation_nested_shell_barycentric_partition_refill_count,
+        1
+    );
+    assert_eq!(recovery.generation_nested_shell_outer_facet_count, 4);
+    assert_eq!(recovery.generation_nested_shell_inner_facet_count, 4);
     assert_eq!(recovery.element_count, 12);
     assert_eq!(recovery.material_region_count, 2);
     assert_eq!(recovery.unclassified_material_element_count, 0);

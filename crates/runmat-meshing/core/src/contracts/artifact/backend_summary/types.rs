@@ -165,6 +165,28 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_generation_interior_support_accepted_count: usize,
     #[serde(default)]
+    pub tetrahedron_generation_nested_shell_outer_node_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_inner_node_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_generated_node_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_refill_boundary_face_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_barycentric_partition_refill_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_outer_facet_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_nested_shell_inner_facet_count: usize,
+    #[serde(default)]
     pub tetrahedron_element_count: usize,
     #[serde(default)]
     pub tetrahedron_material_region_count: usize,

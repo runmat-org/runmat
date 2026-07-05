@@ -279,6 +279,56 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "interior_support_accepted_points",
             ),
+            tetrahedron_generation_nested_shell_outer_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "nested_tetrahedron_shell_outer_nodes",
+            ),
+            tetrahedron_generation_nested_shell_inner_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "nested_tetrahedron_shell_inner_nodes",
+            ),
+            tetrahedron_generation_nested_shell_generated_node_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "nested_tetrahedron_shell_generated_nodes",
+            ),
+            tetrahedron_generation_nested_shell_refill_boundary_face_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_refill_boundary_faces",
+                ),
+            tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_boundary_centroid_refinement_attempts",
+                ),
+            tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_boundary_centroid_refinement_rejected",
+                ),
+            tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_boundary_exact_cover_refills",
+                ),
+            tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_boundary_centroid_refinement_refills",
+                ),
+            tetrahedron_generation_nested_shell_barycentric_partition_refill_count:
+                tetrahedron_entity_count(
+                    &tetrahedron_mesh,
+                    "nested_tetrahedron_shell_barycentric_partition_refills",
+                ),
+            tetrahedron_generation_nested_shell_outer_facet_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "nested_tetrahedron_shell_outer_facets",
+            ),
+            tetrahedron_generation_nested_shell_inner_facet_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "nested_tetrahedron_shell_inner_facets",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,
