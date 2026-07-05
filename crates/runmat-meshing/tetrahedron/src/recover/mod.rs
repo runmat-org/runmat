@@ -773,12 +773,24 @@ pub fn recover_tetrahedron_mesh_from_plc(
         protected_edge_boundary_faces.recovered_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "recovered_cad_curve_protected_edge_boundary_faces".to_string(),
+        protected_edge_boundary_faces.recovered_cad_curve_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "attempted_protected_edge_boundary_face_restoration_items".to_string(),
         protected_edge_boundary_faces.attempted_boundary_face_count,
     );
     recovery_queue.evidence.entity_counts.insert(
+        "attempted_cad_curve_protected_edge_boundary_face_restoration_items".to_string(),
+        protected_edge_boundary_faces.attempted_cad_curve_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
         "rejected_protected_edge_boundary_face_restoration_items".to_string(),
         protected_edge_boundary_faces.rejected_boundary_face_count,
+    );
+    recovery_queue.evidence.entity_counts.insert(
+        "rejected_cad_curve_protected_edge_boundary_face_restoration_items".to_string(),
+        protected_edge_boundary_faces.rejected_cad_curve_boundary_face_count,
     );
     for (reason_key, count) in protected_edge_boundary_faces.rejection_counts {
         recovery_queue

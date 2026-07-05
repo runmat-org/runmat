@@ -175,9 +175,15 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_recovered_protected_edge_boundary_face_count: usize,
     #[serde(default)]
+    pub tetrahedron_recovered_cad_curve_protected_edge_boundary_face_count: usize,
+    #[serde(default)]
     pub tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count: usize,
     #[serde(default)]
     pub tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count:
         usize,

@@ -279,15 +279,30 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "recovered_protected_edge_boundary_faces",
             ),
+            tetrahedron_recovered_cad_curve_protected_edge_boundary_face_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "recovered_cad_curve_protected_edge_boundary_faces",
+                ),
             tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count:
                 recovery_entity_count(
                     recovery_queue,
                     "attempted_protected_edge_boundary_face_restoration_items",
                 ),
+            tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_cad_curve_protected_edge_boundary_face_restoration_items",
+                ),
             tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count:
                 recovery_entity_count(
                     recovery_queue,
                     "rejected_protected_edge_boundary_face_restoration_items",
+                ),
+            tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_cad_curve_protected_edge_boundary_face_restoration_items",
                 ),
             tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count:
                 recovery_entity_count(

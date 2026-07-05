@@ -211,11 +211,23 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.recovered_boundary_face_count, 3);
     assert_eq!(recovery.recovered_protected_edge_boundary_face_count, 2);
     assert_eq!(
+        recovery.recovered_cad_curve_protected_edge_boundary_face_count,
+        1
+    );
+    assert_eq!(
         recovery.attempted_protected_edge_boundary_face_restoration_item_count,
         3
     );
     assert_eq!(
+        recovery.attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
+        2
+    );
+    assert_eq!(
         recovery.rejected_protected_edge_boundary_face_restoration_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.rejected_cad_curve_protected_edge_boundary_face_restoration_item_count,
         1
     );
     assert_eq!(

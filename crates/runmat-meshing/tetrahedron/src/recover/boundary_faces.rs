@@ -14,8 +14,11 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct BoundaryFaceRestoration {
     pub attempted_boundary_face_count: usize,
+    pub attempted_cad_curve_boundary_face_count: usize,
     pub recovered_boundary_face_count: usize,
+    pub recovered_cad_curve_boundary_face_count: usize,
     pub rejected_boundary_face_count: usize,
+    pub rejected_cad_curve_boundary_face_count: usize,
     pub rejection_counts: BTreeMap<&'static str, usize>,
 }
 
@@ -23,14 +26,20 @@ impl BoundaryFaceRestoration {
     fn empty() -> Self {
         Self {
             attempted_boundary_face_count: 0,
+            attempted_cad_curve_boundary_face_count: 0,
             recovered_boundary_face_count: 0,
+            recovered_cad_curve_boundary_face_count: 0,
             rejected_boundary_face_count: 0,
+            rejected_cad_curve_boundary_face_count: 0,
             rejection_counts: BTreeMap::new(),
         }
     }
 
-    fn record_rejection(&mut self, reason: BoundaryFaceRestorationRejection) {
+    fn record_rejection(&mut self, reason: BoundaryFaceRestorationRejection, is_cad_curve: bool) {
         self.rejected_boundary_face_count += 1;
+        if is_cad_curve {
+            self.rejected_cad_curve_boundary_face_count += 1;
+        }
         *self
             .rejection_counts
             .entry(reason.evidence_key())
@@ -82,6 +91,7 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
             protected_edge.source_edge_id.clone(),
         ))
     }) {
+        let is_cad_curve_source_edge = protected_edge.cad_curve_boundary.is_some();
         let protected_edge_key = sorted_edge(protected_edge.node_ids.clone());
         for facet in &plc.facets {
             if !facet_contains_edge(facet.node_ids.clone(), protected_edge_key.clone()) {
@@ -97,11 +107,20 @@ pub(super) fn recover_missing_protected_edge_boundary_faces(
                 BoundaryFaceRestorationStatus::AlreadyPresent => {}
                 BoundaryFaceRestorationStatus::Recovered => {
                     restoration.attempted_boundary_face_count += 1;
+                    if is_cad_curve_source_edge {
+                        restoration.attempted_cad_curve_boundary_face_count += 1;
+                    }
                     restoration.recovered_boundary_face_count += 1;
+                    if is_cad_curve_source_edge {
+                        restoration.recovered_cad_curve_boundary_face_count += 1;
+                    }
                 }
                 BoundaryFaceRestorationStatus::Rejected { reason } => {
                     restoration.attempted_boundary_face_count += 1;
-                    restoration.record_rejection(reason);
+                    if is_cad_curve_source_edge {
+                        restoration.attempted_cad_curve_boundary_face_count += 1;
+                    }
+                    restoration.record_rejection(reason, is_cad_curve_source_edge);
                 }
             }
         }
@@ -154,7 +173,7 @@ pub(super) fn recover_volume_face_source_face_boundary_faces(
             }
             BoundaryFaceRestorationStatus::Rejected { reason } => {
                 restoration.attempted_boundary_face_count += 1;
-                restoration.record_rejection(reason);
+                restoration.record_rejection(reason, false);
             }
         }
     }

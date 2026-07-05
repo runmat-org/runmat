@@ -74,6 +74,60 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
 }
 
 #[test]
+fn recovery_stage_result_records_cad_curve_source_edge_recovered_by_boundary_faces() {
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges[0].cad_curve_boundary = Some(cad_curve_boundary());
+    let mut mesh = tetrahedron_mesh();
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "1")))
+    });
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("missing CAD curve protected edge should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_topology_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("missing CAD curve protected edge should recover with boundary faces");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_cad_curve_protected_edge_boundary_face_restoration_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_cad_curve_protected_edge_boundary_faces"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_cad_curve_protected_edge_boundary_face_restoration_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn protected_edge_boundary_restoration_reports_rejected_non_exterior_volume_face() {
     let plc = tetrahedron_plc();
     let mut mesh = tetrahedron_mesh();

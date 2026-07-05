@@ -69,9 +69,15 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub recovered_protected_edge_boundary_face_count: usize,
     #[serde(default)]
+    pub recovered_cad_curve_protected_edge_boundary_face_count: usize,
+    #[serde(default)]
     pub attempted_protected_edge_boundary_face_restoration_item_count: usize,
     #[serde(default)]
+    pub attempted_cad_curve_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
     pub rejected_protected_edge_boundary_face_restoration_item_count: usize,
+    #[serde(default)]
+    pub rejected_cad_curve_protected_edge_boundary_face_restoration_item_count: usize,
     #[serde(default)]
     pub rejected_protected_edge_boundary_face_restoration_volume_face_topology_count: usize,
     #[serde(default)]
@@ -478,12 +484,21 @@ pub(super) fn tetrahedron_recovery_evidence(
         recovered_protected_edge_boundary_face_count: mesh
             .backend
             .tetrahedron_recovered_protected_edge_boundary_face_count,
+        recovered_cad_curve_protected_edge_boundary_face_count: mesh
+            .backend
+            .tetrahedron_recovered_cad_curve_protected_edge_boundary_face_count,
         attempted_protected_edge_boundary_face_restoration_item_count: mesh
             .backend
             .tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+        attempted_cad_curve_protected_edge_boundary_face_restoration_item_count: mesh
+            .backend
+            .tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
         rejected_protected_edge_boundary_face_restoration_item_count: mesh
             .backend
             .tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
+        rejected_cad_curve_protected_edge_boundary_face_restoration_item_count: mesh
+            .backend
+            .tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count,
         rejected_protected_edge_boundary_face_restoration_volume_face_topology_count: mesh
             .backend
             .tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count,

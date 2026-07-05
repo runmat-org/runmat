@@ -95,9 +95,24 @@ pub(super) fn validate_recovery_evidence_consistency(
             .saturating_mul(2),
     )?;
     validate_recovery_item_count(
+        "attempted_cad_curve_protected_edge_boundary_face_restoration",
+        backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_recovery_item_count(
+        "recovered_cad_curve_protected_edge_boundary_face",
+        backend.tetrahedron_recovered_cad_curve_protected_edge_boundary_face_count,
+        backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_recovery_item_count(
         "rejected_protected_edge_boundary_face_restoration",
         backend.tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
         backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_cad_curve_protected_edge_boundary_face_restoration",
+        backend.tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
     )?;
     validate_recovered_count(
         "volume_edge_source_edge",
