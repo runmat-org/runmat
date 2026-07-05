@@ -29,7 +29,9 @@ use boundary_faces::{
 };
 use boundary_leaks::remove_exterior_elements_across_interior_source_faces;
 use input_validation::validate_tetrahedron_recovery_input_mesh;
-use material_interfaces::{material_interfaces_by_source_face, recover_material_interface_regions};
+use material_interfaces::{
+    material_interface_recovery_topology, recover_material_interface_regions,
+};
 use material_partitions::recover_absent_material_interface_partitions;
 use source_edges::{
     apply_source_edge_split_refill_recovery, evaluate_source_edge_split_refill_recovery,
@@ -695,99 +697,6 @@ fn source_edge_item_has_cad_curve_boundary(
             .source_entity_id
             .as_ref()
             .is_some_and(|source_edge_id| cad_curve_source_edge_ids.contains(source_edge_id))
-}
-
-fn material_interface_recovery_topology(
-    plc: &ProtectedBoundaryComplex,
-    tetrahedron_mesh: &TetrahedronMesh,
-    material_interface_id: &str,
-    recovered_material_interfaces: &BTreeSet<String>,
-    plc_material_interfaces: &BTreeSet<String>,
-) -> TetrahedronMaterialInterfaceTopology {
-    let plc_boundary_faces = plc
-        .facets
-        .iter()
-        .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
-        .collect::<BTreeSet<_>>();
-    let recovered_boundary_faces = tetrahedron_mesh
-        .boundary_faces
-        .iter()
-        .map(|face| sorted_topology_ids(face.node_ids.clone()))
-        .collect::<BTreeSet<_>>();
-    let material_interfaces_by_boundary_face = plc
-        .facets
-        .iter()
-        .map(|facet| {
-            (
-                sorted_topology_ids(facet.node_ids.clone()),
-                facet
-                    .material_interface_ids
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let material_interfaces_by_source_face = material_interfaces_by_source_face(plc);
-    let boundary_source_faces_by_face = tetrahedron_mesh
-        .boundary_faces
-        .iter()
-        .map(|face| {
-            (
-                sorted_topology_ids(face.node_ids.clone()),
-                face.source_face_id.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    for element in &tetrahedron_mesh.elements {
-        if element.material_region_id == material_interface_id {
-            continue;
-        }
-        for face in tetrahedron_faces(element.node_ids.clone()) {
-            let material_interfaces =
-                material_interfaces_by_boundary_face.get(&face).or_else(|| {
-                    boundary_source_faces_by_face
-                        .get(&face)
-                        .and_then(|source_face_id| {
-                            material_interfaces_by_source_face.get(source_face_id)
-                        })
-                });
-            if material_interfaces.is_some_and(|material_interfaces| {
-                material_interfaces.contains(material_interface_id)
-            }) {
-                return TetrahedronMaterialInterfaceTopology::BoundaryOwned;
-            }
-        }
-    }
-
-    let mut material_regions_by_interior_face = BTreeMap::<_, Vec<String>>::new();
-    for element in &tetrahedron_mesh.elements {
-        for face in tetrahedron_faces(element.node_ids.clone()) {
-            if !plc_boundary_faces.contains(&face) && !recovered_boundary_faces.contains(&face) {
-                material_regions_by_interior_face
-                    .entry(face)
-                    .or_default()
-                    .push(element.material_region_id.clone());
-            }
-        }
-    }
-
-    if material_regions_by_interior_face
-        .values()
-        .any(|material_regions| {
-            let [left, right] = material_regions.as_slice() else {
-                return false;
-            };
-            recovered_material_interfaces.contains(material_interface_id)
-                && ((left == material_interface_id && !plc_material_interfaces.contains(right))
-                    || (right == material_interface_id && !plc_material_interfaces.contains(left)))
-        })
-    {
-        TetrahedronMaterialInterfaceTopology::InteriorFace
-    } else {
-        TetrahedronMaterialInterfaceTopology::AbsentPartition
-    }
 }
 
 fn missing_material_interface_item_count_by_topology(
