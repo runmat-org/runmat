@@ -55,6 +55,7 @@ pub fn validate_surface_discretization(
             });
         }
         validate_element_area_evidence(element, tolerance)?;
+        validate_element_projection_evidence(element)?;
         let source_points = topology_face_points(topology, source_face.node_ids)?;
         let projection_error_m = points
             .into_iter()
@@ -218,6 +219,7 @@ pub fn validate_cad_topology_surface_discretization(
             });
         }
         validate_element_area_evidence(element, tolerance)?;
+        validate_element_projection_evidence(element)?;
         max_projection_error_m = max_projection_error_m.max(element.max_projection_error_m);
         if element.max_projection_error_m > options.max_projection_error_m.max(tolerance.absolute_m)
         {
@@ -396,6 +398,17 @@ fn validate_element_area_evidence(
 ) -> Result<(), SurfaceValidationError> {
     if !element.area_m2.is_finite() || element.area_m2 <= tolerance.length_epsilon(1.0).powi(2) {
         return Err(SurfaceValidationError::InvalidElementArea {
+            element_id: element.element_id,
+        });
+    }
+    Ok(())
+}
+
+fn validate_element_projection_evidence(
+    element: &SurfaceElement,
+) -> Result<(), SurfaceValidationError> {
+    if !element.max_projection_error_m.is_finite() || element.max_projection_error_m < 0.0 {
+        return Err(SurfaceValidationError::InvalidProjectionEvidence {
             element_id: element.element_id,
         });
     }
