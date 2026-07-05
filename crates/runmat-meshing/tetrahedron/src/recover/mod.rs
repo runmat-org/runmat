@@ -7,6 +7,7 @@ mod input_validation;
 mod material_interfaces;
 mod material_partitions;
 mod source_edges;
+mod source_face_coverage;
 mod source_faces;
 mod topology;
 mod types;
@@ -32,6 +33,10 @@ use material_interfaces::recover_material_interface_regions;
 use material_partitions::recover_absent_material_interface_partitions;
 use source_edges::{
     apply_source_edge_split_refill_recovery, evaluate_source_edge_split_refill_recovery,
+};
+use source_face_coverage::{
+    boundary_source_face_area_coverage_complete, recovery_geometry_tolerance,
+    tetrahedron_node_coordinates,
 };
 use source_faces::recover_source_faces_by_boundary_diagonal_flip;
 use topology::sorted_topology_ids;
@@ -61,6 +66,8 @@ pub fn build_recovery_queue_from_plc(
         .iter()
         .filter(|face| boundary_face_is_exterior(face, &element_face_counts))
         .collect::<Vec<_>>();
+    let node_coordinates = tetrahedron_node_coordinates(tetrahedron_mesh);
+    let tolerance = recovery_geometry_tolerance(&node_coordinates);
     let recovered_boundary_faces = exterior_boundary_faces
         .iter()
         .map(|face| sorted_topology_ids(face.node_ids.clone()))
@@ -104,6 +111,11 @@ pub fn build_recovery_queue_from_plc(
             &exterior_boundary_faces,
             &plc.protected_edges,
             facet,
+        ) || boundary_source_face_area_coverage_complete(
+            &exterior_boundary_faces,
+            facet,
+            &node_coordinates,
+            tolerance,
         );
         let source_face_topology =
             if recovered_boundary_faces.contains(&face_node_ids) || source_face_boundary_complete {

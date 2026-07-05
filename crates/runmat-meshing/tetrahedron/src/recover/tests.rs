@@ -1071,6 +1071,90 @@ fn recovery_queue_reports_missing_source_face() {
 }
 
 #[test]
+fn recovery_queue_accepts_subdivided_boundary_source_face_coverage() {
+    let mut mesh = tetrahedron_mesh();
+    let split_node_id = entity(MeshingStage::TetrahedronMesh, "split_edge_1_2");
+    mesh.nodes
+        .push(tetrahedron_node(split_node_id.clone(), [0.5, 0.5, 0.0]));
+    mesh.elements = vec![
+        Tetrahedron4Element {
+            element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1a"),
+            node_ids: [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                split_node_id.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            material_region_id: "solid_body".to_string(),
+        },
+        Tetrahedron4Element {
+            element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1b"),
+            node_ids: [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                split_node_id.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            material_region_id: "solid_body".to_string(),
+        },
+    ];
+    mesh.boundary_faces = vec![
+        boundary_face_from_ids(
+            "child_face_1a",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                split_node_id.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            ],
+            "face_1",
+            [None, None, None],
+        ),
+        boundary_face_from_ids(
+            "child_face_1b",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                split_node_id.clone(),
+            ],
+            "face_1",
+            [None, None, None],
+        ),
+        boundary_face("facet_2", ["0", "1", "3"], "face_2"),
+        boundary_face_from_ids(
+            "child_face_3a",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                split_node_id.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            "face_3",
+            [None, None, None],
+        ),
+        boundary_face_from_ids(
+            "child_face_3b",
+            [
+                split_node_id,
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            "face_3",
+            [None, None, None],
+        ),
+        boundary_face("facet_4", ["2", "0", "3"], "face_4"),
+    ];
+
+    let mut plc = tetrahedron_plc();
+    plc.protected_edges.clear();
+    let queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("subdivided boundary source faces should be accepted as recovered coverage");
+
+    assert_eq!(queue.evidence.status, StageEvidenceStatus::Complete);
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
+    assert_eq!(queue.evidence.entity_counts["source_face_items"], 4);
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 0);
+}
+
+#[test]
 fn recovery_queue_reports_partial_boundary_source_face_provenance() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces.push(boundary_face(
@@ -1914,6 +1998,20 @@ fn boundary_face(id: &str, node_ids: [&str; 3], source_face_id: &str) -> Tetrahe
         source_edge_ids: source_edge_ids(node_ids.clone()),
         node_ids,
         source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
+    }
+}
+
+fn boundary_face_from_ids(
+    id: &str,
+    node_ids: [TopologyEntityId; 3],
+    source_face_id: &str,
+    source_edge_ids: [Option<TopologyEntityId>; 3],
+) -> TetrahedronBoundaryFace {
+    TetrahedronBoundaryFace {
+        face_id: entity(MeshingStage::TetrahedronMesh, id),
+        node_ids,
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
+        source_edge_ids,
     }
 }
 
