@@ -86,8 +86,9 @@ pub use runmat_meshing_size::adaptive::{
     SizingFieldUpdate,
 };
 pub use size::field::{
-    AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
-    SizingSampleRejection,
+    AnisotropicSizingSample, MeshSizingField, PointSizingQuery, SegmentSizingQuery,
+    SizingFieldService, SizingQueryResult, SizingQuerySource, SizingSample,
+    SizingSampleApplication, SizingSampleRejection,
 };
 pub use source_topology::{
     extract_source_topology, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,

@@ -36,6 +36,42 @@ pub struct SegmentSizingQuery {
     pub end_m: [f64; 3],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSizingQuery {
+    pub position_m: [f64; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SizingQuerySource {
+    Unset,
+    Global,
+    LocalSample,
+    AnisotropicMetric,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SizingQueryResult {
+    pub target_size_m: Option<f64>,
+    pub source: SizingQuerySource,
+    pub contributing_sample_count: usize,
+}
+
+impl SizingQueryResult {
+    pub fn unset() -> Self {
+        Self {
+            target_size_m: None,
+            source: SizingQuerySource::Unset,
+            contributing_sample_count: 0,
+        }
+    }
+}
+
+pub trait SizingFieldService {
+    fn query_point_size(&self, query: PointSizingQuery) -> SizingQueryResult;
+    fn query_segment_size(&self, query: SegmentSizingQuery) -> SizingQueryResult;
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SizingSampleRejection {
     pub position_m: [f64; 3],
@@ -80,32 +116,42 @@ pub struct MeshSizingField {
 
 impl MeshSizingField {
     pub fn target_size_for_segment(&self, query: SegmentSizingQuery) -> Option<f64> {
-        let mut target_size_m = self
-            .global_target_size_m
-            .and_then(|target_size_m| self.clamped_target_size_m(target_size_m));
-        for sample in &self.samples {
-            if point_lies_on_segment(sample.position_m, query) {
-                target_size_m = min_optional_target(
-                    target_size_m,
-                    self.clamped_target_size_m(sample.target_size_m),
-                );
-            }
+        self.query_segment_size(query).target_size_m
+    }
+
+    pub fn target_size_at_point(&self, query: PointSizingQuery) -> Option<f64> {
+        self.query_point_size(query).target_size_m
+    }
+
+    fn initial_query_result(&self) -> SizingQueryResult {
+        self.global_target_size_m
+            .and_then(|target_size_m| self.clamped_target_size_m(target_size_m))
+            .map(|target_size_m| SizingQueryResult {
+                target_size_m: Some(target_size_m),
+                source: SizingQuerySource::Global,
+                contributing_sample_count: 0,
+            })
+            .unwrap_or_else(SizingQueryResult::unset)
+    }
+
+    fn merge_query_target(
+        &self,
+        mut result: SizingQueryResult,
+        target_size_m: f64,
+        source: SizingQuerySource,
+    ) -> SizingQueryResult {
+        let Some(target_size_m) = self.clamped_target_size_m(target_size_m) else {
+            return result;
+        };
+        if match result.target_size_m {
+            Some(current) => target_size_m < current,
+            None => true,
+        } {
+            result.target_size_m = Some(target_size_m);
+            result.source = source;
         }
-        for sample in &self.anisotropic_samples {
-            if !sample.is_valid_metric() || !point_lies_on_segment(sample.position_m, query) {
-                continue;
-            }
-            let sample_target_size_m = sample
-                .target_sizes_m
-                .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min);
-            target_size_m = min_optional_target(
-                target_size_m,
-                self.clamped_target_size_m(sample_target_size_m),
-            );
-        }
-        target_size_m
+        result.contributing_sample_count += 1;
+        result
     }
 
     pub fn clamped_target_size_m(&self, target_size_m: f64) -> Option<f64> {
@@ -137,12 +183,66 @@ impl MeshSizingField {
     }
 }
 
-fn min_optional_target(left: Option<f64>, right: Option<f64>) -> Option<f64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
+impl SizingFieldService for MeshSizingField {
+    fn query_point_size(&self, query: PointSizingQuery) -> SizingQueryResult {
+        if !query.position_m.iter().all(|value| value.is_finite()) {
+            return SizingQueryResult::unset();
+        }
+        let mut result = self.initial_query_result();
+        for sample in &self.samples {
+            if point_matches(sample.position_m, query.position_m) {
+                result = self.merge_query_target(
+                    result,
+                    sample.target_size_m,
+                    SizingQuerySource::LocalSample,
+                );
+            }
+        }
+        for sample in &self.anisotropic_samples {
+            if !sample.is_valid_metric() || !point_matches(sample.position_m, query.position_m) {
+                continue;
+            }
+            let sample_target_size_m = sample
+                .target_sizes_m
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            result = self.merge_query_target(
+                result,
+                sample_target_size_m,
+                SizingQuerySource::AnisotropicMetric,
+            );
+        }
+        result
+    }
+
+    fn query_segment_size(&self, query: SegmentSizingQuery) -> SizingQueryResult {
+        let mut result = self.initial_query_result();
+        for sample in &self.samples {
+            if point_lies_on_segment(sample.position_m, query) {
+                result = self.merge_query_target(
+                    result,
+                    sample.target_size_m,
+                    SizingQuerySource::LocalSample,
+                );
+            }
+        }
+        for sample in &self.anisotropic_samples {
+            if !sample.is_valid_metric() || !point_lies_on_segment(sample.position_m, query) {
+                continue;
+            }
+            let sample_target_size_m = sample
+                .target_sizes_m
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            result = self.merge_query_target(
+                result,
+                sample_target_size_m,
+                SizingQuerySource::AnisotropicMetric,
+            );
+        }
+        result
     }
 }
 
@@ -170,6 +270,18 @@ fn point_lies_on_segment(point: [f64; 3], query: SegmentSizingQuery) -> bool {
     ];
     let tolerance = segment_length_squared.sqrt().max(1.0) * 1.0e-9;
     distance(point, closest) <= tolerance.max(1.0e-12)
+}
+
+fn point_matches(left: [f64; 3], right: [f64; 3]) -> bool {
+    if !left.iter().all(|value| value.is_finite()) || !right.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    let scale = left
+        .iter()
+        .chain(right.iter())
+        .map(|value| value.abs())
+        .fold(1.0_f64, f64::max);
+    distance(left, right) <= scale * 1.0e-9
 }
 
 fn sub(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
@@ -255,6 +367,13 @@ mod tests {
             .expect("segment target");
 
         assert_eq!(target_size_m, 0.2);
+        let query = sizing.query_segment_size(SegmentSizingQuery {
+            start_m: [0.0, 0.0, 0.0],
+            end_m: [1.0, 0.0, 0.0],
+        });
+        assert_eq!(query.target_size_m, Some(0.2));
+        assert_eq!(query.source, SizingQuerySource::LocalSample);
+        assert_eq!(query.contributing_sample_count, 1);
     }
 
     #[test]
@@ -279,5 +398,52 @@ mod tests {
             .expect("segment target");
 
         assert_eq!(target_size_m, 0.25);
+    }
+
+    #[test]
+    fn point_sizing_query_reports_anisotropic_metric_source() {
+        let sizing = MeshSizingField {
+            global_target_size_m: Some(1.0),
+            samples: vec![SizingSample {
+                position_m: [0.25, 0.0, 0.0],
+                target_size_m: 0.4,
+                reason: Some("feature".to_string()),
+            }],
+            anisotropic_samples: vec![AnisotropicSizingSample {
+                position_m: [0.25, 0.0, 0.0],
+                target_sizes_m: [0.2, 0.3, 0.5],
+                directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                reason: Some("directional".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let query = sizing.query_point_size(PointSizingQuery {
+            position_m: [0.25, 0.0, 0.0],
+        });
+
+        assert_eq!(query.target_size_m, Some(0.2));
+        assert_eq!(query.source, SizingQuerySource::AnisotropicMetric);
+        assert_eq!(query.contributing_sample_count, 2);
+        assert_eq!(
+            sizing.target_size_at_point(PointSizingQuery {
+                position_m: [0.25, 0.0, 0.0],
+            }),
+            Some(0.2)
+        );
+    }
+
+    #[test]
+    fn invalid_point_sizing_query_is_unset() {
+        let sizing = MeshSizingField {
+            global_target_size_m: Some(1.0),
+            ..MeshSizingField::default()
+        };
+
+        let query = sizing.query_point_size(PointSizingQuery {
+            position_m: [f64::NAN, 0.0, 0.0],
+        });
+
+        assert_eq!(query, SizingQueryResult::unset());
     }
 }

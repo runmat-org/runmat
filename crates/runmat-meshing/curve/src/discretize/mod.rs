@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use runmat_meshing_cad::{SourceTopologyEdge, SourceTopologyModel};
-use runmat_meshing_size::field::{MeshSizingField, SegmentSizingQuery};
+use runmat_meshing_size::field::{MeshSizingField, SegmentSizingQuery, SizingFieldService};
 
 pub const MODULE_PURPOSE: &str = "CAD edge discretization before surface or volume meshing";
 
@@ -108,10 +108,12 @@ pub fn discretize_topology_curves_with_sizing(
             })?;
         let target_size_m = sizing
             .and_then(|sizing| {
-                sizing.target_size_for_segment(SegmentSizingQuery {
-                    start_m: left,
-                    end_m: right,
-                })
+                sizing
+                    .query_segment_size(SegmentSizingQuery {
+                        start_m: left,
+                        end_m: right,
+                    })
+                    .target_size_m
             })
             .unwrap_or(options.target_size_m);
         append_edge_discretization(
