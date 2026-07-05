@@ -95,8 +95,9 @@ fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
 
 #[cfg(test)]
 mod tests {
-    use runmat_meshing_cad::{SourceTopologyEdge, SourceTopologyModel, SourceTopologyVertex};
-    use runmat_meshing_core::{MeshingStage, StageEvidenceStatus};
+    use runmat_meshing_core::{
+        fixtures::generic_line_source_topology, MeshingStage, StageEvidenceStatus,
+    };
     use runmat_meshing_curve::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationOptions, CurveElement,
         CurveNode, CurveValidationError, CurveValidationOptions,
@@ -106,7 +107,7 @@ mod tests {
 
     #[test]
     fn curve_contract_preserves_source_edge_provenance_and_validation_evidence() {
-        let topology = line_topology(1.0);
+        let topology = generic_line_source_topology(1.0);
         let curves = discretize_topology_curves(
             &topology,
             CurveDiscretizationOptions {
@@ -178,7 +179,7 @@ mod tests {
 
     #[test]
     fn curve_contract_rejects_invalid_boundary_before_promotion() {
-        let topology = line_topology(1.0);
+        let topology = generic_line_source_topology(1.0);
         let curves = CurveDiscretization {
             nodes: vec![
                 CurveNode {
@@ -225,35 +226,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    fn line_topology(length_m: f64) -> SourceTopologyModel {
-        SourceTopologyModel {
-            mesh_id: "line".to_string(),
-            source_geometry_id: "generic-line".to_string(),
-            source_geometry_revision: 1,
-            source_geometry_sha256: None,
-            vertices: vec![
-                SourceTopologyVertex {
-                    vertex_id: 0,
-                    coordinates_m: [0.0, 0.0, 0.0],
-                },
-                SourceTopologyVertex {
-                    vertex_id: 1,
-                    coordinates_m: [length_m, 0.0, 0.0],
-                },
-            ],
-            edges: vec![SourceTopologyEdge {
-                edge_id: 0,
-                node_ids: [0, 1],
-                adjacent_face_ids: vec![0, 1],
-                region_ids: vec!["edge".to_string()],
-                length_m,
-            }],
-            faces: Vec::new(),
-            bounds_min_m: [0.0, 0.0, 0.0],
-            bounds_max_m: [length_m, 0.0, 0.0],
-            region_ids: vec!["edge".to_string()],
-        }
     }
 }
