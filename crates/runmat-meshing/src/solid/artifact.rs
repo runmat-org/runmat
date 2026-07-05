@@ -204,6 +204,46 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "input_plc_material_region_facets",
             ),
+            plc_input_cad_curve_boundary_source_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_boundary_source_edges",
+            ),
+            plc_input_cad_curve_boundary_segment_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_boundary_segments",
+            ),
+            plc_input_cad_curve_imported_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_imported_edges",
+            ),
+            plc_input_cad_curve_evaluator_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_evaluator_edges",
+            ),
+            plc_input_cad_curve_evaluator_sample_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_evaluator_samples",
+            ),
+            plc_input_cad_curve_live_query_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_live_query_edges",
+            ),
+            plc_input_cad_curve_live_query_sample_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_live_query_samples",
+            ),
+            plc_input_cad_curve_rejected_evaluator_sample_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_rejected_evaluator_samples",
+            ),
+            plc_input_cad_curve_curvature_sized_edge_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_curvature_sized_edges",
+            ),
+            plc_input_cad_curve_curvature_sample_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                "input_plc_cad_curve_curvature_samples",
+            ),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,

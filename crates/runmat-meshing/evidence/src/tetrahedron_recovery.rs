@@ -30,6 +30,26 @@ pub struct MeshTetrahedronRecoveryEvidence {
     pub plc_input_material_region_count: usize,
     #[serde(default)]
     pub plc_input_material_region_facet_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_boundary_source_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_boundary_segment_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_imported_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_evaluator_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_live_query_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_live_query_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_rejected_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_curvature_sized_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_curvature_sample_count: usize,
     pub element_count: usize,
     #[serde(default)]
     pub material_region_count: usize,
@@ -393,6 +413,36 @@ pub(super) fn tetrahedron_recovery_evidence(
         plc_input_max_shell_nesting_depth: mesh.backend.plc_input_max_shell_nesting_depth,
         plc_input_material_region_count: mesh.backend.plc_input_material_region_count,
         plc_input_material_region_facet_count: mesh.backend.plc_input_material_region_facet_count,
+        plc_input_cad_curve_boundary_source_edge_count: mesh
+            .backend
+            .plc_input_cad_curve_boundary_source_edge_count,
+        plc_input_cad_curve_boundary_segment_count: mesh
+            .backend
+            .plc_input_cad_curve_boundary_segment_count,
+        plc_input_cad_curve_imported_edge_count: mesh
+            .backend
+            .plc_input_cad_curve_imported_edge_count,
+        plc_input_cad_curve_evaluator_edge_count: mesh
+            .backend
+            .plc_input_cad_curve_evaluator_edge_count,
+        plc_input_cad_curve_evaluator_sample_count: mesh
+            .backend
+            .plc_input_cad_curve_evaluator_sample_count,
+        plc_input_cad_curve_live_query_edge_count: mesh
+            .backend
+            .plc_input_cad_curve_live_query_edge_count,
+        plc_input_cad_curve_live_query_sample_count: mesh
+            .backend
+            .plc_input_cad_curve_live_query_sample_count,
+        plc_input_cad_curve_rejected_evaluator_sample_count: mesh
+            .backend
+            .plc_input_cad_curve_rejected_evaluator_sample_count,
+        plc_input_cad_curve_curvature_sized_edge_count: mesh
+            .backend
+            .plc_input_cad_curve_curvature_sized_edge_count,
+        plc_input_cad_curve_curvature_sample_count: mesh
+            .backend
+            .plc_input_cad_curve_curvature_sample_count,
         element_count: mesh.backend.tetrahedron_element_count,
         material_region_count: mesh.backend.tetrahedron_material_region_count,
         unclassified_material_element_count: mesh

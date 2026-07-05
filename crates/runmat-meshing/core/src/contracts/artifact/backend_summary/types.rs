@@ -129,6 +129,26 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub plc_input_material_region_facet_count: usize,
     #[serde(default)]
+    pub plc_input_cad_curve_boundary_source_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_boundary_segment_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_imported_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_evaluator_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_live_query_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_live_query_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_rejected_evaluator_sample_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_curvature_sized_edge_count: usize,
+    #[serde(default)]
+    pub plc_input_cad_curve_curvature_sample_count: usize,
+    #[serde(default)]
     pub volume_component_count: usize,
     #[serde(default)]
     pub interior_seed_point_count: usize,

@@ -187,6 +187,19 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.plc_input_max_shell_nesting_depth, 0);
     assert_eq!(recovery.plc_input_material_region_count, 2);
     assert_eq!(recovery.plc_input_material_region_facet_count, 4);
+    assert_eq!(recovery.plc_input_cad_curve_boundary_source_edge_count, 2);
+    assert_eq!(recovery.plc_input_cad_curve_boundary_segment_count, 3);
+    assert_eq!(recovery.plc_input_cad_curve_imported_edge_count, 1);
+    assert_eq!(recovery.plc_input_cad_curve_evaluator_edge_count, 2);
+    assert_eq!(recovery.plc_input_cad_curve_evaluator_sample_count, 5);
+    assert_eq!(recovery.plc_input_cad_curve_live_query_edge_count, 1);
+    assert_eq!(recovery.plc_input_cad_curve_live_query_sample_count, 4);
+    assert_eq!(
+        recovery.plc_input_cad_curve_rejected_evaluator_sample_count,
+        1
+    );
+    assert_eq!(recovery.plc_input_cad_curve_curvature_sized_edge_count, 1);
+    assert_eq!(recovery.plc_input_cad_curve_curvature_sample_count, 2);
     assert_eq!(recovery.element_count, 12);
     assert_eq!(recovery.material_region_count, 2);
     assert_eq!(recovery.unclassified_material_element_count, 0);
