@@ -87,6 +87,140 @@ fn recovery_stage_result_records_protected_source_edge_recovered_by_boundary_fac
 }
 
 #[test]
+fn recovery_queue_accepts_split_boundary_face_chain_for_protected_source_edge() {
+    let mut mesh = tetrahedron_mesh();
+    let split_node = entity(MeshingStage::TetrahedronMesh, "source_edge_split_0_1");
+    mesh.nodes
+        .push(tetrahedron_node(split_node.clone(), [0.5, 0.0, 0.0]));
+    mesh.elements = vec![
+        Tetrahedron4Element {
+            element_id: entity(MeshingStage::TetrahedronMesh, "split_child_1"),
+            node_ids: [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            material_region_id: "solid_body".to_string(),
+        },
+        Tetrahedron4Element {
+            element_id: entity(MeshingStage::TetrahedronMesh, "split_child_2"),
+            node_ids: [
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            material_region_id: "solid_body".to_string(),
+        },
+    ];
+    mesh.boundary_faces = vec![
+        split_boundary_face(
+            "split_face_1a",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            ],
+            "face_1",
+        ),
+        split_boundary_face(
+            "split_face_1b",
+            [
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            ],
+            "face_1",
+        ),
+        split_boundary_face(
+            "split_face_2a",
+            [
+                entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            "face_2",
+        ),
+        split_boundary_face(
+            "split_face_2b",
+            [
+                split_node.clone(),
+                entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            ],
+            "face_2",
+        ),
+        boundary_face("facet_3", ["1", "2", "3"], "face_3"),
+        boundary_face("facet_4", ["2", "0", "3"], "face_4"),
+    ];
+
+    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
+        .expect("split source-edge chain should satisfy recovery audit");
+
+    assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
+    assert_eq!(queue.evidence.entity_counts["missing_source_edge_items"], 0);
+    assert_eq!(queue.evidence.entity_counts["missing_source_face_items"], 0);
+    assert!(queue.items.iter().any(|item| {
+        item.kind == TetrahedronRecoveryKind::SourceEdge
+            && item.status == TetrahedronRecoveryStatus::Recovered
+            && item.protected_edge_topology == Some(TetrahedronProtectedEdgeTopology::BoundaryEdge)
+            && item.protected_edge_node_ids
+                == Some([
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                ])
+    }));
+    assert!(queue
+        .items
+        .iter()
+        .filter(|item| item.kind == TetrahedronRecoveryKind::SourceFace)
+        .all(|item| {
+            item.status == TetrahedronRecoveryStatus::Recovered
+                && item.source_face_topology == Some(TetrahedronSourceFaceTopology::BoundaryFace)
+        }));
+}
+
+fn split_boundary_face(
+    id: &str,
+    node_ids: [TopologyEntityId; 3],
+    source_face_id: &str,
+) -> TetrahedronBoundaryFace {
+    TetrahedronBoundaryFace {
+        face_id: entity(MeshingStage::TetrahedronMesh, id),
+        source_edge_ids: split_source_edge_ids(node_ids.clone()),
+        node_ids,
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
+    }
+}
+
+fn split_source_edge_ids(node_ids: [TopologyEntityId; 3]) -> [Option<TopologyEntityId>; 3] {
+    [
+        split_source_edge_id_for_edge([node_ids[0].clone(), node_ids[1].clone()]),
+        split_source_edge_id_for_edge([node_ids[1].clone(), node_ids[2].clone()]),
+        split_source_edge_id_for_edge([node_ids[2].clone(), node_ids[0].clone()]),
+    ]
+}
+
+fn split_source_edge_id_for_edge(mut node_ids: [TopologyEntityId; 2]) -> Option<TopologyEntityId> {
+    node_ids.sort();
+    let split_node = entity(MeshingStage::TetrahedronMesh, "source_edge_split_0_1");
+    let mut left_child = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+        split_node.clone(),
+    ];
+    let mut right_child = [
+        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+        split_node,
+    ];
+    left_child.sort();
+    right_child.sort();
+
+    (node_ids == left_child || node_ids == right_child)
+        .then(|| entity(MeshingStage::CurveMesh, "edge_1"))
+}
+
+#[test]
 fn recovery_stage_result_records_cad_curve_source_edge_recovered_by_boundary_faces() {
     let mut plc = tetrahedron_plc();
     plc.protected_edges[0].cad_curve_boundary = Some(cad_curve_boundary());

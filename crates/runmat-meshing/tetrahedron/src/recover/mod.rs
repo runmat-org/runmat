@@ -94,23 +94,29 @@ pub fn build_recovery_queue_from_plc(
     for facet in &plc.facets {
         let face_node_ids = sorted_topology_ids(facet.node_ids.clone());
         let face_key = (facet.source_face_id.clone(), face_node_ids.clone());
-        let source_face_topology = if recovered_boundary_faces.contains(&face_node_ids) {
-            TetrahedronSourceFaceTopology::BoundaryFace
-        } else if element_face_counts.get(&face_node_ids).copied() == Some(1) {
-            TetrahedronSourceFaceTopology::VolumeFace
-        } else if recovered_volume_faces.contains(&face_node_ids) {
-            TetrahedronSourceFaceTopology::InteriorFace
-        } else {
-            TetrahedronSourceFaceTopology::Absent
-        };
+        let source_face_boundary_complete = boundary_source_face_provenance_complete(
+            &exterior_boundary_faces,
+            &face_key.1,
+            &face_key.0,
+        ) || boundary_source_face_split_provenance_complete(
+            &exterior_boundary_faces,
+            &plc.protected_edges,
+            facet,
+        );
+        let source_face_topology =
+            if recovered_boundary_faces.contains(&face_node_ids) || source_face_boundary_complete {
+                TetrahedronSourceFaceTopology::BoundaryFace
+            } else if element_face_counts.get(&face_node_ids).copied() == Some(1) {
+                TetrahedronSourceFaceTopology::VolumeFace
+            } else if recovered_volume_faces.contains(&face_node_ids) {
+                TetrahedronSourceFaceTopology::InteriorFace
+            } else {
+                TetrahedronSourceFaceTopology::Absent
+            };
         items.push(TetrahedronRecoveryQueueItem {
             item_id: format!("source_face:{}", facet.facet_id.id),
             kind: TetrahedronRecoveryKind::SourceFace,
-            status: if boundary_source_face_provenance_complete(
-                &exterior_boundary_faces,
-                &face_key.1,
-                &face_key.0,
-            ) {
+            status: if source_face_boundary_complete {
                 TetrahedronRecoveryStatus::Recovered
             } else {
                 TetrahedronRecoveryStatus::Missing
@@ -127,7 +133,14 @@ pub fn build_recovery_queue_from_plc(
 
     for protected_edge in &plc.protected_edges {
         let edge_key = sorted_topology_ids(protected_edge.node_ids.clone());
-        let protected_edge_topology = if recovered_boundary_edges.contains(&edge_key) {
+        let source_edge_boundary_complete = protected_boundary_edge_provenance_complete(
+            &exterior_boundary_faces,
+            &edge_key,
+            &protected_edge.source_edge_id,
+        );
+        let protected_edge_topology = if recovered_boundary_edges.contains(&edge_key)
+            || source_edge_boundary_complete
+        {
             TetrahedronProtectedEdgeTopology::BoundaryEdge
         } else if recovered_volume_edges.contains(&edge_key)
             && plc_facets_adjacent_to_edge_have_exterior_face(plc, &edge_key, &element_face_counts)
@@ -138,11 +151,7 @@ pub fn build_recovery_queue_from_plc(
         } else {
             TetrahedronProtectedEdgeTopology::Absent
         };
-        let status = if protected_boundary_edge_provenance_complete(
-            &exterior_boundary_faces,
-            &edge_key,
-            &protected_edge.source_edge_id,
-        ) {
+        let status = if source_edge_boundary_complete {
             TetrahedronRecoveryStatus::Recovered
         } else {
             TetrahedronRecoveryStatus::Missing
@@ -508,10 +517,110 @@ fn protected_boundary_edge_provenance_complete(
         })
         .collect::<Vec<_>>();
 
-    !matching_edge_sources.is_empty()
-        && matching_edge_sources
-            .iter()
-            .all(|boundary_source_edge_id| boundary_source_edge_id.as_ref() == Some(source_edge_id))
+    let exact_edge_complete = !matching_edge_sources.is_empty()
+        && matching_edge_sources.iter().all(|boundary_source_edge_id| {
+            boundary_source_edge_id.as_ref() == Some(source_edge_id)
+        });
+    exact_edge_complete
+        || boundary_source_edge_chain(exterior_boundary_faces, edge_key, source_edge_id)
+            .is_some_and(|chain| chain.len() >= 3)
+}
+
+fn boundary_source_face_split_provenance_complete(
+    exterior_boundary_faces: &[&TetrahedronBoundaryFace],
+    protected_edges: &[runmat_meshing_core::contracts::PlcProtectedEdge],
+    facet: &runmat_meshing_core::contracts::PlcFacet,
+) -> bool {
+    protected_edges
+        .iter()
+        .filter(|protected_edge| {
+            facet.node_ids.contains(&protected_edge.node_ids[0])
+                && facet.node_ids.contains(&protected_edge.node_ids[1])
+        })
+        .any(|protected_edge| {
+            let edge_key = sorted_topology_ids(protected_edge.node_ids.clone());
+            let Some(chain) = boundary_source_edge_chain(
+                exterior_boundary_faces,
+                &edge_key,
+                &protected_edge.source_edge_id,
+            ) else {
+                return false;
+            };
+            if chain.len() < 3 {
+                return false;
+            }
+            let Some(opposite_node_id) = facet
+                .node_ids
+                .iter()
+                .find(|node_id| !edge_key.contains(node_id))
+            else {
+                return false;
+            };
+            chain.windows(2).all(|segment| {
+                let child_face = sorted_topology_ids([
+                    segment[0].clone(),
+                    segment[1].clone(),
+                    opposite_node_id.clone(),
+                ]);
+                exterior_boundary_faces.iter().any(|boundary_face| {
+                    boundary_face.source_face_id == facet.source_face_id
+                        && sorted_topology_ids(boundary_face.node_ids.clone()) == child_face
+                })
+            })
+        })
+}
+
+fn boundary_source_edge_chain(
+    exterior_boundary_faces: &[&TetrahedronBoundaryFace],
+    edge_key: &[TopologyEntityId; 2],
+    source_edge_id: &TopologyEntityId,
+) -> Option<Vec<TopologyEntityId>> {
+    let mut adjacency = BTreeMap::<TopologyEntityId, BTreeSet<TopologyEntityId>>::new();
+    for boundary_face in exterior_boundary_faces {
+        for (face_edge, boundary_source_edge_id) in boundary_face_source_edges(boundary_face) {
+            if boundary_source_edge_id.as_ref() != Some(source_edge_id) {
+                continue;
+            }
+            adjacency
+                .entry(face_edge[0].clone())
+                .or_default()
+                .insert(face_edge[1].clone());
+            adjacency
+                .entry(face_edge[1].clone())
+                .or_default()
+                .insert(face_edge[0].clone());
+        }
+    }
+    boundary_source_edge_chain_path(&adjacency, edge_key)
+}
+
+fn boundary_source_edge_chain_path(
+    adjacency: &BTreeMap<TopologyEntityId, BTreeSet<TopologyEntityId>>,
+    edge_key: &[TopologyEntityId; 2],
+) -> Option<Vec<TopologyEntityId>> {
+    let mut queue = Vec::<Vec<TopologyEntityId>>::new();
+    let mut visited = BTreeSet::<TopologyEntityId>::new();
+    queue.push(vec![edge_key[0].clone()]);
+    visited.insert(edge_key[0].clone());
+
+    while let Some(path) = queue.pop() {
+        let current = path.last()?;
+        if current == &edge_key[1] {
+            return (path.len() >= 2).then_some(path);
+        }
+        for next in adjacency
+            .get(current)
+            .into_iter()
+            .flat_map(|nodes| nodes.iter())
+        {
+            if visited.insert(next.clone()) {
+                let mut next_path = path.clone();
+                next_path.push(next.clone());
+                queue.insert(0, next_path);
+            }
+        }
+    }
+    None
 }
 
 fn source_edge_item_count_by_cad_curve_boundary(
