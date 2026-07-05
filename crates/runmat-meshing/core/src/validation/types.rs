@@ -84,6 +84,9 @@ pub enum AnalysisMeshValidationError {
     MissingMaterialRegion {
         element_id: String,
     },
+    UnclassifiedMaterialRegion {
+        element_id: String,
+    },
     DuplicateBoundaryFaceId {
         face_id: String,
     },
@@ -229,6 +232,9 @@ pub fn analysis_mesh_validation_error_code(error: &AnalysisMeshValidationError) 
             "repeated_volume_element_node"
         }
         AnalysisMeshValidationError::MissingMaterialRegion { .. } => "missing_material_region",
+        AnalysisMeshValidationError::UnclassifiedMaterialRegion { .. } => {
+            "unclassified_material_region"
+        }
         AnalysisMeshValidationError::DuplicateBoundaryFaceId { .. } => "duplicate_boundary_face_id",
         AnalysisMeshValidationError::UnsupportedBoundaryElementKind { .. } => {
             "unsupported_boundary_element_kind"

@@ -109,6 +109,24 @@ fn rejects_missing_material_coverage() {
 }
 
 #[test]
+fn rejects_unclassified_material_ownership() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.volume_elements[0].material_region_id = "unclassified".to_string();
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("unresolved material ownership should fail");
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::UnclassifiedMaterialRegion {
+            element_id: "e1".to_string()
+        }
+    );
+    assert_eq!(
+        analysis_mesh_validation_error_code(&err),
+        "unclassified_material_region"
+    );
+}
+
+#[test]
 fn rejects_unmapped_boundary_nodes() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.boundary_faces[0].node_ids = vec![1, 2, 99];

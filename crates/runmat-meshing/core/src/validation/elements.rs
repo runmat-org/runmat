@@ -47,6 +47,11 @@ pub(super) fn validate_volume_elements(
                 element_id: element.element_id.clone(),
             });
         }
+        if element.material_region_id == "unclassified" {
+            return Err(AnalysisMeshValidationError::UnclassifiedMaterialRegion {
+                element_id: element.element_id.clone(),
+            });
+        }
     }
     Ok(element_ids)
 }
