@@ -381,6 +381,62 @@ fn rejects_cad_curve_source_edge_split_refill_count_that_exceeds_attempted_count
 }
 
 #[test]
+fn rejects_applied_source_edge_split_refill_count_that_exceeds_accepted_candidates() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_source_edge_split_refill_item_count = 1;
+    mesh.backend
+        .tetrahedron_accepted_source_edge_split_refill_candidate_item_count = 1;
+    mesh.backend
+        .tetrahedron_applied_source_edge_split_refill_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("applied split/refill edits cannot exceed accepted candidates");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "applied_source_edge_split_refill".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_curve_applied_source_edge_split_refill_count_that_exceeds_cad_accepted_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_source_edge_split_refill_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count = 1;
+    mesh.backend
+        .tetrahedron_accepted_source_edge_split_refill_candidate_item_count = 1;
+    mesh.backend
+        .tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count = 1;
+    mesh.backend
+        .tetrahedron_applied_source_edge_split_refill_item_count = 1;
+    mesh.backend
+        .tetrahedron_applied_cad_curve_source_edge_split_refill_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("CAD-backed applied split/refill edits cannot exceed CAD accepted candidates");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "applied_cad_curve_source_edge_split_refill".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_cad_curve_source_edge_status_count_that_does_not_match_input_count() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

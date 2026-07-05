@@ -173,6 +173,21 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_accepted_source_edge_split_refill_candidate_item_count,
     )?;
     validate_recovery_item_count(
+        "applied_source_edge_split_refill",
+        backend.tetrahedron_applied_source_edge_split_refill_item_count,
+        backend.tetrahedron_accepted_source_edge_split_refill_candidate_item_count,
+    )?;
+    validate_recovery_item_count(
+        "applied_cad_curve_source_edge_split_refill",
+        backend.tetrahedron_applied_cad_curve_source_edge_split_refill_item_count,
+        backend.tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+    )?;
+    validate_recovery_item_count(
+        "applied_cad_curve_source_edge_split_refill",
+        backend.tetrahedron_applied_cad_curve_source_edge_split_refill_item_count,
+        backend.tetrahedron_applied_source_edge_split_refill_item_count,
+    )?;
+    validate_recovery_item_count(
         "rejected_source_edge_split_refill",
         backend.tetrahedron_rejected_source_edge_split_refill_item_count,
         backend.tetrahedron_attempted_source_edge_split_refill_item_count,

@@ -206,6 +206,8 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count: 1,
             tetrahedron_accepted_source_edge_split_refill_candidate_item_count: 1,
             tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count: 1,
+            tetrahedron_applied_source_edge_split_refill_item_count: 1,
+            tetrahedron_applied_cad_curve_source_edge_split_refill_item_count: 1,
             tetrahedron_rejected_source_edge_split_refill_item_count: 1,
             tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count: 0,
             tetrahedron_absent_edge_source_edge_recovery_item_count: 2,

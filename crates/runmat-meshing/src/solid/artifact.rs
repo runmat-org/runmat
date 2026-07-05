@@ -365,6 +365,15 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                     recovery_queue,
                     "accepted_cad_curve_source_edge_split_refill_candidate_items",
                 ),
+            tetrahedron_applied_source_edge_split_refill_item_count: recovery_entity_count(
+                recovery_queue,
+                "applied_source_edge_split_refill_items",
+            ),
+            tetrahedron_applied_cad_curve_source_edge_split_refill_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "applied_cad_curve_source_edge_split_refill_items",
+                ),
             tetrahedron_rejected_source_edge_split_refill_item_count: recovery_entity_count(
                 recovery_queue,
                 "rejected_source_edge_split_refill_items",

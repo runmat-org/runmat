@@ -270,6 +270,11 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         recovery.accepted_cad_curve_source_edge_split_refill_candidate_item_count,
         1
     );
+    assert_eq!(recovery.applied_source_edge_split_refill_item_count, 1);
+    assert_eq!(
+        recovery.applied_cad_curve_source_edge_split_refill_item_count,
+        1
+    );
     assert_eq!(recovery.rejected_source_edge_split_refill_item_count, 1);
     assert_eq!(
         recovery.rejected_cad_curve_source_edge_split_refill_item_count,

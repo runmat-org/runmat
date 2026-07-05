@@ -105,6 +105,10 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub accepted_cad_curve_source_edge_split_refill_candidate_item_count: usize,
     #[serde(default)]
+    pub applied_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub applied_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
     pub rejected_source_edge_split_refill_item_count: usize,
     #[serde(default)]
     pub rejected_cad_curve_source_edge_split_refill_item_count: usize,
@@ -554,6 +558,12 @@ pub(super) fn tetrahedron_recovery_evidence(
         accepted_cad_curve_source_edge_split_refill_candidate_item_count: mesh
             .backend
             .tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+        applied_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_applied_source_edge_split_refill_item_count,
+        applied_cad_curve_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_applied_cad_curve_source_edge_split_refill_item_count,
         rejected_source_edge_split_refill_item_count: mesh
             .backend
             .tetrahedron_rejected_source_edge_split_refill_item_count,

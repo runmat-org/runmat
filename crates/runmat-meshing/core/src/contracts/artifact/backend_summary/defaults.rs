@@ -109,6 +109,8 @@ impl Default for MeshBackendSummary {
             tetrahedron_attempted_cad_curve_source_edge_split_refill_item_count: 0,
             tetrahedron_accepted_source_edge_split_refill_candidate_item_count: 0,
             tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count: 0,
+            tetrahedron_applied_source_edge_split_refill_item_count: 0,
+            tetrahedron_applied_cad_curve_source_edge_split_refill_item_count: 0,
             tetrahedron_rejected_source_edge_split_refill_item_count: 0,
             tetrahedron_rejected_cad_curve_source_edge_split_refill_item_count: 0,
             tetrahedron_absent_edge_source_edge_recovery_item_count: 0,
