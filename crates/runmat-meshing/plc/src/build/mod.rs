@@ -65,7 +65,7 @@ pub fn build_protected_boundary_complex(
 
     let mut facets = Vec::<PlcFacet>::with_capacity(surface.elements.len());
     let mut protected_edges = BTreeMap::<(u32, u32, u32), PlcProtectedEdge>::new();
-    let mut protected_source_edge_by_segment = BTreeMap::<[u32; 2], u32>::new();
+    let mut source_edge_marker_by_segment = BTreeMap::<[u32; 2], Option<u32>>::new();
     let mut edge_incidence = BTreeMap::<[u32; 2], usize>::new();
     let mut facet_keys = BTreeSet::<[u32; 3]>::new();
     for element in &surface.elements {
@@ -97,17 +97,31 @@ pub fn build_protected_boundary_complex(
             *edge_incidence.entry(edge).or_insert(0) += 1;
 
             let source_edge_id = element.source_edge_ids[edge_index];
-            if source_edge_id != INTERNAL_SOURCE_EDGE_ID {
-                if let Some(first_source_edge_id) = protected_source_edge_by_segment
-                    .insert(edge, source_edge_id)
-                    .filter(|first_source_edge_id| *first_source_edge_id != source_edge_id)
-                {
-                    return Err(PlcBuildError::AmbiguousProtectedBoundarySegment {
-                        node_ids: edge,
-                        first_source_edge_id,
-                        second_source_edge_id: source_edge_id,
-                    });
+            let source_edge_marker =
+                (source_edge_id != INTERNAL_SOURCE_EDGE_ID).then_some(source_edge_id);
+            if let Some(first_source_edge_marker) =
+                source_edge_marker_by_segment.insert(edge, source_edge_marker)
+            {
+                match (first_source_edge_marker, source_edge_marker) {
+                    (Some(first_source_edge_id), Some(second_source_edge_id))
+                        if first_source_edge_id != second_source_edge_id =>
+                    {
+                        return Err(PlcBuildError::AmbiguousProtectedBoundarySegment {
+                            node_ids: edge,
+                            first_source_edge_id,
+                            second_source_edge_id,
+                        });
+                    }
+                    (Some(source_edge_id), None) | (None, Some(source_edge_id)) => {
+                        return Err(PlcBuildError::PartiallyProtectedBoundarySegment {
+                            node_ids: edge,
+                            source_edge_id,
+                        });
+                    }
+                    _ => {}
                 }
+            }
+            if source_edge_id != INTERNAL_SOURCE_EDGE_ID {
                 protected_edges
                     .entry((source_edge_id, edge[0], edge[1]))
                     .or_insert_with(|| PlcProtectedEdge {

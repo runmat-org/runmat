@@ -133,6 +133,20 @@ fn rejects_ambiguous_protected_source_edges_on_same_boundary_segment() {
     );
 }
 
+#[test]
+fn rejects_partially_protected_source_edge_on_same_boundary_segment() {
+    let mut surface = tetra_surface();
+    surface.elements[1].source_edge_ids[0] = INTERNAL_SOURCE_EDGE_ID;
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::PartiallyProtectedBoundarySegment {
+            node_ids: [0, 1],
+            source_edge_id: 0,
+        })
+    );
+}
+
 fn tetra_surface() -> SurfaceDiscretization {
     SurfaceDiscretization {
         nodes: vec![

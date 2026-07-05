@@ -29,6 +29,10 @@ pub enum PlcBuildError {
         first_source_edge_id: u32,
         second_source_edge_id: u32,
     },
+    PartiallyProtectedBoundarySegment {
+        node_ids: [u32; 2],
+        source_edge_id: u32,
+    },
     OpenBoundaryEdge {
         node_ids: [u32; 2],
         incidence_count: usize,
@@ -90,6 +94,14 @@ impl std::fmt::Display for PlcBuildError {
                 formatter,
                 "surface boundary segment {}-{} has ambiguous source edges {} and {}",
                 node_ids[0], node_ids[1], first_source_edge_id, second_source_edge_id
+            ),
+            Self::PartiallyProtectedBoundarySegment {
+                node_ids,
+                source_edge_id,
+            } => write!(
+                formatter,
+                "surface boundary segment {}-{} is only partially owned by protected source edge {}",
+                node_ids[0], node_ids[1], source_edge_id
             ),
             Self::OpenBoundaryEdge {
                 node_ids,
