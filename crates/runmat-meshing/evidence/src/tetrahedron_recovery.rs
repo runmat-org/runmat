@@ -279,6 +279,16 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub omitted_missing_source_edge_recovery_id_count: usize,
     #[serde(default)]
+    pub cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_cad_curve_source_edge_topology_recovery_item_count: usize,
+    #[serde(default)]
+    pub missing_cad_curve_source_edge_provenance_recovery_item_count: usize,
+    #[serde(default)]
     pub material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub recovered_material_interface_recovery_item_count: usize,
@@ -773,6 +783,21 @@ pub(super) fn tetrahedron_recovery_evidence(
         omitted_missing_source_edge_recovery_id_count: mesh
             .backend
             .tetrahedron_omitted_missing_source_edge_recovery_id_count,
+        cad_curve_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_cad_curve_source_edge_recovery_item_count,
+        recovered_cad_curve_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_cad_curve_source_edge_recovery_item_count,
+        missing_cad_curve_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
+        missing_cad_curve_source_edge_topology_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count,
+        missing_cad_curve_source_edge_provenance_recovery_item_count: mesh
+            .backend
+            .tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count,
         material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_material_interface_recovery_item_count,

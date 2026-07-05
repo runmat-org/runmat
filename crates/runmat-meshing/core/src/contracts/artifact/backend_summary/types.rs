@@ -387,6 +387,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_omitted_missing_source_edge_recovery_id_count: usize,
     #[serde(default)]
+    pub tetrahedron_cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_recovered_cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_cad_curve_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub tetrahedron_recovered_material_interface_recovery_item_count: usize,

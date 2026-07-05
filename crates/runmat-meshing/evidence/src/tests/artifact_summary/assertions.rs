@@ -498,6 +498,23 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         vec!["source_edge_missing_1".to_string()]
     );
     assert_eq!(recovery.omitted_missing_source_edge_recovery_id_count, 0);
+    assert_eq!(recovery.cad_curve_source_edge_recovery_item_count, 2);
+    assert_eq!(
+        recovery.recovered_cad_curve_source_edge_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.missing_cad_curve_source_edge_recovery_item_count,
+        1
+    );
+    assert_eq!(
+        recovery.missing_cad_curve_source_edge_topology_recovery_item_count,
+        0
+    );
+    assert_eq!(
+        recovery.missing_cad_curve_source_edge_provenance_recovery_item_count,
+        1
+    );
     assert_eq!(recovery.material_interface_recovery_item_count, 1);
     assert_eq!(recovery.recovered_material_interface_recovery_item_count, 0);
     assert_eq!(recovery.missing_material_interface_recovery_item_count, 1);
