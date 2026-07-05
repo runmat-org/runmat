@@ -194,6 +194,33 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
         4
     );
     assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_split_boundary_nodes"],
+        0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_refill_boundary_faces"],
+        mesh.boundary_faces.len()
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["nested_tetrahedron_shell_boundary_centroid_refinement_attempts"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["nested_tetrahedron_shell_boundary_centroid_refinement_rejected"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_boundary_exact_cover_refills"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["nested_tetrahedron_shell_boundary_centroid_refinement_refills"],
+        0
+    );
+    assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_facets"],
         4
     );
