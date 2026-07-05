@@ -10,22 +10,27 @@ use crate::cavity::constrained::{
 };
 use crate::generate::TetrahedronGenerationError;
 
+use super::{partition::barycentric_partition_refill, shell::NestedTetrahedronShell};
+
 pub(super) struct NestedTetrahedronShellRefill {
     pub(super) cavity_id_to_node_id: BTreeMap<u32, TopologyEntityId>,
-    pub(super) split_nodes: Vec<ConstrainedCavityNode>,
+    pub(super) generated_nodes: Vec<ConstrainedCavityNode>,
     pub(super) strategy: NestedTetrahedronShellRefillStrategy,
+    pub(super) boundary_centroid_refinement_attempted: bool,
     pub(super) boundary_centroid_refinement_rejected: bool,
     pub(super) refill: ConstrainedCavityRefill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NestedTetrahedronShellRefillStrategy {
+    BarycentricPartition,
     BoundaryCentroidRefinement,
     BoundaryExactCover,
 }
 
 pub(super) fn refill_nested_tetrahedron_shell_cavity(
     plc: &ProtectedBoundaryComplex,
+    shell: &NestedTetrahedronShell,
     target_volume_m3: f64,
 ) -> Result<NestedTetrahedronShellRefill, TetrahedronGenerationError> {
     let mut node_id_to_cavity_id = BTreeMap::<TopologyEntityId, u32>::new();
@@ -67,6 +72,16 @@ pub(super) fn refill_nested_tetrahedron_shell_cavity(
         target_volume_m3,
     };
 
+    if let Some(partition) = barycentric_partition_refill(
+        plc,
+        shell,
+        &cavity_id_to_node_id,
+        &node_id_to_cavity_id,
+        target_volume_m3,
+    )? {
+        return Ok(partition);
+    }
+
     if let Some(refined) =
         try_boundary_centroid_refinement(&cavity, &cavity_nodes, &cavity_id_to_node_id)?
     {
@@ -84,8 +99,9 @@ pub(super) fn refill_nested_tetrahedron_shell_cavity(
 
     Ok(NestedTetrahedronShellRefill {
         cavity_id_to_node_id,
-        split_nodes: Vec::new(),
+        generated_nodes: Vec::new(),
         strategy: NestedTetrahedronShellRefillStrategy::BoundaryExactCover,
+        boundary_centroid_refinement_attempted: true,
         boundary_centroid_refinement_rejected: true,
         refill,
     })
@@ -129,8 +145,9 @@ fn try_boundary_centroid_refinement(
 
     Ok(refill.map(|refill| NestedTetrahedronShellRefill {
         cavity_id_to_node_id,
-        split_nodes,
+        generated_nodes: split_nodes,
         strategy: NestedTetrahedronShellRefillStrategy::BoundaryCentroidRefinement,
+        boundary_centroid_refinement_attempted: true,
         boundary_centroid_refinement_rejected: false,
         refill,
     }))

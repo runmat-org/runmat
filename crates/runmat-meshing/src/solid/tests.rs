@@ -506,9 +506,9 @@ fn auto_backend_generates_nested_tetrahedron_shell_solid() {
     assert_eq!(mesh.backend.plc_input_outer_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_nested_shell_count, 1);
     assert_eq!(mesh.backend.plc_input_max_shell_nesting_depth, 1);
-    assert_eq!(mesh.boundary_faces.len(), 8);
+    assert_eq!(mesh.boundary_faces.len(), 404);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
-    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian > 0.0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
 }
 
 #[test]

@@ -182,9 +182,9 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
         mesh.tetrahedron_generation_family,
         "nested_tetrahedron_shell"
     );
-    assert_eq!(mesh.nodes.len(), plc.nodes.len());
-    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
-    assert!(mesh.elements.len() > plc.facets.len());
+    assert_eq!(mesh.nodes.len(), 790);
+    assert_eq!(mesh.boundary_faces.len(), 404);
+    assert_eq!(mesh.elements.len(), 2676);
     assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_nodes"],
         4
@@ -194,8 +194,8 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
         4
     );
     assert_eq!(
-        mesh.evidence.entity_counts["nested_tetrahedron_shell_split_boundary_nodes"],
-        0
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_generated_nodes"],
+        782
     );
     assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_refill_boundary_faces"],
@@ -204,21 +204,25 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
     assert_eq!(
         mesh.evidence.entity_counts
             ["nested_tetrahedron_shell_boundary_centroid_refinement_attempts"],
-        1
+        0
     );
     assert_eq!(
         mesh.evidence.entity_counts
             ["nested_tetrahedron_shell_boundary_centroid_refinement_rejected"],
-        1
+        0
     );
     assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_boundary_exact_cover_refills"],
-        1
+        0
     );
     assert_eq!(
         mesh.evidence.entity_counts
             ["nested_tetrahedron_shell_boundary_centroid_refinement_refills"],
         0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_barycentric_partition_refills"],
+        1
     );
     assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_facets"],
@@ -229,7 +233,7 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
         4
     );
     assert_eq!(mesh.evidence.entity_counts["input_plc_nested_shells"], 1);
-    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") > 0.0);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
     for element in &mesh.elements {
         let points = element.node_ids.clone().map(|node_id| {
             mesh.nodes
@@ -252,7 +256,8 @@ fn solver_generation_supports_nested_tetrahedron_shell_plcs() {
         mesh.tetrahedron_generation_family,
         "nested_tetrahedron_shell"
     );
-    assert_eq!(mesh.boundary_faces.len(), 8);
+    assert_eq!(mesh.boundary_faces.len(), 404);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
 }
 
 #[test]
