@@ -90,7 +90,9 @@ pub(super) fn validate_recovery_evidence_consistency(
     validate_recovery_item_count(
         "attempted_protected_edge_boundary_face_restoration",
         backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
-        backend.tetrahedron_volume_edge_source_edge_recovery_item_count,
+        backend
+            .tetrahedron_volume_edge_source_edge_recovery_item_count
+            .saturating_mul(2),
     )?;
     validate_recovery_item_count(
         "rejected_protected_edge_boundary_face_restoration",

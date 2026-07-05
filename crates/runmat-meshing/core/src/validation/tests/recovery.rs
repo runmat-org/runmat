@@ -331,6 +331,62 @@ fn rejects_attempted_absent_source_edge_count_that_exceeds_typed_input_count() {
 }
 
 #[test]
+fn allows_two_protected_edge_boundary_face_restoration_attempts_per_volume_edge_input() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count = 2;
+
+    validate_analysis_mesh(&mesh, Default::default())
+        .expect("one manifold protected-edge input can restore two adjacent boundary faces");
+}
+
+#[test]
+fn rejects_protected_edge_boundary_face_restoration_attempts_beyond_manifold_edge_bound() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count = 3;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("protected-edge boundary restoration attempts are bounded by adjacent facets");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "attempted_protected_edge_boundary_face_restoration".to_string(),
+            item_count: 3,
+            input_count: 2,
+        }
+    );
+}
+
+#[test]
+fn rejects_rejected_protected_edge_boundary_face_restoration_count_that_exceeds_attempted_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_volume_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count = 2;
+    mesh.backend
+        .tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count = 3;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("rejected protected-edge restoration count cannot exceed attempts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "rejected_protected_edge_boundary_face_restoration".to_string(),
+            item_count: 3,
+            input_count: 2,
+        }
+    );
+}
+
+#[test]
 fn rejects_rejected_absent_source_edge_count_that_exceeds_attempted_count() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
