@@ -192,6 +192,11 @@ fn recovery_stage_result_repairs_single_material_interface_before_audit() {
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_boundary_owned_material_interface_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
         1
     );
@@ -301,6 +306,11 @@ fn recovery_stage_result_repairs_boundary_facet_owned_material_interface() {
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_boundary_owned_material_interface_items"],
         1
     );
     assert_eq!(
@@ -479,6 +489,11 @@ fn recovery_stage_result_inserts_bounded_absent_material_interface_partition() {
         1
     );
     assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_absent_partition_material_interface_items"],
+        1
+    );
+    assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
         3
     );
@@ -591,6 +606,11 @@ fn recovery_stage_result_inserts_two_element_absent_material_interface_partition
     );
     assert_eq!(
         result.recovery_queue.evidence.entity_counts["recovered_material_interface_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_absent_partition_material_interface_items"],
         1
     );
     assert_eq!(

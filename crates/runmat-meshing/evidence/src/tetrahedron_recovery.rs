@@ -167,7 +167,13 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub boundary_owned_material_interface_recovery_item_count: usize,
     #[serde(default)]
+    pub recovered_boundary_owned_material_interface_recovery_item_count: usize,
+    #[serde(default)]
     pub interior_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_interior_face_material_interface_recovery_item_count: usize,
+    #[serde(default)]
+    pub recovered_absent_partition_material_interface_recovery_item_count: usize,
     #[serde(default)]
     pub rejected_material_interface_missing_boundary_ownership_count: usize,
     #[serde(default)]
@@ -548,9 +554,18 @@ pub(super) fn tetrahedron_recovery_evidence(
         boundary_owned_material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_boundary_owned_material_interface_recovery_item_count,
+        recovered_boundary_owned_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_boundary_owned_material_interface_recovery_item_count,
         interior_material_interface_recovery_item_count: mesh
             .backend
             .tetrahedron_interior_material_interface_recovery_item_count,
+        recovered_interior_face_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_interior_face_material_interface_recovery_item_count,
+        recovered_absent_partition_material_interface_recovery_item_count: mesh
+            .backend
+            .tetrahedron_recovered_absent_partition_material_interface_recovery_item_count,
         rejected_material_interface_missing_boundary_ownership_count: mesh
             .backend
             .tetrahedron_rejected_material_interface_missing_boundary_ownership_count,

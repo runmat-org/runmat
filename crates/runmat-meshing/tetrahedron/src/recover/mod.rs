@@ -1050,6 +1050,31 @@ fn record_recovered_queue_item_counts(
             .entity_counts
             .insert(recovered_key.to_string(), recovered_count);
     }
+    for (recovered_key, topology) in [
+        (
+            "recovered_boundary_owned_material_interface_items",
+            TetrahedronMaterialInterfaceTopology::BoundaryOwned,
+        ),
+        (
+            "recovered_interior_face_material_interface_items",
+            TetrahedronMaterialInterfaceTopology::InteriorFace,
+        ),
+        (
+            "recovered_absent_partition_material_interface_items",
+            TetrahedronMaterialInterfaceTopology::AbsentPartition,
+        ),
+    ] {
+        let recovered_count =
+            recovery_material_interface_item_count_by_topology(initial_recovery_queue, topology)
+                .saturating_sub(recovery_material_interface_item_count_by_topology(
+                    recovery_queue,
+                    topology,
+                ));
+        recovery_queue
+            .evidence
+            .entity_counts
+            .insert(recovered_key.to_string(), recovered_count);
+    }
 }
 
 fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
