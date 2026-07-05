@@ -1,7 +1,8 @@
 use super::*;
 use runmat_meshing_core::contracts::{
-    PlcFacet, PlcNode, PlcProtectedEdge, PlcProtectedEdgeCadCurveBoundary, PlcValidationSummary,
-    Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
+    MeshingStage, PlcFacet, PlcNode, PlcProtectedEdge, PlcProtectedEdgeCadCurveBoundary,
+    PlcValidationSummary, StageEvidence, StageEvidenceStatus, Tetrahedron4Element,
+    TetrahedronBoundaryFace, TetrahedronMeshNode, TopologyEntityId,
 };
 
 mod boundary_leaks;
