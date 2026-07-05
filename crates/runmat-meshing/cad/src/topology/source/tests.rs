@@ -24,10 +24,16 @@ fn builds_generic_cad_topology_from_source_triangles() {
     assert_eq!(cad.report.imported_face_count, 0);
     assert_eq!(cad.report.evaluator_face_count, 0);
     assert_eq!(cad.report.generic_face_count, 6);
+    assert_eq!(cad.report.loop_count, 6);
+    assert_eq!(cad.report.hole_loop_count, 0);
+    assert_eq!(cad.loops.len(), 6);
     assert!(cad
-        .faces
+        .loops
         .iter()
-        .all(|face| { face.source_face_ids.len() == 2 && face.loop_edge_ids.len() == 4 }));
+        .all(|cad_loop| cad_loop.is_outer && cad_loop.edge_ids.len() == 4));
+    assert!(cad.faces.iter().all(|face| {
+        face.source_face_ids.len() == 2 && face.loop_ids.len() == 1 && face.loop_edge_ids.len() == 4
+    }));
 }
 
 #[test]
@@ -54,7 +60,15 @@ fn preserves_semantic_cad_face_regions() {
     );
     assert_eq!(semantic_face.source_face_ids, vec![0, 1]);
     assert_eq!(semantic_face.source_edge_ids.len(), 5);
+    assert_eq!(semantic_face.loop_ids.len(), 1);
     assert_eq!(semantic_face.loop_edge_ids.len(), 4);
+    let semantic_loop = cad
+        .loops
+        .iter()
+        .find(|cad_loop| cad_loop.face_id == semantic_face.entity_id.id)
+        .expect("semantic face loop should be represented");
+    assert!(semantic_loop.is_outer);
+    assert_eq!(semantic_loop.edge_ids, semantic_face.loop_edge_ids);
     assert!((semantic_face.area_m2 - 1.0).abs() <= 1.0e-12);
     assert_eq!(semantic_face.unit_normal, [0.0, 0.0, -1.0]);
 }

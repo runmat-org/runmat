@@ -18,7 +18,7 @@ pub use eval::{
 };
 pub use topology::{
     build_cad_topology, extract_source_topology, CadEdge, CadEntityId, CadEntityKind, CadFace,
-    CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex,
-    CadVolume, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace, SourceTopologyModel,
-    SourceTopologyVertex,
+    CadLoop, CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource,
+    CadVertex, CadVolume, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
+    SourceTopologyModel, SourceTopologyVertex,
 };

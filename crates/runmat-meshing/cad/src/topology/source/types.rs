@@ -14,6 +14,7 @@ pub enum CadTopologySource {
 pub enum CadEntityKind {
     Vertex,
     Edge,
+    Loop,
     Face,
     Shell,
     Volume,
@@ -66,10 +67,20 @@ pub struct CadFace {
     pub evaluator_samples: Vec<CadFaceEvaluationSample>,
     pub source_face_ids: Vec<u32>,
     pub source_edge_ids: Vec<u32>,
+    #[serde(default)]
+    pub loop_ids: Vec<String>,
     pub loop_edge_ids: Vec<String>,
     pub region_ids: Vec<String>,
     pub area_m2: f64,
     pub unit_normal: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CadLoop {
+    pub entity_id: CadEntityId,
+    pub face_id: String,
+    pub edge_ids: Vec<String>,
+    pub is_outer: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,6 +109,10 @@ pub struct CadTopologyReport {
     pub imported_face_count: usize,
     pub evaluator_face_count: usize,
     pub generic_face_count: usize,
+    #[serde(default)]
+    pub loop_count: usize,
+    #[serde(default)]
+    pub hole_loop_count: usize,
     pub closed_shell_count: usize,
 }
 
@@ -109,6 +124,8 @@ pub struct CadTopologyModel {
     pub source: CadTopologySource,
     pub vertices: Vec<CadVertex>,
     pub edges: Vec<CadEdge>,
+    #[serde(default)]
+    pub loops: Vec<CadLoop>,
     pub faces: Vec<CadFace>,
     pub shells: Vec<CadShell>,
     pub volumes: Vec<CadVolume>,

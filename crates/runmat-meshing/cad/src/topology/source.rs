@@ -16,8 +16,8 @@ use semantics::{
     imported_face_id_for_regions, imported_face_ids_by_region, semantic_face_regions,
 };
 pub use types::{
-    CadEdge, CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyError, CadTopologyModel,
-    CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
+    CadEdge, CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyError,
+    CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
 };
 
 pub fn build_cad_topology(
@@ -93,6 +93,7 @@ pub fn build_cad_topology(
                     .unwrap_or_default(),
                 source_face_ids: vec![face.face_id],
                 source_edge_ids: face.edge_ids.to_vec(),
+                loop_ids: Vec::new(),
                 loop_edge_ids: face
                     .edge_ids
                     .iter()
@@ -104,7 +105,8 @@ pub fn build_cad_topology(
             }
         })
         .collect::<Vec<_>>();
-    let faces = merge_stable_cad_faces(face_seeds);
+    let mut faces = merge_stable_cad_faces(face_seeds);
+    let loops = attach_outer_loops(&mut faces);
 
     let face_ids_by_source_face = faces
         .iter()
@@ -187,6 +189,8 @@ pub fn build_cad_topology(
         imported_face_count,
         evaluator_face_count,
         generic_face_count,
+        loop_count: loops.len(),
+        hole_loop_count: loops.iter().filter(|cad_loop| !cad_loop.is_outer).count(),
         closed_shell_count: usize::from(closed),
     };
 
@@ -197,11 +201,30 @@ pub fn build_cad_topology(
         source,
         vertices,
         edges,
+        loops,
         faces,
         shells: vec![shell],
         volumes: closed.then_some(volume).into_iter().collect(),
         report,
     })
+}
+
+fn attach_outer_loops(faces: &mut [CadFace]) -> Vec<CadLoop> {
+    let mut loops = Vec::<CadLoop>::with_capacity(faces.len());
+    for face in faces {
+        let loop_id = format!("cad_loop_{}_outer", face.entity_id.id);
+        face.loop_ids = vec![loop_id.clone()];
+        loops.push(CadLoop {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Loop,
+                id: loop_id,
+            },
+            face_id: face.entity_id.id.clone(),
+            edge_ids: face.loop_edge_ids.clone(),
+            is_outer: true,
+        });
+    }
+    loops
 }
 
 #[cfg(test)]

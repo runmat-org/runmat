@@ -1,7 +1,7 @@
 use super::*;
 use runmat_meshing_cad::{
     CadEntityId, CadEntityKind, CadEvaluationModel, CadEvaluationReport, CadEvaluationSource,
-    CadFace, CadFaceEvaluationFrame, CadShell, CadTopologyModel, CadTopologyReport,
+    CadFace, CadFaceEvaluationFrame, CadLoop, CadShell, CadTopologyModel, CadTopologyReport,
     CadTopologySource, CadVertex, CadVolume, SourceTopologyEdge, SourceTopologyFace,
     SourceTopologyModel, SourceTopologyVertex,
 };
@@ -398,6 +398,7 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
         evaluator_samples: Vec::new(),
         source_face_ids: vec![0, 1],
         source_edge_ids: vec![0, 1, 2, 3, 4],
+        loop_ids: vec!["cad_loop_square_outer".to_string()],
         loop_edge_ids: vec![
             "cad_edge_0".to_string(),
             "cad_edge_1".to_string(),
@@ -426,6 +427,15 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             })
             .collect(),
         edges: Vec::new(),
+        loops: vec![CadLoop {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Loop,
+                id: "cad_loop_square_outer".to_string(),
+            },
+            face_id: "cad_face_square".to_string(),
+            edge_ids: face.loop_edge_ids.clone(),
+            is_outer: true,
+        }],
         faces: vec![face],
         shells: vec![CadShell {
             entity_id: CadEntityId {
@@ -454,6 +464,8 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             imported_face_count: 1,
             evaluator_face_count: 0,
             generic_face_count: 0,
+            loop_count: 1,
+            hole_loop_count: 0,
             closed_shell_count: 0,
         },
     }
@@ -528,6 +540,10 @@ fn holed_square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel
         evaluator_samples: Vec::new(),
         source_face_ids: vec![0],
         source_edge_ids: (0..=7).collect(),
+        loop_ids: vec![
+            "cad_loop_holed_square_outer".to_string(),
+            "cad_loop_holed_square_hole_0".to_string(),
+        ],
         loop_edge_ids: (0..=7)
             .map(|edge_id| format!("cad_edge_{edge_id}"))
             .collect(),
@@ -535,9 +551,35 @@ fn holed_square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel
         area_m2: 0.96,
         unit_normal: [0.0, 0.0, 1.0],
     };
+    cad_topology.loops = vec![
+        CadLoop {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Loop,
+                id: "cad_loop_holed_square_outer".to_string(),
+            },
+            face_id: "cad_face_holed_square".to_string(),
+            edge_ids: (0..=3)
+                .map(|edge_id| format!("cad_edge_{edge_id}"))
+                .collect(),
+            is_outer: true,
+        },
+        CadLoop {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Loop,
+                id: "cad_loop_holed_square_hole_0".to_string(),
+            },
+            face_id: "cad_face_holed_square".to_string(),
+            edge_ids: (4..=7)
+                .map(|edge_id| format!("cad_edge_{edge_id}"))
+                .collect(),
+            is_outer: false,
+        },
+    ];
     cad_topology.shells[0].face_ids = vec!["cad_face_holed_square".to_string()];
     cad_topology.report.vertex_count = topology.vertices.len();
     cad_topology.report.edge_count = topology.edges.len();
+    cad_topology.report.loop_count = 2;
+    cad_topology.report.hole_loop_count = 1;
     cad_topology
 }
 

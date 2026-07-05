@@ -5,7 +5,7 @@ use crate::{
     SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
 use runmat_meshing_cad::{
-    CadEntityId, CadEntityKind, CadFace, CadShell, CadTopologyModel, CadTopologyReport,
+    CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyModel, CadTopologyReport,
     CadTopologySource, CadVertex, CadVolume, SourceTopologyEdge, SourceTopologyFace,
     SourceTopologyModel, SourceTopologyVertex,
 };
@@ -514,6 +514,7 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             evaluator_samples: Vec::new(),
             source_face_ids: vec![0, 1],
             source_edge_ids: vec![0, 1, 2, 3, 4],
+            loop_ids: vec!["cad_loop_square_outer".to_string()],
             loop_edge_ids: vec![
                 "cad_edge_0".to_string(),
                 "cad_edge_1".to_string(),
@@ -523,6 +524,20 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             region_ids: vec!["face_square".to_string()],
             area_m2: 1.0,
             unit_normal: [0.0, 0.0, 1.0],
+        }],
+        loops: vec![CadLoop {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Loop,
+                id: "cad_loop_square_outer".to_string(),
+            },
+            face_id: "cad_face_square".to_string(),
+            edge_ids: vec![
+                "cad_edge_0".to_string(),
+                "cad_edge_1".to_string(),
+                "cad_edge_3".to_string(),
+                "cad_edge_4".to_string(),
+            ],
+            is_outer: true,
         }],
         shells: vec![CadShell {
             entity_id: CadEntityId {
@@ -551,6 +566,8 @@ fn square_cad_topology(topology: &SourceTopologyModel) -> CadTopologyModel {
             imported_face_count: 1,
             evaluator_face_count: 0,
             generic_face_count: 0,
+            loop_count: 1,
+            hole_loop_count: 0,
             closed_shell_count: 0,
         },
     }
