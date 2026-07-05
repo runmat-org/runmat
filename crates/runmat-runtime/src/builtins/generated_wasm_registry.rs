@@ -627,6 +627,8 @@ __runmat_wasm_register_builtin_duration_minus();
     crate :: builtins :: fea ::
 __runmat_wasm_register_builtin_fea_study_builtin();
     crate :: builtins :: fea ::
+__runmat_wasm_register_builtin_fea_author_study_builtin();
+    crate :: builtins :: fea ::
 __runmat_wasm_register_builtin_fea_sweep_builtin();
     crate :: builtins :: fea ::
 __runmat_wasm_register_builtin_fea_model_builtin();

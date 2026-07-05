@@ -37,6 +37,8 @@ use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod author_study;
+
 const FEA_STUDY_CLASS: &str = "fea.Study";
 const FEA_SWEEP_CLASS: &str = "fea.Sweep";
 const FEA_VALIDATION_CLASS: &str = "fea.Validation";
@@ -63,6 +65,7 @@ const FEA_RUN_ID_CONTEXT_PROPERTY: &str = "__runmat_fea_run_id";
 
 const LOAD_NAME: &str = "fea.load";
 const STUDY_NAME: &str = "fea.study";
+const AUTHOR_STUDY_NAME: &str = "fea.authorStudy";
 const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
@@ -126,6 +129,36 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         description: "Profile, Backend, ModelId, and model setup options.",
     },
 ];
+const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Study id.",
+    },
+    BuiltinParamDescriptor {
+        name: "geometry",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "geometry.Asset returned by geometry.load.",
+    },
+    BuiltinParamDescriptor {
+        name: "meshAuthoringSummary",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Compact mesh authoring evidence summary.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Profile, Backend, region selectors, and ForceN.",
+    },
+];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -142,6 +175,11 @@ const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
 const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "study = fea.study(id, geometry, Name, Value, ...)",
     inputs: &IN_STUDY_ARGS,
+    outputs: &OUT_ANY,
+}];
+const AUTHOR_STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "study = fea.authorStudy(id, geometry, meshAuthoringSummary, Name, Value, ...)",
+    inputs: &IN_AUTHOR_STUDY_ARGS,
     outputs: &OUT_ANY,
 }];
 const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -240,6 +278,12 @@ pub const FEA_LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &STUDY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_AUTHOR_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &AUTHOR_STUDY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -343,6 +387,18 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return load_document_object(PathBuf::from(path)).await;
     }
     create_study_object_from_args(args)
+}
+
+#[runtime_builtin(
+    name = "fea.authorStudy",
+    category = "fea",
+    summary = "Author a linear static FEA study from compact mesh authoring evidence.",
+    keywords = "fea,study,author,mesh,evidence,agent",
+    descriptor(crate::builtins::fea::FEA_AUTHOR_STUDY_DESCRIPTOR),
+    builtin_path = "crate::builtins::fea"
+)]
+pub async fn fea_author_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    author_study::create_author_study_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -3369,29 +3425,31 @@ fn serializable_to_object_value<T: Serialize>(
 }
 
 fn geometry_asset_from_value(value: &Value) -> BuiltinResult<GeometryAsset> {
+    geometry_asset_from_value_with_builtin(value, STUDY_NAME)
+}
+
+fn geometry_asset_from_value_with_builtin(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<GeometryAsset> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
-            STUDY_NAME,
+            builtin,
             &ERROR_INPUT,
-            format!("fea.study geometry must be {GEOMETRY_ASSET_CLASS}"),
+            format!("{builtin} geometry must be {GEOMETRY_ASSET_CLASS}"),
         ));
     };
     if object.class_name != GEOMETRY_ASSET_CLASS {
         return Err(builtin_error(
-            STUDY_NAME,
+            builtin,
             &ERROR_INPUT,
             format!(
-                "fea.study geometry must be {GEOMETRY_ASSET_CLASS}, got {}",
+                "{builtin} geometry must be {GEOMETRY_ASSET_CLASS}, got {}",
                 object.class_name
             ),
         ));
     }
-    object_json_property(
-        STUDY_NAME,
-        object,
-        GEOMETRY_ASSET_JSON_PROPERTY,
-        &ERROR_INPUT,
-    )
+    object_json_property(builtin, object, GEOMETRY_ASSET_JSON_PROPERTY, &ERROR_INPUT)
 }
 
 fn object_json_property<T: DeserializeOwned>(
@@ -3710,6 +3768,161 @@ mod tests {
         Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
     }
 
+    fn authoring_summary_value() -> Value {
+        value_from_json(&serde_json::json!({
+            "mesh_authoring_summary": {
+                "schema_version": "mesh-authoring-summary/v1",
+                "mesh_id": "mesh_authoring_fixture",
+                "solve_ready": true,
+                "backend": "solid",
+                "tetrahedron_generation_family": "structured_box",
+                "topology": {
+                    "node_count": 4,
+                    "volume_element_count": 1,
+                    "boundary_face_count": 2,
+                    "boundary_edge_count": 3,
+                    "adaptive_iteration_count": 0
+                },
+                "quality": {
+                    "meets_quality_thresholds": true,
+                    "min_scaled_jacobian": 0.5,
+                    "min_exact_scaled_jacobian": 0.45,
+                    "max_aspect_ratio": 2.0,
+                    "max_boundary_projection_error_m": 0.0,
+                    "inverted_element_count": 0,
+                    "sliver_count": 0,
+                    "sliver_removed_count": 0,
+                    "unrepaired_exact_quality_count": 0
+                },
+                "recovery": {
+                    "boundary_face_recovery_ratio": 1.0,
+                    "boundary_edge_recovery_ratio": 1.0,
+                    "recovery_item_count": 2,
+                    "recovered_item_count": 2,
+                    "missing_recovery_item_count": 0,
+                    "unrecovered_tetrahedron_component_count": 0
+                },
+                "regions": {
+                    "material_regions": [
+                        {
+                            "region_id": "solid",
+                            "element_count": 1,
+                            "volume_m3": 0.16666666666666666,
+                            "required": true
+                        }
+                    ],
+                    "boundary_regions": [
+                        {
+                            "region_id": "root",
+                            "face_count": 1,
+                            "recovered_face_count": 1,
+                            "edge_count": 3,
+                            "fully_recovered": true,
+                            "required": true
+                        },
+                        {
+                            "region_id": "tip",
+                            "face_count": 1,
+                            "recovered_face_count": 1,
+                            "edge_count": 3,
+                            "fully_recovered": true,
+                            "required": true
+                        }
+                    ],
+                    "required_material_region_ids": ["solid"],
+                    "required_boundary_region_ids": ["root", "tip"]
+                }
+            }
+        }))
+        .expect("authoring summary value should convert")
+    }
+
+    fn generic_authoring_geometry_value() -> Value {
+        use runmat_geometry_core::{
+            EntityIdRange, EntityKind, GeometrySource, MeshDescriptor, MeshKind, Region,
+            RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+            TessellationProfile, UnitSystem,
+        };
+
+        let asset = GeometryAsset {
+            geometry_id: "geo:authoring_fixture".to_string(),
+            source: GeometrySource {
+                path: "/fixtures/authoring.step".to_string(),
+                sha256: "hash-authoring".to_string(),
+                importer_version: "test".to_string(),
+            },
+            source_geometry: SourceGeometry {
+                kind: SourceGeometryKind::Cad,
+                assembly: None,
+                material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
+            },
+            tessellation_profile: TessellationProfile::default(),
+            units: UnitSystem::Meter,
+            revision: 1,
+            meshes: vec![MeshDescriptor {
+                mesh_id: "surface".to_string(),
+                kind: MeshKind::Surface,
+                vertex_count: 4,
+                element_count: 2,
+            }],
+            surface_meshes: vec![SurfaceMesh::new(
+                "surface",
+                vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                vec![[0, 1, 2], [0, 1, 3]],
+            )],
+            regions: vec![
+                Region {
+                    region_id: "root".to_string(),
+                    name: "root".to_string(),
+                    tag: Some("fixed".to_string()),
+                    cad_ownership: None,
+                },
+                Region {
+                    region_id: "tip".to_string(),
+                    name: "tip".to_string(),
+                    tag: Some("load".to_string()),
+                    cad_ownership: None,
+                },
+                Region {
+                    region_id: "solid".to_string(),
+                    name: "solid".to_string(),
+                    tag: Some("material".to_string()),
+                    cad_ownership: None,
+                },
+            ],
+            region_entity_mappings: vec![
+                RegionEntityMapping::new(
+                    "root",
+                    "surface",
+                    EntityKind::Face,
+                    vec![EntityIdRange::new(0, 1)],
+                ),
+                RegionEntityMapping::new(
+                    "tip",
+                    "surface",
+                    EntityKind::Face,
+                    vec![EntityIdRange::new(1, 1)],
+                ),
+            ],
+            diagnostics: Vec::new(),
+        };
+
+        serializable_to_object(
+            AUTHOR_STUDY_NAME,
+            &ERROR_INTERNAL,
+            GEOMETRY_ASSET_CLASS,
+            &asset,
+            Some(GEOMETRY_ASSET_JSON_PROPERTY),
+        )
+        .expect("geometry asset should convert")
+    }
+
     #[test]
     fn fea_study_requires_geometry_asset() {
         let err = block_on(fea_study_builtin(vec![
@@ -3718,6 +3931,58 @@ mod tests {
         ]))
         .expect_err("invalid geometry should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+    }
+
+    #[test]
+    fn fea_author_study_builds_study_from_mesh_authoring_summary() {
+        let study = block_on(fea_author_study_builtin(vec![
+            Value::String("authored_static".to_string()),
+            generic_authoring_geometry_value(),
+            authoring_summary_value(),
+            Value::String("ForceN".to_string()),
+            Value::Tensor(
+                Tensor::new_2d(vec![25.0, -50.0, 0.0], 1, 3).expect("force tensor should build"),
+            ),
+        ]))
+        .expect("authoring should produce a study");
+
+        let Value::Object(study_object) = study.clone() else {
+            panic!("expected authored study object");
+        };
+        assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
+        let Some(Value::String(payload)) =
+            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
+        else {
+            panic!("expected study JSON payload");
+        };
+        let decoded: AnalysisStudySpec =
+            serde_json::from_str(payload).expect("authored study should decode");
+        let model = decoded.model.expect("authored study should include model");
+        assert_eq!(model.material_assignments[0].region_id, "solid");
+        assert_eq!(model.boundary_conditions[0].region_id, "root");
+        assert_eq!(model.loads[0].region_id, "tip");
+
+        let validation =
+            block_on(fea_validate_builtin(study)).expect("authored study should validate");
+        let Value::Object(validation_object) = validation else {
+            panic!("expected validation object");
+        };
+        assert_eq!(
+            validation_object.properties.get("valid"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn fea_author_study_requires_geometry_asset() {
+        let err = block_on(fea_author_study_builtin(vec![
+            Value::String("bad".to_string()),
+            Value::Num(1.0),
+            authoring_summary_value(),
+        ]))
+        .expect_err("invalid geometry should fail");
+        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert!(err.message().contains("fea.authorStudy geometry"));
     }
 
     #[test]
