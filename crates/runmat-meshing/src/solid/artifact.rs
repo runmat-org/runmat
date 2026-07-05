@@ -7,6 +7,10 @@ use runmat_meshing_core::{
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
         SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        TETRAHEDRON_EXACT_QUALITY_REPAIR_PASS_COUNT,
+        TETRAHEDRON_EXACT_QUALITY_SEED_STAR_RELOCATION_COUNT,
+        TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_INTERIOR_SEED_COUNT,
+        TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_TOTAL_COUNT,
         TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ACCEPTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ATTEMPT_COUNT,
         TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_BUDGET_LIMIT_COUNT,
@@ -1002,6 +1006,22 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_untangling_relocated_seed_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT,
+            ),
+            tetrahedron_exact_quality_repair_pass_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_EXACT_QUALITY_REPAIR_PASS_COUNT,
+            ),
+            tetrahedron_exact_quality_seed_star_relocation_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_EXACT_QUALITY_SEED_STAR_RELOCATION_COUNT,
+            ),
+            tetrahedron_exact_quality_unrepaired_total_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_TOTAL_COUNT,
+            ),
+            tetrahedron_exact_quality_unrepaired_interior_seed_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_INTERIOR_SEED_COUNT,
             ),
             ..MeshBackendSummary::default()
         },

@@ -6,19 +6,21 @@ use crate::reconnect::{
 };
 
 use super::{
-    remove_tetrahedron_mesh_slivers, smooth_tetrahedron_mesh_boundary_with_projector,
-    smooth_tetrahedron_mesh_interior, untangle_tetrahedron_mesh_interior,
-    TetrahedronBoundarySmoothingProjector, TetrahedronMeshBoundarySmoothingOptions,
-    TetrahedronMeshBoundarySmoothingReport, TetrahedronMeshInteriorSmoothingOptions,
-    TetrahedronMeshInteriorSmoothingReport, TetrahedronMeshSliverRemovalOptions,
-    TetrahedronMeshSliverRemovalReport, TetrahedronMeshUntanglingOptions,
-    TetrahedronMeshUntanglingReport,
+    remove_tetrahedron_mesh_slivers, repair_tetrahedron_mesh_exact_quality,
+    smooth_tetrahedron_mesh_boundary_with_projector, smooth_tetrahedron_mesh_interior,
+    untangle_tetrahedron_mesh_interior, TetrahedronBoundarySmoothingProjector,
+    TetrahedronMeshBoundarySmoothingOptions, TetrahedronMeshBoundarySmoothingReport,
+    TetrahedronMeshExactQualityRepairOptions, TetrahedronMeshExactQualityRepairReport,
+    TetrahedronMeshInteriorSmoothingOptions, TetrahedronMeshInteriorSmoothingReport,
+    TetrahedronMeshSliverRemovalOptions, TetrahedronMeshSliverRemovalReport,
+    TetrahedronMeshUntanglingOptions, TetrahedronMeshUntanglingReport,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecoveredTetrahedronMeshOptimizationOptions {
     pub local_reconnection: TetrahedronMeshLocalReconnectionOptions,
     pub untangling: TetrahedronMeshUntanglingOptions,
+    pub exact_quality_repair: TetrahedronMeshExactQualityRepairOptions,
     pub sliver_removal: TetrahedronMeshSliverRemovalOptions,
     pub interior_smoothing: TetrahedronMeshInteriorSmoothingOptions,
     pub boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions,
@@ -29,6 +31,7 @@ impl Default for RecoveredTetrahedronMeshOptimizationOptions {
         Self {
             local_reconnection: TetrahedronMeshLocalReconnectionOptions::default(),
             untangling: TetrahedronMeshUntanglingOptions::default(),
+            exact_quality_repair: TetrahedronMeshExactQualityRepairOptions::default(),
             sliver_removal: TetrahedronMeshSliverRemovalOptions::default(),
             interior_smoothing: TetrahedronMeshInteriorSmoothingOptions::default(),
             boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions::default(),
@@ -40,6 +43,7 @@ impl Default for RecoveredTetrahedronMeshOptimizationOptions {
 pub struct RecoveredTetrahedronMeshOptimizationReport {
     pub local_reconnection: TetrahedronMeshLocalReconnectionReport,
     pub untangling: TetrahedronMeshUntanglingReport,
+    pub exact_quality_repair: TetrahedronMeshExactQualityRepairReport,
     pub sliver_removal: TetrahedronMeshSliverRemovalReport,
     pub interior_smoothing: TetrahedronMeshInteriorSmoothingReport,
     pub boundary_smoothing: TetrahedronMeshBoundarySmoothingReport,
@@ -53,6 +57,8 @@ pub fn optimize_recovered_tetrahedron_mesh(
     let local_reconnection =
         improve_tetrahedron_mesh_with_local_flips(mesh, options.local_reconnection);
     let untangling = untangle_tetrahedron_mesh_interior(mesh, options.untangling);
+    let exact_quality_repair =
+        repair_tetrahedron_mesh_exact_quality(mesh, options.exact_quality_repair);
     let sliver_removal = remove_tetrahedron_mesh_slivers(mesh, options.sliver_removal);
     let interior_smoothing = smooth_tetrahedron_mesh_interior(mesh, options.interior_smoothing);
     let boundary_smoothing = smooth_tetrahedron_mesh_boundary_with_projector(
@@ -64,6 +70,7 @@ pub fn optimize_recovered_tetrahedron_mesh(
     RecoveredTetrahedronMeshOptimizationReport {
         local_reconnection,
         untangling,
+        exact_quality_repair,
         sliver_removal,
         interior_smoothing,
         boundary_smoothing,
@@ -101,6 +108,10 @@ mod tests {
                     max_attempted_seeds: 0,
                     ..TetrahedronMeshUntanglingOptions::default()
                 },
+                exact_quality_repair: TetrahedronMeshExactQualityRepairOptions {
+                    max_attempted_seeds: 0,
+                    ..TetrahedronMeshExactQualityRepairOptions::default()
+                },
                 sliver_removal: TetrahedronMeshSliverRemovalOptions {
                     max_attempted_elements: 0,
                     ..TetrahedronMeshSliverRemovalOptions::default()
@@ -125,6 +136,7 @@ mod tests {
 
         assert_eq!(report.local_reconnection.attempted_reconnection_count, 0);
         assert_eq!(report.untangling.attempted_seed_count, 0);
+        assert_eq!(report.exact_quality_repair.attempted_seed_count, 0);
         assert_eq!(report.sliver_removal.attempted_element_count, 0);
         assert_eq!(report.interior_smoothing.attempted_point_count, 1);
         assert_eq!(report.interior_smoothing.accepted_point_count, 1);

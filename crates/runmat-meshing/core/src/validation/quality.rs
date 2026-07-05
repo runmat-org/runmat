@@ -302,6 +302,28 @@ fn validate_optimization_evidence(
             },
         );
     }
+    if backend.tetrahedron_exact_quality_repair_pass_count == 0
+        && backend.tetrahedron_exact_quality_seed_star_relocation_count > 0
+    {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "exact_quality_edits_without_pass".to_string(),
+                observed_count: backend.tetrahedron_exact_quality_seed_star_relocation_count,
+                limit_count: backend.tetrahedron_exact_quality_repair_pass_count,
+            },
+        );
+    }
+    if backend.tetrahedron_exact_quality_repair_pass_count == 0
+        && backend.tetrahedron_exact_quality_unrepaired_total_count > 0
+    {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "exact_quality_unrepaired_without_pass".to_string(),
+                observed_count: backend.tetrahedron_exact_quality_unrepaired_total_count,
+                limit_count: backend.tetrahedron_exact_quality_repair_pass_count,
+            },
+        );
+    }
 
     let initial_min = backend.tetrahedron_optimization_initial_min_exact_scaled_jacobian;
     let final_min = backend.tetrahedron_optimization_final_min_exact_scaled_jacobian;

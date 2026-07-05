@@ -48,6 +48,14 @@ pub const TETRAHEDRON_UNTANGLING_INITIAL_NEAR_SINGULAR_COUNT: &str =
 pub const TETRAHEDRON_UNTANGLING_FINAL_NEAR_SINGULAR_COUNT: &str = "untangling_final_near_singular";
 pub const TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT: &str = "untangling_relocated_seeds";
 pub const TETRAHEDRON_UNTANGLING_REJECTION_PREFIX: &str = "untangling_rejected_";
+pub const TETRAHEDRON_EXACT_QUALITY_REPAIR_PASS_COUNT: &str = "exact_quality_repair_passes";
+pub const TETRAHEDRON_EXACT_QUALITY_SEED_STAR_RELOCATION_COUNT: &str =
+    "exact_quality_seed_star_relocations";
+pub const TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_TOTAL_COUNT: &str = "exact_quality_unrepaired_total";
+pub const TETRAHEDRON_EXACT_QUALITY_UNREPAIRED_INTERIOR_SEED_COUNT: &str =
+    "exact_quality_unrepaired_interior_seeds";
+pub const TETRAHEDRON_EXACT_QUALITY_REPAIR_REJECTION_PREFIX: &str =
+    "exact_quality_repair_rejected_";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {

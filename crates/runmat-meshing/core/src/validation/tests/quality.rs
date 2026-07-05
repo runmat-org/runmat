@@ -371,6 +371,46 @@ fn rejects_untangling_near_singular_regression() {
 }
 
 #[test]
+fn rejects_exact_quality_relocation_without_repair_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_exact_quality_seed_star_relocation_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("exact-quality relocation requires a repair pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "exact_quality_edits_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
+        }
+    );
+}
+
+#[test]
+fn rejects_exact_quality_unrepaired_evidence_without_repair_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_exact_quality_unrepaired_total_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("exact-quality unrepaired evidence requires a repair pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "exact_quality_unrepaired_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
+        }
+    );
+}
+
+#[test]
 fn rejects_boundary_smoothing_rejection_reason_mismatch() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend.tetrahedron_optimization_pass_count = 1;

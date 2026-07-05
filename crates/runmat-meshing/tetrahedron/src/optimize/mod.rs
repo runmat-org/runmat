@@ -1,4 +1,5 @@
 pub mod boundary_smoothing;
+pub mod exact_quality;
 pub mod interior_smoothing;
 pub mod post_recovery;
 pub mod sliver_removal;
@@ -8,6 +9,10 @@ pub use boundary_smoothing::{
     smooth_tetrahedron_mesh_boundary_with_projector, TetrahedronBoundarySmoothingProjection,
     TetrahedronBoundarySmoothingProjector, TetrahedronMeshBoundarySmoothingOptions,
     TetrahedronMeshBoundarySmoothingReport,
+};
+pub use exact_quality::{
+    repair_tetrahedron_mesh_exact_quality, TetrahedronMeshExactQualityRepairOptions,
+    TetrahedronMeshExactQualityRepairReport,
 };
 pub use interior_smoothing::{
     smooth_tetrahedron_mesh_interior, TetrahedronMeshInteriorSmoothingOptions,
