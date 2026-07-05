@@ -120,6 +120,7 @@ pub fn generate_single_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "single_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "single_tetrahedron".to_string(),
         nodes,
         elements,
         boundary_faces,

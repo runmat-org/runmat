@@ -36,6 +36,8 @@ pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_REJECTION_PREFIX: &str =
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {
     pub mesh_id: String,
+    #[serde(default = "unknown_tetrahedron_generation_family")]
+    pub tetrahedron_generation_family: String,
     #[serde(default)]
     pub nodes: Vec<TetrahedronMeshNode>,
     #[serde(default)]
@@ -45,6 +47,10 @@ pub struct TetrahedronMesh {
     pub recovery_complete: bool,
     pub quality_optimized: bool,
     pub evidence: StageEvidence,
+}
+
+fn unknown_tetrahedron_generation_family() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

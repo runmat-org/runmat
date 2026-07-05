@@ -135,6 +135,7 @@ pub fn generate_convex_polyhedron_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "convex_polyhedron_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "convex_polyhedron".to_string(),
         nodes,
         elements,
         boundary_faces,

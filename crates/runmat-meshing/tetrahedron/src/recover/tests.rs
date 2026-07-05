@@ -1411,6 +1411,7 @@ fn cad_curve_boundary() -> PlcProtectedEdgeCadCurveBoundary {
 fn tetrahedron_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "tetrahedron".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
@@ -1498,6 +1499,7 @@ fn source_face_boundary_diagonal_flip_plc() -> ProtectedBoundaryComplex {
 fn boundary_diagonal_flip_tetrahedron_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "boundary_diagonal_flip_tetrahedron".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
@@ -1606,6 +1608,7 @@ fn two_region_bipyramid_plc_with_region_a_protected_edge() -> ProtectedBoundaryC
 fn two_region_bipyramid_tetrahedron_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "two_region_bipyramid_tetrahedron".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
@@ -1696,6 +1699,7 @@ fn two_element_material_partition_plc() -> ProtectedBoundaryComplex {
 fn two_element_material_partition_seed_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "two_element_material_partition_seed".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),
@@ -1818,6 +1822,7 @@ fn interior_material_interface_propagation_plc() -> ProtectedBoundaryComplex {
 fn interior_material_interface_propagation_mesh() -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "interior_material_interface_propagation_tetrahedron".to_string(),
+        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![
             tetrahedron_node(
                 entity(MeshingStage::ProtectedBoundaryComplex, "0"),

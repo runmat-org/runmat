@@ -18,6 +18,7 @@ fn generates_positive_tetrahedra_from_validated_tetra_plc() {
         .expect("validated tetra PLC should generate an initial Tetrahedron mesh");
 
     assert_eq!(mesh.nodes.len(), 5);
+    assert_eq!(mesh.tetrahedron_generation_family, "initial_plc");
     assert_eq!(mesh.elements.len(), 4);
     assert_eq!(mesh.boundary_faces.len(), 4);
     assert!(!mesh.recovery_complete);
@@ -214,6 +215,7 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
         .expect("validated box PLC should generate structured Tetrahedron mesh");
 
     assert_eq!(mesh.nodes.len(), 8);
+    assert_eq!(mesh.tetrahedron_generation_family, "structured_box");
     assert_eq!(mesh.elements.len(), 6);
     assert_eq!(mesh.boundary_faces.len(), 12);
     assert_eq!(mesh.evidence.entity_counts["plc_boundary_nodes"], 8);
@@ -261,6 +263,10 @@ fn boundary_conforming_box_generation_keeps_ambiguous_material_ownership_unclass
     assert_eq!(
         mesh.mesh_id,
         "structured_box_boundary_conforming_tetrahedron_mesh"
+    );
+    assert_eq!(
+        mesh.tetrahedron_generation_family,
+        "boundary_conforming_box"
     );
     assert!(mesh
         .elements
@@ -323,6 +329,10 @@ fn structured_box_generation_preserves_split_protected_source_edges() {
     assert_eq!(
         mesh.mesh_id,
         "structured_box_boundary_conforming_tetrahedron_mesh"
+    );
+    assert_eq!(
+        mesh.tetrahedron_generation_family,
+        "boundary_conforming_box"
     );
     assert_eq!(mesh.nodes.len(), plc.nodes.len() + 1);
     assert_eq!(mesh.elements.len(), plc.facets.len());
@@ -412,7 +422,12 @@ fn solver_generation_supports_box_and_single_tetrahedron_plcs() {
         .expect("tetrahedron PLC should use single Tetrahedron solver generation");
 
     assert_eq!(box_mesh.elements.len(), 6);
+    assert_eq!(box_mesh.tetrahedron_generation_family, "structured_box");
     assert_eq!(tetrahedron_mesh.elements.len(), 1);
+    assert_eq!(
+        tetrahedron_mesh.tetrahedron_generation_family,
+        "single_tetrahedron"
+    );
 }
 
 #[test]
@@ -421,6 +436,7 @@ fn generates_convex_polyhedron_tetrahedron_mesh_from_octahedron_plc() {
         .expect("convex octahedron PLC should generate one Tetrahedron4 per boundary facet");
 
     assert_eq!(mesh.nodes.len(), 7);
+    assert_eq!(mesh.tetrahedron_generation_family, "convex_polyhedron");
     assert_eq!(mesh.elements.len(), 8);
     assert_eq!(mesh.boundary_faces.len(), 8);
     assert_eq!(mesh.evidence.entity_counts["interior_nodes"], 1);
@@ -474,6 +490,7 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
         .expect("convex octahedron PLC should use convex polyhedron solver generation");
 
     assert_eq!(mesh.mesh_id, "convex_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.tetrahedron_generation_family, "convex_polyhedron");
     assert_eq!(mesh.elements.len(), 8);
 }
 
@@ -489,6 +506,7 @@ fn generates_star_shaped_polyhedron_tetrahedron_mesh_from_dented_corner_box_plc(
         .expect("star-shaped dented-corner box PLC should generate a Tetrahedron mesh");
 
     assert_eq!(mesh.mesh_id, "star_shaped_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.tetrahedron_generation_family, "star_shaped_polyhedron");
     assert_eq!(mesh.nodes.len(), plc.nodes.len() + 1);
     assert_eq!(mesh.elements.len(), plc.facets.len());
     assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
@@ -582,6 +600,7 @@ fn solver_generation_supports_star_shaped_polyhedron_plcs() {
         .expect("dented-corner box PLC should use star-shaped polyhedron generation");
 
     assert_eq!(mesh.mesh_id, "star_shaped_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.tetrahedron_generation_family, "star_shaped_polyhedron");
     assert_eq!(mesh.elements.len(), 12);
 }
 

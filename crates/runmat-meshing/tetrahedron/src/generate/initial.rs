@@ -123,6 +123,7 @@ pub fn generate_initial_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "initial_plc_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "initial_plc".to_string(),
         nodes,
         elements,
         boundary_faces,

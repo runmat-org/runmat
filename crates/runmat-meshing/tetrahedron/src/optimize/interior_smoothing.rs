@@ -437,6 +437,7 @@ mod tests {
     fn smoothing_fixture(interior: Point3) -> TetrahedronMesh {
         TetrahedronMesh {
             mesh_id: "interior_smoothing_fixture".to_string(),
+            tetrahedron_generation_family: "unknown".to_string(),
             nodes: vec![
                 node("0", [0.0, 0.0, 0.0]),
                 node("1", [1.0, 0.0, 0.0]),

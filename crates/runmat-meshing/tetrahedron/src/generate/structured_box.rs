@@ -93,6 +93,7 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "structured_box_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "structured_box".to_string(),
         nodes,
         elements,
         boundary_faces,
@@ -236,6 +237,7 @@ fn generate_boundary_conforming_box_tetrahedron_mesh(
 
     Ok(TetrahedronMesh {
         mesh_id: "structured_box_boundary_conforming_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "boundary_conforming_box".to_string(),
         nodes,
         elements,
         boundary_faces,

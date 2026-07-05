@@ -553,6 +553,7 @@ mod tests {
     ) -> TetrahedronMesh {
         TetrahedronMesh {
             mesh_id: "boundary_smoothing_fixture".to_string(),
+            tetrahedron_generation_family: "unknown".to_string(),
             nodes: vec![
                 node("0", [0.0, 0.0, 0.0]),
                 node("1", [1.0, 0.0, 0.0]),

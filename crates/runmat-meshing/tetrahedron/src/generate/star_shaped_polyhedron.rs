@@ -136,6 +136,7 @@ pub fn generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(
 
     Ok(TetrahedronMesh {
         mesh_id: "star_shaped_polyhedron_tetrahedron_mesh".to_string(),
+        tetrahedron_generation_family: "star_shaped_polyhedron".to_string(),
         nodes,
         elements,
         boundary_faces,
