@@ -5,6 +5,19 @@ use runmat_meshing_core::contracts::{
 };
 use runmat_meshing_plc::validate::{classify_boundary_components, classify_shell_nesting};
 
+const INPUT_PLC_CAD_CURVE_EVIDENCE_KEYS: &[&str] = &[
+    "cad_curve_boundary_source_edges",
+    "cad_curve_boundary_segments",
+    "cad_curve_imported_edges",
+    "cad_curve_evaluator_edges",
+    "cad_curve_evaluator_samples",
+    "cad_curve_live_query_edges",
+    "cad_curve_live_query_samples",
+    "cad_curve_rejected_evaluator_samples",
+    "cad_curve_curvature_sized_edges",
+    "cad_curve_curvature_samples",
+];
+
 pub(super) fn record_input_plc_evidence(
     plc: &ProtectedBoundaryComplex,
     evidence: &mut StageEvidence,
@@ -70,6 +83,13 @@ pub(super) fn record_input_plc_evidence(
         "input_plc_material_region_facets".to_string(),
         material_region_facet_count,
     );
+    for key in INPUT_PLC_CAD_CURVE_EVIDENCE_KEYS {
+        if let Some(count) = plc.evidence.entity_counts.get(*key) {
+            evidence
+                .entity_counts
+                .insert(format!("input_plc_{key}"), *count);
+        }
+    }
 }
 
 pub(super) fn record_tetrahedron_material_evidence(

@@ -68,6 +68,85 @@ fn initial_generation_keeps_ambiguous_material_ownership_unclassified() {
 }
 
 #[test]
+fn generated_tetrahedron_mesh_preserves_input_plc_cad_curve_evidence() {
+    let mut plc = tetra_plc();
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_boundary_source_edges".to_string(), 2);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_boundary_segments".to_string(), 3);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_imported_edges".to_string(), 1);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_evaluator_edges".to_string(), 2);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_evaluator_samples".to_string(), 5);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_live_query_edges".to_string(), 1);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_live_query_samples".to_string(), 4);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_rejected_evaluator_samples".to_string(), 1);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_curvature_sized_edges".to_string(), 1);
+    plc.evidence
+        .entity_counts
+        .insert("cad_curve_curvature_samples".to_string(), 2);
+
+    let mesh = generate_initial_tetrahedron_mesh_from_plc(&plc)
+        .expect("validated PLC should generate initial Tetrahedron mesh");
+
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_boundary_source_edges"],
+        2
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_boundary_segments"],
+        3
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_imported_edges"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_evaluator_edges"],
+        2
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_evaluator_samples"],
+        5
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_live_query_edges"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_live_query_samples"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_rejected_evaluator_samples"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_curvature_sized_edges"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_cad_curve_curvature_samples"],
+        2
+    );
+}
+
+#[test]
 fn rejects_unvalidated_plc_before_tetrahedron_generation() {
     let mut plc = tetra_plc();
     plc.validation.watertight = false;
