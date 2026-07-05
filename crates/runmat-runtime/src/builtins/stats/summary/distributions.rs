@@ -7,7 +7,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::tensor;
+use crate::builtins::common::{broadcast, tensor};
 use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
 use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -37,6 +37,14 @@ const INPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Probability value.",
+};
+
+const INPUT_DIST: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Distribution name.",
 };
 
 const INPUT_MU: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -72,11 +80,11 @@ const INPUT_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
 };
 
 const INPUT_PROB: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
+    name: "prob",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Probability parameter.",
+    description: "Success probability parameter.",
 };
 
 const INPUT_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -95,10 +103,106 @@ const INPUT_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Shape parameter.",
 };
 
+const INPUT_SHAPE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "shape",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Shape parameter.",
+};
+
+const INPUT_SCALE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "scale",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Scale parameter.",
+};
+
+const INPUT_LAMBDA: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "lambda",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Rate or mean parameter.",
+};
+
+const INPUT_LOWER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "a",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Lower endpoint.",
+};
+
+const INPUT_UPPER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "b",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Upper endpoint.",
+};
+
+const INPUT_DF1: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "v1",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numerator degrees of freedom.",
+};
+
+const INPUT_DF2: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "v2",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Denominator degrees of freedom.",
+};
+
+const INPUT_ALPHA: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "a",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "First shape parameter.",
+};
+
+const INPUT_BETA: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "b",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Second shape parameter.",
+};
+
+const INPUT_MEAN_REQUIRED: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "mu",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Mean parameter.",
+};
+
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [INPUT_X];
 const INPUTS_X_MU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_MU];
 const INPUTS_X_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_MU, INPUT_SIGMA];
 const INPUTS_P: [BuiltinParamDescriptor; 1] = [INPUT_P];
+const INPUTS_DIST_P: [BuiltinParamDescriptor; 2] = [INPUT_DIST, INPUT_P];
+const INPUTS_DIST_P_PARAM: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_P, INPUT_NU];
+const INPUTS_DIST_P_MU_SIGMA: [BuiltinParamDescriptor; 4] =
+    [INPUT_DIST, INPUT_P, INPUT_MU, INPUT_SIGMA];
+const INPUTS_DIST_P_MU: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_P, INPUT_MEAN_REQUIRED];
+const INPUTS_DIST_P_A_B: [BuiltinParamDescriptor; 4] = [INPUT_DIST, INPUT_P, INPUT_A, INPUT_B];
+const INPUTS_DIST_P_SHAPE_SCALE: [BuiltinParamDescriptor; 4] =
+    [INPUT_DIST, INPUT_P, INPUT_SHAPE, INPUT_SCALE];
+const INPUTS_DIST_P_N_PROB: [BuiltinParamDescriptor; 4] =
+    [INPUT_DIST, INPUT_P, INPUT_N, INPUT_PROB];
+const INPUTS_DIST_P_LAMBDA: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_P, INPUT_LAMBDA];
+const INPUTS_DIST_P_BOUNDS: [BuiltinParamDescriptor; 4] =
+    [INPUT_DIST, INPUT_P, INPUT_LOWER, INPUT_UPPER];
+const INPUTS_DIST_P_DF: [BuiltinParamDescriptor; 4] = [INPUT_DIST, INPUT_P, INPUT_DF1, INPUT_DF2];
+const INPUTS_DIST_P_ALPHA_BETA: [BuiltinParamDescriptor; 4] =
+    [INPUT_DIST, INPUT_P, INPUT_ALPHA, INPUT_BETA];
 const INPUTS_P_MU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_MU];
 const INPUTS_P_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_MU, INPUT_SIGMA];
 const INPUTS_X_NU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_NU];
@@ -229,6 +333,79 @@ const WBLINV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const ICDF_SIGNATURES: [BuiltinSignatureDescriptor; 14] = [
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Normal\", p)",
+        inputs: &INPUTS_DIST_P,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Normal\", p, mu, sigma)",
+        inputs: &INPUTS_DIST_P_MU_SIGMA,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"t\", p, nu)",
+        inputs: &INPUTS_DIST_P_PARAM,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Weibull\", p, a, b)",
+        inputs: &INPUTS_DIST_P_A_B,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Chi-square\", p, nu)",
+        inputs: &INPUTS_DIST_P_PARAM,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Binomial\", p, n, prob)",
+        inputs: &INPUTS_DIST_P_N_PROB,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Gamma\", p, shape, scale)",
+        inputs: &INPUTS_DIST_P_SHAPE_SCALE,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Exponential\", p, mu)",
+        inputs: &INPUTS_DIST_P_MU,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Poisson\", p, lambda)",
+        inputs: &INPUTS_DIST_P_LAMBDA,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Uniform\", p)",
+        inputs: &INPUTS_DIST_P,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Uniform\", p, a, b)",
+        inputs: &INPUTS_DIST_P_BOUNDS,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Lognormal\", p, mu, sigma)",
+        inputs: &INPUTS_DIST_P_MU_SIGMA,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"Beta\", p, a, b)",
+        inputs: &INPUTS_DIST_P_ALPHA_BETA,
+        outputs: &OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = icdf(\"F\", p, v1, v2)",
+        inputs: &INPUTS_DIST_P_DF,
+        outputs: &OUTPUT_Y,
+    },
+];
+
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NORMAL.INVALID_ARGUMENT",
     identifier: None,
@@ -278,6 +455,32 @@ fn normal_type(args: &[Type], _ctx: &ResolveContext) -> Type {
         Some(Type::Unknown) | None => Type::Unknown,
         _ => Type::Unknown,
     }
+}
+
+fn icdf_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let mut shape: Option<Vec<Option<usize>>> = None;
+    for arg in args.iter().skip(1) {
+        let current = match arg {
+            Type::Num | Type::Int | Type::Bool => {
+                runmat_builtins::shape_rules::scalar_tensor_shape()
+            }
+            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+                shape.clone()
+            }
+            Type::Tensor { shape: None } | Type::Logical { shape: None } => {
+                return Type::Tensor { shape: None };
+            }
+            Type::Unknown => return Type::Unknown,
+            _ => return Type::Unknown,
+        };
+        shape = Some(match shape {
+            Some(previous) => runmat_builtins::shape_rules::broadcast_shapes(&previous, &current),
+            None => current,
+        });
+    }
+    shape
+        .map(runmat_builtins::shape_rules::numeric_tensor_from_shape)
+        .unwrap_or(Type::Unknown)
 }
 
 fn normal_error(name: &str, message: impl Into<String>) -> RuntimeError {
@@ -334,18 +537,10 @@ async fn normal_args(
         ),
         _ => unreachable!(),
     };
-    let (x, mu, shape) = broadcast_pair(name, &x, &mu)?;
-    let (sigma, _, shape2) = broadcast_pair(
-        name,
-        &sigma,
-        &Tensor::new(vec![0.0; x.len()], shape.clone()).unwrap(),
-    )?;
-    if shape2 != shape {
-        return Err(normal_error(
-            name,
-            format!("{name}: operands must have compatible sizes"),
-        ));
-    }
+    let (mut broadcasted, shape) = broadcast_tensors(name, &[&x, &mu, &sigma])?;
+    let x = broadcasted.remove(0);
+    let mu = broadcasted.remove(0);
+    let sigma = broadcasted.remove(0);
     Ok(NormalArgs {
         x,
         mu,
@@ -383,8 +578,58 @@ fn broadcast_pair(
     lhs: &Tensor,
     rhs: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
-    tensor::binary_numeric_tensors(lhs, rhs, name, name)
-        .map_err(|err| normal_error(name, err.message().to_string()))
+    let (mut values, shape) = broadcast_tensors(name, &[lhs, rhs])?;
+    let lhs = values.remove(0);
+    let rhs = values.remove(0);
+    Ok((lhs, rhs, shape))
+}
+
+fn broadcast_tensors(name: &str, inputs: &[&Tensor]) -> BuiltinResult<(Vec<Vec<f64>>, Vec<usize>)> {
+    let Some(first) = inputs.first() else {
+        return Ok((Vec::new(), vec![1, 1]));
+    };
+    let mut shape = first.shape.clone();
+    for tensor in inputs.iter().skip(1) {
+        shape = broadcast::broadcast_shapes(name, &shape, &tensor.shape)
+            .map_err(|err| normal_error(name, err))?;
+    }
+    let mut values = Vec::with_capacity(inputs.len());
+    for tensor in inputs {
+        values.push(broadcast_tensor_to(name, tensor, &shape)?);
+    }
+    Ok((values, shape))
+}
+
+fn broadcast_tensor_to(
+    name: &str,
+    tensor: &Tensor,
+    out_shape: &[usize],
+) -> BuiltinResult<Vec<f64>> {
+    let len = out_shape.iter().copied().product::<usize>();
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    let in_shape = align_shape(&tensor.shape, out_shape.len());
+    let strides = broadcast::compute_strides(&in_shape);
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        let source_idx = broadcast::broadcast_index(idx, out_shape, &in_shape, &strides);
+        let Some(value) = tensor.data.get(source_idx) else {
+            return Err(normal_error(
+                name,
+                format!("{name}: tensor data does not match tensor shape"),
+            ));
+        };
+        out.push(*value);
+    }
+    Ok(out)
+}
+
+fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
+    let mut aligned = Vec::with_capacity(rank);
+    aligned.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
+    aligned.extend_from_slice(shape);
+    aligned
 }
 
 async fn t_args(
@@ -455,16 +700,10 @@ async fn three_args(
         }
     };
     let x = value_to_tensor(name, first).await?;
-    let (x, a, shape) = broadcast_pair(name, &x, &a)?;
-    let temp = Tensor::new(vec![0.0; x.len()], shape.clone())
-        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
-    let (b, _, shape2) = broadcast_pair(name, &b, &temp)?;
-    if shape2 != shape {
-        return Err(normal_error(
-            name,
-            format!("{name}: operands must have compatible sizes"),
-        ));
-    }
+    let (mut broadcasted, shape) = broadcast_tensors(name, &[&x, &a, &b])?;
+    let x = broadcasted.remove(0);
+    let a = broadcasted.remove(0);
+    let b = broadcasted.remove(0);
     Ok(ThreeArgs {
         x,
         a,
@@ -582,6 +821,229 @@ fn wblinv_scalar(p: f64, a: f64, b: f64) -> f64 {
         return f64::INFINITY;
     }
     a * (-(-p).ln_1p()).powf(1.0 / b)
+}
+
+fn chi2inv_scalar(p: f64, nu: f64) -> f64 {
+    if p.is_nan() || nu.is_nan() || nu <= 0.0 || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    if p == 0.0 {
+        return 0.0;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    let mut lo = 0.0;
+    let mut hi = nu.max(1.0);
+    let mut iterations = 0;
+    while chi2cdf_scalar(hi, nu, false) < p {
+        hi *= 2.0;
+        iterations += 1;
+        if !hi.is_finite() || iterations > 2048 {
+            return f64::INFINITY;
+        }
+    }
+    for _ in 0..160 {
+        let mid = 0.5 * (lo + hi);
+        if chi2cdf_scalar(mid, nu, false) >= p {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+fn binoinv_scalar(probability: f64, n: f64, success_probability: f64) -> f64 {
+    if probability.is_nan()
+        || n.is_nan()
+        || success_probability.is_nan()
+        || n < 0.0
+        || n.fract() != 0.0
+        || !(0.0..=1.0).contains(&probability)
+        || !(0.0..=1.0).contains(&success_probability)
+    {
+        return f64::NAN;
+    }
+    if probability == 0.0 || success_probability == 0.0 {
+        return 0.0;
+    }
+    if probability == 1.0 || success_probability == 1.0 {
+        return n;
+    }
+    let mut lo = 0.0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = ((lo + hi) / 2.0).floor();
+        if binocdf_scalar(mid, n, success_probability, false) >= probability {
+            hi = mid;
+        } else {
+            lo = mid + 1.0;
+        }
+    }
+    lo
+}
+
+fn expinv_scalar(p: f64, mu: f64) -> f64 {
+    if p.is_nan() || mu.is_nan() || mu <= 0.0 || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    -mu * (-p).ln_1p()
+}
+
+fn unifinv_scalar(p: f64, a: f64, b: f64) -> f64 {
+    if p.is_nan() || a.is_nan() || b.is_nan() || a > b || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    a + p * (b - a)
+}
+
+fn logninv_scalar(p: f64, mu: f64, sigma: f64) -> f64 {
+    let normal = norminv_scalar(p, mu, sigma);
+    if normal.is_nan() {
+        f64::NAN
+    } else {
+        normal.exp()
+    }
+}
+
+fn gaminv_scalar(p: f64, shape: f64, scale: f64) -> f64 {
+    if p.is_nan()
+        || shape.is_nan()
+        || scale.is_nan()
+        || shape <= 0.0
+        || scale <= 0.0
+        || !(0.0..=1.0).contains(&p)
+    {
+        return f64::NAN;
+    }
+    if p == 0.0 {
+        return 0.0;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    invert_continuous_positive(p, shape * scale, |x| {
+        distribution_math::regularized_gamma_p(shape, x / scale)
+    })
+}
+
+fn betainv_scalar(p: f64, a: f64, b: f64) -> f64 {
+    if p.is_nan() || a.is_nan() || b.is_nan() || a <= 0.0 || b <= 0.0 || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    if p == 0.0 {
+        return 0.0;
+    }
+    if p == 1.0 {
+        return 1.0;
+    }
+    let mut lo = 0.0;
+    let mut hi = 1.0;
+    for _ in 0..180 {
+        let mid = 0.5 * (lo + hi);
+        if distribution_math::regularized_beta(mid, a, b) >= p {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+fn finv_scalar(p: f64, v1: f64, v2: f64) -> f64 {
+    if p.is_nan()
+        || v1.is_nan()
+        || v2.is_nan()
+        || v1 <= 0.0
+        || v2 <= 0.0
+        || !(0.0..=1.0).contains(&p)
+    {
+        return f64::NAN;
+    }
+    if p == 0.0 {
+        return 0.0;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    invert_continuous_positive(p, 1.0, |x| {
+        let scaled = v1 * x;
+        let beta_x = scaled / (scaled + v2);
+        distribution_math::regularized_beta(beta_x, v1 / 2.0, v2 / 2.0)
+    })
+}
+
+fn poissinv_scalar(p: f64, lambda: f64) -> f64 {
+    if p.is_nan() || lambda.is_nan() || lambda < 0.0 || !(0.0..=1.0).contains(&p) {
+        return f64::NAN;
+    }
+    if p == 1.0 {
+        return f64::INFINITY;
+    }
+    if p == 0.0 || lambda == 0.0 {
+        return 0.0;
+    }
+    let mut lo = 0.0;
+    let mut hi = lambda.ceil().max(1.0);
+    let mut iterations = 0;
+    while poisscdf_scalar(hi, lambda) < p {
+        hi *= 2.0;
+        iterations += 1;
+        if !hi.is_finite() || iterations > 2048 {
+            return f64::INFINITY;
+        }
+    }
+    while lo < hi {
+        let mid = ((lo + hi) / 2.0).floor();
+        if poisscdf_scalar(mid, lambda) >= p {
+            hi = mid;
+        } else {
+            lo = mid + 1.0;
+        }
+    }
+    lo
+}
+
+fn poisscdf_scalar(k: f64, lambda: f64) -> f64 {
+    if k.is_nan() || lambda.is_nan() || lambda < 0.0 {
+        return f64::NAN;
+    }
+    if k < 0.0 {
+        return 0.0;
+    }
+    if lambda == 0.0 {
+        return 1.0;
+    }
+    distribution_math::regularized_gamma_q(k.floor() + 1.0, lambda)
+}
+
+fn invert_continuous_positive<F>(p: f64, initial_hi: f64, mut cdf: F) -> f64
+where
+    F: FnMut(f64) -> f64,
+{
+    let mut lo = 0.0;
+    let mut hi = initial_hi.max(1.0);
+    let mut iterations = 0;
+    while cdf(hi) < p {
+        hi *= 2.0;
+        iterations += 1;
+        if !hi.is_finite() || iterations > 2048 {
+            return f64::INFINITY;
+        }
+    }
+    for _ in 0..180 {
+        let mid = 0.5 * (lo + hi);
+        if cdf(mid) >= p {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    0.5 * (lo + hi)
 }
 
 pub mod normpdf {
@@ -826,6 +1288,276 @@ pub mod wblinv {
     }
 }
 
+pub mod icdf {
+    use super::*;
+
+    const ERRORS: [BuiltinErrorDescriptor; 2] = [
+        BuiltinErrorDescriptor {
+            code: "RM.icdf.INVALID_ARGUMENT",
+            identifier: Some("RunMat:icdf:InvalidArgument"),
+            when: ERROR_INVALID_ARGUMENT.when,
+            message: "icdf: invalid argument",
+        },
+        BuiltinErrorDescriptor {
+            code: "RM.icdf.INTERNAL",
+            identifier: Some("RunMat:icdf:Internal"),
+            when: ERROR_INTERNAL.when,
+            message: "icdf: internal error",
+        },
+    ];
+
+    pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &ICDF_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::Public,
+        errors: &ERRORS,
+    };
+
+    #[derive(Clone, Copy)]
+    enum IcdfDistribution {
+        Normal,
+        StudentT,
+        Weibull,
+        ChiSquare,
+        Binomial,
+        Gamma,
+        Exponential,
+        Poisson,
+        Uniform,
+        Lognormal,
+        Beta,
+        F,
+    }
+
+    #[runtime_builtin(
+        name = "icdf",
+        category = "stats/summary",
+        summary = "Evaluate inverse cumulative distribution functions by distribution name.",
+        keywords = "icdf,inverse,cdf,normal,student t,weibull,binomial,chi-square,gamma,exponential,poisson,uniform,lognormal,beta,f,statistics",
+        type_resolver(super::icdf_type),
+        descriptor(self::DESCRIPTOR),
+        builtin_path = "crate::builtins::stats::summary::distributions::icdf"
+    )]
+    pub(crate) async fn icdf_builtin(
+        name: Value,
+        p: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        let distribution = parse_distribution_name(&name)?;
+        match distribution {
+            IcdfDistribution::Normal => normal_icdf(p, rest).await,
+            IcdfDistribution::StudentT => student_t_icdf(p, rest).await,
+            IcdfDistribution::Weibull => weibull_icdf(p, rest).await,
+            IcdfDistribution::ChiSquare => chi_square_icdf(p, rest).await,
+            IcdfDistribution::Binomial => binomial_icdf(p, rest).await,
+            IcdfDistribution::Gamma => gamma_icdf(p, rest).await,
+            IcdfDistribution::Exponential => exponential_icdf(p, rest).await,
+            IcdfDistribution::Poisson => poisson_icdf(p, rest).await,
+            IcdfDistribution::Uniform => uniform_icdf(p, rest).await,
+            IcdfDistribution::Lognormal => lognormal_icdf(p, rest).await,
+            IcdfDistribution::Beta => beta_icdf(p, rest).await,
+            IcdfDistribution::F => f_icdf(p, rest).await,
+        }
+    }
+
+    fn parse_distribution_name(value: &Value) -> BuiltinResult<IcdfDistribution> {
+        let Some(keyword) = crate::builtins::common::random_args::keyword_of(value) else {
+            return Err(super::normal_error(
+                "icdf",
+                "icdf: distribution name must be a string scalar",
+            ));
+        };
+        let normalized = keyword
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        match normalized.as_str() {
+            "normal" | "norm" | "gaussian" => Ok(IcdfDistribution::Normal),
+            "t" | "tdistribution" | "studentt" | "student" => Ok(IcdfDistribution::StudentT),
+            "weibull" | "wbl" => Ok(IcdfDistribution::Weibull),
+            "chisquare" | "chi2" | "chisquared" => Ok(IcdfDistribution::ChiSquare),
+            "binomial" | "bino" => Ok(IcdfDistribution::Binomial),
+            "gamma" | "gam" => Ok(IcdfDistribution::Gamma),
+            "exponential" | "exp" => Ok(IcdfDistribution::Exponential),
+            "poisson" | "poiss" => Ok(IcdfDistribution::Poisson),
+            "uniform" | "unif" => Ok(IcdfDistribution::Uniform),
+            "lognormal" | "logn" => Ok(IcdfDistribution::Lognormal),
+            "beta" => Ok(IcdfDistribution::Beta),
+            "f" | "fdist" | "fdistribution" => Ok(IcdfDistribution::F),
+            _ => Err(super::normal_error(
+                "icdf",
+                format!("icdf: unsupported distribution '{keyword}'"),
+            )),
+        }
+    }
+
+    async fn normal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::normal_args("icdf", p, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.mu.iter())
+            .zip(args.sigma.iter())
+            .map(|((p, mu), sigma)| super::norminv_scalar(*p, *mu, *sigma))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn student_t_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("icdf", p, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(p, nu)| distribution_math::student_t_inv(*p, *nu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn weibull_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, Some((1.0, 1.0)), false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, a), b)| super::wblinv_scalar(*p, *a, *b))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn chi_square_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::t_args("icdf", p, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.nu.iter())
+            .map(|(p, nu)| super::chi2inv_scalar(*p, *nu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn binomial_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((probability, n), success_probability)| {
+                super::binoinv_scalar(*probability, *n, *success_probability)
+            })
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn gamma_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, shape), scale)| super::gaminv_scalar(*p, *shape, *scale))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn exponential_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = one_param_args("Exponential", p, rest).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.param.iter())
+            .map(|(p, mu)| super::expinv_scalar(*p, *mu))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn poisson_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = one_param_args("Poisson", p, rest).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.param.iter())
+            .map(|(p, lambda)| super::poissinv_scalar(*p, *lambda))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn uniform_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, Some((0.0, 1.0)), false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, a), b)| super::unifinv_scalar(*p, *a, *b))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn lognormal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::normal_args("icdf", p, rest, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.mu.iter())
+            .zip(args.sigma.iter())
+            .map(|((p, mu), sigma)| super::logninv_scalar(*p, *mu, *sigma))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn beta_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, a), b)| super::betainv_scalar(*p, *a, *b))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    async fn f_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let data = args
+            .x
+            .iter()
+            .zip(args.a.iter())
+            .zip(args.b.iter())
+            .map(|((p, v1), v2)| super::finv_scalar(*p, *v1, *v2))
+            .collect();
+        super::finish(args.shape, data)
+    }
+
+    struct OneParamArgs {
+        x: Vec<f64>,
+        param: Vec<f64>,
+        shape: Vec<usize>,
+    }
+
+    async fn one_param_args(
+        distribution: &str,
+        p: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<OneParamArgs> {
+        if rest.len() != 1 {
+            return Err(super::normal_error(
+                "icdf",
+                format!("icdf: {distribution} distribution expects one parameter"),
+            ));
+        }
+        let x = super::value_to_tensor("icdf", p).await?;
+        let param = super::value_to_tensor("icdf", rest[0].clone()).await?;
+        let (x, param, shape) = super::broadcast_pair("icdf", &x, &param)?;
+        Ok(OneParamArgs { x, param, shape })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,6 +1568,13 @@ mod tests {
             (actual - expected).abs() <= tol,
             "actual={actual} expected={expected}"
         );
+    }
+
+    fn icdf_scalar(name: &str, p: f64, rest: Vec<Value>) -> f64 {
+        match block_on(icdf::icdf_builtin(Value::from(name), Value::Num(p), rest)).unwrap() {
+            Value::Num(value) => value,
+            other => panic!("expected scalar icdf result, got {other:?}"),
+        }
     }
 
     #[test]
@@ -916,6 +1655,259 @@ mod tests {
             Value::Num(value) => assert_close(value, 2.0, 1e-10),
             other => panic!("expected scalar inv, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn icdf_dispatches_supported_distribution_names() {
+        let normal = block_on(icdf::icdf_builtin(
+            Value::from("Normal"),
+            Value::Num(0.5),
+            vec![Value::Num(10.0), Value::Num(2.0)],
+        ))
+        .unwrap();
+        match normal {
+            Value::Num(value) => assert_close(value, 10.0, 1e-10),
+            other => panic!("expected scalar normal icdf, got {other:?}"),
+        }
+
+        let student_t = block_on(icdf::icdf_builtin(
+            Value::from("Student t"),
+            Value::Num(0.95),
+            vec![Value::Num(50.0)],
+        ))
+        .unwrap();
+        match student_t {
+            Value::Num(value) => assert_close(value, 1.675_905, 1e-6),
+            other => panic!("expected scalar t icdf, got {other:?}"),
+        }
+
+        let weibull = block_on(icdf::icdf_builtin(
+            Value::from("Weibull"),
+            Value::Num(0.5),
+            vec![Value::Num(3.0), Value::Num(4.0)],
+        ))
+        .unwrap();
+        match weibull {
+            Value::Num(value) => {
+                assert_close(value, 3.0 * std::f64::consts::LN_2.powf(0.25), 1e-12)
+            }
+            other => panic!("expected scalar weibull icdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icdf_broadcasts_and_inverts_chisquare_and_binomial() {
+        let probabilities = Value::Tensor(Tensor::new(vec![0.5, 0.95], vec![1, 2]).unwrap());
+        let normal = block_on(icdf::icdf_builtin(
+            Value::from("norm"),
+            probabilities,
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        ))
+        .unwrap();
+        match normal {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_close(tensor.data[0], 1.0, 1e-10);
+                assert_close(tensor.data[1], 4.289_707_253_902_944, 1e-10);
+            }
+            other => panic!("expected tensor normal icdf, got {other:?}"),
+        }
+
+        let chi_square = block_on(icdf::icdf_builtin(
+            Value::from("Chi-square"),
+            Value::Num(0.5),
+            vec![Value::Num(2.0)],
+        ))
+        .unwrap();
+        match chi_square {
+            Value::Num(value) => assert_close(value, 2.0 * std::f64::consts::LN_2, 1e-12),
+            other => panic!("expected scalar chi-square icdf, got {other:?}"),
+        }
+
+        let binomial = block_on(icdf::icdf_builtin(
+            Value::from("Binomial"),
+            Value::Num(0.75),
+            vec![Value::Num(10.0), Value::Num(0.5)],
+        ))
+        .unwrap();
+        match binomial {
+            Value::Num(value) => assert_close(value, 6.0, 0.0),
+            other => panic!("expected scalar binomial icdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icdf_dispatches_common_distribution_families() {
+        assert_close(
+            icdf_scalar("Exponential", 0.5, vec![Value::Num(4.0)]),
+            4.0 * std::f64::consts::LN_2,
+            1e-12,
+        );
+        assert_close(
+            icdf_scalar("Uniform", 0.25, vec![Value::Num(10.0), Value::Num(20.0)]),
+            12.5,
+            1e-12,
+        );
+        assert_close(
+            icdf_scalar("Lognormal", 0.5, vec![Value::Num(1.0), Value::Num(2.0)]),
+            std::f64::consts::E,
+            1e-10,
+        );
+        assert_close(icdf_scalar("Poisson", 0.8, vec![Value::Num(3.0)]), 4.0, 0.0);
+        assert_close(
+            icdf_scalar("Beta", 0.5, vec![Value::Num(2.0), Value::Num(2.0)]),
+            0.5,
+            1e-12,
+        );
+
+        let gamma = icdf_scalar("Gamma", 0.6, vec![Value::Num(2.0), Value::Num(3.0)]);
+        assert_close(
+            distribution_math::regularized_gamma_p(2.0, gamma / 3.0),
+            0.6,
+            1e-10,
+        );
+
+        let f = icdf_scalar("F", 0.6, vec![Value::Num(5.0), Value::Num(10.0)]);
+        let beta_x = 5.0 * f / (5.0 * f + 10.0);
+        assert_close(
+            distribution_math::regularized_beta(beta_x, 2.5, 5.0),
+            0.6,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn icdf_handles_boundaries_invalid_params_and_bad_broadcasts() {
+        assert_close(
+            icdf_scalar("Uniform", 0.0, vec![Value::Num(2.0), Value::Num(5.0)]),
+            2.0,
+            0.0,
+        );
+        assert_close(
+            icdf_scalar("Uniform", 1.0, vec![Value::Num(2.0), Value::Num(5.0)]),
+            5.0,
+            0.0,
+        );
+        assert_close(
+            icdf_scalar("Gamma", 0.0, vec![Value::Num(2.0), Value::Num(3.0)]),
+            0.0,
+            0.0,
+        );
+        assert!(icdf_scalar("Gamma", 1.0, vec![Value::Num(2.0), Value::Num(3.0)]).is_infinite());
+        assert_close(
+            icdf_scalar("Binomial", 0.0, vec![Value::Num(10.0), Value::Num(0.5)]),
+            0.0,
+            0.0,
+        );
+        assert_close(
+            icdf_scalar("Binomial", 1.0, vec![Value::Num(10.0), Value::Num(0.5)]),
+            10.0,
+            0.0,
+        );
+        assert!(icdf_scalar("Normal", -0.1, Vec::new()).is_nan());
+        assert!(icdf_scalar("Gamma", 0.5, vec![Value::Num(0.0), Value::Num(3.0)]).is_nan());
+        assert!(icdf_scalar("Uniform", 0.5, vec![Value::Num(5.0), Value::Num(2.0)]).is_nan());
+
+        let err = block_on(icdf::icdf_builtin(
+            Value::from("Exponential"),
+            Value::Tensor(Tensor::new(vec![0.1, 0.2], vec![1, 2]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+            )],
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:icdf:InvalidArgument"));
+    }
+
+    #[test]
+    fn icdf_broadcasts_later_parameter_shapes() {
+        let normal = block_on(icdf::icdf_builtin(
+            Value::from("Normal"),
+            Value::Num(0.5),
+            vec![
+                Value::Num(0.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            ],
+        ))
+        .unwrap();
+        match normal {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_close(tensor.data[0], 0.0, 1e-10);
+                assert_close(tensor.data[1], 0.0, 1e-10);
+            }
+            other => panic!("expected tensor normal icdf, got {other:?}"),
+        }
+
+        let uniform = block_on(icdf::icdf_builtin(
+            Value::from("Uniform"),
+            Value::Num(0.5),
+            vec![
+                Value::Num(0.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            ],
+        ))
+        .unwrap();
+        match uniform {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_close(tensor.data[0], 0.5, 1e-12);
+                assert_close(tensor.data[1], 1.0, 1e-12);
+            }
+            other => panic!("expected tensor uniform icdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icdf_type_uses_broadcasted_numeric_argument_shape() {
+        let probability_type = Type::Tensor {
+            shape: Some(vec![Some(1), Some(2)]),
+        };
+        let inferred = icdf_type(
+            &[Type::String, probability_type.clone(), Type::Num, Type::Num],
+            &ResolveContext::default(),
+        );
+        assert_eq!(inferred, probability_type);
+        assert_eq!(
+            icdf_type(&[Type::String, Type::Num], &ResolveContext::default()),
+            Type::Num
+        );
+        assert_eq!(
+            icdf_type(
+                &[
+                    Type::String,
+                    Type::Num,
+                    Type::Tensor {
+                        shape: Some(vec![Some(1), Some(2)])
+                    }
+                ],
+                &ResolveContext::default()
+            ),
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(2)])
+            }
+        );
+    }
+
+    #[test]
+    fn icdf_poisson_large_lambda_is_bounded_and_finite() {
+        let value = icdf_scalar("Poisson", 0.5, vec![Value::Num(1000.0)]);
+        assert!(value.is_finite());
+        assert!(value >= 0.0);
+        assert!(poisscdf_scalar(value, 1000.0) >= 0.5);
+        assert!(value == 0.0 || poisscdf_scalar(value - 1.0, 1000.0) < 0.5);
+    }
+
+    #[test]
+    fn icdf_rejects_unknown_distribution_name() {
+        let err = block_on(icdf::icdf_builtin(
+            Value::from("not_a_distribution"),
+            Value::Num(0.5),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("unsupported distribution"));
+        assert_eq!(err.identifier(), Some("RunMat:icdf:InvalidArgument"));
     }
 
     #[test]

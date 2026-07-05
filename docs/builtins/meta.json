@@ -5112,11 +5112,11 @@
               "description": "Number of trials."
             },
             {
-              "name": "p",
+              "name": "prob",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Probability parameter."
+              "description": "Success probability parameter."
             }
           ],
           "outputs": [
@@ -5147,11 +5147,11 @@
               "description": "Number of trials."
             },
             {
-              "name": "p",
+              "name": "prob",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Probability parameter."
+              "description": "Success probability parameter."
             }
           ],
           "outputs": [
@@ -39339,6 +39339,559 @@
           "identifier": "RunMat:hypot:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "hypot: internal error"
+        }
+      ]
+    },
+    {
+      "name": "icdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = icdf(\"Normal\", p)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Normal\", p, mu, sigma)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"t\", p, nu)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Weibull\", p, a, b)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Scale parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Shape parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Chi-square\", p, nu)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "nu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Degrees of freedom parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Binomial\", p, n, prob)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "n",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of trials."
+            },
+            {
+              "name": "prob",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Success probability parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Gamma\", p, shape, scale)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "shape",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Shape parameter."
+            },
+            {
+              "name": "scale",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scale parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Exponential\", p, mu)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Mean parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Poisson\", p, lambda)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "lambda",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Rate or mean parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Uniform\", p)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Uniform\", p, a, b)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower endpoint."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper endpoint."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Lognormal\", p, mu, sigma)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "mu",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Mean parameter."
+            },
+            {
+              "name": "sigma",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Standard deviation parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"Beta\", p, a, b)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First shape parameter."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second shape parameter."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(\"F\", p, v1, v2)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability value."
+            },
+            {
+              "name": "v1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator degrees of freedom."
+            },
+            {
+              "name": "v2",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator degrees of freedom."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.icdf.INVALID_ARGUMENT",
+          "identifier": "RunMat:icdf:InvalidArgument",
+          "when": "Inputs are nonnumeric, sizes are incompatible, or too many arguments are supplied.",
+          "message": "icdf: invalid argument"
+        },
+        {
+          "code": "RM.icdf.INTERNAL",
+          "identifier": "RunMat:icdf:Internal",
+          "when": "Internal tensor conversion or allocation fails.",
+          "message": "icdf: internal error"
         }
       ]
     },

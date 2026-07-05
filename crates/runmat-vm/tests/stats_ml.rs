@@ -390,15 +390,25 @@ fn covariance_conversion_surface_executes_from_scripts() {
 #[test]
 fn distribution_compatibility_surface_executes_from_scripts() {
     let vars = execute_source(
-        "rng('default'); b = binocdf(55,100,0.5); bu = binocdf(55,100,0.5,'upper'); c = chi2cdf(3,5); w = wblinv(0.5,3,4); gr = gamrnd(2,3,2,2); br = binornd(10,0.5,2,3); wr = wblrnd(4,3,[2 2]);",
+        "rng('default'); b = binocdf(55,100,0.5); bu = binocdf(55,100,0.5,'upper'); c = chi2cdf(3,5); w = wblinv(0.5,3,4); icn = icdf('Normal',0.5,10,2); ict = icdf('t',0.95,50); icw = icdf('Weibull',0.5,3,4); icc = icdf('Chi-square',0.5,2); icb = icdf('Binomial',0.75,10,0.5); ice = icdf('Exponential',0.5,4); icu = icdf('Uniform',0.25,10,20); icl = icdf('Lognormal',0.5,1,2); icp = icdf('Poisson',0.8,3); icg = icdf('Gamma',0.5,2,3); icbeta = icdf('Beta',0.5,2,2); icf = icdf('F',0.5,5,10); gr = gamrnd(2,3,2,2); br = binornd(10,0.5,2,3); wr = wblrnd(4,3,[2 2]);",
     )
     .expect("distribution compatibility script");
     assert!(has_num(&vars, 0.864_373_487_963_083));
     assert!(has_num(&vars, 0.135_626_512_036_917));
     assert!(has_num(&vars, 0.300_014_164_121_372));
+    assert!(has_num(&vars, 10.0));
+    assert!(has_num(&vars, 6.0));
+    assert!(has_num(&vars, 4.0 * std::f64::consts::LN_2));
+    assert!(has_num(&vars, 12.5));
+    assert!(has_num(&vars, std::f64::consts::E));
+    assert!(has_num(&vars, 4.0));
+    assert!(has_num(&vars, 0.5));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(value) if (*value - 3.0 * std::f64::consts::LN_2.powf(0.25)).abs() < 1.0e-8)));
+    assert!(vars.iter().any(
+        |value| matches!(value, Value::Num(value) if (*value - 2.0 * std::f64::consts::LN_2).abs() < 1.0e-10)
+    ));
     assert!(has_tensor_shape(&vars, &[2, 2]));
     assert!(has_tensor_shape(&vars, &[2, 3]));
 }
