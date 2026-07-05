@@ -278,6 +278,17 @@ fn binscatter_surface_executes_from_scripts() {
 }
 
 #[test]
+fn scatterhist_surface_executes_from_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h = scatterhist([0;0.2;0.8;1], [0;0.1;0.9;1], 'NBins', [2 2]); n = length(h); g = [\"a\";\"b\";\"a\";\"b\"]; h2 = scatterhist([0;0.2;0.8;1], [0;0.1;0.9;1], 'Group', g, 'Kernel', 'on', 'Legend', 'on', 'Location', 'southwest', 'Direction', 'in'); n2 = length(h2);",
+    )
+    .expect("scatterhist script");
+    assert!(has_tensor_shape(&vars, &[3, 1]));
+    assert!(has_num(&vars, 3.0));
+}
+
+#[test]
 fn encoding_surface_executes_from_scripts() {
     let vars = execute_source(
         "D = dummyvar([1;2;1]); labels = [\"red\";\"blue\";\"red\"]; H = onehotencode(labels, 2, 'ClassNames', [\"blue\";\"red\"], 'OutputType', 'logical'); dec = onehotdecode(H, [\"blue\";\"red\"], 2, 'string'); d11 = D(1,1); d22 = D(2,2);",

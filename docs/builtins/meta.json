@@ -81974,6 +81974,109 @@
       ]
     },
     {
+      "name": "scatterhist",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "scatterhist(x, y)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X observations."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y observations."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "scatterhist(x, y, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X observations."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y observations."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Scatterhist name-value options."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "h = scatterhist(___)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X observations."
+            },
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y observations."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Scatterhist name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Three axes handles: scatter, x marginal, and y marginal."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SCATTERHIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:scatterhist:InvalidArgument",
+          "when": "Observation vectors or name-value options are malformed.",
+          "message": "scatterhist: invalid argument"
+        },
+        {
+          "code": "RM.SCATTERHIST.INTERNAL",
+          "identifier": "RunMat:scatterhist:Internal",
+          "when": "RunMat cannot allocate or render the scatterhist chart.",
+          "message": "scatterhist: internal error"
+        }
+      ]
+    },
+    {
       "name": "scatterplot",
       "output_mode": "Fixed",
       "completion_policy": "Public",

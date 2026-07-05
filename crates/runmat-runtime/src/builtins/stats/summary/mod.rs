@@ -18,6 +18,7 @@ pub(crate) mod order_stats;
 pub(crate) mod outliers;
 pub(crate) mod qqplot;
 pub(crate) mod refline;
+pub(crate) mod scatterhist;
 
 pub use corrcoef::corrcoef_from_tensors;
 pub use cov::{cov_from_tensors, CovWeightSpec};
