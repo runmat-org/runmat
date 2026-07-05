@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::BTreeSet;
+
 use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId};
 use runmat_meshing_core::quality::predicate::tetrahedron_signed_volume;
 
@@ -118,6 +120,51 @@ fn boundary_conforming_box_generation_keeps_ambiguous_material_ownership_unclass
         .elements
         .iter()
         .all(|element| element.material_region_id == "unclassified"));
+}
+
+#[test]
+fn boundary_conforming_box_recovery_assigns_material_ownership_from_plc_facets() {
+    let plc = with_split_material_ids(split_edge_box_plc());
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("subdivided box PLC should generate boundary-conforming Tetrahedron mesh");
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+
+    let result = crate::recover::recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("boundary-owned PLC materials should recover generated element ownership");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert!(result
+        .tetrahedron_mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id != "unclassified"));
+    let material_region_ids = result
+        .tetrahedron_mesh
+        .elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_a", "region_b"])
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["boundary_owned_material_interface_recovery_input_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["recovered_boundary_owned_material_interface_items"],
+        2
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["repaired_material_interface_elements"],
+        plc.facets.len()
+    );
 }
 
 #[test]
