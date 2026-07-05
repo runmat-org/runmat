@@ -76,6 +76,11 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         0
     );
     assert_eq!(mesh.backend.tetrahedron_optimization_target_seed_count, 0);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_skipped_target_seed_count,
+        0
+    );
     assert!(mesh
         .backend
         .tetrahedron_missing_source_face_recovery_ids
@@ -217,6 +222,11 @@ fn explicit_sizing_refines_recovered_cube_source_edges() {
             == 0
     );
     assert_eq!(mesh.backend.tetrahedron_optimization_target_seed_count, 0);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_skipped_target_seed_count,
+        0
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("refined protected-edge cube should pass the default quality gate");
     validate_analysis_mesh_with_options(

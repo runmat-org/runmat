@@ -69,7 +69,6 @@ fn validate_optimization_evidence(
 
     let reported_edit_count = backend.tetrahedron_smoothed_point_count
         + backend.tetrahedron_sliver_removed_count
-        + backend.tetrahedron_optimization_skipped_target_seed_count
         + backend.tetrahedron_optimization_rejected_edit_count
         + backend.tetrahedron_untangling_relocated_seed_count
         + backend.tetrahedron_untangling_reconnected_edge_star_count

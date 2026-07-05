@@ -116,6 +116,17 @@ fn rejects_optimization_edits_without_reported_pass() {
 }
 
 #[test]
+fn allows_skipped_optimization_targets_without_reported_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_target_seed_count = 2;
+    mesh.backend
+        .tetrahedron_optimization_skipped_target_seed_count = 2;
+
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("skipped targets are bookkeeping when no optimization pass ran");
+}
+
+#[test]
 fn rejects_reported_optimization_min_exact_quality_regression() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

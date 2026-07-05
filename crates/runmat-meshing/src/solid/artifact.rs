@@ -700,6 +700,8 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 missing_material_interface_recovery.omitted_count,
             tetrahedron_sliver_count: backend_quality.sliver_count,
             tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
+            tetrahedron_optimization_skipped_target_seed_count: backend_quality
+                .quality_repair_target_count,
             tetrahedron_optimization_initial_max_aspect_ratio: backend_quality.max_aspect_ratio,
             tetrahedron_optimization_final_max_aspect_ratio: backend_quality.max_aspect_ratio,
             tetrahedron_optimization_initial_min_exact_scaled_jacobian: backend_quality
