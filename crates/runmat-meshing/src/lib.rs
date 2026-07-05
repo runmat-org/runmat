@@ -18,3 +18,6 @@ pub use visualization::{
     map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,
     BoundaryNodeVectorValue, FieldMappingError,
 };
+
+#[cfg(test)]
+mod structure_tests;
