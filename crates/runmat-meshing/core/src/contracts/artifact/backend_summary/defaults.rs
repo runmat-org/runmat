@@ -80,6 +80,7 @@ impl Default for MeshBackendSummary {
             plc_input_cad_curve_curvature_sample_count: 0,
             volume_component_count: 0,
             interior_seed_point_count: 0,
+            tetrahedron_generation_family: "unknown".to_string(),
             tetrahedron_element_count: 0,
             tetrahedron_material_region_count: 0,
             tetrahedron_unclassified_material_element_count: 0,

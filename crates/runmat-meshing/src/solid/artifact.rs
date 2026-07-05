@@ -244,6 +244,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 &tetrahedron_mesh,
                 "input_plc_cad_curve_curvature_samples",
             ),
+            tetrahedron_generation_family: tetrahedron_generation_family(&tetrahedron_mesh),
             tetrahedron_element_count: tetrahedron_mesh.elements.len(),
             tetrahedron_material_region_count: tetrahedron_material_region_count(
                 &tetrahedron_mesh,
@@ -1037,6 +1038,19 @@ fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> us
         .get(key)
         .copied()
         .unwrap_or_default()
+}
+
+fn tetrahedron_generation_family(tetrahedron_mesh: &TetrahedronMesh) -> String {
+    match tetrahedron_mesh.mesh_id.as_str() {
+        "structured_box_tetrahedron_mesh" => "structured_box",
+        "structured_box_boundary_conforming_tetrahedron_mesh" => "boundary_conforming_box",
+        "single_tetrahedron_mesh" => "single_tetrahedron",
+        "convex_polyhedron_tetrahedron_mesh" => "convex_polyhedron",
+        "star_shaped_polyhedron_tetrahedron_mesh" => "star_shaped_polyhedron",
+        "initial_plc_tetrahedron_mesh" => "initial_plc",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 fn tetrahedron_rejection_counts_by_prefix(

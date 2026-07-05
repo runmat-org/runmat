@@ -177,6 +177,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             plc_input_cad_curve_rejected_evaluator_sample_count: 1,
             plc_input_cad_curve_curvature_sized_edge_count: 1,
             plc_input_cad_curve_curvature_sample_count: 2,
+            tetrahedron_generation_family: "star_shaped_polyhedron".to_string(),
             tetrahedron_element_count: 12,
             tetrahedron_material_region_count: 2,
             tetrahedron_unclassified_material_element_count: 0,

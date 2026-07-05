@@ -22,6 +22,10 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "boundary_conforming_box"
+    );
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     let source_face_count = mesh
@@ -388,6 +392,10 @@ fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     .expect("tetrahedron PLC should run through the root solid pipeline");
 
     assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "single_tetrahedron"
+    );
     assert_eq!(mesh.volume_elements.len(), 1);
     assert_eq!(mesh.boundary_faces.len(), 4);
     assert_eq!(mesh.backend.plc_input_node_count, 4);
@@ -467,6 +475,10 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
     .expect("convex octahedron PLC should run through the root solid pipeline");
 
     assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "convex_polyhedron"
+    );
     assert_eq!(mesh.volume_elements.len(), 8);
     assert_eq!(mesh.boundary_faces.len(), 8);
     assert_eq!(mesh.backend.tetrahedron_source_face_recovery_item_count, 8);
@@ -484,6 +496,10 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
     .expect("star-shaped dented-corner solid should run through the root solid pipeline");
 
     assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "star_shaped_polyhedron"
+    );
     assert_eq!(
         mesh.volume_elements.len(),
         mesh.backend.surface_element_count
@@ -531,6 +547,10 @@ fn auto_backend_preserves_recovered_material_regions_for_dented_corner_solid() {
         mesh.backend
             .tetrahedron_recovered_material_interface_recovery_item_count,
         2
+    );
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "star_shaped_polyhedron"
     );
     validate_analysis_mesh_with_options(
         &mesh,

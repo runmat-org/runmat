@@ -153,6 +153,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub interior_seed_point_count: usize,
     #[serde(default)]
+    pub tetrahedron_generation_family: String,
+    #[serde(default)]
     pub tetrahedron_element_count: usize,
     #[serde(default)]
     pub tetrahedron_material_region_count: usize,
