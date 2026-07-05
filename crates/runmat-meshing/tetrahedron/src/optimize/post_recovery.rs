@@ -6,15 +6,17 @@ use crate::reconnect::{
 };
 
 use super::{
-    smooth_tetrahedron_mesh_boundary_with_projector, smooth_tetrahedron_mesh_interior,
-    TetrahedronBoundarySmoothingProjector, TetrahedronMeshBoundarySmoothingOptions,
-    TetrahedronMeshBoundarySmoothingReport, TetrahedronMeshInteriorSmoothingOptions,
-    TetrahedronMeshInteriorSmoothingReport,
+    remove_tetrahedron_mesh_slivers, smooth_tetrahedron_mesh_boundary_with_projector,
+    smooth_tetrahedron_mesh_interior, TetrahedronBoundarySmoothingProjector,
+    TetrahedronMeshBoundarySmoothingOptions, TetrahedronMeshBoundarySmoothingReport,
+    TetrahedronMeshInteriorSmoothingOptions, TetrahedronMeshInteriorSmoothingReport,
+    TetrahedronMeshSliverRemovalOptions, TetrahedronMeshSliverRemovalReport,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecoveredTetrahedronMeshOptimizationOptions {
     pub local_reconnection: TetrahedronMeshLocalReconnectionOptions,
+    pub sliver_removal: TetrahedronMeshSliverRemovalOptions,
     pub interior_smoothing: TetrahedronMeshInteriorSmoothingOptions,
     pub boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions,
 }
@@ -23,6 +25,7 @@ impl Default for RecoveredTetrahedronMeshOptimizationOptions {
     fn default() -> Self {
         Self {
             local_reconnection: TetrahedronMeshLocalReconnectionOptions::default(),
+            sliver_removal: TetrahedronMeshSliverRemovalOptions::default(),
             interior_smoothing: TetrahedronMeshInteriorSmoothingOptions::default(),
             boundary_smoothing: TetrahedronMeshBoundarySmoothingOptions::default(),
         }
@@ -32,6 +35,7 @@ impl Default for RecoveredTetrahedronMeshOptimizationOptions {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoveredTetrahedronMeshOptimizationReport {
     pub local_reconnection: TetrahedronMeshLocalReconnectionReport,
+    pub sliver_removal: TetrahedronMeshSliverRemovalReport,
     pub interior_smoothing: TetrahedronMeshInteriorSmoothingReport,
     pub boundary_smoothing: TetrahedronMeshBoundarySmoothingReport,
 }
@@ -43,6 +47,7 @@ pub fn optimize_recovered_tetrahedron_mesh(
 ) -> RecoveredTetrahedronMeshOptimizationReport {
     let local_reconnection =
         improve_tetrahedron_mesh_with_local_flips(mesh, options.local_reconnection);
+    let sliver_removal = remove_tetrahedron_mesh_slivers(mesh, options.sliver_removal);
     let interior_smoothing = smooth_tetrahedron_mesh_interior(mesh, options.interior_smoothing);
     let boundary_smoothing = smooth_tetrahedron_mesh_boundary_with_projector(
         mesh,
@@ -52,6 +57,7 @@ pub fn optimize_recovered_tetrahedron_mesh(
 
     RecoveredTetrahedronMeshOptimizationReport {
         local_reconnection,
+        sliver_removal,
         interior_smoothing,
         boundary_smoothing,
     }
@@ -84,6 +90,10 @@ mod tests {
                     max_attempted_reconnections: 0,
                     ..TetrahedronMeshLocalReconnectionOptions::default()
                 },
+                sliver_removal: TetrahedronMeshSliverRemovalOptions {
+                    max_attempted_elements: 0,
+                    ..TetrahedronMeshSliverRemovalOptions::default()
+                },
                 interior_smoothing: TetrahedronMeshInteriorSmoothingOptions {
                     smoothing: TetrahedronSmoothingOptions {
                         min_volume_m3: 1.0e-18,
@@ -103,6 +113,7 @@ mod tests {
         );
 
         assert_eq!(report.local_reconnection.attempted_reconnection_count, 0);
+        assert_eq!(report.sliver_removal.attempted_element_count, 0);
         assert_eq!(report.interior_smoothing.attempted_point_count, 1);
         assert_eq!(report.interior_smoothing.accepted_point_count, 1);
         assert_eq!(report.boundary_smoothing.attempted_point_count, 0);

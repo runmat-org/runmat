@@ -32,6 +32,16 @@ pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_BUDGET_LIMIT_COUNT: &str =
     "optimization_boundary_smoothing_budget_limited";
 pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_REJECTION_PREFIX: &str =
     "optimization_boundary_smoothing_rejected_";
+pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ATTEMPT_COUNT: &str =
+    "optimization_sliver_removal_attempts";
+pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ACCEPTED_COUNT: &str =
+    "optimization_sliver_removal_accepted";
+pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTED_COUNT: &str =
+    "optimization_sliver_removal_rejected";
+pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT: &str =
+    "optimization_sliver_removal_budget_limited";
+pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX: &str =
+    "optimization_sliver_removal_rejected_";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {

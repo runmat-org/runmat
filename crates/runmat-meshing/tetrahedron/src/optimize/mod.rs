@@ -1,6 +1,7 @@
 pub mod boundary_smoothing;
 pub mod interior_smoothing;
 pub mod post_recovery;
+pub mod sliver_removal;
 
 pub use boundary_smoothing::{
     smooth_tetrahedron_mesh_boundary_with_projector, TetrahedronBoundarySmoothingProjection,
@@ -14,4 +15,8 @@ pub use interior_smoothing::{
 pub use post_recovery::{
     optimize_recovered_tetrahedron_mesh, RecoveredTetrahedronMeshOptimizationOptions,
     RecoveredTetrahedronMeshOptimizationReport,
+};
+pub use sliver_removal::{
+    remove_tetrahedron_mesh_slivers, TetrahedronMeshSliverRemovalOptions,
+    TetrahedronMeshSliverRemovalReport,
 };
