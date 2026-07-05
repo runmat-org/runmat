@@ -2,8 +2,9 @@ use super::*;
 use std::collections::BTreeSet;
 
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
 };
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisMeshValidationOptions,
@@ -97,6 +98,42 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         },
     )
     .expect("root solid pipeline should recover PLC constraints before quality optimization");
+}
+
+#[test]
+fn auto_backend_preserves_recovered_material_regions_for_split_cube() {
+    let mesh = generate_analysis_mesh(
+        &split_material_cube_geometry(),
+        VolumeMeshingOptions::default(),
+    )
+    .expect("split-region cube should recover material ownership into final artifact");
+
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert!(mesh
+        .volume_elements
+        .iter()
+        .all(|element| element.material_region_id != "unclassified"));
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_recovered_material_interface_recovery_item_count,
+        2
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["region_base".to_string(), "region_cap".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("final artifact should expose both recovered material regions");
 }
 
 #[test]
@@ -323,6 +360,40 @@ fn cube_geometry() -> GeometryAsset {
         )],
         diagnostics: Vec::new(),
     }
+}
+
+fn split_material_cube_geometry() -> GeometryAsset {
+    let mut geometry = cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_split_material_cube".to_string();
+    geometry.regions = vec![
+        Region {
+            region_id: "region_base".to_string(),
+            name: "base".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "region_cap".to_string(),
+            name: "cap".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+    ];
+    geometry.region_entity_mappings = vec![
+        RegionEntityMapping::new(
+            "region_base",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 6)],
+        ),
+        RegionEntityMapping::new(
+            "region_cap",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(6, 6)],
+        ),
+    ];
+    geometry
 }
 
 fn octahedron_geometry() -> GeometryAsset {
