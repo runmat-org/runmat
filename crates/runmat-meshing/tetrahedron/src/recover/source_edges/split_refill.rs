@@ -196,7 +196,7 @@ pub(in crate::recover) fn apply_source_edge_split_refill_recovery(
             );
             continue;
         };
-        let Some(split_refill) =
+        let Some(candidate) =
             evaluate_split_refill(&adapter, edge, is_cad_curve_source_edge, &mut recovery)
         else {
             continue;
@@ -209,7 +209,7 @@ pub(in crate::recover) fn apply_source_edge_split_refill_recovery(
             plc,
             tetrahedron_mesh,
             &adapter,
-            &split_refill,
+            &candidate,
             protected_edge_node_ids,
             source_edge_id,
         ) {
@@ -407,12 +407,17 @@ impl SplitRefillAdapter {
     }
 }
 
+struct SplitRefillCandidate {
+    selected_tetrahedron_id: u32,
+    split_refill: ConstrainedCavitySourceEdgeSplitRecovery,
+}
+
 fn evaluate_split_refill(
     adapter: &SplitRefillAdapter,
     edge: [u32; 2],
     is_cad_curve_source_edge: bool,
     recovery: &mut SourceEdgeSplitRefillRecovery,
-) -> Option<ConstrainedCavitySourceEdgeSplitRecovery> {
+) -> Option<SplitRefillCandidate> {
     let Some(seed_index) = adapter.first_tetrahedron_index_incident_to_edge(edge) else {
         recovery.reject(
             "source_edge_split_refill_no_incident_tetrahedron",
@@ -420,8 +425,10 @@ fn evaluate_split_refill(
         );
         return None;
     };
+    let source_tetrahedra = vec![adapter.tetrahedra[seed_index].clone()];
+    let selected_tetrahedron_id = source_tetrahedra[0].tetrahedron_id;
     let Ok(cavity) =
-        constrained_cavity_from_selected_tetrahedra(&adapter.tetrahedra, &[seed_index], Vec::new())
+        constrained_cavity_from_selected_tetrahedra(&source_tetrahedra, &[0], Vec::new())
     else {
         recovery.reject(
             "source_edge_split_refill_cavity_extraction",
@@ -434,11 +441,16 @@ fn evaluate_split_refill(
         &cavity,
         &adapter.nodes,
         &adapter.nodes,
-        &adapter.tetrahedra,
+        &source_tetrahedra,
         edge,
         ConstrainedCavityRefillOptions::default(),
     ) {
-        Ok(split_refill) if split_refill.refill_evaluation.refill.is_some() => Some(split_refill),
+        Ok(split_refill) if split_refill.refill_evaluation.refill.is_some() => {
+            Some(SplitRefillCandidate {
+                selected_tetrahedron_id,
+                split_refill,
+            })
+        }
         Ok(split_refill) => {
             recovery.rejected_source_edge_count += 1;
             if is_cad_curve_source_edge {
@@ -470,10 +482,11 @@ fn apply_split_refill(
     plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &mut TetrahedronMesh,
     adapter: &SplitRefillAdapter,
-    split_refill: &ConstrainedCavitySourceEdgeSplitRecovery,
+    candidate: &SplitRefillCandidate,
     protected_edge_node_ids: &[TopologyEntityId; 2],
     source_edge_id: &TopologyEntityId,
 ) -> Result<(), &'static str> {
+    let split_refill = &candidate.split_refill;
     let Some(refill) = split_refill.refill_evaluation.refill.as_ref() else {
         return Err("source_edge_split_refill_no_refill_candidate");
     };
@@ -509,13 +522,20 @@ fn apply_split_refill(
         .max()
         .unwrap_or_default()
         .saturating_add(1);
-    let mut final_tetrahedra = split_refill
-        .split
-        .source_tetrahedra
+    let mut final_tetrahedra = adapter
+        .tetrahedra
         .iter()
-        .filter(|tetrahedron| !removed_tetrahedron_ids.contains(&tetrahedron.tetrahedron_id))
+        .filter(|tetrahedron| tetrahedron.tetrahedron_id != candidate.selected_tetrahedron_id)
         .cloned()
         .collect::<Vec<_>>();
+    final_tetrahedra.extend(
+        split_refill
+            .split
+            .source_tetrahedra
+            .iter()
+            .filter(|tetrahedron| !removed_tetrahedron_ids.contains(&tetrahedron.tetrahedron_id))
+            .cloned(),
+    );
     for refill_tetrahedron in &refill.tetrahedra {
         final_tetrahedra.push(refill_tetrahedron_to_cavity_tetrahedron(
             refill_tetrahedron,
