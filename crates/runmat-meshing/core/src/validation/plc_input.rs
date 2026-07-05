@@ -101,6 +101,14 @@ fn validate_tetrahedron_generation_selection_evidence(
     {
         return missing("inconsistent_tetrahedron_generation_rejected_family_count");
     }
+    if backend.tetrahedron_generation_interior_support_accepted_count
+        > backend.tetrahedron_generation_interior_support_candidate_count
+    {
+        return missing("inconsistent_tetrahedron_generation_interior_support_count");
+    }
+    if backend.tetrahedron_generation_interior_support_accepted_count > 1 {
+        return missing("unsupported_tetrahedron_generation_interior_support_count");
+    }
     Ok(())
 }
 

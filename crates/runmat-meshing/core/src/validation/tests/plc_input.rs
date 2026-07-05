@@ -131,6 +131,44 @@ fn rejects_tetrahedron_generation_rejected_family_count_mismatch() {
 }
 
 #[test]
+fn rejects_tetrahedron_generation_support_acceptance_without_candidates() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend
+        .tetrahedron_generation_interior_support_candidate_count = 0;
+    mesh.backend
+        .tetrahedron_generation_interior_support_accepted_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("accepted support points must be backed by candidate evidence");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "inconsistent_tetrahedron_generation_interior_support_count".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_tetrahedron_generation_multiple_accepted_support_points() {
+    let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
+    mesh.backend
+        .tetrahedron_generation_interior_support_candidate_count = 3;
+    mesh.backend
+        .tetrahedron_generation_interior_support_accepted_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("native support-point generation selects at most one support point");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::MissingPlcInputEvidence {
+            reason: "unsupported_tetrahedron_generation_interior_support_count".to_string(),
+        }
+    );
+}
+
+#[test]
 fn rejects_nested_plc_shell_without_nested_generation_family() {
     let mut mesh = solid_tetrahedron_mesh_with_plc_input_evidence();
     mesh.backend.plc_input_boundary_component_count = 2;
