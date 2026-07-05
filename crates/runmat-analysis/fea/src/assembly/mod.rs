@@ -23,7 +23,10 @@ use self::{
         global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
-    solid::{assemble_solid_stiffness_csr, solid_topology_from_analysis_mesh, SolidAssemblyError},
+    solid::{
+        assemble_solid_stiffness_csr_with_materials, solid_topology_from_analysis_mesh,
+        SolidAssemblyError,
+    },
     solid_boundary::apply_analysis_mesh_structural_regions,
 };
 
@@ -1061,12 +1064,13 @@ fn assemble_linear_system_impl(
     }
 
     let stiffness_csr = match analysis_mesh.as_ref() {
-        Some(mesh) => match assemble_solid_stiffness_csr(
+        Some(mesh) => match assemble_solid_stiffness_csr_with_materials(
             mesh,
             SolidMaterial {
                 youngs_modulus_pa: structural_material.youngs_modulus_pa,
                 poisson_ratio: structural_material.poisson_ratio,
             },
+            &solid_materials_by_region(model),
             base_dof_count,
         ) {
             Ok(dense) => Some(dense),
@@ -1627,6 +1631,29 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         lame_lambda_pa,
         shear_modulus_pa,
     }
+}
+
+fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
+    let materials_by_id = model
+        .materials
+        .iter()
+        .map(|material| (material.material_id.as_str(), material))
+        .collect::<BTreeMap<_, _>>();
+
+    model
+        .material_assignments
+        .iter()
+        .filter_map(|assignment| {
+            let material = materials_by_id.get(assignment.assigned_material_id.as_str())?;
+            Some((
+                assignment.region_id.clone(),
+                SolidMaterial {
+                    youngs_modulus_pa: material.mechanical.youngs_modulus_pa.max(1.0),
+                    poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
+                },
+            ))
+        })
+        .collect()
 }
 
 fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
@@ -3219,6 +3246,48 @@ mod tests {
     }
 
     #[test]
+    fn analysis_mesh_material_regions_select_assigned_solid_materials() {
+        let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut hard = soft_model.materials[0].clone();
+        hard.material_id = "mat_hard".to_string();
+        hard.mechanical.youngs_modulus_pa = 200.0e9;
+        hard.mechanical.poisson_ratio = 0.3;
+        let mut soft = hard.clone();
+        soft.material_id = "mat_soft".to_string();
+        soft.mechanical.youngs_modulus_pa = 20.0e9;
+        soft_model.materials = vec![hard.clone(), soft.clone()];
+        soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
+            region_id: "soft_region".to_string(),
+            expected_material_id: "mat_hard".to_string(),
+            assigned_material_id: "mat_soft".to_string(),
+            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+        }];
+        let mut soft_mesh = tetrahedron4_mesh();
+        soft_mesh.volume_elements[0].material_region_id = "soft_region".to_string();
+
+        let mut hard_model = soft_model.clone();
+        hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
+            region_id: "soft_region".to_string(),
+            expected_material_id: "mat_hard".to_string(),
+            assigned_material_id: "mat_hard".to_string(),
+            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+        }];
+        let hard_mesh = soft_mesh.clone();
+
+        let soft_summary = assemble_linear_system(&soft_model, None, Some(soft_mesh), None, None);
+        let hard_summary = assemble_linear_system(&hard_model, None, Some(hard_mesh), None, None);
+
+        assert!(
+            first_csr_diagonal(&soft_summary) < first_csr_diagonal(&hard_summary) * 0.2,
+            "soft material assignment should lower solid element stiffness"
+        );
+        assert_eq!(
+            soft_summary.structural_solid_recovery[0].region_id,
+            "soft_region"
+        );
+    }
+
+    #[test]
     fn strict_analysis_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let mut mesh = tetrahedron4_mesh();
@@ -3392,7 +3461,7 @@ mod tests {
     }
 
     fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
-        AnalysisMeshArtifact {
+        let mut mesh = AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
             mesh_id: "unit_tetrahedron".to_string(),
             nodes: vec![
@@ -3412,6 +3481,7 @@ mod tests {
             boundary_edges: Vec::new(),
             quality: AnalysisMeshQualityReport::default(),
             sizing: MeshSizingField::default(),
+            field_topology: Vec::new(),
             backend: Default::default(),
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
@@ -3420,7 +3490,9 @@ mod tests {
                 source_geometry_revision: 1,
                 source_geometry_sha256: None,
             },
-        }
+        };
+        mesh.refresh_field_topology();
+        mesh
     }
 
     fn boundary_face(
@@ -3446,6 +3518,19 @@ mod tests {
             (actual - expected).abs() <= 1.0e-8,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn first_csr_diagonal(summary: &AssemblySummary) -> f64 {
+        let csr = summary
+            .operator
+            .stiffness_csr
+            .as_ref()
+            .expect("analysis mesh should assemble CSR stiffness");
+        csr.column_indices[csr.row_offsets[0]..csr.row_offsets[1]]
+            .iter()
+            .zip(csr.values[csr.row_offsets[0]..csr.row_offsets[1]].iter())
+            .find_map(|(&column, &value)| (column == 0).then_some(value.abs()))
+            .expect("first row should contain diagonal")
     }
 
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {

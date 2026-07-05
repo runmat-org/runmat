@@ -1617,7 +1617,7 @@ mod tests {
     }
 
     fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
-        AnalysisMeshArtifact {
+        let mut mesh = AnalysisMeshArtifact {
             schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
             mesh_id: "unit_tetrahedron".to_string(),
             nodes: vec![
@@ -1637,6 +1637,7 @@ mod tests {
             boundary_edges: Vec::new(),
             quality: AnalysisMeshQualityReport::default(),
             sizing: MeshSizingField::default(),
+            field_topology: Vec::new(),
             backend: Default::default(),
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
@@ -1645,7 +1646,9 @@ mod tests {
                 source_geometry_revision: 1,
                 source_geometry_sha256: None,
             },
-        }
+        };
+        mesh.refresh_field_topology();
+        mesh
     }
 
     fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {

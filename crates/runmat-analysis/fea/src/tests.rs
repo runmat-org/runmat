@@ -757,7 +757,7 @@ fn prep_context_without_analysis_mesh_fails_for_solid_continuum() {
 }
 
 fn single_tetrahedron_analysis_mesh() -> AnalysisMeshArtifact {
-    AnalysisMeshArtifact {
+    let mut mesh = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: "single_tetrahedron".to_string(),
         nodes: vec![
@@ -780,6 +780,7 @@ fn single_tetrahedron_analysis_mesh() -> AnalysisMeshArtifact {
         boundary_edges: Vec::new(),
         quality: AnalysisMeshQualityReport::default(),
         sizing: MeshSizingField::default(),
+        field_topology: Vec::new(),
         backend: Default::default(),
         adaptive_iterations: Vec::new(),
         provenance: AnalysisMeshProvenance {
@@ -788,7 +789,9 @@ fn single_tetrahedron_analysis_mesh() -> AnalysisMeshArtifact {
             source_geometry_revision: 1,
             source_geometry_sha256: None,
         },
-    }
+    };
+    mesh.refresh_field_topology();
+    mesh
 }
 
 fn single_tetrahedron_analysis_mesh_for_model(
@@ -822,6 +825,7 @@ fn single_tetrahedron_analysis_mesh_for_model(
     if let Some(loaded_face) = mesh.boundary_faces.get_mut(1) {
         loaded_face.region_ids = loaded_regions.into_iter().collect();
     }
+    mesh.refresh_field_topology();
     mesh
 }
 

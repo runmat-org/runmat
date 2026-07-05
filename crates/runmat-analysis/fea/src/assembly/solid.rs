@@ -109,6 +109,15 @@ pub fn assemble_solid_stiffness_csr(
     material: SolidMaterial,
     base_dof_count: usize,
 ) -> Result<CsrMatrix, SolidAssemblyError> {
+    assemble_solid_stiffness_csr_with_materials(mesh, material, &BTreeMap::new(), base_dof_count)
+}
+
+pub fn assemble_solid_stiffness_csr_with_materials(
+    mesh: &AnalysisMeshArtifact,
+    default_material: SolidMaterial,
+    materials_by_region: &BTreeMap<String, SolidMaterial>,
+    base_dof_count: usize,
+) -> Result<CsrMatrix, SolidAssemblyError> {
     let topology = solid_topology_from_analysis_mesh(mesh, base_dof_count)?;
     let mut node_offsets = BTreeMap::<u32, usize>::new();
     for (index, node) in mesh.nodes.iter().enumerate() {
@@ -144,6 +153,10 @@ pub fn assemble_solid_stiffness_csr(
                 }
             })?;
         }
+        let material = materials_by_region
+            .get(element.material_region_id.as_str())
+            .copied()
+            .unwrap_or(default_material);
         let element_stiffness =
             tetrahedron4_global_stiffness_matrix(material, Tetrahedron4ElementGeometry { nodes_m })
                 .map_err(|err| SolidAssemblyError::ElementStiffness {
@@ -264,6 +277,7 @@ mod tests {
             boundary_edges: Vec::new(),
             quality: AnalysisMeshQualityReport::default(),
             sizing: MeshSizingField::default(),
+            field_topology: Vec::new(),
             backend: Default::default(),
             adaptive_iterations: Vec::new(),
             provenance: AnalysisMeshProvenance {
