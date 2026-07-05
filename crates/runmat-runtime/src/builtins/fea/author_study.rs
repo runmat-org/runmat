@@ -241,6 +241,9 @@ mod tests {
                 "solve_ready": true,
                 "backend": "solid",
                 "tetrahedron_generation_family": "structured_box",
+                "tetrahedron_generation_attempted_family_count": 2,
+                "tetrahedron_generation_rejected_family_count": 1,
+                "tetrahedron_generation_selected_family_index": 2,
                 "topology": {
                     "node_count": 4,
                     "volume_element_count": 1,

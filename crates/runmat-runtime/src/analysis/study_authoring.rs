@@ -207,7 +207,17 @@ pub fn analysis_author_study_op(
     let evidence = AnalysisStudyAuthoringEvidence {
         schema_version: "fea_study_authoring_evidence/v1".to_string(),
         mesh_id: intent.mesh_authoring_summary.mesh_id.clone(),
-        mesh_authoring_summary_schema_version: intent.mesh_authoring_summary.schema_version,
+        mesh_authoring_summary_schema_version: intent.mesh_authoring_summary.schema_version.clone(),
+        tetrahedron_generation_family: intent.mesh_authoring_summary.tetrahedron_generation_family,
+        tetrahedron_generation_attempted_family_count: intent
+            .mesh_authoring_summary
+            .tetrahedron_generation_attempted_family_count,
+        tetrahedron_generation_rejected_family_count: intent
+            .mesh_authoring_summary
+            .tetrahedron_generation_rejected_family_count,
+        tetrahedron_generation_selected_family_index: intent
+            .mesh_authoring_summary
+            .tetrahedron_generation_selected_family_index,
         selected_material_region_id: material_region_id,
         selected_fixed_boundary_region_id: fixed_boundary_region_id,
         selected_load_boundary_region_id: load_boundary_region_id,

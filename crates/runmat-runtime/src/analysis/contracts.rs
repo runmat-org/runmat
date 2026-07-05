@@ -1886,6 +1886,14 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub schema_version: String,
     pub mesh_id: String,
     pub mesh_authoring_summary_schema_version: String,
+    #[serde(default)]
+    pub tetrahedron_generation_family: String,
+    #[serde(default)]
+    pub tetrahedron_generation_attempted_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_rejected_family_count: usize,
+    #[serde(default)]
+    pub tetrahedron_generation_selected_family_index: usize,
     pub selected_material_region_id: String,
     pub selected_fixed_boundary_region_id: String,
     pub selected_load_boundary_region_id: String,

@@ -2441,6 +2441,10 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
     summary.solve_ready = true;
     summary.validation_error_code = None;
     summary.validation_error_message = None;
+    summary.tetrahedron_generation_family = "star_shaped_polyhedron".to_string();
+    summary.tetrahedron_generation_attempted_family_count = 5;
+    summary.tetrahedron_generation_rejected_family_count = 4;
+    summary.tetrahedron_generation_selected_family_index = 5;
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
@@ -2490,6 +2494,31 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         authored.data.evidence.selected_load_boundary_region_id,
         "tip".to_string()
     );
+    assert_eq!(
+        authored.data.evidence.tetrahedron_generation_family,
+        "star_shaped_polyhedron"
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_attempted_family_count,
+        5
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_rejected_family_count,
+        4
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_selected_family_index,
+        5
+    );
 
     let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
         .expect("authored study should validate");
@@ -2506,6 +2535,22 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
     assert_eq!(
         artifact["evidence"]["selected_load_boundary_region_id"].as_str(),
         Some("tip")
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_family"].as_str(),
+        Some("star_shaped_polyhedron")
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_attempted_family_count"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_rejected_family_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_selected_family_index"].as_u64(),
+        Some(5)
     );
 
     let _ = fs::remove_dir_all(&root);
