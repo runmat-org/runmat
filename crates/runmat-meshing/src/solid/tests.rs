@@ -107,6 +107,25 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
         .is_empty());
     assert_eq!(
         mesh.backend
+            .tetrahedron_optimization_boundary_smoothing_attempt_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_boundary_smoothing_accepted_count,
+        0
+    );
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_optimization_boundary_smoothing_rejected_count,
+        0
+    );
+    assert!(mesh
+        .backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_by_reason
+        .is_empty());
+    assert_eq!(
+        mesh.backend
             .tetrahedron_optimization_local_reconnection_accepted_count,
         0
     );

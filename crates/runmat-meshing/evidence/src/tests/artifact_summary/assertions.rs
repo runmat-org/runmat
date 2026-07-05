@@ -511,7 +511,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.refinement_pass_count, 2);
     assert_eq!(recovery.refinement_point_count, 5);
     assert_eq!(recovery.optimization_pass_count, 1);
-    assert_eq!(recovery.smoothed_point_count, 2);
+    assert_eq!(recovery.smoothed_point_count, 3);
     assert_eq!(recovery.optimization_interior_smoothing_attempt_count, 4);
     assert_eq!(recovery.optimization_interior_smoothing_accepted_count, 2);
     assert_eq!(recovery.optimization_interior_smoothing_rejected_count, 1);
@@ -522,6 +522,17 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(
         recovery.optimization_interior_smoothing_rejected_by_reason,
         BTreeMap::from([("quality_does_not_improve".to_string(), 1)])
+    );
+    assert_eq!(recovery.optimization_boundary_smoothing_attempt_count, 3);
+    assert_eq!(recovery.optimization_boundary_smoothing_accepted_count, 1);
+    assert_eq!(recovery.optimization_boundary_smoothing_rejected_count, 1);
+    assert_eq!(
+        recovery.optimization_boundary_smoothing_budget_limited_count,
+        1
+    );
+    assert_eq!(
+        recovery.optimization_boundary_smoothing_rejected_by_reason,
+        BTreeMap::from([("projection_out_of_bounds".to_string(), 1)])
     );
     assert_eq!(recovery.sliver_count, 1);
     assert_eq!(recovery.sliver_removed_count, 2);

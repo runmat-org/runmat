@@ -20,6 +20,16 @@ pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_BUDGET_LIMIT_COUNT: &str =
     "optimization_interior_smoothing_budget_limited";
 pub const TETRAHEDRON_OPTIMIZATION_INTERIOR_SMOOTHING_REJECTION_PREFIX: &str =
     "optimization_interior_smoothing_rejected_";
+pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ATTEMPT_COUNT: &str =
+    "optimization_boundary_smoothing_attempts";
+pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_ACCEPTED_COUNT: &str =
+    "optimization_boundary_smoothing_accepted";
+pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_REJECTED_COUNT: &str =
+    "optimization_boundary_smoothing_rejected";
+pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_BUDGET_LIMIT_COUNT: &str =
+    "optimization_boundary_smoothing_budget_limited";
+pub const TETRAHEDRON_OPTIMIZATION_BOUNDARY_SMOOTHING_REJECTION_PREFIX: &str =
+    "optimization_boundary_smoothing_rejected_";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {

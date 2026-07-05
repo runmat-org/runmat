@@ -161,9 +161,86 @@ fn rejects_interior_smoothing_accepted_count_mismatch() {
     assert_eq!(
         err,
         AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
-            family: "optimization_interior_smoothing_accepted_points".to_string(),
+            family: "optimization_smoothing_accepted_points".to_string(),
             observed_count: 0,
             limit_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_boundary_smoothing_outcomes_that_exceed_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_attempt_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_accepted_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_count = 1;
+    mesh.backend.tetrahedron_smoothed_point_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_by_reason =
+        BTreeMap::from([("projection_out_of_bounds".to_string(), 1)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("boundary smoothing outcomes cannot exceed attempts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_boundary_smoothing_outcomes".to_string(),
+            observed_count: 2,
+            limit_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_boundary_smoothing_rejection_reason_mismatch() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_attempt_count = 2;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_count = 2;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_by_reason =
+        BTreeMap::from([("projection_out_of_bounds".to_string(), 1)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("boundary smoothing rejection reasons must reconcile");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_boundary_smoothing_rejection_reasons".to_string(),
+            observed_count: 1,
+            limit_count: 2,
+        }
+    );
+}
+
+#[test]
+fn rejects_boundary_smoothing_attempts_without_reported_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_attempt_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_count = 1;
+    mesh.backend
+        .tetrahedron_optimization_boundary_smoothing_rejected_by_reason =
+        BTreeMap::from([("projection_out_of_bounds".to_string(), 1)]);
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("boundary smoothing attempts require a reported repair pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "optimization_boundary_smoothing_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
         }
     );
 }

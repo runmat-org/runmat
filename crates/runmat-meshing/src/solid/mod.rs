@@ -1,7 +1,11 @@
 use runmat_geometry_core::GeometryAsset;
-use runmat_meshing_cad::{build_cad_evaluation_model, build_cad_topology, extract_source_topology};
+use runmat_meshing_cad::{
+    build_cad_evaluation_model, build_cad_topology, extract_source_topology, project_to_face,
+    CadEvaluationModel,
+};
 use runmat_meshing_core::{
-    AnalysisMeshArtifact, MeshBackendKind, MeshSizingField, VolumeMeshingOptions,
+    quality::predicate::Point3, AnalysisMeshArtifact, MeshBackendKind, MeshSizingField,
+    TopologyEntityId, VolumeMeshingOptions,
 };
 use runmat_meshing_curve::discretize_topology_curves_with_sizing;
 use runmat_meshing_plc::build::build_protected_boundary_complex;
@@ -10,7 +14,11 @@ use runmat_meshing_surface::{
     SurfaceValidationOptions,
 };
 use runmat_meshing_tetrahedron::{
-    optimize::{smooth_tetrahedron_mesh_interior, TetrahedronMeshInteriorSmoothingOptions},
+    optimize::{
+        smooth_tetrahedron_mesh_boundary_with_projector, smooth_tetrahedron_mesh_interior,
+        TetrahedronBoundarySmoothingProjection, TetrahedronBoundarySmoothingProjector,
+        TetrahedronMeshBoundarySmoothingOptions, TetrahedronMeshInteriorSmoothingOptions,
+    },
     reconnect::{
         improve_tetrahedron_mesh_with_local_flips, TetrahedronMeshLocalReconnectionOptions,
     },
@@ -121,6 +129,13 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         &mut recovery.tetrahedron_mesh,
         TetrahedronMeshInteriorSmoothingOptions::default(),
     );
+    smooth_tetrahedron_mesh_boundary_with_projector(
+        &mut recovery.tetrahedron_mesh,
+        &CadFaceBoundarySmoothingProjector {
+            cad_evaluation: &cad_evaluation,
+        },
+        TetrahedronMeshBoundarySmoothingOptions::default(),
+    );
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,
@@ -129,6 +144,31 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         &recovery.recovery_queue,
         recovery.tetrahedron_mesh,
     ))
+}
+
+struct CadFaceBoundarySmoothingProjector<'a> {
+    cad_evaluation: &'a CadEvaluationModel,
+}
+
+impl TetrahedronBoundarySmoothingProjector for CadFaceBoundarySmoothingProjector<'_> {
+    fn project_to_source_face(
+        &self,
+        source_face_id: &TopologyEntityId,
+        point_m: Point3,
+    ) -> Option<TetrahedronBoundarySmoothingProjection> {
+        let source_face_id = source_face_id.id.parse::<u32>().ok()?;
+        let frame = self
+            .cad_evaluation
+            .face_frames
+            .iter()
+            .find(|frame| frame.source_face_id == source_face_id)?;
+        let projection = project_to_face(frame, point_m);
+        Some(TetrahedronBoundarySmoothingProjection {
+            point_m: projection.point_m,
+            distance_m: projection.distance_m,
+            in_bounds: projection.uv_in_bounds,
+        })
+    }
 }
 
 #[cfg(test)]

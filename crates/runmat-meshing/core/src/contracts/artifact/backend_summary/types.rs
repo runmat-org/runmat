@@ -427,6 +427,16 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_optimization_interior_smoothing_rejected_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
+    pub tetrahedron_optimization_boundary_smoothing_attempt_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_boundary_smoothing_accepted_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_boundary_smoothing_rejected_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_boundary_smoothing_budget_limited_count: usize,
+    #[serde(default)]
+    pub tetrahedron_optimization_boundary_smoothing_rejected_by_reason: BTreeMap<String, usize>,
+    #[serde(default)]
     pub tetrahedron_sliver_count: usize,
     #[serde(default)]
     pub tetrahedron_sliver_removed_count: usize,
