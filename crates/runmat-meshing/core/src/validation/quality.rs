@@ -280,6 +280,28 @@ fn validate_optimization_evidence(
             },
         );
     }
+    if backend.tetrahedron_untangling_pass_count == 0
+        && backend.tetrahedron_untangling_relocated_seed_count > 0
+    {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "untangling_edits_without_pass".to_string(),
+                observed_count: backend.tetrahedron_untangling_relocated_seed_count,
+                limit_count: backend.tetrahedron_untangling_pass_count,
+            },
+        );
+    }
+    if backend.tetrahedron_untangling_final_near_singular_count
+        > backend.tetrahedron_untangling_initial_near_singular_count
+    {
+        return Err(
+            AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+                family: "untangling_near_singular_regression".to_string(),
+                observed_count: backend.tetrahedron_untangling_final_near_singular_count,
+                limit_count: backend.tetrahedron_untangling_initial_near_singular_count,
+            },
+        );
+    }
 
     let initial_min = backend.tetrahedron_optimization_initial_min_exact_scaled_jacobian;
     let final_min = backend.tetrahedron_optimization_final_min_exact_scaled_jacobian;

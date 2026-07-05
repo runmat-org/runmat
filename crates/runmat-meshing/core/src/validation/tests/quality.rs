@@ -330,6 +330,47 @@ fn rejects_sliver_removal_attempts_without_reported_pass() {
 }
 
 #[test]
+fn rejects_untangling_edits_without_untangling_pass() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_optimization_pass_count = 1;
+    mesh.backend.tetrahedron_untangling_relocated_seed_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("untangling edits require an untangling pass");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "untangling_edits_without_pass".to_string(),
+            observed_count: 1,
+            limit_count: 0,
+        }
+    );
+}
+
+#[test]
+fn rejects_untangling_near_singular_regression() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend.tetrahedron_untangling_pass_count = 1;
+    mesh.backend
+        .tetrahedron_untangling_initial_near_singular_count = 1;
+    mesh.backend
+        .tetrahedron_untangling_final_near_singular_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect_err("untangling cannot increase near-singular count");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
+            family: "untangling_near_singular_regression".to_string(),
+            observed_count: 2,
+            limit_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_boundary_smoothing_rejection_reason_mismatch() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend.tetrahedron_optimization_pass_count = 1;

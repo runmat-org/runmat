@@ -26,7 +26,10 @@ use runmat_meshing_core::{
         TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_ATTEMPT_COUNT,
         TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT,
         TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTED_COUNT,
-        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX, UNCLASSIFIED_MATERIAL_REGION_ID,
+        TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX,
+        TETRAHEDRON_UNTANGLING_FINAL_NEAR_SINGULAR_COUNT,
+        TETRAHEDRON_UNTANGLING_INITIAL_NEAR_SINGULAR_COUNT, TETRAHEDRON_UNTANGLING_PASS_COUNT,
+        TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT, UNCLASSIFIED_MATERIAL_REGION_ID,
     },
     quality::{
         predicate::{
@@ -984,6 +987,22 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 .min_exact_scaled_jacobian,
             tetrahedron_optimization_final_min_exact_scaled_jacobian: backend_quality
                 .min_exact_scaled_jacobian,
+            tetrahedron_untangling_pass_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_UNTANGLING_PASS_COUNT,
+            ),
+            tetrahedron_untangling_initial_near_singular_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_UNTANGLING_INITIAL_NEAR_SINGULAR_COUNT,
+            ),
+            tetrahedron_untangling_final_near_singular_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_UNTANGLING_FINAL_NEAR_SINGULAR_COUNT,
+            ),
+            tetrahedron_untangling_relocated_seed_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT,
+            ),
             ..MeshBackendSummary::default()
         },
         adaptive_iterations: Vec::new(),

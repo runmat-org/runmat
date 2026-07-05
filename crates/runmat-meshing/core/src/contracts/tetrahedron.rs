@@ -42,6 +42,12 @@ pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_BUDGET_LIMIT_COUNT: &str =
     "optimization_sliver_removal_budget_limited";
 pub const TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX: &str =
     "optimization_sliver_removal_rejected_";
+pub const TETRAHEDRON_UNTANGLING_PASS_COUNT: &str = "untangling_passes";
+pub const TETRAHEDRON_UNTANGLING_INITIAL_NEAR_SINGULAR_COUNT: &str =
+    "untangling_initial_near_singular";
+pub const TETRAHEDRON_UNTANGLING_FINAL_NEAR_SINGULAR_COUNT: &str = "untangling_final_near_singular";
+pub const TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT: &str = "untangling_relocated_seeds";
+pub const TETRAHEDRON_UNTANGLING_REJECTION_PREFIX: &str = "untangling_rejected_";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {
