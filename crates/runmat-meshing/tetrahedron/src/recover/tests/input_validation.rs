@@ -3,8 +3,8 @@ use runmat_meshing_core::contracts::{
 };
 
 use super::{
-    boundary_face, build_recovery_queue_from_plc, entity, recover_tetrahedron_mesh_from_plc,
-    tetrahedron_mesh, tetrahedron_node, tetrahedron_plc, TetrahedronRecoveryError,
+    boundary_face, build_recovery_queue_from_plc, entity, tetrahedron_mesh, tetrahedron_node,
+    tetrahedron_plc, TetrahedronRecoveryError,
 };
 
 #[test]
@@ -164,7 +164,7 @@ fn rejects_recovery_input_boundary_face_with_bad_source_stages() {
 }
 
 #[test]
-fn ignores_and_removes_recovery_input_boundary_face_that_is_not_exterior() {
+fn rejects_recovery_input_boundary_face_absent_from_element_and_plc_topology() {
     let mut mesh = tetrahedron_mesh();
     mesh.nodes.push(tetrahedron_node(
         entity(MeshingStage::ProtectedBoundaryComplex, "4"),
@@ -176,23 +176,21 @@ fn ignores_and_removes_recovery_input_boundary_face_that_is_not_exterior() {
         "face_2",
     ));
 
-    let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
-        .expect("unsupported boundary face should not block queue classification");
-    assert_eq!(queue.evidence.entity_counts["missing_items"], 0);
-
-    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
-        .expect("unsupported boundary face should be removed before final audit");
-    assert!(result.tetrahedron_mesh.recovery_complete);
-    assert!(!result
-        .tetrahedron_mesh
-        .boundary_faces
-        .iter()
-        .any(|face| face.face_id.id == "unsupported_boundary_face"));
     assert_eq!(
-        result.recovery_queue.evidence.entity_counts["removed_unsupported_boundary_faces"],
-        1
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(
+            TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementOrPlcTopology {
+                face_id: entity(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    "unsupported_boundary_face"
+                ),
+            },
+        )
     );
+}
 
+#[test]
+fn classifies_recovery_input_boundary_face_that_is_now_interior_as_missing_source_face() {
     let mut mesh = tetrahedron_mesh();
     mesh.nodes.push(tetrahedron_node(
         entity(MeshingStage::TetrahedronMesh, "4"),

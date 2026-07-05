@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::contracts::{MeshingStage, TetrahedronMesh, TopologyEntityId};
+use runmat_meshing_core::contracts::{
+    MeshingStage, ProtectedBoundaryComplex, TetrahedronMesh, TopologyEntityId,
+};
 
-use super::TetrahedronRecoveryError;
+use super::{topology::sorted_topology_ids, TetrahedronRecoveryError};
 
 pub(super) fn validate_tetrahedron_recovery_input_mesh(
+    plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &TetrahedronMesh,
 ) -> Result<(), TetrahedronRecoveryError> {
     if tetrahedron_mesh.evidence.stage != MeshingStage::TetrahedronMesh {
@@ -42,6 +45,7 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
     }
 
     let mut element_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut element_faces = BTreeSet::<[TopologyEntityId; 3]>::new();
     for element in &tetrahedron_mesh.elements {
         if element.element_id.stage != MeshingStage::TetrahedronMesh {
             return Err(TetrahedronRecoveryError::TetrahedronElementStageMismatch {
@@ -71,8 +75,14 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 },
             );
         }
+        element_faces.extend(tetrahedron_element_faces(element.node_ids.clone()));
     }
 
+    let plc_faces = plc
+        .facets
+        .iter()
+        .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
+        .collect::<BTreeSet<_>>();
     let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();
     for boundary_face in &tetrahedron_mesh.boundary_faces {
         if !matches!(
@@ -101,6 +111,14 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 face_id: boundary_face.face_id.clone(),
             },
         )?;
+        let boundary_face_key = sorted_topology_ids(boundary_face.node_ids.clone());
+        if !element_faces.contains(&boundary_face_key) && !plc_faces.contains(&boundary_face_key) {
+            return Err(
+                TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementOrPlcTopology {
+                    face_id: boundary_face.face_id.clone(),
+                },
+            );
+        }
         if boundary_face.source_face_id.stage != MeshingStage::SurfaceMesh {
             return Err(
                 TetrahedronRecoveryError::TetrahedronBoundaryFaceSourceFaceStageMismatch {
@@ -122,6 +140,31 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
     }
 
     Ok(())
+}
+
+fn tetrahedron_element_faces(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 3]; 4] {
+    [
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[1].clone(),
+            node_ids[2].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[1].clone(),
+            node_ids[3].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[0].clone(),
+            node_ids[2].clone(),
+            node_ids[3].clone(),
+        ]),
+        sorted_topology_ids([
+            node_ids[1].clone(),
+            node_ids[2].clone(),
+            node_ids[3].clone(),
+        ]),
+    ]
 }
 
 fn validate_node_references<const N: usize, UnknownNodeError, RepeatedNodeError>(
