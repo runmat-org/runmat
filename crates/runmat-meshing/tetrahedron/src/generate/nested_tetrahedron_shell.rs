@@ -6,11 +6,6 @@ use runmat_meshing_core::contracts::{
 use runmat_meshing_core::quality::tolerance::MeshingTolerance;
 use runmat_meshing_plc::validate::validate_protected_boundary_complex;
 
-use crate::cavity::constrained::{
-    retriangulate_constrained_cavity_from_nodes, ConstrainedCavity, ConstrainedCavityBoundaryFace,
-    ConstrainedCavityNode, ConstrainedCavityRefillOptions,
-};
-
 use super::convex_polyhedron::bounds::plc_coordinates_and_bounds;
 use super::evidence::{record_input_plc_evidence, record_tetrahedron_material_evidence};
 use super::material::plc_material_region_id;
@@ -19,7 +14,9 @@ use super::{
     TetrahedronMeshNode,
 };
 
+mod refill;
 mod shell;
+use refill::refill_nested_tetrahedron_shell_cavity;
 use shell::nested_tetrahedron_shell;
 
 pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
@@ -35,51 +32,7 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
         return Err(TetrahedronGenerationError::DegenerateNestedTetrahedronShellPlc);
     }
 
-    let mut node_id_to_cavity_id = BTreeMap::<TopologyEntityId, u32>::new();
-    let mut cavity_id_to_node_id = BTreeMap::<u32, TopologyEntityId>::new();
-    let mut cavity_nodes = Vec::<ConstrainedCavityNode>::with_capacity(plc.nodes.len());
-    for (index, node) in plc.nodes.iter().enumerate() {
-        let cavity_id = u32::try_from(index)
-            .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
-        node_id_to_cavity_id.insert(node.node_id.clone(), cavity_id);
-        cavity_id_to_node_id.insert(cavity_id, node.node_id.clone());
-        cavity_nodes.push(ConstrainedCavityNode {
-            node_id: cavity_id,
-            coordinates_m: node.coordinates_m,
-        });
-    }
-    let cavity = ConstrainedCavity {
-        removed_tetrahedron_ids: vec![0],
-        boundary_faces: plc
-            .facets
-            .iter()
-            .enumerate()
-            .map(|(index, facet)| {
-                let source_face_id = u32::try_from(index).ok();
-                Ok(ConstrainedCavityBoundaryFace {
-                    node_ids: [
-                        cavity_node_id(&node_id_to_cavity_id, &facet.node_ids[0])?,
-                        cavity_node_id(&node_id_to_cavity_id, &facet.node_ids[1])?,
-                        cavity_node_id(&node_id_to_cavity_id, &facet.node_ids[2])?,
-                    ],
-                    outside_tetrahedron_ids: Vec::new(),
-                    source_face_id,
-                    source_edge_ids: [None, None, None],
-                    region_ids: facet.material_interface_ids.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, TetrahedronGenerationError>>()?,
-        protected_node_ids: Vec::new(),
-        target_volume_m3,
-    };
-    let refill_options = ConstrainedCavityRefillOptions {
-        min_scaled_jacobian: 1.0e-12,
-        ..ConstrainedCavityRefillOptions::default()
-    };
-    let refill =
-        retriangulate_constrained_cavity_from_nodes(&cavity, &cavity_nodes, refill_options)
-            .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?
-            .ok_or(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
+    let refill = refill_nested_tetrahedron_shell_cavity(plc, target_volume_m3)?;
 
     let material_region_id = plc_material_region_id(plc);
     let nodes = plc
@@ -91,6 +44,7 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
         })
         .collect::<Vec<_>>();
     let elements = refill
+        .refill
         .tetrahedra
         .iter()
         .enumerate()
@@ -101,10 +55,10 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
                     id: format!("nested_tetrahedron_shell_tetrahedron_{index}"),
                 },
                 node_ids: [
-                    mesh_node_id(&cavity_id_to_node_id, tetrahedron.node_ids[0])?,
-                    mesh_node_id(&cavity_id_to_node_id, tetrahedron.node_ids[1])?,
-                    mesh_node_id(&cavity_id_to_node_id, tetrahedron.node_ids[2])?,
-                    mesh_node_id(&cavity_id_to_node_id, tetrahedron.node_ids[3])?,
+                    mesh_node_id(&refill.cavity_id_to_node_id, tetrahedron.node_ids[0])?,
+                    mesh_node_id(&refill.cavity_id_to_node_id, tetrahedron.node_ids[1])?,
+                    mesh_node_id(&refill.cavity_id_to_node_id, tetrahedron.node_ids[2])?,
+                    mesh_node_id(&refill.cavity_id_to_node_id, tetrahedron.node_ids[3])?,
                 ],
                 material_region_id: material_region_id.clone(),
             })
@@ -148,6 +102,7 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
     record_input_plc_evidence(plc, &mut evidence);
     record_tetrahedron_material_evidence(&elements, &mut evidence);
     evidence.min_scaled_jacobian = refill
+        .refill
         .tetrahedra
         .iter()
         .map(|tetrahedron| tetrahedron.exact_scaled_jacobian)
@@ -162,17 +117,6 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
         recovery_complete: false,
         quality_optimized: false,
         evidence,
-    })
-}
-
-fn cavity_node_id(
-    node_id_to_cavity_id: &BTreeMap<TopologyEntityId, u32>,
-    node_id: &TopologyEntityId,
-) -> Result<u32, TetrahedronGenerationError> {
-    node_id_to_cavity_id.get(node_id).copied().ok_or_else(|| {
-        TetrahedronGenerationError::MissingPlcNode {
-            node_id: node_id.id.clone(),
-        }
     })
 }
 
