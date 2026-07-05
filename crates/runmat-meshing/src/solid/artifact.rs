@@ -7,6 +7,7 @@ use runmat_meshing_core::{
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, MeshEntityProvenance, MeshingStage,
         SourceEntityKind, TopologyEntityId, VolumeElementKind,
+        TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
@@ -702,6 +703,7 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 missing_material_interface_recovery.ids,
             tetrahedron_omitted_missing_material_interface_recovery_id_count:
                 missing_material_interface_recovery.omitted_count,
+            tetrahedron_optimization_pass_count: usize::from(tetrahedron_mesh.quality_optimized),
             tetrahedron_sliver_count: backend_quality.sliver_count,
             tetrahedron_optimization_target_seed_count: backend_quality.quality_repair_target_count,
             tetrahedron_optimization_skipped_target_seed_count: backend_quality
@@ -709,6 +711,10 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
             tetrahedron_optimization_local_reconnection_attempt_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,
                 TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+            ),
+            tetrahedron_optimization_local_reconnection_accepted_count: tetrahedron_entity_count(
+                &tetrahedron_mesh,
+                TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
             ),
             tetrahedron_optimization_local_reconnection_rejected_count: tetrahedron_entity_count(
                 &tetrahedron_mesh,

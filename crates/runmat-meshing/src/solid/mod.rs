@@ -9,7 +9,13 @@ use runmat_meshing_surface::{
     discretize_cad_topology_surfaces_with_curves, validate_cad_topology_surface_discretization,
     SurfaceValidationOptions,
 };
-use runmat_meshing_tetrahedron::{recover::recover_tetrahedron_mesh_from_plc, structured_grid};
+use runmat_meshing_tetrahedron::{
+    reconnect::{
+        improve_tetrahedron_mesh_with_local_flips, TetrahedronMeshLocalReconnectionOptions,
+    },
+    recover::recover_tetrahedron_mesh_from_plc,
+    structured_grid,
+};
 
 mod artifact;
 mod error;
@@ -104,8 +110,12 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     let plc = build_protected_boundary_complex(&surface)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
-    let recovery = recover_tetrahedron_mesh_from_plc(&plc, tetrahedron_mesh)
+    let mut recovery = recover_tetrahedron_mesh_from_plc(&plc, tetrahedron_mesh)
         .map_err(SolidMeshingError::TetrahedronRecovery)?;
+    improve_tetrahedron_mesh_with_local_flips(
+        &mut recovery.tetrahedron_mesh,
+        TetrahedronMeshLocalReconnectionOptions::default(),
+    );
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,

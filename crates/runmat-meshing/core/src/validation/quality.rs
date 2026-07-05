@@ -81,13 +81,17 @@ fn validate_optimization_evidence(
         + backend.tetrahedron_exact_quality_repair_pass_count;
     let local_reconnection_attempt_count =
         backend.tetrahedron_optimization_local_reconnection_attempt_count;
+    let local_reconnection_accepted_count =
+        backend.tetrahedron_optimization_local_reconnection_accepted_count;
     let local_reconnection_rejected_count =
         backend.tetrahedron_optimization_local_reconnection_rejected_count;
-    if local_reconnection_rejected_count > local_reconnection_attempt_count {
+    let local_reconnection_outcome_count =
+        local_reconnection_accepted_count + local_reconnection_rejected_count;
+    if local_reconnection_outcome_count > local_reconnection_attempt_count {
         return Err(
             AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
-                family: "optimization_local_reconnection_rejections".to_string(),
-                observed_count: local_reconnection_rejected_count,
+                family: "optimization_local_reconnection_outcomes".to_string(),
+                observed_count: local_reconnection_outcome_count,
                 limit_count: local_reconnection_attempt_count,
             },
         );

@@ -217,6 +217,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_optimization_skipped_target_seed_count: 0,
             tetrahedron_optimization_rejected_edit_count: 0,
             tetrahedron_optimization_local_reconnection_attempt_count: 0,
+            tetrahedron_optimization_local_reconnection_accepted_count: 0,
             tetrahedron_optimization_local_reconnection_rejected_count: 0,
             tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap::new(),
             tetrahedron_optimization_initial_max_aspect_ratio: 0.0,

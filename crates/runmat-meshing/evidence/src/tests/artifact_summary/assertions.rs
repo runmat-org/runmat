@@ -518,6 +518,7 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
     assert_eq!(recovery.optimization_skipped_target_seed_count, 4);
     assert_eq!(recovery.optimization_rejected_edit_count, 3);
     assert_eq!(recovery.optimization_local_reconnection_attempt_count, 5);
+    assert_eq!(recovery.optimization_local_reconnection_accepted_count, 3);
     assert_eq!(recovery.optimization_local_reconnection_rejected_count, 2);
     assert_eq!(
         recovery.optimization_local_reconnection_rejected_by_reason,

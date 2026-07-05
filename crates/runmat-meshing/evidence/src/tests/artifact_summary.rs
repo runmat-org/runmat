@@ -314,6 +314,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_optimization_skipped_target_seed_count: 4,
             tetrahedron_optimization_rejected_edit_count: 3,
             tetrahedron_optimization_local_reconnection_attempt_count: 5,
+            tetrahedron_optimization_local_reconnection_accepted_count: 3,
             tetrahedron_optimization_local_reconnection_rejected_count: 2,
             tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap::from([
                 ("quality_does_not_improve".to_string(), 1),

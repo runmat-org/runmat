@@ -290,6 +290,8 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub optimization_local_reconnection_attempt_count: usize,
     #[serde(default)]
+    pub optimization_local_reconnection_accepted_count: usize,
+    #[serde(default)]
     pub optimization_local_reconnection_rejected_count: usize,
     #[serde(default)]
     pub optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,
@@ -736,6 +738,9 @@ pub(super) fn tetrahedron_recovery_evidence(
         optimization_local_reconnection_attempt_count: mesh
             .backend
             .tetrahedron_optimization_local_reconnection_attempt_count,
+        optimization_local_reconnection_accepted_count: mesh
+            .backend
+            .tetrahedron_optimization_local_reconnection_accepted_count,
         optimization_local_reconnection_rejected_count: mesh
             .backend
             .tetrahedron_optimization_local_reconnection_rejected_count,

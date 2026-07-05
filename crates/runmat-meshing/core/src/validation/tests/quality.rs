@@ -134,19 +134,21 @@ fn rejects_local_reconnection_rejections_that_exceed_attempts() {
     mesh.backend
         .tetrahedron_optimization_local_reconnection_attempt_count = 1;
     mesh.backend
+        .tetrahedron_optimization_local_reconnection_accepted_count = 1;
+    mesh.backend
         .tetrahedron_optimization_local_reconnection_rejected_count = 2;
     mesh.backend
         .tetrahedron_optimization_local_reconnection_rejected_by_reason =
         BTreeMap::from([("quality_does_not_improve".to_string(), 2)]);
 
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
-        .expect_err("local reconnection rejections cannot exceed attempts");
+        .expect_err("local reconnection outcomes cannot exceed attempts");
 
     assert_eq!(
         err,
         AnalysisMeshValidationError::InconsistentTetrahedronOptimizationEvidence {
-            family: "optimization_local_reconnection_rejections".to_string(),
-            observed_count: 2,
+            family: "optimization_local_reconnection_outcomes".to_string(),
+            observed_count: 3,
             limit_count: 1,
         }
     );

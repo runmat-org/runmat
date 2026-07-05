@@ -2,6 +2,12 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+mod mesh;
+pub use mesh::{
+    improve_tetrahedron_mesh_with_local_flips, TetrahedronMeshLocalReconnectionOptions,
+    TetrahedronMeshLocalReconnectionReport,
+};
+
 mod quality;
 pub use quality::{
     evaluate_local_tetrahedron_flip_improvement, evaluate_local_tetrahedron_flip_quality,

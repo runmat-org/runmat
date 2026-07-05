@@ -429,6 +429,8 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_optimization_local_reconnection_attempt_count: usize,
     #[serde(default)]
+    pub tetrahedron_optimization_local_reconnection_accepted_count: usize,
+    #[serde(default)]
     pub tetrahedron_optimization_local_reconnection_rejected_count: usize,
     #[serde(default)]
     pub tetrahedron_optimization_local_reconnection_rejected_by_reason: BTreeMap<String, usize>,

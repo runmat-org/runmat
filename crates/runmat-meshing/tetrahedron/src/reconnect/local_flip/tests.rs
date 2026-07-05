@@ -1,4 +1,11 @@
 use super::*;
+use runmat_meshing_core::contracts::{
+    MeshingStage, StageEvidence, Tetrahedron4Element, TetrahedronMesh, TetrahedronMeshNode,
+    TopologyEntityId, TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
+    TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
+};
 use std::collections::BTreeMap;
 
 #[test]
@@ -170,6 +177,92 @@ fn local_flip_improvement_accepts_quality_improving_flip() {
 }
 
 #[test]
+fn mesh_local_reconnection_applies_quality_improving_interior_face_flip() {
+    let mut mesh = two_tetrahedron_mesh([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5357890395018374, -0.18744218273792734, 0.3827030431131124],
+        [0.4852929197428164, 1.1962618573152073, -0.10539356221586194],
+    ]);
+
+    let report = improve_tetrahedron_mesh_with_local_flips(
+        &mut mesh,
+        TetrahedronMeshLocalReconnectionOptions {
+            quality_thresholds: LocalTetrahedronFlipQualityThresholds {
+                min_volume_m3: 1.0e-12,
+                min_scaled_jacobian: 0.15,
+            },
+            max_accepted_reconnections: 1,
+        },
+    );
+
+    assert_eq!(report.attempted_reconnection_count, 1);
+    assert_eq!(report.accepted_reconnection_count, 1);
+    assert_eq!(report.rejected_reconnection_count, 0);
+    assert_eq!(mesh.elements.len(), 3);
+    assert!(mesh.quality_optimized);
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT],
+        0
+    );
+}
+
+#[test]
+fn mesh_local_reconnection_records_quality_neutral_rejection() {
+    let mut mesh = two_tetrahedron_mesh([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0 / 3.0, 1.0 / 3.0, 1.0],
+        [1.0 / 3.0, 1.0 / 3.0, -1.0],
+    ]);
+
+    let report = improve_tetrahedron_mesh_with_local_flips(
+        &mut mesh,
+        TetrahedronMeshLocalReconnectionOptions {
+            quality_thresholds: LocalTetrahedronFlipQualityThresholds {
+                min_volume_m3: 1.0e-12,
+                min_scaled_jacobian: 0.95,
+            },
+            max_accepted_reconnections: 1,
+        },
+    );
+
+    assert_eq!(report.attempted_reconnection_count, 1);
+    assert_eq!(report.accepted_reconnection_count, 0);
+    assert_eq!(report.rejected_reconnection_count, 1);
+    assert_eq!(mesh.elements.len(), 2);
+    assert!(mesh.quality_optimized);
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ATTEMPT_COUNT],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_ACCEPTED_COUNT],
+        0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts[TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.rejection_counts[&format!(
+            "{TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX}scaled_jacobian_below_threshold"
+        )],
+        1
+    );
+}
+
+#[test]
 fn local_flip_improvement_rejects_candidate_that_does_not_improve_quality_or_count() {
     let left = LocalTetrahedron {
         tetrahedron_id: 4,
@@ -200,6 +293,43 @@ fn local_flip_improvement_rejects_candidate_that_does_not_improve_quality_or_cou
     .expect_err("quality-neutral count-increasing flip should be rejected");
 
     assert_eq!(err, LocalTetrahedronFlipError::QualityDoesNotImprove);
+}
+
+fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
+    TetrahedronMesh {
+        mesh_id: "local_reconnection_fixture".to_string(),
+        nodes: coordinates
+            .into_iter()
+            .enumerate()
+            .map(|(index, coordinates_m)| TetrahedronMeshNode {
+                node_id: entity(index),
+                coordinates_m,
+            })
+            .collect(),
+        elements: vec![
+            Tetrahedron4Element {
+                element_id: entity(10),
+                node_ids: [entity(0), entity(1), entity(2), entity(3)],
+                material_region_id: "body".to_string(),
+            },
+            Tetrahedron4Element {
+                element_id: entity(11),
+                node_ids: [entity(0), entity(2), entity(1), entity(4)],
+                material_region_id: "body".to_string(),
+            },
+        ],
+        boundary_faces: Vec::new(),
+        recovery_complete: true,
+        quality_optimized: false,
+        evidence: StageEvidence::complete(MeshingStage::TetrahedronMesh),
+    }
+}
+
+fn entity(id: usize) -> TopologyEntityId {
+    TopologyEntityId {
+        stage: MeshingStage::TetrahedronMesh,
+        id: id.to_string(),
+    }
 }
 
 #[test]
