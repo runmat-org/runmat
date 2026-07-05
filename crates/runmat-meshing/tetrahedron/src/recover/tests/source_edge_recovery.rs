@@ -224,6 +224,52 @@ fn recovery_stage_result_reconnects_absent_source_edge_by_boundary_diagonal_flip
 }
 
 #[test]
+fn recovery_stage_result_reconnects_cad_curve_absent_source_edge_by_boundary_diagonal_flip() {
+    let mut plc = boundary_diagonal_flip_plc();
+    plc.protected_edges[0].cad_curve_boundary = Some(cad_curve_boundary());
+    let mesh = boundary_diagonal_flip_tetrahedron_mesh();
+
+    let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
+        .expect("absent CAD curve protected edge should be reported before recovery");
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        initial_queue.evidence.entity_counts["missing_cad_curve_source_edge_topology_items"],
+        1
+    );
+
+    let result = recover_tetrahedron_mesh_from_plc(&plc, mesh)
+        .expect("boundary diagonal flip should recover the CAD curve protected edge");
+
+    assert!(result.tetrahedron_mesh.recovery_complete);
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["attempted_cad_curve_absent_source_edge_recovery_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["reconnected_cad_curve_absent_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts
+            ["rejected_cad_curve_absent_source_edge_recovery_items"],
+        0
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["recovered_cad_curve_source_edge_items"],
+        1
+    );
+    assert_eq!(
+        result.recovery_queue.evidence.entity_counts["missing_cad_curve_source_edge_items"],
+        0
+    );
+}
+
+#[test]
 fn absent_source_edge_boundary_diagonal_flip_records_rejection_without_mutating_mesh() {
     let plc = boundary_diagonal_flip_plc();
     let mut mesh = boundary_diagonal_flip_tetrahedron_mesh();

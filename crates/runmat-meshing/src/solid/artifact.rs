@@ -389,14 +389,29 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
                 recovery_queue,
                 "attempted_absent_source_edge_recovery_items",
             ),
+            tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "attempted_cad_curve_absent_source_edge_recovery_items",
+                ),
             tetrahedron_reconnected_absent_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "reconnected_absent_source_edge_items",
             ),
+            tetrahedron_reconnected_cad_curve_absent_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "reconnected_cad_curve_absent_source_edge_items",
+                ),
             tetrahedron_rejected_absent_source_edge_recovery_item_count: recovery_entity_count(
                 recovery_queue,
                 "rejected_absent_source_edge_recovery_items",
             ),
+            tetrahedron_rejected_cad_curve_absent_source_edge_recovery_item_count:
+                recovery_entity_count(
+                    recovery_queue,
+                    "rejected_cad_curve_absent_source_edge_recovery_items",
+                ),
             tetrahedron_rejected_absent_source_edge_adjacent_facet_count: recovery_entity_count(
                 recovery_queue,
                 "rejected_absent_source_edge_recovery_adjacent_facet_count",

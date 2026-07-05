@@ -117,9 +117,15 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub attempted_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub attempted_cad_curve_absent_source_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub reconnected_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
+    pub reconnected_cad_curve_absent_source_edge_recovery_item_count: usize,
+    #[serde(default)]
     pub rejected_absent_source_edge_recovery_item_count: usize,
+    #[serde(default)]
+    pub rejected_cad_curve_absent_source_edge_recovery_item_count: usize,
     #[serde(default)]
     pub rejected_absent_source_edge_adjacent_facet_count: usize,
     #[serde(default)]
@@ -544,12 +550,21 @@ pub(super) fn tetrahedron_recovery_evidence(
         attempted_absent_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_attempted_absent_source_edge_recovery_item_count,
+        attempted_cad_curve_absent_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count,
         reconnected_absent_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_reconnected_absent_source_edge_recovery_item_count,
+        reconnected_cad_curve_absent_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_reconnected_cad_curve_absent_source_edge_recovery_item_count,
         rejected_absent_source_edge_recovery_item_count: mesh
             .backend
             .tetrahedron_rejected_absent_source_edge_recovery_item_count,
+        rejected_cad_curve_absent_source_edge_recovery_item_count: mesh
+            .backend
+            .tetrahedron_rejected_cad_curve_absent_source_edge_recovery_item_count,
         rejected_absent_source_edge_adjacent_facet_count: mesh
             .backend
             .tetrahedron_rejected_absent_source_edge_adjacent_facet_count,

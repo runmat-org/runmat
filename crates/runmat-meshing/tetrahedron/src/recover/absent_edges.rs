@@ -11,9 +11,12 @@ use super::{
 
 pub(super) struct AbsentSourceEdgeRecovery {
     pub attempted_source_edge_count: usize,
+    pub attempted_cad_curve_source_edge_count: usize,
     pub source_edge_count: usize,
+    pub cad_curve_source_edge_count: usize,
     pub boundary_face_count: usize,
     pub rejected_source_edge_count: usize,
+    pub rejected_cad_curve_source_edge_count: usize,
     pub rejection_counts: BTreeMap<&'static str, usize>,
 }
 
@@ -40,9 +43,12 @@ pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
 
     let mut recovered = AbsentSourceEdgeRecovery {
         attempted_source_edge_count: 0,
+        attempted_cad_curve_source_edge_count: 0,
         source_edge_count: 0,
+        cad_curve_source_edge_count: 0,
         boundary_face_count: 0,
         rejected_source_edge_count: 0,
+        rejected_cad_curve_source_edge_count: 0,
         rejection_counts: BTreeMap::new(),
     };
     for protected_edge in plc.protected_edges.iter().filter(|protected_edge| {
@@ -51,7 +57,11 @@ pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
             protected_edge.source_edge_id.clone(),
         ))
     }) {
+        let is_cad_curve_source_edge = protected_edge.cad_curve_boundary.is_some();
         recovered.attempted_source_edge_count += 1;
+        if is_cad_curve_source_edge {
+            recovered.attempted_cad_curve_source_edge_count += 1;
+        }
         match recover_boundary_diagonal_flip(
             plc,
             tetrahedron_mesh,
@@ -59,10 +69,16 @@ pub(super) fn recover_absent_protected_edges_by_boundary_diagonal_flip(
         ) {
             Ok(boundary_face_count) => {
                 recovered.source_edge_count += 1;
+                if is_cad_curve_source_edge {
+                    recovered.cad_curve_source_edge_count += 1;
+                }
                 recovered.boundary_face_count += boundary_face_count;
             }
             Err(rejection) => {
                 recovered.rejected_source_edge_count += 1;
+                if is_cad_curve_source_edge {
+                    recovered.rejected_cad_curve_source_edge_count += 1;
+                }
                 *recovered
                     .rejection_counts
                     .entry(rejection.absent_source_edge_evidence_key())

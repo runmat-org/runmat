@@ -394,6 +394,32 @@ fn rejects_attempted_absent_source_edge_count_that_exceeds_typed_input_count() {
 }
 
 #[test]
+fn rejects_cad_curve_absent_source_edge_reconnection_count_that_exceeds_attempted_count() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_edge_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_absent_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_reconnected_cad_curve_absent_source_edge_recovery_item_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default()).expect_err(
+        "reconnected CAD curve absent source-edge evidence cannot exceed CAD-backed attempts",
+    );
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryItemEvidence {
+            family: "reconnected_cad_curve_absent_source_edge".to_string(),
+            item_count: 2,
+            input_count: 1,
+        }
+    );
+}
+
+#[test]
 fn allows_two_protected_edge_boundary_face_restoration_attempts_per_volume_edge_input() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
