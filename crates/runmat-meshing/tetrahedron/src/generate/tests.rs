@@ -77,6 +77,27 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 }
 
 #[test]
+fn structured_box_generation_keeps_ambiguous_material_ownership_unclassified() {
+    let mut plc = box_plc();
+    for (facet_index, facet) in plc.facets.iter_mut().enumerate() {
+        facet.material_interface_ids = vec![if facet_index < 6 {
+            "region_a".to_string()
+        } else {
+            "region_b".to_string()
+        }];
+    }
+
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("validated box PLC should generate initial Tetrahedron mesh");
+
+    assert_eq!(mesh.elements.len(), 6);
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "unclassified"));
+}
+
+#[test]
 fn structured_box_generation_preserves_split_protected_source_edges() {
     let plc = split_edge_box_plc();
 

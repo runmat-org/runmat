@@ -16,6 +16,9 @@ use runmat_meshing_core::{
 };
 use shape::{plc_nodes_are_box_corners, validate_structured_box_plc};
 
+const DEFAULT_MATERIAL_REGION_ID: &str = "solid_body";
+const UNCLASSIFIED_MATERIAL_REGION_ID: &str = "unclassified";
+
 pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
@@ -27,7 +30,7 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     if !plc.protected_edges.is_empty() || !plc_nodes_are_box_corners(plc, bounds, tolerance) {
         return generate_boundary_conforming_box_tetrahedron_mesh(plc, bounds, tolerance);
     }
-    let material_region_ids = plc_material_region_ids(plc);
+    let material_region_id = plc_material_region_id(plc);
 
     let mut nodes = plc
         .nodes
@@ -66,8 +69,7 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
                 id: format!("structured_box_tetrahedron_{tetrahedron_index}"),
             },
             node_ids,
-            material_region_id: material_region_ids[tetrahedron_index % material_region_ids.len()]
-                .clone(),
+            material_region_id: material_region_id.clone(),
         });
     }
 
@@ -378,7 +380,7 @@ fn plc_bounds(plc: &ProtectedBoundaryComplex) -> Result<[[f64; 3]; 2], Tetrahedr
     }
 }
 
-fn plc_material_region_ids(plc: &ProtectedBoundaryComplex) -> Vec<String> {
+fn plc_material_region_id(plc: &ProtectedBoundaryComplex) -> String {
     let material_region_ids = plc
         .facets
         .iter()
@@ -386,10 +388,10 @@ fn plc_material_region_ids(plc: &ProtectedBoundaryComplex) -> Vec<String> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    if material_region_ids.is_empty() {
-        vec!["solid_body".to_string()]
-    } else {
-        material_region_ids
+    match material_region_ids.as_slice() {
+        [] => DEFAULT_MATERIAL_REGION_ID.to_string(),
+        [material_region_id] => material_region_id.clone(),
+        _ => UNCLASSIFIED_MATERIAL_REGION_ID.to_string(),
     }
 }
 
