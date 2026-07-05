@@ -12,6 +12,8 @@ use crate::generate::TetrahedronGenerationError;
 
 #[derive(Debug, Clone)]
 pub(super) struct NestedTetrahedronShell {
+    pub(super) outer_node_ids: Vec<TopologyEntityId>,
+    pub(super) inner_node_ids: Vec<TopologyEntityId>,
     pub(super) outer_facet_indices: Vec<usize>,
     pub(super) inner_facet_indices: Vec<usize>,
     pub(super) outer_volume_m3: f64,
@@ -52,6 +54,8 @@ pub(super) fn nested_tetrahedron_shell(
         return Err(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc);
     }
     Ok(NestedTetrahedronShell {
+        outer_node_ids: outer.node_ids.clone(),
+        inner_node_ids: inner.node_ids.clone(),
         outer_facet_indices: outer.facet_indices.clone(),
         inner_facet_indices: inner.facet_indices.clone(),
         outer_volume_m3: outer.volume_m3,

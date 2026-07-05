@@ -92,6 +92,14 @@ pub fn generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc(
         .entity_counts
         .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
     evidence.entity_counts.insert(
+        "nested_tetrahedron_shell_outer_nodes".to_string(),
+        shell.outer_node_ids.len(),
+    );
+    evidence.entity_counts.insert(
+        "nested_tetrahedron_shell_inner_nodes".to_string(),
+        shell.inner_node_ids.len(),
+    );
+    evidence.entity_counts.insert(
         "nested_tetrahedron_shell_outer_facets".to_string(),
         shell.outer_facet_indices.len(),
     );

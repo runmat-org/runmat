@@ -186,6 +186,14 @@ fn generates_nested_tetrahedron_shell_mesh_from_nested_shell_plc() {
     assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
     assert!(mesh.elements.len() > plc.facets.len());
     assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_nodes"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["nested_tetrahedron_shell_inner_nodes"],
+        4
+    );
+    assert_eq!(
         mesh.evidence.entity_counts["nested_tetrahedron_shell_outer_facets"],
         4
     );
