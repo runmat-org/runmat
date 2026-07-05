@@ -3,7 +3,8 @@ use runmat_meshing_core::{
     contracts::{
         AnalysisBoundaryEdge, AnalysisBoundaryFace, AnalysisMeshArtifact, AnalysisMeshNode,
         AnalysisMeshProvenance, AnalysisVolumeElement, BoundaryElementKind, MeshBackendSummary,
-        VolumeElementKind,
+        VolumeElementKind, ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
+        ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
     },
     quality::AnalysisMeshQualityReport,
     size::field::MeshSizingField,
@@ -116,6 +117,48 @@ fn rejects_element_field_length_mismatch() {
 }
 
 #[test]
+fn rejects_missing_field_topology_descriptor() {
+    let mut mesh = field_mapping_mesh();
+    mesh.field_topology.clear();
+
+    let err = map_volume_scalar_field_to_boundary_faces(&mesh, &[10.0, 20.0])
+        .expect_err("missing field topology should fail");
+
+    assert_eq!(
+        err,
+        FieldMappingError::FieldTopologyMissing {
+            topology_id: ANALYSIS_MESH_FIELD_TOPOLOGY_ID.to_string(),
+            location: runmat_meshing_core::AnalysisFieldTopologyLocation::VolumeElement,
+            element_kind: Some("tetrahedron4".to_string()),
+        }
+    );
+}
+
+#[test]
+fn rejects_stale_field_topology_count_before_mapping() {
+    let mut mesh = field_mapping_mesh();
+    let boundary_face_descriptor = mesh
+        .field_topology
+        .iter_mut()
+        .find(|descriptor| descriptor.topology_id == ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID)
+        .expect("boundary face topology descriptor");
+    boundary_face_descriptor.entity_count += 1;
+
+    let err = map_nodal_vector_field_to_boundary_faces(&mesh, &nodal_vector_values())
+        .expect_err("stale field topology count should fail");
+
+    assert_eq!(
+        err,
+        FieldMappingError::FieldTopologyCountMismatch {
+            topology_id: ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID.to_string(),
+            location: runmat_meshing_core::AnalysisFieldTopologyLocation::BoundaryFace,
+            expected_entity_count: 3,
+            actual_entity_count: 2,
+        }
+    );
+}
+
+#[test]
 fn rejects_node_vector_field_length_mismatch() {
     let mesh = field_mapping_mesh();
 
@@ -206,6 +249,7 @@ fn rejects_boundary_edges_referencing_unknown_nodes() {
         region_ids: Vec::new(),
         provenance: Vec::new(),
     });
+    mesh.refresh_field_topology();
 
     let err = map_nodal_vector_field_to_boundary_nodes(&mesh, &nodal_vector_values())
         .expect_err("unknown boundary edge node should fail");
@@ -246,7 +290,7 @@ fn nodal_vector_values() -> Vec<[f64; 3]> {
 }
 
 fn field_mapping_mesh() -> AnalysisMeshArtifact {
-    AnalysisMeshArtifact {
+    let mut mesh = AnalysisMeshArtifact {
         schema_version: "analysis-mesh/v1".to_string(),
         mesh_id: "field_mapping_fixture".to_string(),
         nodes: vec![
@@ -322,5 +366,7 @@ fn field_mapping_mesh() -> AnalysisMeshArtifact {
             source_geometry_revision: 1,
             source_geometry_sha256: None,
         },
-    }
+    };
+    mesh.refresh_field_topology();
+    mesh
 }

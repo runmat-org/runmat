@@ -9,12 +9,17 @@ mod validation;
 pub use error::FieldMappingError;
 pub use types::{BoundaryFaceScalarValue, BoundaryFaceVectorValue, BoundaryNodeVectorValue};
 
-use validation::validate_nodal_vector_field;
+use validation::{
+    validate_nodal_vector_field, validate_nodal_vector_to_boundary_face_topology,
+    validate_nodal_vector_to_boundary_node_topology,
+    validate_volume_scalar_to_boundary_face_topology,
+};
 
 pub fn map_volume_scalar_field_to_boundary_faces(
     mesh: &AnalysisMeshArtifact,
     element_values: &[f64],
 ) -> Result<Vec<BoundaryFaceScalarValue>, FieldMappingError> {
+    validate_volume_scalar_to_boundary_face_topology(mesh)?;
     if element_values.len() != mesh.volume_elements.len() {
         return Err(FieldMappingError::ElementFieldLengthMismatch {
             element_value_count: element_values.len(),
@@ -67,6 +72,7 @@ pub fn map_nodal_vector_field_to_boundary_nodes(
     mesh: &AnalysisMeshArtifact,
     node_values: &[[f64; 3]],
 ) -> Result<Vec<BoundaryNodeVectorValue>, FieldMappingError> {
+    validate_nodal_vector_to_boundary_node_topology(mesh)?;
     let node_values_by_id = validate_nodal_vector_field(mesh, node_values)?;
     let mut boundary_node_ids = BTreeMap::<u32, ()>::new();
 
@@ -106,6 +112,7 @@ pub fn map_nodal_vector_field_to_boundary_faces(
     mesh: &AnalysisMeshArtifact,
     node_values: &[[f64; 3]],
 ) -> Result<Vec<BoundaryFaceVectorValue>, FieldMappingError> {
+    validate_nodal_vector_to_boundary_face_topology(mesh)?;
     let node_values_by_id = validate_nodal_vector_field(mesh, node_values)?;
 
     mesh.boundary_faces

@@ -5798,6 +5798,7 @@ fn analysis_mesh_render_topology_preserves_boundary_regions() {
         vec![2, 3, 4],
         &["fixed"],
     ));
+    mesh.refresh_field_topology();
 
     let topology = render_topology_from_analysis_mesh(Some(&mesh))
         .expect("mapped analysis mesh should produce render topology");
@@ -7649,6 +7650,7 @@ fn analysis_mesh_with_boundary_regions(
         analysis_boundary_face("face_fixed", vec![1, 2, 3], fixed_region_ids),
         analysis_boundary_face("face_load", vec![1, 2, 4], load_region_ids),
     ];
+    mesh.refresh_field_topology();
     mesh
 }
 
@@ -7671,7 +7673,7 @@ fn analysis_boundary_face(
 }
 
 fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
-    AnalysisMeshArtifact {
+    let mut mesh = AnalysisMeshArtifact {
         schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
         mesh_id: "unit_tetrahedron".to_string(),
         nodes: vec![
@@ -7700,7 +7702,9 @@ fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
             source_geometry_revision: 1,
             source_geometry_sha256: None,
         },
-    }
+    };
+    mesh.refresh_field_topology();
+    mesh
 }
 
 fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
