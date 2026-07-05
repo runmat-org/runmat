@@ -74,6 +74,11 @@ pub fn build_protected_boundary_complex(
                 element_id: element.element_id,
             });
         }
+        if element.area_m2 <= 0.0 {
+            return Err(PlcBuildError::NonPositiveSurfaceElementArea {
+                element_id: element.element_id,
+            });
+        }
         for node_id in element.node_ids {
             if !surface_nodes.contains_key(&node_id) {
                 return Err(PlcBuildError::MissingSurfaceNode {

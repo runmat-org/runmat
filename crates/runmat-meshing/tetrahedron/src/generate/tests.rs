@@ -5,6 +5,7 @@ use runmat_meshing_core::contracts::{ProtectedBoundaryComplex, TopologyEntityId}
 use runmat_meshing_core::quality::predicate::{
     tetrahedron_scaled_jacobian, tetrahedron_signed_volume,
 };
+use runmat_meshing_plc::validate::PlcValidationError;
 
 mod fixtures;
 
@@ -62,7 +63,11 @@ fn rejects_degenerate_plc_facet() {
 
     assert!(matches!(
         generate_initial_tetrahedron_mesh_from_plc(&plc),
-        Err(TetrahedronGenerationError::DegenerateBoundaryFacet { .. })
+        Err(
+            TetrahedronGenerationError::InvalidProtectedBoundaryComplex {
+                error: PlcValidationError::DegenerateFacet { .. }
+            }
+        )
     ));
 }
 
@@ -369,10 +374,14 @@ fn structured_box_generation_rejects_degenerate_bounds() {
         node.coordinates_m[2] = 0.0;
     }
 
-    assert_eq!(
+    assert!(matches!(
         generate_structured_box_tetrahedron_mesh_from_plc(&plc),
-        Err(TetrahedronGenerationError::DegeneratePlcBounds)
-    );
+        Err(
+            TetrahedronGenerationError::InvalidProtectedBoundaryComplex {
+                error: PlcValidationError::DegenerateFacet { .. }
+            }
+        )
+    ));
 }
 
 #[test]

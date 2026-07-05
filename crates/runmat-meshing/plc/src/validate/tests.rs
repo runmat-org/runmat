@@ -136,6 +136,20 @@ fn rejects_facet_that_references_unknown_node() {
 }
 
 #[test]
+fn rejects_degenerate_facet_geometry() {
+    let mut plc = tetrahedron_plc();
+    plc.nodes[1].coordinates_m = [2.0, 0.0, 0.0];
+    plc.nodes[2].coordinates_m = [1.0, 0.0, 0.0];
+
+    assert_eq!(
+        validate_protected_boundary_complex(&plc),
+        Err(PlcValidationError::DegenerateFacet {
+            facet_id: entity("f0"),
+        })
+    );
+}
+
+#[test]
 fn rejects_facet_node_with_non_plc_stage() {
     let mut plc = tetrahedron_plc();
     plc.facets[0].node_ids[0] = source_face("wrong_stage_node");

@@ -39,6 +39,9 @@ pub enum PlcValidationError {
     FacetHasRepeatedNode {
         facet_id: TopologyEntityId,
     },
+    DegenerateFacet {
+        facet_id: TopologyEntityId,
+    },
     FacetHasEmptySourceFaceId {
         facet_id: TopologyEntityId,
     },
@@ -148,6 +151,9 @@ impl std::fmt::Display for PlcValidationError {
             ),
             Self::FacetHasRepeatedNode { facet_id } => {
                 write!(formatter, "PLC facet {} repeats a node", facet_id.id)
+            }
+            Self::DegenerateFacet { facet_id } => {
+                write!(formatter, "PLC facet {} has degenerate geometry", facet_id.id)
             }
             Self::FacetHasEmptySourceFaceId { facet_id } => write!(
                 formatter,

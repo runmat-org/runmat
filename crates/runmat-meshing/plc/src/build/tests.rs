@@ -104,6 +104,33 @@ fn rejects_duplicate_surface_facets() {
 }
 
 #[test]
+fn rejects_non_positive_surface_element_area_before_volume_meshing() {
+    let mut surface = tetra_surface();
+    surface.elements[0].area_m2 = 0.0;
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::NonPositiveSurfaceElementArea { element_id: 0 })
+    );
+}
+
+#[test]
+fn rejects_degenerate_surface_facet_geometry_before_returning_plc() {
+    let mut surface = tetra_surface();
+    surface.nodes[1].coordinates_m = [2.0, 0.0, 0.0];
+    surface.nodes[2].coordinates_m = [1.0, 0.0, 0.0];
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::ProtectedBoundaryValidation(
+            PlcValidationError::DegenerateFacet {
+                facet_id: topology_entity_id(MeshingStage::ProtectedBoundaryComplex, 0),
+            }
+        ))
+    );
+}
+
+#[test]
 fn rejects_inconsistent_surface_orientation_before_returning_plc() {
     let mut surface = tetra_surface();
     surface.elements[0].node_ids = [0, 1, 2];

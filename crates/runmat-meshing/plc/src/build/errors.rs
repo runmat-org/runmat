@@ -21,6 +21,9 @@ pub enum PlcBuildError {
     NonFiniteSurfaceElement {
         element_id: u32,
     },
+    NonPositiveSurfaceElementArea {
+        element_id: u32,
+    },
     DuplicateFacet {
         element_id: u32,
     },
@@ -81,6 +84,10 @@ impl std::fmt::Display for PlcBuildError {
             Self::NonFiniteSurfaceElement { element_id } => write!(
                 formatter,
                 "surface element {element_id} has non-finite area or projection evidence"
+            ),
+            Self::NonPositiveSurfaceElementArea { element_id } => write!(
+                formatter,
+                "surface element {element_id} has non-positive area evidence"
             ),
             Self::DuplicateFacet { element_id } => write!(
                 formatter,

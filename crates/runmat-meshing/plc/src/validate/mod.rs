@@ -8,8 +8,10 @@ pub use components::{
 };
 pub use errors::PlcValidationError;
 pub use runmat_meshing_core::contracts::PlcValidationSummary;
-use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, StageEvidenceStatus, TopologyEntityId,
+use runmat_meshing_core::{
+    contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidenceStatus, TopologyEntityId},
+    predicate::triangle_area,
+    tolerance::MeshingTolerance,
 };
 
 pub const MODULE_PURPOSE: &str =
@@ -44,6 +46,9 @@ pub fn validate_protected_boundary_complex(
     }
 
     let mut node_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut node_coordinates = BTreeMap::<TopologyEntityId, [f64; 3]>::new();
+    let mut bounds_min_m = [f64::INFINITY; 3];
+    let mut bounds_max_m = [f64::NEG_INFINITY; 3];
     for node in &plc.nodes {
         validate_plc_entity_stage(&node.node_id)?;
         if !node_ids.insert(node.node_id.clone()) {
@@ -60,7 +65,13 @@ pub fn validate_protected_boundary_complex(
                 node_id: node.node_id.clone(),
             });
         }
+        for axis in 0..3 {
+            bounds_min_m[axis] = bounds_min_m[axis].min(node.coordinates_m[axis]);
+            bounds_max_m[axis] = bounds_max_m[axis].max(node.coordinates_m[axis]);
+        }
+        node_coordinates.insert(node.node_id.clone(), node.coordinates_m);
     }
+    let tolerance = MeshingTolerance::from_bounds(bounds_min_m, bounds_max_m);
 
     let mut edge_incidence = BTreeMap::<[TopologyEntityId; 2], usize>::new();
     let mut edge_orientation_balance = BTreeMap::<[TopologyEntityId; 2], i32>::new();
@@ -76,6 +87,12 @@ pub fn validate_protected_boundary_complex(
         }
         validate_facet_source_face(facet.facet_id.clone(), &facet.source_face_id)?;
         validate_facet_nodes(facet.facet_id.clone(), facet.node_ids.as_ref(), &node_ids)?;
+        validate_facet_geometry(
+            facet.facet_id.clone(),
+            facet.node_ids.as_ref(),
+            &node_coordinates,
+            tolerance,
+        )?;
         validate_facet_material_interfaces(facet.facet_id.clone(), &facet.material_interface_ids)?;
         let facet_key = sorted_facet(facet.node_ids.clone());
         if let Some(first_facet_id) =
@@ -226,6 +243,23 @@ fn validate_plc_entity_stage(entity_id: &TopologyEntityId) -> Result<(), PlcVali
         return Err(PlcValidationError::PlcEntityStageMismatch {
             entity_id: entity_id.clone(),
         });
+    }
+    Ok(())
+}
+
+fn validate_facet_geometry(
+    facet_id: TopologyEntityId,
+    facet_node_ids: &[TopologyEntityId],
+    node_coordinates: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    tolerance: MeshingTolerance,
+) -> Result<(), PlcValidationError> {
+    let points = [
+        node_coordinates[&facet_node_ids[0]],
+        node_coordinates[&facet_node_ids[1]],
+        node_coordinates[&facet_node_ids[2]],
+    ];
+    if triangle_area(points) <= tolerance.length_epsilon(1.0).powi(2) {
+        return Err(PlcValidationError::DegenerateFacet { facet_id });
     }
     Ok(())
 }
