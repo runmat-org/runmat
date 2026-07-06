@@ -29,7 +29,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     ] {
         assert!(
             !crate_root.join(stale_core_path).exists(),
-            "old volume-first meshing path still exists: {stale_core_path}"
+            "removed meshing path still exists: {stale_core_path}"
         );
     }
 

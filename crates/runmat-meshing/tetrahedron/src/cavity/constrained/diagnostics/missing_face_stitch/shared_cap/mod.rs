@@ -9,7 +9,7 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
     options: ConstrainedCavityRefillOptions,
     patch_link: MissingFaceLink,
     incomplete_reason: &'static str,
-    fallback_to_face_caps: bool,
+    allow_individual_face_caps: bool,
 ) -> Result<MissingFaceLocalCapStitchDiagnostic, ConstrainedCavityRefillError> {
     let MissingFaceStitchSetup {
         boundary_node_map,
@@ -69,7 +69,7 @@ pub(super) fn diagnostic_missing_face_shared_cap_stitch_with_link(
         }
 
         let mut capped_count = 0_usize;
-        if fallback_to_face_caps {
+        if allow_individual_face_caps {
             for face in &faces {
                 let Some(surface_point) = face_centroid(*face, &boundary_node_map) else {
                     continue;

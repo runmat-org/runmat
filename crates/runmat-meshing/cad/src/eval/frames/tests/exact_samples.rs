@@ -205,7 +205,7 @@ fn exact_backend_query_samples_drive_matching_projection() {
         .expect("one frame should be exact-query backed");
     let query_projection = project_to_face(frame, [0.5, 0.5, 1.02]);
     let projected_point_projection = project_to_face(frame, [0.5, 0.5, 1.0]);
-    let fallback_projection = project_to_face(frame, [0.25, 0.25, 1.02]);
+    let off_sample_projection = project_to_face(frame, [0.25, 0.25, 1.02]);
 
     assert_eq!(query_projection.point_m, [0.5, 0.5, 1.0]);
     assert_eq!(query_projection.uv, [0.5, 0.5]);
@@ -213,7 +213,7 @@ fn exact_backend_query_samples_drive_matching_projection() {
     assert_eq!(query_projection.unit_normal, [0.0, 0.0, 1.0]);
     assert_eq!(projected_point_projection.point_m, [0.5, 0.5, 1.0]);
     assert_eq!(projected_point_projection.uv, [0.5, 0.5]);
-    assert_ne!(fallback_projection.uv, [0.5, 0.5]);
+    assert_ne!(off_sample_projection.uv, [0.5, 0.5]);
 }
 
 #[test]

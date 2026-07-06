@@ -61,18 +61,18 @@ pub fn build_cad_evaluation_model_with_provider(
                 topology_vertex(topology, source_face.node_ids[1])?,
                 topology_vertex(topology, source_face.node_ids[2])?,
             ];
-            let fallback_reference_point_m = face
+            let frame_reference_point_m = face
                 .evaluator_reference_point_m
                 .unwrap_or_else(|| triangle_centroid(points));
-            let fallback_unit_normal = face
+            let frame_unit_normal = face
                 .evaluator_unit_normal
                 .unwrap_or(source_face.unit_normal);
             let live_samples = live_evaluator_samples(
                 evaluator_provider,
                 face,
                 *source_face_id,
-                fallback_reference_point_m,
-                fallback_unit_normal,
+                frame_reference_point_m,
+                frame_unit_normal,
             );
             let live_query_backed = !live_samples.samples.is_empty();
             let evaluator_samples = merged_bounded_evaluator_samples(face, live_samples, points);
@@ -199,7 +199,7 @@ fn cad_uv_domain_summary(
         );
     }
 
-    let fallback_uvs = source_points
+    let source_face_uvs = source_points
         .iter()
         .map(|point| {
             let relative = sub(*point, origin);
@@ -207,8 +207,8 @@ fn cad_uv_domain_summary(
         })
         .collect::<Vec<_>>();
     (
-        uv_bounds_from_points(fallback_uvs.as_slice()),
-        fallback_uvs.len(),
+        uv_bounds_from_points(source_face_uvs.as_slice()),
+        source_face_uvs.len(),
         Some("source_face_projection".to_string()),
     )
 }
