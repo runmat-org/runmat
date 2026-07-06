@@ -11,6 +11,7 @@ pub(crate) mod distribution_math;
 pub(crate) mod distributions;
 pub(crate) mod ecdf;
 pub(crate) mod encoding;
+pub(crate) mod fitdist;
 pub(crate) mod hypothesis;
 pub(crate) mod mode;
 pub(crate) mod normalize;

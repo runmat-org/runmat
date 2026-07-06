@@ -333,7 +333,7 @@ const WBLINV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const ICDF_SIGNATURES: [BuiltinSignatureDescriptor; 14] = [
+const ICDF_SIGNATURES: [BuiltinSignatureDescriptor; 15] = [
     BuiltinSignatureDescriptor {
         label: "x = icdf(\"Normal\", p)",
         inputs: &INPUTS_DIST_P,
@@ -404,6 +404,7 @@ const ICDF_SIGNATURES: [BuiltinSignatureDescriptor; 14] = [
         inputs: &INPUTS_DIST_P_DF,
         outputs: &OUTPUT_Y,
     },
+    crate::builtins::stats::summary::fitdist::ICDF_OBJECT_SIGNATURE,
 ];
 
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -1343,6 +1344,19 @@ pub mod icdf {
         p: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
+        if matches!(name, Value::Object(_)) {
+            if !rest.is_empty() {
+                return Err(super::normal_error(
+                    "icdf",
+                    "icdf: fitted distribution object form accepts exactly two inputs",
+                ));
+            }
+            return crate::builtins::stats::summary::fitdist::icdf_probability_distribution(
+                name, p,
+            )
+            .await;
+        }
+
         let distribution = parse_distribution_name(&name)?;
         match distribution {
             IcdfDistribution::Normal => normal_icdf(p, rest).await,

@@ -7994,6 +7994,96 @@
       ]
     },
     {
+      "name": "cdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = cdf(pd, x)",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        },
+        {
+          "label": "p = cdf(distname, x, params)",
+          "inputs": [
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITDIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitdist:InvalidArgument",
+          "when": "Sample data, distribution name, options, or evaluation inputs are malformed.",
+          "message": "fitdist: invalid argument"
+        },
+        {
+          "code": "RM.FITDIST.NUMERICAL",
+          "identifier": "RunMat:fitdist:Numerical",
+          "when": "Distribution parameter estimation fails to converge or is ill-conditioned.",
+          "message": "fitdist: numerical failure"
+        },
+        {
+          "code": "RM.FITDIST.INTERNAL",
+          "identifier": "RunMat:fitdist:Internal",
+          "when": "RunMat cannot construct distribution outputs.",
+          "message": "fitdist: internal error"
+        }
+      ]
+    },
+    {
       "name": "cdfplot",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -30727,6 +30817,96 @@
       ]
     },
     {
+      "name": "fitdist",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pd = fitdist(x, distname)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            },
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fitted probability distribution object."
+            }
+          ]
+        },
+        {
+          "label": "pd = fitdist(x, distname, Name, Value)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            },
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fitted probability distribution object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITDIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitdist:InvalidArgument",
+          "when": "Sample data, distribution name, options, or evaluation inputs are malformed.",
+          "message": "fitdist: invalid argument"
+        },
+        {
+          "code": "RM.FITDIST.NUMERICAL",
+          "identifier": "RunMat:fitdist:Numerical",
+          "when": "Distribution parameter estimation fails to converge or is ill-conditioned.",
+          "message": "fitdist: numerical failure"
+        },
+        {
+          "code": "RM.FITDIST.INTERNAL",
+          "identifier": "RunMat:fitdist:Internal",
+          "when": "RunMat cannot construct distribution outputs.",
+          "message": "fitdist: internal error"
+        }
+      ]
+    },
+    {
       "name": "fitlm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -40156,6 +40336,34 @@
               "arity": "Required",
               "default": null,
               "description": "Distribution function value."
+            }
+          ]
+        },
+        {
+          "label": "x = icdf(pd, p)",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Probability values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
             }
           ]
         }
@@ -68169,6 +68377,96 @@
       ]
     },
     {
+      "name": "pdf",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "y = pdf(pd, x)",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        },
+        {
+          "label": "y = pdf(distname, x, params)",
+          "inputs": [
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITDIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitdist:InvalidArgument",
+          "when": "Sample data, distribution name, options, or evaluation inputs are malformed.",
+          "message": "fitdist: invalid argument"
+        },
+        {
+          "code": "RM.FITDIST.NUMERICAL",
+          "identifier": "RunMat:fitdist:Numerical",
+          "when": "Distribution parameter estimation fails to converge or is ill-conditioned.",
+          "message": "fitdist: numerical failure"
+        },
+        {
+          "code": "RM.FITDIST.INTERNAL",
+          "identifier": "RunMat:fitdist:Internal",
+          "when": "RunMat cannot construct distribution outputs.",
+          "message": "fitdist: internal error"
+        }
+      ]
+    },
+    {
       "name": "pdist",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -74817,6 +75115,110 @@
           "identifier": null,
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "randn: dimension arguments must be numeric and nonnegative"
+        }
+      ]
+    },
+    {
+      "name": "random",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = random(pd)",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random samples."
+            }
+          ]
+        },
+        {
+          "label": "r = random(pd, sz)",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output size."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random samples."
+            }
+          ]
+        },
+        {
+          "label": "r = random(distname, params, sz)",
+          "inputs": [
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Random samples."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FITDIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:fitdist:InvalidArgument",
+          "when": "Sample data, distribution name, options, or evaluation inputs are malformed.",
+          "message": "fitdist: invalid argument"
+        },
+        {
+          "code": "RM.FITDIST.NUMERICAL",
+          "identifier": "RunMat:fitdist:Numerical",
+          "when": "Distribution parameter estimation fails to converge or is ill-conditioned.",
+          "message": "fitdist: numerical failure"
+        },
+        {
+          "code": "RM.FITDIST.INTERNAL",
+          "identifier": "RunMat:fitdist:Internal",
+          "when": "RunMat cannot construct distribution outputs.",
+          "message": "fitdist: internal error"
         }
       ]
     },

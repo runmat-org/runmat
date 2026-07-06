@@ -109,6 +109,20 @@ fn fitlm_surface_executes_from_scripts() {
 }
 
 #[test]
+fn fitdist_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "pd = fitdist([1; 2; 3], 'Normal'); vals = pd.ParameterValues; mu = vals(1); sigma = vals(2); y = pdf(pd, 2); p = cdf(pd, 2); x = icdf(pd, 0.5); r = random(pd, [2 3]); yn = pdf('Normal', 0, 0, 1); pn = cdf('Poisson', 2, 3); rn = random('Weibull', 2, 3, 2, 2); sz = size(r); rows = sz(1); cols = sz(2);",
+    )
+    .expect("fitdist script");
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, (2.0_f64 / 3.0).sqrt()));
+    assert!(has_num(&vars, 0.5));
+    assert!(has_tensor_shape(&vars, &[2, 3]));
+    assert!(has_tensor_shape(&vars, &[2, 2]));
+    assert!(has_num(&vars, 3.0));
+}
+
+#[test]
 fn fitctree_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0; 1; 2; 3]; y = [0; 0; 1; 1]; mdl = fitctree(X, y, 'MaxNumSplits', 1, 'MinParentSize', 2); [label,score,node,cnum] = predict(mdl, [0.5; 2.5]); a = label(1); b = label(2); s11 = score(1,1); n1 = node(1); c2 = cnum(2);",
