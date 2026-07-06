@@ -46,12 +46,8 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
         bounds,
         tolerance.absolute_m,
     )?;
-    let material_regions_by_ring_region = holed_polyhedron_ring_material_regions(
-        plc,
-        &grid,
-        &coordinates_by_id,
-        tolerance.absolute_m,
-    )?;
+    let material_classifier =
+        holed_polyhedron_material_classifier(plc, &grid, &coordinates_by_id, tolerance.absolute_m)?;
     let mut nodes = plc
         .nodes
         .iter()
@@ -74,7 +70,7 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
         &grid,
         &grid_node_ids,
         &coordinates_by_mesh_node_id,
-        &material_regions_by_ring_region,
+        &material_classifier,
         &mut elements,
         &mut min_scaled_jacobian,
     )?;
@@ -160,12 +156,12 @@ impl RectangularThroughHoleGrid {
             && (self.y_hole_min_index..self.y_hole_max_index).contains(&y_index)
     }
 
-    fn cell_center(&self, cell_index: [usize; 2]) -> [f64; 3] {
-        let [x_index, y_index] = cell_index;
+    fn cell_center(&self, cell_index: [usize; 3]) -> [f64; 3] {
+        let [x_index, y_index, z_index] = cell_index;
         [
             0.5 * (self.x_values[x_index] + self.x_values[x_index + 1]),
             0.5 * (self.y_values[y_index] + self.y_values[y_index + 1]),
-            0.5 * (self.source_z_values[0] + self.source_z_values[1]),
+            0.5 * (self.z_values[z_index] + self.z_values[z_index + 1]),
         ]
     }
 }
@@ -176,7 +172,7 @@ fn axis_aligned_rectangular_through_hole_grid(
     bounds: [[f64; 3]; 2],
     tolerance_m: f64,
 ) -> Result<RectangularThroughHoleGrid, TetrahedronGenerationError> {
-    if plc.nodes.len() != 16 || plc.facets.len() != 32 {
+    if plc.nodes.len() != 16 || plc.facets.is_empty() {
         return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
     }
     let x_values = unique_axis_values(plc, 0, tolerance_m);
@@ -276,7 +272,7 @@ fn append_ring_cell_tetrahedra(
     grid: &RectangularThroughHoleGrid,
     grid_node_ids: &[TopologyEntityId],
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    material_regions_by_ring_region: &BTreeMap<HoledRingRegionKey, String>,
+    material_classifier: &HoledPolyhedronMaterialClassifier,
     elements: &mut Vec<Tetrahedron4Element>,
     min_scaled_jacobian: &mut f64,
 ) -> Result<(), TetrahedronGenerationError> {
@@ -294,12 +290,10 @@ fn append_ring_cell_tetrahedra(
                 if grid.contains_hole_cell(x_index, y_index) {
                     continue;
                 }
-                let ring_region =
-                    holed_ring_region_key(grid.cell_center([x_index, y_index]), grid, 0.0)
-                        .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-                let material_region_id = material_regions_by_ring_region
-                    .get(&ring_region)
-                    .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+                let material_region_id = material_classifier.material_region_for_cell(
+                    grid.cell_center([x_index, y_index, z_index]),
+                    grid,
+                )?;
                 let cell_corner_ids = holed_polyhedron_cell_corner_ids(
                     grid,
                     grid_node_ids,
@@ -341,25 +335,68 @@ enum HoledRingRegionKey {
     Left,
 }
 
-fn holed_polyhedron_ring_material_regions(
+#[derive(Debug, Clone)]
+struct HoledPolyhedronMaterialClassifier {
+    default_material_region_id: Option<String>,
+    facets: Vec<HoledMaterialFacet>,
+    tolerance_m: f64,
+}
+
+impl HoledPolyhedronMaterialClassifier {
+    fn material_region_for_cell(
+        &self,
+        cell_center: [f64; 3],
+        grid: &RectangularThroughHoleGrid,
+    ) -> Result<String, TetrahedronGenerationError> {
+        if let Some(material_region_id) = &self.default_material_region_id {
+            return Ok(material_region_id.clone());
+        }
+        let ring_region = holed_ring_region_key(cell_center, grid, 0.0)
+            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        let surface_key = holed_ring_region_outer_surface_key(ring_region);
+        let boundary_point = holed_ring_region_outer_boundary_point(cell_center, grid, ring_region);
+        self.facets
+            .iter()
+            .find(|facet| {
+                facet.surface_key == surface_key
+                    && point_lies_in_triangle(boundary_point, facet.points, self.tolerance_m)
+            })
+            .map(|facet| facet.material_region_id.clone())
+            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HoledMaterialFacet {
+    surface_key: HoledSurfaceKey,
+    points: [[f64; 3]; 3],
+    material_region_id: String,
+}
+
+fn holed_polyhedron_material_classifier(
     plc: &ProtectedBoundaryComplex,
     grid: &RectangularThroughHoleGrid,
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
     tolerance_m: f64,
-) -> Result<BTreeMap<HoledRingRegionKey, String>, TetrahedronGenerationError> {
+) -> Result<HoledPolyhedronMaterialClassifier, TetrahedronGenerationError> {
     let plc_material_region_ids = plc
         .facets
         .iter()
         .flat_map(|facet| facet.material_interface_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
     if plc_material_region_ids.is_empty() {
-        return Ok(holed_polyhedron_uniform_ring_material_regions(
-            DEFAULT_MATERIAL_REGION_ID,
-        ));
+        return Ok(HoledPolyhedronMaterialClassifier {
+            default_material_region_id: Some(DEFAULT_MATERIAL_REGION_ID.to_string()),
+            facets: Vec::new(),
+            tolerance_m,
+        });
     }
 
-    let mut region_ids_by_ring_region = BTreeMap::<HoledRingRegionKey, BTreeSet<String>>::new();
+    let mut facets = Vec::<HoledMaterialFacet>::with_capacity(plc.facets.len());
     for facet in &plc.facets {
+        if facet.material_interface_ids.is_empty() {
+            continue;
+        }
         if facet.material_interface_ids.len() != 1 {
             return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
         }
@@ -372,45 +409,19 @@ fn holed_polyhedron_ring_material_regions(
         });
         let points = points.into_iter().collect::<Result<Vec<_>, _>>()?;
         let points = [points[0], points[1], points[2]];
-        let ring_region = holed_facet_ring_region_key(&points, grid, tolerance_m)
+        let surface_key = holed_surface_key(&points, grid, tolerance_m)
             .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-        region_ids_by_ring_region
-            .entry(ring_region)
-            .or_default()
-            .insert(facet.material_interface_ids[0].clone());
+        facets.push(HoledMaterialFacet {
+            surface_key,
+            points,
+            material_region_id: facet.material_interface_ids[0].clone(),
+        });
     }
-
-    let mut material_regions_by_ring_region = BTreeMap::<HoledRingRegionKey, String>::new();
-    for ring_region in holed_ring_region_keys() {
-        let region_ids = region_ids_by_ring_region
-            .remove(&ring_region)
-            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-        let [material_region_id]: [String; 1] = region_ids
-            .into_iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-        material_regions_by_ring_region.insert(ring_region, material_region_id);
-    }
-    Ok(material_regions_by_ring_region)
-}
-
-fn holed_polyhedron_uniform_ring_material_regions(
-    material_region_id: &str,
-) -> BTreeMap<HoledRingRegionKey, String> {
-    holed_ring_region_keys()
-        .into_iter()
-        .map(|ring_region| (ring_region, material_region_id.to_string()))
-        .collect()
-}
-
-fn holed_ring_region_keys() -> [HoledRingRegionKey; 4] {
-    [
-        HoledRingRegionKey::Bottom,
-        HoledRingRegionKey::Right,
-        HoledRingRegionKey::Top,
-        HoledRingRegionKey::Left,
-    ]
+    Ok(HoledPolyhedronMaterialClassifier {
+        default_material_region_id: None,
+        facets,
+        tolerance_m,
+    })
 }
 
 fn holed_ring_region_key(
@@ -433,19 +444,27 @@ fn holed_ring_region_key(
         .map(|(ring_region, _)| ring_region)
 }
 
-fn holed_facet_ring_region_key(
-    points: &[[f64; 3]; 3],
+fn holed_ring_region_outer_surface_key(ring_region: HoledRingRegionKey) -> HoledSurfaceKey {
+    match ring_region {
+        HoledRingRegionKey::Bottom => HoledSurfaceKey::OuterYMin,
+        HoledRingRegionKey::Right => HoledSurfaceKey::OuterXMax,
+        HoledRingRegionKey::Top => HoledSurfaceKey::OuterYMax,
+        HoledRingRegionKey::Left => HoledSurfaceKey::OuterXMin,
+    }
+}
+
+fn holed_ring_region_outer_boundary_point(
+    cell_center: [f64; 3],
     grid: &RectangularThroughHoleGrid,
-    tolerance_m: f64,
-) -> Option<HoledRingRegionKey> {
-    match holed_surface_key(points, grid, tolerance_m)? {
-        HoledSurfaceKey::OuterYMin | HoledSurfaceKey::HoleYMin => Some(HoledRingRegionKey::Bottom),
-        HoledSurfaceKey::OuterXMax | HoledSurfaceKey::HoleXMax => Some(HoledRingRegionKey::Right),
-        HoledSurfaceKey::OuterYMax | HoledSurfaceKey::HoleYMax => Some(HoledRingRegionKey::Top),
-        HoledSurfaceKey::OuterXMin | HoledSurfaceKey::HoleXMin => Some(HoledRingRegionKey::Left),
-        HoledSurfaceKey::Top | HoledSurfaceKey::Bottom => {
-            holed_ring_region_key(triangle_centroid(*points), grid, tolerance_m)
-        }
+    ring_region: HoledRingRegionKey,
+) -> [f64; 3] {
+    let [x_min, _, _, x_max] = grid.source_x_values;
+    let [y_min, _, _, y_max] = grid.source_y_values;
+    match ring_region {
+        HoledRingRegionKey::Bottom => [cell_center[0], y_min, cell_center[2]],
+        HoledRingRegionKey::Right => [x_max, cell_center[1], cell_center[2]],
+        HoledRingRegionKey::Top => [cell_center[0], y_max, cell_center[2]],
+        HoledRingRegionKey::Left => [x_min, cell_center[1], cell_center[2]],
     }
 }
 

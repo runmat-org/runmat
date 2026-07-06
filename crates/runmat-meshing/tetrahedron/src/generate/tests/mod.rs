@@ -912,6 +912,33 @@ fn holed_polyhedron_generation_assigns_split_ring_material_regions() {
 }
 
 #[test]
+fn holed_polyhedron_generation_assigns_split_ring_material_regions_for_close_parallel_walls() {
+    let plc = split_ring_material_close_parallel_wall_slot_plc();
+    let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("split-ring close-wall slot PLC should generate region-owned Tetrahedra");
+
+    let material_region_ids = mesh
+        .elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["unclassified_tetrahedron_material_elements"],
+        0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["tetrahedron_material_regions"],
+        2
+    );
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality evidence") >= 0.15);
+}
+
+#[test]
 fn holed_polyhedron_generation_preserves_protected_source_edges() {
     let plc = protected_edge_through_hole_plate_plc();
     let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
@@ -1198,6 +1225,18 @@ fn split_ring_material_through_hole_plate_plc() -> ProtectedBoundaryComplex {
         } else {
             "region_cap".to_string()
         }];
+    }
+    plc
+}
+
+fn split_ring_material_close_parallel_wall_slot_plc() -> ProtectedBoundaryComplex {
+    let mut plc = split_ring_material_through_hole_plate_plc();
+    for node in &mut plc.nodes {
+        match node.node_id.id.as_str() {
+            "4" | "7" | "12" | "15" => node.coordinates_m[0] = 1.4,
+            "5" | "6" | "13" | "14" => node.coordinates_m[0] = 1.6,
+            _ => {}
+        }
     }
     plc
 }
