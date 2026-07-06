@@ -3,11 +3,12 @@ use super::{
     boundary::FaceCurveSegment,
     elements::append_curve_fan_face_elements,
     geometry::{point_in_polygon_2d, triangle_centroid_2d},
-    sampling::ExactCadSampleSurfaceReport,
+    sampling::{ExactCadSampleSurfaceReport, SizingSampleSurfaceReport},
 };
 use crate::math::{cross, dot, sub};
 use runmat_geometry_core::{CadFaceEvaluationSample, CadFaceEvaluationSampleSource};
 use runmat_meshing_cad::{build_cad_evaluation_model, build_cad_topology, SourceTopologyFace};
+use runmat_meshing_core::{MeshSizingField, SizingSample};
 use runmat_meshing_curve::{
     discretize_cad_topology_curves_with_sizing, discretize_topology_curves,
     CurveDiscretizationOptions, CurveValidationError,
@@ -89,6 +90,55 @@ fn rejects_cad_surface_vertex_outside_uv_domain() {
             node_id: 1,
         }
     );
+}
+
+#[test]
+fn cad_topology_surface_inserts_sizing_face_domain_samples() {
+    let topology = single_triangle_topology();
+    let geometry = geometry_with_face_domain_sample();
+    let cad_topology = build_cad_topology(&geometry, &topology).expect("cad topology");
+    let cad_evaluation =
+        build_cad_evaluation_model(&cad_topology, &topology).expect("cad evaluation");
+    let cad_curves = discretize_cad_topology_curves_with_sizing(
+        &topology,
+        &cad_topology,
+        CurveDiscretizationOptions {
+            target_size_m: 1.0,
+            min_segments_per_edge: 1,
+            max_segments_per_edge: 1,
+        },
+        None,
+    )
+    .expect("cad curves should discretize");
+    let sizing = MeshSizingField {
+        samples: vec![SizingSample {
+            position_m: [0.2, 0.2, 0.0],
+            target_size_m: 0.25,
+            reason: Some("structural.load_regions".to_string()),
+        }],
+        ..MeshSizingField::default()
+    };
+
+    let surface = discretize_cad_topology_surfaces_with_cad_curves_and_sizing(
+        &cad_topology,
+        &topology,
+        &cad_evaluation,
+        &cad_curves,
+        SurfaceDiscretizationOptions {
+            max_curve_segments_per_edge: 1,
+            ..SurfaceDiscretizationOptions::default()
+        },
+        Some(&sizing),
+    )
+    .expect("sizing-aware CAD surface should discretize");
+
+    assert_eq!(surface.sizing_sample_node_count, 1);
+    assert_eq!(surface.rejected_sizing_sample_count, 0);
+    assert!(surface
+        .nodes
+        .iter()
+        .any(|node| node.coordinates_m == [0.2, 0.2, 0.0]));
+    assert!(surface.elements.len() > 1);
 }
 
 #[test]

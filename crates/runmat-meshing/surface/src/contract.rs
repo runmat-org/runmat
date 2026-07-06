@@ -51,6 +51,14 @@ pub fn build_surface_mesh_contract(
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
     );
+    evidence.entity_counts.insert(
+        "sizing_sample_nodes".to_string(),
+        surface.sizing_sample_node_count,
+    );
+    evidence.entity_counts.insert(
+        "rejected_sizing_samples".to_string(),
+        surface.rejected_sizing_sample_count,
+    );
     evidence.max_projection_error_m = Some(validation.max_projection_error_m);
 
     SurfaceMesh {
@@ -267,6 +275,8 @@ mod tests {
             cad_curve_boundary_provenance: None,
             exact_cad_sample_node_count: 0,
             rejected_exact_cad_sample_count: 0,
+            sizing_sample_node_count: 0,
+            rejected_sizing_sample_count: 0,
         };
         let validation = SurfaceValidationReport {
             source_face_count: 1,

@@ -59,6 +59,10 @@ pub struct SurfaceDiscretization {
     pub exact_cad_sample_node_count: usize,
     #[serde(default)]
     pub rejected_exact_cad_sample_count: usize,
+    #[serde(default)]
+    pub sizing_sample_node_count: usize,
+    #[serde(default)]
+    pub rejected_sizing_sample_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

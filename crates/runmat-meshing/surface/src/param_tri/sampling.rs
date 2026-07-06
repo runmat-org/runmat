@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use runmat_geometry_core::{CadFaceEvaluationSample, CadFaceEvaluationSampleSource};
 use runmat_meshing_cad::{project_to_face, CadFaceEvaluationFrame, SourceTopologyFace};
+use runmat_meshing_core::MeshSizingField;
 
 use crate::math::{dot, sub};
 
@@ -29,6 +30,12 @@ impl ExactCadSampleSurfaceReport {
             rejected_count: self.rejected_count + self.accepted_count,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct SizingSampleSurfaceReport {
+    pub(super) accepted_count: usize,
+    pub(super) rejected_count: usize,
 }
 
 pub(super) fn face_area_is_recovered(
@@ -122,6 +129,63 @@ pub(super) fn append_exact_face_domain_sample_points(
         report.accepted_count += 1;
     }
     report
+}
+
+pub(super) fn append_sizing_face_sample_points(
+    frame: &CadFaceEvaluationFrame,
+    boundary_polygons: &[Vec<[f64; 2]>],
+    sizing: Option<&MeshSizingField>,
+    nodes: &mut Vec<SurfaceNode>,
+    points: &mut Vec<FaceTriangulationPoint>,
+) -> SizingSampleSurfaceReport {
+    let Some(sizing) = sizing else {
+        return SizingSampleSurfaceReport::default();
+    };
+    let mut report = SizingSampleSurfaceReport::default();
+    for sample in &sizing.samples {
+        if !sample_targets_boundary_face(sample.reason.as_deref()) {
+            continue;
+        }
+        let Some(_) = sizing.clamped_target_size_m(sample.target_size_m) else {
+            report.rejected_count += 1;
+            continue;
+        };
+        if !sample.position_m.iter().all(|value| value.is_finite()) {
+            report.rejected_count += 1;
+            continue;
+        }
+        let projection = project_to_face(frame, sample.position_m);
+        if !projection.uv_in_bounds || !point_in_trimmed_domain_2d(projection.uv, boundary_polygons)
+        {
+            continue;
+        }
+        if points
+            .iter()
+            .any(|point| distance2_2d(point.uv, projection.uv) <= 1.0e-24)
+        {
+            report.rejected_count += 1;
+            continue;
+        }
+        let node_id = nodes.len() as u32;
+        nodes.push(SurfaceNode {
+            node_id,
+            source_vertex_id: u32::MAX,
+            coordinates_m: projection.point_m,
+        });
+        points.push(FaceTriangulationPoint {
+            node_id,
+            uv: projection.uv,
+        });
+        report.accepted_count += 1;
+    }
+    report
+}
+
+fn sample_targets_boundary_face(reason: Option<&str>) -> bool {
+    matches!(
+        reason,
+        Some("structural.load_regions" | "structural.constraint_regions")
+    )
 }
 
 fn frame_local_uv(frame: &CadFaceEvaluationFrame, point_m: [f64; 3]) -> [f64; 2] {

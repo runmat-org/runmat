@@ -451,17 +451,24 @@ fn boundary_focus_sizing_records_load_and_constraint_curve_applications() {
     )
     .expect("boundary-focus sizing should refine protected solid curves");
 
-    let inserted_breakpoints_by_reason = mesh
+    let mut inserted_breakpoints_by_reason = BTreeMap::<&str, usize>::new();
+    for application in &mesh.sizing.applied_samples {
+        *inserted_breakpoints_by_reason
+            .entry(application.reason.as_deref().unwrap_or("unspecified"))
+            .or_default() += application.inserted_breakpoint_count;
+    }
+    let face_domain_application_reasons = mesh
         .sizing
         .applied_samples
         .iter()
-        .map(|application| {
-            (
-                application.reason.as_deref().unwrap_or("unspecified"),
-                application.inserted_breakpoint_count,
-            )
+        .filter_map(|application| {
+            application
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("face-domain sizing samples"))
+                .then_some(application.reason.as_deref().unwrap_or("unspecified"))
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect::<BTreeSet<_>>();
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.sizing.rejected_samples, Vec::new());
@@ -473,6 +480,8 @@ fn boundary_focus_sizing_records_load_and_constraint_curve_applications() {
         inserted_breakpoints_by_reason["structural.constraint_regions"] > 0,
         "constraint-region sizing should insert protected-edge breakpoints"
     );
+    assert!(face_domain_application_reasons.contains("structural.load_regions"));
+    assert!(face_domain_application_reasons.contains("structural.constraint_regions"));
     assert!(mesh.backend.plc_input_protected_edge_count > 12);
     assert_eq!(
         mesh.backend

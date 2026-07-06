@@ -4,6 +4,7 @@ use runmat_meshing_cad::{
     project_to_face, CadEvaluationModel, CadFace, CadLoop, CadTopologyModel, SourceTopologyEdge,
     SourceTopologyFace, SourceTopologyModel,
 };
+use runmat_meshing_core::MeshSizingField;
 use runmat_meshing_curve::{
     validate_curve_discretization, CadCurveDiscretization, CadCurveEdgeProvenance,
     CurveDiscretization, CurveValidationOptions,
@@ -74,6 +75,8 @@ pub fn discretize_topology_surfaces(
         cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
+        sizing_sample_node_count: 0,
+        rejected_sizing_sample_count: 0,
     })
 }
 
@@ -180,6 +183,8 @@ pub fn discretize_cad_surfaces(
         cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
+        sizing_sample_node_count: 0,
+        rejected_sizing_sample_count: 0,
     })
 }
 
@@ -218,6 +223,8 @@ pub fn discretize_cad_surfaces_with_curves(
     let mut loop_coverage = SurfaceLoopCoverageAccumulator::new(topology.faces.len());
     let mut exact_cad_sample_node_count = 0_usize;
     let mut rejected_exact_cad_sample_count = 0_usize;
+    let mut sizing_sample_node_count = 0_usize;
+    let mut rejected_sizing_sample_count = 0_usize;
     for face in &topology.faces {
         validate_face_vertices(topology, face)?;
         let frame = frames_by_source_face.get(&face.face_id).ok_or(
@@ -235,15 +242,18 @@ pub fn discretize_cad_surfaces_with_curves(
         )?;
         let segment_loops = face_curve_segment_loops(face.face_id, &segments)?;
         loop_coverage.record_face(face, &segment_loops);
-        let sample_report = append_curve_driven_face_elements(
+        let (sample_report, sizing_report) = append_curve_driven_face_elements(
             face,
             frame,
             &segment_loops,
+            None,
             &mut nodes,
             &mut elements,
         );
         exact_cad_sample_node_count += sample_report.accepted_count;
         rejected_exact_cad_sample_count += sample_report.rejected_count;
+        sizing_sample_node_count += sizing_report.accepted_count;
+        rejected_sizing_sample_count += sizing_report.rejected_count;
     }
 
     Ok(SurfaceDiscretization {
@@ -254,6 +264,8 @@ pub fn discretize_cad_surfaces_with_curves(
         cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
+        sizing_sample_node_count,
+        rejected_sizing_sample_count,
     })
 }
 
@@ -271,6 +283,7 @@ pub fn discretize_cad_topology_surfaces_with_curves(
         curves,
         None,
         options,
+        None,
     )
 }
 
@@ -281,6 +294,24 @@ pub fn discretize_cad_topology_surfaces_with_cad_curves(
     cad_curves: &CadCurveDiscretization,
     options: SurfaceDiscretizationOptions,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
+    discretize_cad_topology_surfaces_with_cad_curves_and_sizing(
+        cad_topology,
+        topology,
+        cad_evaluation,
+        cad_curves,
+        options,
+        None,
+    )
+}
+
+pub fn discretize_cad_topology_surfaces_with_cad_curves_and_sizing(
+    cad_topology: &CadTopologyModel,
+    topology: &SourceTopologyModel,
+    cad_evaluation: &CadEvaluationModel,
+    cad_curves: &CadCurveDiscretization,
+    options: SurfaceDiscretizationOptions,
+    sizing: Option<&MeshSizingField>,
+) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
     discretize_cad_topology_surfaces_with_curve_inputs(
         cad_topology,
         topology,
@@ -288,6 +319,7 @@ pub fn discretize_cad_topology_surfaces_with_cad_curves(
         &cad_curves.curves,
         Some(&cad_curves.edge_provenance),
         options,
+        sizing,
     )
 }
 
@@ -298,6 +330,7 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
     curves: &CurveDiscretization,
     cad_curve_edge_provenance: Option<&[CadCurveEdgeProvenance]>,
     options: SurfaceDiscretizationOptions,
+    sizing: Option<&MeshSizingField>,
 ) -> Result<SurfaceDiscretization, SurfaceDiscretizationError> {
     let curve_boundary_validation =
         validate_curve_discretization(topology, curves, cad_curve_validation_options())
@@ -342,6 +375,8 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
         .map(|_| SurfaceCadCurveBoundaryProvenanceAccumulator::new());
     let mut exact_cad_sample_node_count = 0_usize;
     let mut rejected_exact_cad_sample_count = 0_usize;
+    let mut sizing_sample_node_count = 0_usize;
+    let mut rejected_sizing_sample_count = 0_usize;
     for cad_face in &cad_topology.faces {
         let face = cad_face_surface_seed(cad_face, &cad_loops_by_id, &topology_edges)?;
         validate_face_vertices(topology, &face)?;
@@ -368,15 +403,18 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
         ) {
             accumulator.record_segments(&segment_loops, provenance_by_source_edge)?;
         }
-        let sample_report = append_curve_driven_face_elements(
+        let (sample_report, sizing_report) = append_curve_driven_face_elements(
             &face,
             frame,
             &segment_loops,
+            sizing,
             &mut nodes,
             &mut elements,
         );
         exact_cad_sample_node_count += sample_report.accepted_count;
         rejected_exact_cad_sample_count += sample_report.rejected_count;
+        sizing_sample_node_count += sizing_report.accepted_count;
+        rejected_sizing_sample_count += sizing_report.rejected_count;
     }
 
     Ok(SurfaceDiscretization {
@@ -388,6 +426,8 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
             .map(SurfaceCadCurveBoundaryProvenanceAccumulator::finish),
         exact_cad_sample_node_count,
         rejected_exact_cad_sample_count,
+        sizing_sample_node_count,
+        rejected_sizing_sample_count,
     })
 }
 

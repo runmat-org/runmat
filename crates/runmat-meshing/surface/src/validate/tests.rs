@@ -463,6 +463,8 @@ fn square_cad_surface(mark_display_diagonal_as_source_edge: bool) -> SurfaceDisc
         cad_curve_boundary_provenance: None,
         exact_cad_sample_node_count: 0,
         rejected_exact_cad_sample_count: 0,
+        sizing_sample_node_count: 0,
+        rejected_sizing_sample_count: 0,
     }
 }
 

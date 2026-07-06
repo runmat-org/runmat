@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_meshing_cad::{project_to_face, CadFaceEvaluationFrame, SourceTopologyFace};
+use runmat_meshing_core::MeshSizingField;
 
 use crate::math::{cross, dot, sub, triangle_area};
 
@@ -10,8 +11,9 @@ use super::{
         boundary_loop_polygons, boundary_triangulation_points, sorted_node_pair, triangle_edges_2d,
     },
     sampling::{
-        append_exact_face_domain_sample_points, append_face_lattice_points, face_area_is_recovered,
-        face_edges_are_recovered, has_exact_face_domain_samples, ExactCadSampleSurfaceReport,
+        append_exact_face_domain_sample_points, append_face_lattice_points,
+        append_sizing_face_sample_points, face_area_is_recovered, face_edges_are_recovered,
+        has_exact_face_domain_samples, ExactCadSampleSurfaceReport, SizingSampleSurfaceReport,
     },
     triangulation::{triangulate_face_points, triangulate_triangle_points_by_insertion},
     SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
@@ -37,20 +39,24 @@ pub(super) fn append_curve_driven_face_elements(
     face: &SourceTopologyFace,
     frame: &CadFaceEvaluationFrame,
     segment_loops: &[Vec<FaceCurveSegment>],
+    sizing: Option<&MeshSizingField>,
     nodes: &mut Vec<SurfaceNode>,
     elements: &mut Vec<SurfaceElement>,
-) -> ExactCadSampleSurfaceReport {
+) -> (ExactCadSampleSurfaceReport, SizingSampleSurfaceReport) {
     let segments = segment_loops
         .iter()
         .flat_map(|loop_segments| loop_segments.iter().copied())
         .collect::<Vec<_>>();
-    if segments.len() <= 3 && !has_exact_face_domain_samples(frame) {
+    if segments.len() <= 3 && sizing.is_none() && !has_exact_face_domain_samples(frame) {
         if segments.len() == 3 {
             append_curve_triangle_face_element(face, frame, &segments, nodes, elements);
         } else {
             append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
         }
-        return ExactCadSampleSurfaceReport::default();
+        return (
+            ExactCadSampleSurfaceReport::default(),
+            SizingSampleSurfaceReport::default(),
+        );
     }
 
     let node_start = nodes.len();
@@ -68,6 +74,8 @@ pub(super) fn append_curve_driven_face_elements(
     let boundary_polygons = boundary_loop_polygons(frame, segment_loops, nodes);
     let sample_report =
         append_exact_face_domain_sample_points(face, frame, &boundary_polygons, nodes, &mut points);
+    let sizing_report =
+        append_sizing_face_sample_points(frame, &boundary_polygons, sizing, nodes, &mut points);
     append_face_lattice_points(
         face,
         frame,
@@ -83,7 +91,7 @@ pub(super) fn append_curve_driven_face_elements(
     };
     if triangles.is_empty() {
         append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
-        return sample_report;
+        return (sample_report, sizing_report);
     }
 
     for triangle in triangles {
@@ -148,9 +156,17 @@ pub(super) fn append_curve_driven_face_elements(
         nodes.truncate(node_start);
         elements.truncate(element_start);
         append_curve_fan_face_elements(face, frame, &segments, nodes, elements);
-        return sample_report.rejected_after_area_guard();
+        return (
+            sample_report.rejected_after_area_guard(),
+            SizingSampleSurfaceReport {
+                accepted_count: 0,
+                rejected_count: sizing_report
+                    .rejected_count
+                    .saturating_add(sizing_report.accepted_count),
+            },
+        );
     }
-    sample_report
+    (sample_report, sizing_report)
 }
 
 pub(super) fn append_curve_fan_face_elements(

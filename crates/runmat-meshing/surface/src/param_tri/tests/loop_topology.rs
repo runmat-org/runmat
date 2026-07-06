@@ -54,12 +54,19 @@ fn curve_driven_face_elements_triangulate_holed_loop_domain() {
     ];
     let mut elements = Vec::<SurfaceElement>::new();
 
-    let report =
-        append_curve_driven_face_elements(&face, &frame, &segment_loops, &mut nodes, &mut elements);
+    let (report, sizing_report) = append_curve_driven_face_elements(
+        &face,
+        &frame,
+        &segment_loops,
+        None,
+        &mut nodes,
+        &mut elements,
+    );
     let recovered_area = elements.iter().map(|element| element.area_m2).sum::<f64>();
     let hole = [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]];
 
     assert_eq!(report, ExactCadSampleSurfaceReport::default());
+    assert_eq!(sizing_report, SizingSampleSurfaceReport::default());
     assert!(!elements.is_empty());
     assert!(
         (recovered_area - face.area_m2).abs() <= 1.0e-12,

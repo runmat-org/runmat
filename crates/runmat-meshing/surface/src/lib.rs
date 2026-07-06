@@ -12,11 +12,12 @@ pub mod validate;
 pub use contract::build_surface_mesh_contract;
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
-    discretize_cad_topology_surfaces_with_cad_curves, discretize_cad_topology_surfaces_with_curves,
-    discretize_topology_surfaces, SurfaceCadCurveBoundaryEdgeProvenance,
-    SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, SurfaceDiscretizationError,
-    SurfaceDiscretizationOptions, SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode,
-    INTERNAL_SOURCE_EDGE_ID,
+    discretize_cad_topology_surfaces_with_cad_curves,
+    discretize_cad_topology_surfaces_with_cad_curves_and_sizing,
+    discretize_cad_topology_surfaces_with_curves, discretize_topology_surfaces,
+    SurfaceCadCurveBoundaryEdgeProvenance, SurfaceCadCurveBoundaryProvenanceReport,
+    SurfaceDiscretization, SurfaceDiscretizationError, SurfaceDiscretizationOptions,
+    SurfaceElement, SurfaceLoopCoverageReport, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
 };
 pub use recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,

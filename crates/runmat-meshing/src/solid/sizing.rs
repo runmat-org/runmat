@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     SizingSampleRejection, VolumeMeshingOptions,
 };
 use runmat_meshing_curve::CurveDiscretizationOptions;
+use runmat_meshing_surface::SurfaceDiscretization;
 
 pub(super) fn target_curve_size_m(options: &VolumeMeshingOptions, geometry: &GeometryAsset) -> f64 {
     match options.target_size {
@@ -16,13 +17,15 @@ pub(super) fn target_curve_size_m(options: &VolumeMeshingOptions, geometry: &Geo
     .min(options.max_size_m.unwrap_or(f64::INFINITY))
 }
 
-pub(super) fn sizing_with_curve_application_evidence(
+pub(super) fn sizing_with_application_evidence(
     sizing: &MeshSizingField,
     topology: &SourceTopologyModel,
     options: CurveDiscretizationOptions,
+    surface: &SurfaceDiscretization,
 ) -> MeshSizingField {
     let mut enriched = sizing.clone();
     append_curve_sample_application_evidence(&mut enriched, topology, options);
+    append_surface_sample_application_evidence(&mut enriched, surface);
     enriched
 }
 
@@ -75,6 +78,45 @@ fn append_curve_sample_application_evidence(
             target_size_m,
             sample.reason,
         );
+    }
+}
+
+fn append_surface_sample_application_evidence(
+    sizing: &mut MeshSizingField,
+    surface: &SurfaceDiscretization,
+) {
+    if surface.sizing_sample_node_count == 0 {
+        return;
+    }
+    let inserted_sample_nodes = surface
+        .nodes
+        .iter()
+        .filter(|node| node.source_vertex_id == u32::MAX)
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
+    for sample in sizing.samples.clone() {
+        let Some(target_size_m) = sizing.clamped_target_size_m(sample.target_size_m) else {
+            continue;
+        };
+        let inserted_breakpoint_count = inserted_sample_nodes
+            .iter()
+            .filter(|coordinates| {
+                distance(sample.position_m, **coordinates)
+                    <= target_size_m.max(1.0) * 1.0e-9 + 1.0e-12
+            })
+            .count();
+        if inserted_breakpoint_count == 0 {
+            continue;
+        }
+        sizing.applied_samples.push(SizingSampleApplication {
+            position_m: sample.position_m,
+            target_size_m,
+            inserted_breakpoint_count,
+            reason: sample.reason,
+            detail: Some(format!(
+                "inserted {inserted_breakpoint_count} face-domain sizing samples"
+            )),
+        });
     }
 }
 
