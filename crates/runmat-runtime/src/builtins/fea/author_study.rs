@@ -718,6 +718,78 @@ mod tests {
     }
 
     #[test]
+    fn runs_generic_study_from_minimal_authoring_inputs() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let (mesh_path, evidence_path, summary) = authoring_analysis_mesh_artifacts(tmp.path());
+        let study = create_author_study_object_from_args(vec![
+            Value::String("authored_minimal_static".to_string()),
+            generic_authoring_geometry_value(),
+            summary,
+            Value::String("AnalysisMeshArtifactPath".to_string()),
+            Value::String(mesh_path.clone()),
+            Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
+            Value::String(evidence_path.clone()),
+        ])
+        .expect("minimal authoring inputs should produce a runnable generic study");
+
+        let Value::Object(study_object) = study.clone() else {
+            panic!("expected authored study object");
+        };
+        let Some(Value::String(study_payload)) =
+            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
+        else {
+            panic!("expected study payload");
+        };
+        let decoded_study: crate::analysis::AnalysisStudySpec =
+            serde_json::from_str(study_payload).expect("authored study should decode");
+        let model = decoded_study
+            .model
+            .as_ref()
+            .expect("minimal authored study should include a model");
+        assert_eq!(model.material_assignments[0].region_id, "solid");
+        assert_eq!(model.boundary_conditions[0].region_id, "root");
+        assert_eq!(model.loads[0].region_id, "tip");
+        let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
+            panic!("minimal authored study should default to a force load");
+        };
+        assert_eq!([fx, fy, fz], [0.0, -1000.0, 0.0]);
+        assert_eq!(
+            decoded_study.analysis_mesh_artifact_path.as_deref(),
+            Some(mesh_path.as_str())
+        );
+        assert_eq!(
+            decoded_study
+                .analysis_mesh_evidence_artifact_path
+                .as_deref(),
+            Some(evidence_path.as_str())
+        );
+
+        let run = block_on(fea_run_builtin(study)).expect("minimal authored study should run");
+        let Value::Object(run_object) = run else {
+            panic!("expected run result object");
+        };
+        assert_eq!(run_object.class_name, FEA_RUN_RESULT_CLASS);
+        let Some(Value::String(run_payload)) = run_object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
+        else {
+            panic!("expected run result payload");
+        };
+        let run_data: crate::analysis::AnalysisStudyRunData =
+            serde_json::from_str(run_payload).expect("run result should decode");
+        assert_eq!(run_data.run_kind, AnalysisRunKind::LinearStatic);
+        assert_eq!(run_data.run_status, crate::analysis::RunStatus::Publishable);
+        assert!(run_data.publishable);
+        assert_eq!(run_data.quality_reasons.len(), 0);
+        assert_eq!(
+            run_data.analysis_mesh_artifact_path.as_deref(),
+            Some(mesh_path.as_str())
+        );
+        assert_eq!(
+            run_data.analysis_mesh_evidence_artifact_path.as_deref(),
+            Some(evidence_path.as_str())
+        );
+    }
+
+    #[test]
     fn requires_geometry_asset() {
         let err = create_author_study_object_from_args(vec![
             Value::String("bad".to_string()),
