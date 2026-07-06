@@ -13,7 +13,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-cad = { workspace = true }
-runmat-meshing-opt = { workspace = true }
 runmat-meshing-size = { workspace = true }
 
 [dev-dependencies]

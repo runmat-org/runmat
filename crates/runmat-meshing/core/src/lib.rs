@@ -3,7 +3,6 @@ extern crate self as runmat_meshing_core;
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub mod fixtures;
-pub use runmat_meshing_opt as opt;
 pub mod quality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size as size;
@@ -54,11 +53,6 @@ pub use contracts::{
     SurfaceCurveBoundaryValidation, SurfaceLoopCoverage, SurfaceMesh, SurfaceMeshNode,
     SurfaceMeshTriangle, Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh,
     TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
-};
-pub use opt::sliver::recovery::{
-    classify_sliver_tetrahedra, evaluate_sliver_removal, SliverClassification,
-    SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
-    SliverRemovalEvaluation, SliverRemovalRejectionReason, SliverTetrahedronQuality,
 };
 pub use predicate::{
     closest_point_on_triangle, distance, distance_squared, point_in_closed_triangle_surface,

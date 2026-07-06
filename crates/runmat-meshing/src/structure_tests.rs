@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 #[test]
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
@@ -30,6 +30,22 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         assert!(
             !crate_root.join(stale_core_path).exists(),
             "old volume-first meshing path still exists: {stale_core_path}"
+        );
+    }
+
+    let core_manifest = fs::read_to_string(crate_root.join("core").join("Cargo.toml"))
+        .expect("core manifest should be readable");
+    for implementation_crate in [
+        "runmat-meshing-curve",
+        "runmat-meshing-surface",
+        "runmat-meshing-plc",
+        "runmat-meshing-tetrahedron",
+        "runmat-meshing-opt",
+        "runmat-meshing-evidence",
+    ] {
+        assert!(
+            !core_manifest.contains(implementation_crate),
+            "core depends on implementation crate: {implementation_crate}"
         );
     }
 
