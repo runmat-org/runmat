@@ -13003,6 +13003,116 @@ fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topolog
 
 #[cfg(feature = "plot-core")]
 #[test]
+fn analysis_generate_study_run_figures_uses_generated_nested_shell_topology() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("figures-solid-nested-shell");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = nested_tetrahedron_shell_study_geometry();
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -250.0,
+            fz: 25.0,
+        },
+    }];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    mesh_options.target_size = runmat_meshing_core::MeshTargetSize::LengthM(10.0);
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("nested-shell solid study should run");
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("nested-shell study figures should be generated");
+
+    let artifact_path = run
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("nested-shell study should persist analysis mesh artifact");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    assert_eq!(
+        payload["mesh"]["backend"]["tetrahedron_generation_family"].as_str(),
+        Some("nested_tetrahedron_shell")
+    );
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist analysis mesh render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    let solver_triangle_count = topology
+        .meshes
+        .iter()
+        .map(|mesh| mesh.triangles.len())
+        .sum::<usize>();
+    assert_eq!(
+        solver_triangle_count,
+        payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("analysis mesh boundary faces")
+            .len()
+    );
+    let stress_figure = figures
+        .iter()
+        .find(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        })
+        .expect("von Mises figure should be generated");
+    let overlay_triangle_count = stress_figure
+        .figure
+        .plots()
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
+            _ => None,
+        })
+        .filter(|field| {
+            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
+                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
+        })
+        .map(|field| field.values.len())
+        .sum::<usize>();
+    assert_eq!(overlay_triangle_count, solver_triangle_count);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
 fn analysis_generate_study_run_figures_uses_solver_topology_for_em_fields() {
     let _guard = analysis_test_guard();
     let spec = sample_electromagnetic_study_spec();
