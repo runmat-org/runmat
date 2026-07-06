@@ -811,6 +811,60 @@ fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
 }
 
 #[test]
+fn auto_backend_generates_split_material_close_parallel_wall_slot_solid() {
+    let geometry = split_material_close_parallel_wall_slot_geometry();
+    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("split-material close-wall slot should run through the root solid pipeline");
+
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let source_edge_count = mesh
+        .boundary_edges
+        .iter()
+        .flat_map(|edge| edge.provenance.iter())
+        .filter(|provenance| provenance.source_entity_kind == SourceEntityKind::Edge)
+        .map(|provenance| provenance.source_entity_id.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "holed_polyhedron"
+    );
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert_eq!(mesh.backend.tetrahedron_material_region_count, 2);
+    assert_eq!(
+        mesh.backend.tetrahedron_unclassified_material_element_count,
+        0
+    );
+    assert_eq!(
+        source_edge_count,
+        mesh.backend.plc_input_protected_edge_count
+    );
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(
+        mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15,
+        "min exact scaled Jacobian was {}",
+        mesh.backend.tetrahedron_min_exact_scaled_jacobian
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["region_base".to_string(), "region_cap".to_string()],
+            require_boundary_source_edge_provenance: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("split-material close-wall slot should be solve-ready with source-edge provenance");
+}
+
+#[test]
 fn generated_solid_mesh_maps_solver_fields_to_boundary_visualization_topology() {
     let geometry = split_material_through_hole_plate_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
@@ -1318,6 +1372,43 @@ fn close_parallel_wall_slot_geometry() -> GeometryAsset {
         "close_parallel_wall_slot_surface",
         32,
     )];
+    geometry
+}
+
+fn split_material_close_parallel_wall_slot_geometry() -> GeometryAsset {
+    let mut geometry = close_parallel_wall_slot_geometry();
+    geometry.geometry_id = "geo_root_meshing_split_material_close_parallel_wall_slot".to_string();
+    geometry.source.path =
+        "/fixtures/generic_split_material_close_parallel_wall_slot.step".to_string();
+    geometry.source.sha256 = "generic-split-material-close-parallel-wall-slot".to_string();
+    geometry.regions = vec![
+        Region {
+            region_id: "region_base".to_string(),
+            name: "base".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "region_cap".to_string(),
+            name: "cap".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+    ];
+    geometry.region_entity_mappings = vec![
+        RegionEntityMapping::new(
+            "region_base",
+            "close_parallel_wall_slot_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(16, 4), EntityIdRange::new(24, 4)],
+        ),
+        RegionEntityMapping::new(
+            "region_cap",
+            "close_parallel_wall_slot_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(20, 4), EntityIdRange::new(28, 4)],
+        ),
+    ];
     geometry
 }
 

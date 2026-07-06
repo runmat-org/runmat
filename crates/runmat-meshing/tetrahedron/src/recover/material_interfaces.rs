@@ -116,11 +116,7 @@ pub(super) fn material_interface_recovery_topology(
         .map(|facet| {
             (
                 sorted_topology_ids(facet.node_ids.clone()),
-                facet
-                    .material_interface_ids
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
+                single_owner_material_interfaces(facet.material_interface_ids.as_slice()),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -255,11 +251,7 @@ fn recover_boundary_facet_material_interface_regions(
         .map(|facet| {
             (
                 sorted_topology_ids(facet.node_ids.clone()),
-                facet
-                    .material_interface_ids
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
+                single_owner_material_interfaces(facet.material_interface_ids.as_slice()),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -448,9 +440,18 @@ pub(super) fn material_interfaces_by_source_face(
         material_interfaces_by_source_face
             .entry(facet.source_face_id.clone())
             .or_default()
-            .extend(facet.material_interface_ids.iter().cloned());
+            .extend(single_owner_material_interfaces(
+                facet.material_interface_ids.as_slice(),
+            ));
     }
     material_interfaces_by_source_face
+}
+
+fn single_owner_material_interfaces(material_interface_ids: &[String]) -> BTreeSet<String> {
+    let [material_interface_id] = material_interface_ids else {
+        return BTreeSet::new();
+    };
+    BTreeSet::from([material_interface_id.clone()])
 }
 
 fn record_interior_material_candidate(

@@ -394,12 +394,6 @@ fn holed_polyhedron_material_classifier(
 
     let mut facets = Vec::<HoledMaterialFacet>::with_capacity(plc.facets.len());
     for facet in &plc.facets {
-        if facet.material_interface_ids.is_empty() {
-            continue;
-        }
-        if facet.material_interface_ids.len() != 1 {
-            return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
-        }
         let points = facet.node_ids.clone().map(|node_id| {
             coordinates_by_id.get(&node_id).copied().ok_or_else(|| {
                 TetrahedronGenerationError::MissingPlcNode {
@@ -411,10 +405,19 @@ fn holed_polyhedron_material_classifier(
         let points = [points[0], points[1], points[2]];
         let surface_key = holed_surface_key(&points, grid, tolerance_m)
             .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        if facet.material_interface_ids.is_empty() {
+            continue;
+        }
+        let [material_region_id] = facet.material_interface_ids.as_slice() else {
+            if matches!(surface_key, HoledSurfaceKey::Top | HoledSurfaceKey::Bottom) {
+                continue;
+            }
+            return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
+        };
         facets.push(HoledMaterialFacet {
             surface_key,
             points,
-            material_region_id: facet.material_interface_ids[0].clone(),
+            material_region_id: material_region_id.clone(),
         });
     }
     Ok(HoledPolyhedronMaterialClassifier {
