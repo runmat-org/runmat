@@ -85,8 +85,8 @@ fn invalid_sizing_envelope_options_are_rejected() {
     assert_eq!(err, MeshingError::InvalidTargetSize);
 }
 #[test]
-fn volume_meshing_options_default_backend_when_deserializing_old_payloads() {
-    let options: VolumeMeshingOptions = serde_json::from_value(serde_json::json!({
+fn volume_meshing_options_require_backend_when_deserializing() {
+    let err = serde_json::from_value::<VolumeMeshingOptions>(serde_json::json!({
         "kind": "solid",
         "element": "tetrahedron4",
         "element_order": "linear",
@@ -109,7 +109,7 @@ fn volume_meshing_options_default_backend_when_deserializing_old_payloads() {
             }
         }
     }))
-    .expect("old mesh options payload should deserialize");
+    .expect_err("serialized mesh options must name the backend explicitly");
 
-    assert_eq!(options.backend, MeshBackendKind::Auto);
+    assert!(err.to_string().contains("missing field `backend`"));
 }

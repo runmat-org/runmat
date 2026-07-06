@@ -71,7 +71,6 @@ impl Default for MeshValidationPolicyOptions {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeMeshingOptions {
-    #[serde(default)]
     pub backend: MeshBackendKind,
     pub kind: MeshKindRequest,
     pub element: VolumeElementKind,
