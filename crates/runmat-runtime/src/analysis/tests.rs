@@ -7654,7 +7654,7 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
     mesh.backend
         .tetrahedron_accepted_requested_refinement_point_count = 3;
     mesh.backend
-        .tetrahedron_accepted_requested_refinement_surrogate_point_count = 2;
+        .tetrahedron_accepted_requested_refinement_interpolated_point_count = 2;
     mesh.backend
         .tetrahedron_rejected_requested_refinement_point_count = 1;
     mesh.backend
@@ -7714,7 +7714,7 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(1)
     );
     assert_eq!(
-        summary["requested_tetrahedron_refinement"]["accepted_surrogate_count"].as_u64(),
+        summary["requested_tetrahedron_refinement"]["accepted_interpolated_count"].as_u64(),
         Some(2)
     );
     assert_eq!(
@@ -7749,7 +7749,7 @@ fn sizing_application_summary_groups_reasons_and_breakpoints() {
         Some(0.25)
     );
     assert_eq!(
-        summary["requested_tetrahedron_refinement"]["surrogate_ratio"].as_f64(),
+        summary["requested_tetrahedron_refinement"]["interpolated_ratio"].as_f64(),
         Some(2.0 / 3.0)
     );
     assert_eq!(summary["anisotropic"]["total"].as_u64(), Some(2));

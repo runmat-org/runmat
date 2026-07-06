@@ -15653,9 +15653,9 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
     let accepted_location = mesh
         .backend
         .tetrahedron_accepted_requested_refinement_location_count;
-    let accepted_surrogate = mesh
+    let accepted_interpolated = mesh
         .backend
-        .tetrahedron_accepted_requested_refinement_surrogate_point_count;
+        .tetrahedron_accepted_requested_refinement_interpolated_point_count;
     let rejected_requested = mesh
         .backend
         .tetrahedron_rejected_requested_refinement_point_count;
@@ -15692,8 +15692,8 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
             "requested_count": mesh.backend.tetrahedron_requested_refinement_point_count,
             "accepted_location_count": accepted_location,
             "accepted_count": accepted_requested,
-            "accepted_exact_count": accepted_requested.saturating_sub(accepted_surrogate),
-            "accepted_surrogate_count": accepted_surrogate,
+            "accepted_exact_count": accepted_requested.saturating_sub(accepted_interpolated),
+            "accepted_interpolated_count": accepted_interpolated,
             "rejected_count": rejected_requested,
             "rejected_by_reason": mesh.backend.tetrahedron_requested_refinement_rejected_by_reason.clone(),
             "dropped_count": dropped_requested,
@@ -15713,8 +15713,8 @@ fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value 
             } else {
                 None
             },
-            "surrogate_ratio": if accepted_requested > 0 {
-                Some(accepted_surrogate as f64 / accepted_requested as f64)
+            "interpolated_ratio": if accepted_requested > 0 {
+                Some(accepted_interpolated as f64 / accepted_requested as f64)
             } else {
                 None
             },
