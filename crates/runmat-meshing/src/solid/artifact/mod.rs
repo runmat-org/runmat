@@ -33,7 +33,7 @@ use runmat_meshing_core::{
         TETRAHEDRON_OPTIMIZATION_SLIVER_REMOVAL_REJECTION_PREFIX,
         TETRAHEDRON_UNTANGLING_FINAL_NEAR_SINGULAR_COUNT,
         TETRAHEDRON_UNTANGLING_INITIAL_NEAR_SINGULAR_COUNT, TETRAHEDRON_UNTANGLING_PASS_COUNT,
-        TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT, UNCLASSIFIED_MATERIAL_REGION_ID,
+        TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT,
     },
     quality::{
         predicate::{
@@ -45,18 +45,23 @@ use runmat_meshing_core::{
 use runmat_meshing_size::field::MeshSizingField;
 use runmat_meshing_tetrahedron::{
     generate::TetrahedronMesh,
-    recover::{TetrahedronRecoveryKind, TetrahedronRecoveryQueue, TetrahedronRecoveryStatus},
+    recover::{TetrahedronRecoveryKind, TetrahedronRecoveryQueue},
 };
 
+mod backend_counts;
 mod backend_quality;
 
+use backend_counts::{
+    bounded_missing_recovery_ids, recovery_entity_count, tetrahedron_entity_count,
+    tetrahedron_material_region_count, tetrahedron_rejection_counts_by_prefix,
+    tetrahedron_unclassified_material_element_count,
+};
 use backend_quality::{backend_quality_evidence, optimization_target_evidence};
 pub(super) use backend_quality::{
     backend_quality_evidence_from_tetrahedron_mesh, BackendQualityEvidence,
 };
 
 const SOLID_PLC_TETRAHEDRON_ALGORITHM: &str = "plc_tetrahedron/v1";
-const MAX_REPORTED_RECOVERY_IDS: usize = 64;
 
 pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     geometry: &GeometryAsset,
@@ -1111,89 +1116,6 @@ pub(super) fn analysis_artifact_from_tetrahedron_mesh(
     };
     artifact.refresh_field_topology();
     artifact
-}
-
-fn tetrahedron_entity_count(tetrahedron_mesh: &TetrahedronMesh, key: &str) -> usize {
-    tetrahedron_mesh
-        .evidence
-        .entity_counts
-        .get(key)
-        .copied()
-        .unwrap_or_default()
-}
-
-fn tetrahedron_rejection_counts_by_prefix(
-    tetrahedron_mesh: &TetrahedronMesh,
-    prefix: &str,
-) -> BTreeMap<String, usize> {
-    tetrahedron_mesh
-        .evidence
-        .rejection_counts
-        .iter()
-        .filter_map(|(reason, count)| {
-            reason
-                .strip_prefix(prefix)
-                .map(|stripped| (stripped.to_string(), *count))
-        })
-        .collect()
-}
-
-fn tetrahedron_material_region_count(tetrahedron_mesh: &TetrahedronMesh) -> usize {
-    tetrahedron_mesh
-        .elements
-        .iter()
-        .map(|element| element.material_region_id.as_str())
-        .collect::<BTreeSet<_>>()
-        .len()
-}
-
-fn tetrahedron_unclassified_material_element_count(tetrahedron_mesh: &TetrahedronMesh) -> usize {
-    tetrahedron_mesh
-        .elements
-        .iter()
-        .filter(|element| element.material_region_id == UNCLASSIFIED_MATERIAL_REGION_ID)
-        .count()
-}
-
-fn recovery_entity_count(recovery_queue: &TetrahedronRecoveryQueue, key: &str) -> usize {
-    recovery_queue
-        .evidence
-        .entity_counts
-        .get(key)
-        .copied()
-        .unwrap_or_default()
-}
-
-struct BoundedRecoveryIds {
-    ids: Vec<String>,
-    omitted_count: usize,
-}
-
-fn bounded_missing_recovery_ids(
-    recovery_queue: &TetrahedronRecoveryQueue,
-    kind: TetrahedronRecoveryKind,
-) -> BoundedRecoveryIds {
-    let all_ids = recovery_queue
-        .items
-        .iter()
-        .filter(|item| item.kind == kind && item.status == TetrahedronRecoveryStatus::Missing)
-        .filter_map(|item| match kind {
-            TetrahedronRecoveryKind::SourceFace | TetrahedronRecoveryKind::SourceEdge => item
-                .source_entity_id
-                .as_ref()
-                .map(|source_id| source_id.id.clone()),
-            TetrahedronRecoveryKind::MaterialInterface => item.material_interface_id.clone(),
-        })
-        .collect::<BTreeSet<_>>();
-    let total_count = all_ids.len();
-    let ids = all_ids
-        .into_iter()
-        .take(MAX_REPORTED_RECOVERY_IDS)
-        .collect::<Vec<_>>();
-    BoundedRecoveryIds {
-        omitted_count: total_count.saturating_sub(ids.len()),
-        ids,
-    }
 }
 
 fn source_edge_provenance_by_boundary_edge(
