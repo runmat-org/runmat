@@ -60,7 +60,6 @@ pub const TETRAHEDRON_EXACT_QUALITY_REPAIR_REJECTION_PREFIX: &str =
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TetrahedronMesh {
     pub mesh_id: String,
-    #[serde(default = "unknown_tetrahedron_generation_family")]
     pub tetrahedron_generation_family: String,
     #[serde(default)]
     pub nodes: Vec<TetrahedronMeshNode>,
@@ -71,10 +70,6 @@ pub struct TetrahedronMesh {
     pub recovery_complete: bool,
     pub quality_optimized: bool,
     pub evidence: StageEvidence,
-}
-
-fn unknown_tetrahedron_generation_family() -> String {
-    "unknown".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,4 +92,32 @@ pub struct TetrahedronBoundaryFace {
     pub source_face_id: TopologyEntityId,
     #[serde(default)]
     pub source_edge_ids: [Option<TopologyEntityId>; 3],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tetrahedron_mesh_deserialization_requires_generation_family() {
+        let err = serde_json::from_value::<TetrahedronMesh>(serde_json::json!({
+            "mesh_id": "missing_generation_family",
+            "nodes": [],
+            "elements": [],
+            "boundary_faces": [],
+            "recovery_complete": false,
+            "quality_optimized": false,
+            "evidence": {
+                "stage": "tetrahedron_mesh",
+                "status": "complete",
+                "entity_counts": {},
+                "checks": []
+            }
+        }))
+        .expect_err("serialized Tetrahedron meshes must name their generation family");
+
+        assert!(err
+            .to_string()
+            .contains("missing field `tetrahedron_generation_family`"));
+    }
 }
