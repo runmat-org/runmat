@@ -2833,6 +2833,126 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
 }
 
 #[test]
+fn analysis_run_study_persists_solid_boundary_focus_sizing_evidence() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-solid-boundary-focus");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    let mut model = sample_solid_model();
+    model.geometry_id = spec.geometry.geometry_id.clone();
+    model.geometry_revision = spec.geometry.revision;
+    model.units = spec.geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    spec.model = Some(model);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Fine;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed with solid boundary-focus mesh");
+
+    let initial_artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist solid analysis mesh artifact path");
+    let payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(initial_artifact_path).expect("read initial analysis mesh artifact"),
+    )
+    .expect("parse analysis mesh artifact");
+
+    let active_artifact_path = envelope
+        .data
+        .refined_analysis_mesh_artifact_path
+        .as_ref()
+        .unwrap_or(initial_artifact_path);
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(active_artifact_path.as_str())
+    );
+    let active_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(active_artifact_path).expect("read active analysis mesh artifact"),
+    )
+    .expect("parse active analysis mesh artifact");
+    if active_artifact_path != initial_artifact_path {
+        assert_eq!(
+            active_payload["source_analysis_mesh_artifact_path"].as_str(),
+            Some(initial_artifact_path.as_str())
+        );
+    }
+    let active_volume_element_count = active_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .len();
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("solid boundary-focus run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![active_volume_element_count]);
+
+    let applied_samples = payload["mesh"]["sizing"]["applied_samples"]
+        .as_array()
+        .expect("sizing applied samples");
+    for reason in ["structural.load_regions", "structural.constraint_regions"] {
+        assert!(
+            applied_samples
+                .iter()
+                .any(|sample| sample["reason"].as_str() == Some(reason)
+                    && sample["inserted_breakpoint_count"]
+                        .as_u64()
+                        .unwrap_or_default()
+                        > 0),
+            "expected boundary-focus sizing application for {reason}"
+        );
+        assert!(
+            payload["sizing_applications"]["by_reason"][reason]
+                .as_u64()
+                .unwrap_or_default()
+                > 0,
+            "expected persisted sizing application summary for {reason}"
+        );
+    }
+    assert_eq!(
+        payload["sizing_rejections"]["total"].as_u64(),
+        Some(0),
+        "boundary-focus sizing samples should be accepted for the closed cube fixture"
+    );
+    assert_eq!(
+        payload["refinement_context"]["boundary_load_region_ids"]
+            .as_array()
+            .expect("load region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tip"]
+    );
+    assert_eq!(
+        payload["refinement_context"]["boundary_constraint_region_ids"]
+            .as_array()
+            .expect("constraint region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root"]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
