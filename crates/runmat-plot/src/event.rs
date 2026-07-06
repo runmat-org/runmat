@@ -1076,6 +1076,8 @@ pub struct SerializedAxesMetadata {
     pub axes_kind: SerializedAxesKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1125,6 +1127,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub axes_style: SerializedTextStyle,
     pub title_style: SerializedTextStyle,
+    #[serde(default)]
+    pub subtitle_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
     pub z_label_style: SerializedTextStyle,
@@ -1235,6 +1239,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
         Self {
             axes_kind: value.axes_kind.into(),
             title: value.title,
+            subtitle: value.subtitle,
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
@@ -1263,6 +1268,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             color_limits: value.color_limits.map(|(a, b)| [a, b]),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
+            subtitle_style: value.subtitle_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
@@ -1281,6 +1287,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
         Self {
             axes_kind: value.axes_kind.into(),
             title: value.title,
+            subtitle: value.subtitle,
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
@@ -1313,6 +1320,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             color_limits: value.color_limits.map(|[a, b]| (a, b)),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
+            subtitle_style: value.subtitle_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
@@ -4270,6 +4278,7 @@ mod tests {
         });
         figure.set_active_axes_index(0);
         figure.set_axes_title(0, "Left");
+        figure.set_axes_subtitle(0, "Left details");
         figure.set_axes_xlabel(0, "LX");
         figure.set_axes_ylabel(0, "LY");
         figure.set_axes_legend_enabled(0, false);
@@ -4289,6 +4298,8 @@ mod tests {
         if let Some(meta) = figure.axes_metadata.get_mut(0) {
             meta.title_style.font_weight = Some("bold".into());
             meta.title_style.font_angle = Some("italic".into());
+            meta.subtitle_style.font_size = Some(12.0);
+            meta.subtitle_style.font_weight = Some("normal".into());
         }
         figure.set_active_axes_index(1);
 
@@ -4303,6 +4314,10 @@ mod tests {
         assert_eq!(
             rebuilt.axes_metadata(0).and_then(|m| m.title.as_deref()),
             Some("Left")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).and_then(|m| m.subtitle.as_deref()),
+            Some("Left details")
         );
         assert_eq!(
             rebuilt.axes_metadata(0).and_then(|m| m.x_label.as_deref()),
@@ -4330,6 +4345,19 @@ mod tests {
                 .font_angle
                 .as_deref(),
             Some("italic")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).unwrap().subtitle_style.font_size,
+            Some(12.0)
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(0)
+                .unwrap()
+                .subtitle_style
+                .font_weight
+                .as_deref(),
+            Some("normal")
         );
         assert_eq!(
             rebuilt.axes_metadata(1).and_then(|m| m.title.as_deref()),

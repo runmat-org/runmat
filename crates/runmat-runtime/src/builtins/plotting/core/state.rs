@@ -540,6 +540,7 @@ pub enum PlotObjectKind {
     ZLabel = 4,
     Legend = 5,
     SuperTitle = 6,
+    Subtitle = 7,
 }
 
 impl PlotObjectKind {
@@ -551,6 +552,7 @@ impl PlotObjectKind {
             4 => Some(Self::ZLabel),
             5 => Some(Self::Legend),
             6 => Some(Self::SuperTitle),
+            7 => Some(Self::Subtitle),
             _ => None,
         }
     }
@@ -829,6 +831,23 @@ pub fn set_figure_title_for_axes(
     Ok(object_handle)
 }
 
+pub fn set_figure_subtitle_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    subtitle: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .set_axes_subtitle(axes_index, subtitle.to_string());
+        state.figure.set_axes_subtitle_style(axes_index, style);
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::Subtitle)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
 pub fn set_sg_title_for_figure(
     handle: FigureHandle,
     title: &str,
@@ -917,6 +936,7 @@ pub fn set_text_properties_for_axes(
         if let Some(text) = text {
             match kind {
                 PlotObjectKind::Title => state.figure.set_axes_title(axes_index, text),
+                PlotObjectKind::Subtitle => state.figure.set_axes_subtitle(axes_index, text),
                 PlotObjectKind::XLabel => state.figure.set_axes_xlabel(axes_index, text),
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel(axes_index, text),
                 PlotObjectKind::ZLabel => state.figure.set_axes_zlabel(axes_index, text),
@@ -927,6 +947,7 @@ pub fn set_text_properties_for_axes(
         if let Some(style) = style {
             match kind {
                 PlotObjectKind::Title => state.figure.set_axes_title_style(axes_index, style),
+                PlotObjectKind::Subtitle => state.figure.set_axes_subtitle_style(axes_index, style),
                 PlotObjectKind::XLabel => state.figure.set_axes_xlabel_style(axes_index, style),
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel_style(axes_index, style),
                 PlotObjectKind::ZLabel => state.figure.set_axes_zlabel_style(axes_index, style),

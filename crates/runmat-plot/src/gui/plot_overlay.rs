@@ -444,23 +444,35 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         axes_index: usize,
         title: Option<&str>,
+        subtitle: Option<&str>,
         x_label: Option<&str>,
         y_label: Option<&str>,
         scale: f32,
     ) -> PanelLayout {
         let scale = scale.max(0.75);
         let has_title = Self::has_visible_text(title);
+        let has_subtitle = Self::has_visible_text(subtitle);
         let has_x_label = Self::has_visible_text(x_label);
         let has_y_label = Self::has_visible_text(y_label);
         let outer_w = outer.width().max(1.0);
         let outer_h = outer.height().max(1.0);
-        let title_gap = if has_title { 4.0 * scale } else { 1.5 * scale };
+        let has_title_band = has_title || has_subtitle;
+        let title_gap = if has_title_band {
+            4.0 * scale
+        } else {
+            1.5 * scale
+        };
         let x_gap = 4.0 * scale;
         let x_edge_pad = self.estimate_x_axis_edge_padding(plot_renderer, axes_index, scale);
         let mut right_pad = (3.0 * scale).max(x_edge_pad + 1.0 * scale);
 
-        let mut title_h = if has_title {
-            (28.0 * scale).min(outer_h * 0.16)
+        let mut title_h = if has_title_band {
+            let base = if has_title && has_subtitle {
+                44.0
+            } else {
+                28.0
+            };
+            (base * scale).min(outer_h * 0.22)
         } else {
             0.0
         };
@@ -519,10 +531,23 @@ impl PlotOverlay {
         }
     }
 
-    fn layout_3d_panel(&self, outer: Rect, title: Option<&str>, scale: f32) -> PanelLayout {
+    fn layout_3d_panel(
+        &self,
+        outer: Rect,
+        title: Option<&str>,
+        subtitle: Option<&str>,
+        scale: f32,
+    ) -> PanelLayout {
         let scale = scale.max(0.75);
-        let title_h = if Self::has_visible_text(title) {
-            (28.0 * scale).min(outer.height().max(1.0) * 0.16)
+        let has_title = Self::has_visible_text(title);
+        let has_subtitle = Self::has_visible_text(subtitle);
+        let title_h = if has_title || has_subtitle {
+            let base = if has_title && has_subtitle {
+                44.0
+            } else {
+                28.0
+            };
+            (base * scale).min(outer.height().max(1.0) * 0.22)
         } else {
             0.0
         };
@@ -561,6 +586,9 @@ impl PlotOverlay {
                 plot_renderer
                     .overlay_title_for_axes(axes_index)
                     .map(|s| s.as_str()),
+                plot_renderer
+                    .overlay_subtitle_for_axes(axes_index)
+                    .map(|s| s.as_str()),
                 scale,
             )
         } else {
@@ -570,6 +598,9 @@ impl PlotOverlay {
                 axes_index,
                 plot_renderer
                     .overlay_title_for_axes(axes_index)
+                    .map(|s| s.as_str()),
+                plot_renderer
+                    .overlay_subtitle_for_axes(axes_index)
                     .map(|s| s.as_str()),
                 plot_renderer
                     .overlay_x_label_for_axes(axes_index)
@@ -1149,15 +1180,17 @@ impl PlotOverlay {
                     crate::core::camera::ProjectionType::Perspective { .. }
                 ) {
                     if config.show_title {
-                        if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
-                            self.draw_title_in_rect(
-                                ui,
-                                panel_layout.title_rect,
-                                title,
-                                None,
-                                config.font_scale,
-                            );
-                        }
+                        self.draw_title_block_in_rect(
+                            ui,
+                            panel_layout.title_rect,
+                            plot_renderer.overlay_title_for_axes(i).map(String::as_str),
+                            plot_renderer.overlay_title_style_for_axes(i),
+                            plot_renderer
+                                .overlay_subtitle_for_axes(i)
+                                .map(String::as_str),
+                            plot_renderer.overlay_subtitle_style_for_axes(i),
+                            config.font_scale,
+                        );
                     }
                     self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
                     let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
@@ -1196,15 +1229,17 @@ impl PlotOverlay {
                 }
 
                 if config.show_title {
-                    if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
-                        self.draw_title_in_rect(
-                            ui,
-                            panel_layout.title_rect,
-                            title,
-                            None,
-                            config.font_scale,
-                        );
-                    }
+                    self.draw_title_block_in_rect(
+                        ui,
+                        panel_layout.title_rect,
+                        plot_renderer.overlay_title_for_axes(i).map(String::as_str),
+                        plot_renderer.overlay_title_style_for_axes(i),
+                        plot_renderer
+                            .overlay_subtitle_for_axes(i)
+                            .map(String::as_str),
+                        plot_renderer.overlay_subtitle_style_for_axes(i),
+                        config.font_scale,
+                    );
                 }
                 if !matches!(
                     cam.projection,
@@ -1270,18 +1305,20 @@ impl PlotOverlay {
                 centered_plot_rect.max.y
             );
             if config.show_title {
-                if let Some(title) = plot_renderer
-                    .overlay_title_for_axes(0)
-                    .or(config.title.as_ref())
-                {
-                    self.draw_title_in_rect(
-                        ui,
-                        panel_layout.title_rect,
-                        title,
-                        None,
-                        config.font_scale,
-                    );
-                }
+                self.draw_title_block_in_rect(
+                    ui,
+                    panel_layout.title_rect,
+                    plot_renderer
+                        .overlay_title_for_axes(0)
+                        .map(String::as_str)
+                        .or(config.title.as_deref()),
+                    plot_renderer.overlay_title_style_for_axes(0),
+                    plot_renderer
+                        .overlay_subtitle_for_axes(0)
+                        .map(String::as_str),
+                    plot_renderer.overlay_subtitle_style_for_axes(0),
+                    config.font_scale,
+                );
             }
             if matches!(
                 cam.projection,
@@ -2505,6 +2542,56 @@ impl PlotOverlay {
             Self::style_is_bold(&style),
             110,
         );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_title_block_in_rect(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        title: Option<&str>,
+        title_style: Option<&TextStyle>,
+        subtitle: Option<&str>,
+        subtitle_style: Option<&TextStyle>,
+        scale: f32,
+    ) {
+        let title = title.filter(|text| Self::has_visible_text(Some(text)));
+        let subtitle = subtitle.filter(|text| Self::has_visible_text(Some(text)));
+        let Some((first_text, first_style, second)) = title
+            .map(|title| (title, title_style, subtitle.map(|s| (s, subtitle_style))))
+            .or_else(|| subtitle.map(|subtitle| (subtitle, subtitle_style, None)))
+        else {
+            return;
+        };
+
+        let scale = scale.max(0.75);
+        let center = rect.center();
+        if let Some((second_text, second_style)) = second {
+            let first_style = first_style.cloned().unwrap_or_default();
+            let second_style = second_style.cloned().unwrap_or_default();
+            Self::paint_styled_text(
+                ui.painter(),
+                egui::pos2(center.x, center.y - 8.0 * scale),
+                Align2::CENTER_CENTER,
+                first_text,
+                Self::style_font_size(&first_style, 16.0, scale),
+                Self::style_color(&first_style, self.theme_text_color()),
+                Self::style_is_bold(&first_style),
+                110,
+            );
+            Self::paint_styled_text(
+                ui.painter(),
+                egui::pos2(center.x, center.y + 9.0 * scale),
+                Align2::CENTER_CENTER,
+                second_text,
+                Self::style_font_size(&second_style, 13.0, scale),
+                Self::style_color(&second_style, self.theme_text_color()),
+                Self::style_is_bold(&second_style),
+                110,
+            );
+        } else {
+            self.draw_title_in_rect(ui, rect, first_text, first_style, scale);
+        }
     }
 
     fn draw_legend(

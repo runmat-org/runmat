@@ -132,6 +132,7 @@ impl Default for LegendStyle {
 pub struct AxesMetadata {
     pub axes_kind: AxesKind,
     pub title: Option<String>,
+    pub subtitle: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
@@ -159,6 +160,7 @@ pub struct AxesMetadata {
     pub color_limits: Option<(f64, f64)>,
     pub axes_style: TextStyle,
     pub title_style: TextStyle,
+    pub subtitle_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
     pub z_label_style: TextStyle,
@@ -410,7 +412,7 @@ impl Figure {
             || self
                 .axes_metadata
                 .iter()
-                .any(|meta| non_empty(meta.title.as_deref()))
+                .any(|meta| non_empty(meta.title.as_deref()) || non_empty(meta.subtitle.as_deref()))
     }
 
     /// Set the figure title
@@ -443,6 +445,14 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_subtitle<S: Into<String>>(&mut self, axes_index: usize, subtitle: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.subtitle = Some(subtitle.into());
         }
         self.dirty = true;
     }
@@ -617,6 +627,14 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.title_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_subtitle_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.subtitle_style = style;
         }
         self.dirty = true;
     }

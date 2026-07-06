@@ -208,6 +208,7 @@ pub fn validate_heatmap_property_pairs(
         let key = property_name(&pair[0], builtin)?;
         match key.as_str() {
             "title" => validate_axes_text_alias(PlotObjectKind::Title, &pair[1], builtin)?,
+            "subtitle" => validate_axes_text_alias(PlotObjectKind::Subtitle, &pair[1], builtin)?,
             "xlabel" => validate_axes_text_alias(PlotObjectKind::XLabel, &pair[1], builtin)?,
             "ylabel" => validate_axes_text_alias(PlotObjectKind::YLabel, &pair[1], builtin)?,
             "colorbar" | "colorbarvisible" => {
@@ -396,6 +397,14 @@ fn get_axes_property(
                 )),
             );
             st.insert(
+                "Subtitle",
+                Value::Num(super::state::encode_plot_object_handle(
+                    handle,
+                    axes_index,
+                    PlotObjectKind::Subtitle,
+                )),
+            );
+            st.insert(
                 "XLabel",
                 Value::Num(super::state::encode_plot_object_handle(
                     handle,
@@ -437,6 +446,11 @@ fn get_axes_property(
                         handle,
                         axes_index,
                         PlotObjectKind::Title,
+                    ),
+                    super::state::encode_plot_object_handle(
+                        handle,
+                        axes_index,
+                        PlotObjectKind::Subtitle,
                     ),
                     super::state::encode_plot_object_handle(
                         handle,
@@ -508,6 +522,11 @@ fn get_axes_property(
             axes_index,
             PlotObjectKind::Title,
         ))),
+        Some("subtitle") => Ok(Value::Num(super::state::encode_plot_object_handle(
+            handle,
+            axes_index,
+            PlotObjectKind::Subtitle,
+        ))),
         Some("xlabel") => Ok(Value::Num(super::state::encode_plot_object_handle(
             handle,
             axes_index,
@@ -573,6 +592,7 @@ fn get_axes_property(
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
         Some("children") => Ok(handles_value(vec![
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title),
+            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Subtitle),
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::XLabel),
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::YLabel),
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::ZLabel),
@@ -599,6 +619,7 @@ fn get_text_property(
             (figure.sg_title, figure.sg_title_style)
         }
         PlotObjectKind::Title
+        | PlotObjectKind::Subtitle
         | PlotObjectKind::XLabel
         | PlotObjectKind::YLabel
         | PlotObjectKind::ZLabel => {
@@ -606,6 +627,7 @@ fn get_text_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             match kind {
                 PlotObjectKind::Title => (meta.title, meta.title_style),
+                PlotObjectKind::Subtitle => (meta.subtitle, meta.subtitle_style),
                 PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
                 PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
                 PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
@@ -1020,6 +1042,9 @@ fn apply_axes_property(
             Ok(())
         }
         "title" => apply_axes_text_alias(handle, axes_index, PlotObjectKind::Title, value, builtin),
+        "subtitle" => {
+            apply_axes_text_alias(handle, axes_index, PlotObjectKind::Subtitle, value, builtin)
+        }
         "xlabel" => {
             apply_axes_text_alias(handle, axes_index, PlotObjectKind::XLabel, value, builtin)
         }
@@ -4212,6 +4237,7 @@ fn apply_axes_text_alias(
         .map_err(|err| map_figure_error(builtin, err))?;
     let (text, style) = match kind {
         PlotObjectKind::Title => (meta.title, meta.title_style),
+        PlotObjectKind::Subtitle => (meta.subtitle, meta.subtitle_style),
         PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
         PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
         PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
@@ -4762,6 +4788,7 @@ fn color_to_short_name(color: glam::Vec4) -> String {
 fn key_name(kind: PlotObjectKind) -> &'static str {
     match kind {
         PlotObjectKind::Title => "Title",
+        PlotObjectKind::Subtitle => "Subtitle",
         PlotObjectKind::XLabel => "XLabel",
         PlotObjectKind::YLabel => "YLabel",
         PlotObjectKind::ZLabel => "ZLabel",
@@ -4778,6 +4805,7 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
     fn text_style_for(&self, kind: PlotObjectKind) -> TextStyle {
         match kind {
             PlotObjectKind::Title => self.title_style.clone(),
+            PlotObjectKind::Subtitle => self.subtitle_style.clone(),
             PlotObjectKind::XLabel => self.x_label_style.clone(),
             PlotObjectKind::YLabel => self.y_label_style.clone(),
             PlotObjectKind::ZLabel => self.z_label_style.clone(),

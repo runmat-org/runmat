@@ -13,6 +13,7 @@ struct AxesView {
     camera_3d: Option<Camera>,
     has_3d_content: bool,
     title: Option<String>,
+    subtitle: Option<String>,
     x_label: Option<String>,
     y_label: Option<String>,
     z_label: Option<String>,
@@ -25,6 +26,15 @@ struct AxesView {
     show_minor_grid: bool,
     show_box: bool,
     axes_kind: AxesKind,
+}
+
+#[derive(Clone, Debug, Default)]
+struct AxesTextLabels {
+    title: Option<String>,
+    subtitle: Option<String>,
+    x_label: Option<String>,
+    y_label: Option<String>,
+    z_label: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -656,19 +666,15 @@ fn choose_axes_camera(
     cam
 }
 
-fn get_axes_title_and_labels(
-    figure: &Figure,
-    axes_index: usize,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+fn get_axes_title_and_labels(figure: &Figure, axes_index: usize) -> AxesTextLabels {
     let meta = figure.axes_metadata(axes_index);
     let title = meta
         .and_then(|m| m.title.as_ref())
         .or(figure.title.as_ref())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let subtitle = meta
+        .and_then(|m| m.subtitle.as_ref())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let x_label = meta
@@ -686,7 +692,13 @@ fn get_axes_title_and_labels(
         .or(figure.z_label.as_ref())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    (title, x_label, y_label, z_label)
+    AxesTextLabels {
+        title,
+        subtitle,
+        x_label,
+        y_label,
+        z_label,
+    }
 }
 
 fn text_scale_from_font_size(font_size: Option<f32>, default_scale: u32) -> u32 {
@@ -709,7 +721,10 @@ fn get_axes_style_and_display_prefs(
         );
     };
 
-    let title_scale = text_scale_from_font_size(meta.title_style.font_size, 2);
+    let title_scale = text_scale_from_font_size(
+        meta.title_style.font_size.or(meta.subtitle_style.font_size),
+        2,
+    );
     let label_font = meta
         .x_label_style
         .font_size
@@ -1055,6 +1070,16 @@ fn draw_axes_titles_and_labels(canvas: &mut Canvas, axes: &AxesView, text_color:
             title,
             axes.title_scale,
             text_color,
+        );
+    }
+    if let Some(subtitle) = &axes.subtitle {
+        draw_text_centered(
+            canvas,
+            (axes.viewport.0 + axes.viewport.2 / 2) as i32,
+            axes.viewport.1 as i32 + 8 + (10 * axes.title_scale) as i32,
+            subtitle,
+            axes.title_scale.saturating_sub(1).max(1),
+            with_alpha(text_color, 0.9),
         );
     }
     if let Some(x_label) = &axes.x_label {
@@ -1600,7 +1625,7 @@ pub async fn render_figure_rgba_bytes(
             None
         };
 
-        let (title, x_label, y_label, z_label) = get_axes_title_and_labels(&figure, axes_index);
+        let text = get_axes_title_and_labels(&figure, axes_index);
         let (x_ticks, y_ticks) = figure
             .axes_metadata(axes_index)
             .map(|meta| (meta.x_ticks.clone(), meta.y_ticks.clone()))
@@ -1615,10 +1640,11 @@ pub async fn render_figure_rgba_bytes(
             bounds_3d: (bmin, bmax),
             camera_3d,
             has_3d_content: has_3d,
-            title,
-            x_label,
-            y_label,
-            z_label,
+            title: text.title,
+            subtitle: text.subtitle,
+            x_label: text.x_label,
+            y_label: text.y_label,
+            z_label: text.z_label,
             x_ticks,
             y_ticks,
             title_scale,

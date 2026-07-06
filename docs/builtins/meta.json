@@ -92305,6 +92305,139 @@
       ]
     },
     {
+      "name": "subtitle",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = subtitle(txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Subtitle text (string/char/cellstr-like multiline forms)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created/updated subtitle object."
+            }
+          ]
+        },
+        {
+          "label": "h = subtitle(ax, txt)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "txt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Subtitle text (string/char/cellstr-like multiline forms)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created/updated subtitle object."
+            }
+          ]
+        },
+        {
+          "label": "h = subtitle(txt, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "txt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Subtitle text (string/char/cellstr-like multiline forms)."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Property/value pairs (Color, FontSize, FontWeight, etc.)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created/updated subtitle object."
+            }
+          ]
+        },
+        {
+          "label": "h = subtitle(ax, txt, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "txt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Subtitle text (string/char/cellstr-like multiline forms)."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Property/value pairs (Color, FontSize, FontWeight, etc.)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created/updated subtitle object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUBTITLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:subtitle:InvalidArgument",
+          "when": "Axes handle, text payload, or property/value arguments are invalid.",
+          "message": "subtitle: invalid argument"
+        },
+        {
+          "code": "RM.SUBTITLE.INTERNAL",
+          "identifier": "RunMat:subtitle:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "subtitle: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "sum",
       "output_mode": "Fixed",
       "completion_policy": "Public",

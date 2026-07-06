@@ -3522,6 +3522,24 @@ impl PlotRenderer {
             .and_then(|f| f.axes_metadata(axes_index))
             .and_then(|m| m.title.as_ref())
     }
+    pub fn overlay_title_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.title_style)
+    }
+    pub fn overlay_subtitle_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.subtitle.as_ref())
+    }
+    pub fn overlay_subtitle_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.subtitle_style)
+    }
     pub fn overlay_x_label(&self) -> Option<&String> {
         self.figure_x_label.as_ref()
     }
