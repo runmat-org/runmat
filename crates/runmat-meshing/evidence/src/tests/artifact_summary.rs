@@ -345,7 +345,7 @@ fn evidence_summarizes_mesh_without_raw_sizing_samples() {
             tetrahedron_requested_refinement_point_count: 5,
             tetrahedron_accepted_requested_refinement_location_count: 5,
             tetrahedron_accepted_requested_refinement_point_count: 3,
-            tetrahedron_accepted_requested_refinement_surrogate_point_count: 2,
+            tetrahedron_accepted_requested_refinement_interpolated_point_count: 2,
             tetrahedron_rejected_requested_refinement_point_count: 1,
             tetrahedron_requested_refinement_rejected_by_reason: BTreeMap::from([(
                 "quality_or_recovery".to_string(),

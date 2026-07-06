@@ -493,7 +493,7 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_accepted_requested_refinement_point_count: usize,
     #[serde(default)]
-    pub tetrahedron_accepted_requested_refinement_surrogate_point_count: usize,
+    pub tetrahedron_accepted_requested_refinement_interpolated_point_count: usize,
     #[serde(default)]
     pub tetrahedron_rejected_requested_refinement_point_count: usize,
     #[serde(default)]

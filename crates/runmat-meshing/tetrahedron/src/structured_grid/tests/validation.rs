@@ -48,7 +48,7 @@ fn unsupported_mesh_kind_is_rejected() {
             ..VolumeMeshingOptions::default()
         },
     )
-    .expect_err("surrogate compatibility mode is not an analysis mesh backend");
+    .expect_err("surrogate mesh kind is not an analysis mesh backend");
 
     assert_eq!(
         err,

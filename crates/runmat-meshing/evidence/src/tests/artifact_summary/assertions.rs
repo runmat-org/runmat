@@ -124,7 +124,7 @@ pub(super) fn assert_sizing_evidence(sizing: &MeshSizingEvidence) {
         Some(&2)
     );
     assert_eq!(
-        sizing.accepted_requested_tetrahedron_refinement_surrogate_point_count,
+        sizing.accepted_requested_tetrahedron_refinement_interpolated_point_count,
         2
     );
     assert_eq!(
@@ -140,7 +140,7 @@ pub(super) fn assert_sizing_evidence(sizing: &MeshSizingEvidence) {
         Some(0.2)
     );
     assert_eq!(
-        sizing.requested_tetrahedron_refinement_surrogate_ratio,
+        sizing.requested_tetrahedron_refinement_interpolated_ratio,
         Some(2.0 / 3.0)
     );
     assert_eq!(sizing.sample_count, 3);

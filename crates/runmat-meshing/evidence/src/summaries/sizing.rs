@@ -33,7 +33,7 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub accepted_requested_tetrahedron_refinement_point_count: usize,
     #[serde(default)]
-    pub accepted_requested_tetrahedron_refinement_surrogate_point_count: usize,
+    pub accepted_requested_tetrahedron_refinement_interpolated_point_count: usize,
     #[serde(default)]
     pub accepted_requested_tetrahedron_refinement_exact_point_count: usize,
     #[serde(default)]
@@ -49,7 +49,7 @@ pub struct MeshSizingEvidence {
     #[serde(default)]
     pub requested_tetrahedron_refinement_rejection_ratio: Option<f64>,
     #[serde(default)]
-    pub requested_tetrahedron_refinement_surrogate_ratio: Option<f64>,
+    pub requested_tetrahedron_refinement_interpolated_ratio: Option<f64>,
     #[serde(default)]
     pub generated_cad_by_reason: BTreeMap<String, usize>,
     #[serde(default)]
@@ -127,9 +127,9 @@ pub(crate) fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence
     let accepted_requested_tetrahedron_refinement_location_count = mesh
         .backend
         .tetrahedron_accepted_requested_refinement_location_count;
-    let accepted_requested_tetrahedron_refinement_surrogate_point_count = mesh
+    let accepted_requested_tetrahedron_refinement_interpolated_point_count = mesh
         .backend
-        .tetrahedron_accepted_requested_refinement_surrogate_point_count;
+        .tetrahedron_accepted_requested_refinement_interpolated_point_count;
 
     MeshSizingEvidence {
         global_target_size_m: mesh.sizing.global_target_size_m,
@@ -155,10 +155,10 @@ pub(crate) fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence
             .tetrahedron_requested_refinement_point_count,
         accepted_requested_tetrahedron_refinement_location_count,
         accepted_requested_tetrahedron_refinement_point_count,
-        accepted_requested_tetrahedron_refinement_surrogate_point_count,
+        accepted_requested_tetrahedron_refinement_interpolated_point_count,
         accepted_requested_tetrahedron_refinement_exact_point_count:
             accepted_requested_tetrahedron_refinement_point_count
-                .saturating_sub(accepted_requested_tetrahedron_refinement_surrogate_point_count),
+                .saturating_sub(accepted_requested_tetrahedron_refinement_interpolated_point_count),
         rejected_requested_tetrahedron_refinement_point_count: mesh
             .backend
             .tetrahedron_rejected_requested_refinement_point_count,
@@ -199,10 +199,10 @@ pub(crate) fn sizing_evidence(mesh: &AnalysisMeshArtifact) -> MeshSizingEvidence
         } else {
             None
         },
-        requested_tetrahedron_refinement_surrogate_ratio:
+        requested_tetrahedron_refinement_interpolated_ratio:
             if accepted_requested_tetrahedron_refinement_point_count > 0 {
                 Some(
-                    accepted_requested_tetrahedron_refinement_surrogate_point_count as f64
+                    accepted_requested_tetrahedron_refinement_interpolated_point_count as f64
                         / accepted_requested_tetrahedron_refinement_point_count as f64,
                 )
             } else {

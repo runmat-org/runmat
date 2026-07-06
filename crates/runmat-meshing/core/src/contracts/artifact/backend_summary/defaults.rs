@@ -249,7 +249,7 @@ impl Default for MeshBackendSummary {
             tetrahedron_requested_refinement_point_count: 0,
             tetrahedron_accepted_requested_refinement_location_count: 0,
             tetrahedron_accepted_requested_refinement_point_count: 0,
-            tetrahedron_accepted_requested_refinement_surrogate_point_count: 0,
+            tetrahedron_accepted_requested_refinement_interpolated_point_count: 0,
             tetrahedron_rejected_requested_refinement_point_count: 0,
             tetrahedron_requested_refinement_rejected_by_reason: BTreeMap::new(),
             tetrahedron_dropped_requested_refinement_point_count: 0,
