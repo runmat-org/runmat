@@ -365,6 +365,7 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_missing_recovery_item_count,
         typed_missing_item_count,
     )?;
+    validate_missing_recovery_reason_counts(mesh)?;
     validate_aggregate_recovery_count(
         "recovery_status_items",
         backend.tetrahedron_recovery_item_count,
@@ -412,6 +413,93 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count
             + backend.tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count,
     )?;
+    Ok(())
+}
+
+fn validate_missing_recovery_reason_counts(
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), AnalysisMeshValidationError> {
+    let backend = &mesh.backend;
+    for (family, item_count) in [
+        (
+            "missing_source_face_topology",
+            backend.tetrahedron_missing_source_face_topology_recovery_item_count,
+        ),
+        (
+            "missing_source_face_provenance",
+            backend.tetrahedron_missing_source_face_provenance_recovery_item_count,
+        ),
+        (
+            "missing_source_face_boundary_face",
+            backend.tetrahedron_missing_source_face_boundary_face_recovery_item_count,
+        ),
+        (
+            "missing_source_face_volume_face",
+            backend.tetrahedron_missing_source_face_volume_face_recovery_item_count,
+        ),
+        (
+            "missing_source_face_interior_face",
+            backend.tetrahedron_missing_source_face_interior_face_recovery_item_count,
+        ),
+        (
+            "missing_source_face_absent_face",
+            backend.tetrahedron_missing_source_face_absent_face_recovery_item_count,
+        ),
+    ] {
+        validate_recovery_item_count(
+            family,
+            item_count,
+            backend.tetrahedron_missing_source_face_recovery_item_count,
+        )?;
+    }
+    for (family, item_count) in [
+        (
+            "missing_source_edge_topology",
+            backend.tetrahedron_missing_source_edge_topology_recovery_item_count,
+        ),
+        (
+            "missing_source_edge_provenance",
+            backend.tetrahedron_missing_source_edge_provenance_recovery_item_count,
+        ),
+        (
+            "missing_source_edge_volume_edge",
+            backend.tetrahedron_missing_source_edge_volume_edge_recovery_item_count,
+        ),
+        (
+            "missing_source_edge_interior_edge",
+            backend.tetrahedron_missing_source_edge_interior_edge_recovery_item_count,
+        ),
+        (
+            "missing_source_edge_absent_edge",
+            backend.tetrahedron_missing_source_edge_absent_edge_recovery_item_count,
+        ),
+    ] {
+        validate_recovery_item_count(
+            family,
+            item_count,
+            backend.tetrahedron_missing_source_edge_recovery_item_count,
+        )?;
+    }
+    for (family, item_count) in [
+        (
+            "missing_material_interface_boundary_owned",
+            backend.tetrahedron_missing_material_interface_boundary_owned_recovery_item_count,
+        ),
+        (
+            "missing_material_interface_interior_face",
+            backend.tetrahedron_missing_material_interface_interior_face_recovery_item_count,
+        ),
+        (
+            "missing_material_interface_absent_partition",
+            backend.tetrahedron_missing_material_interface_absent_partition_recovery_item_count,
+        ),
+    ] {
+        validate_recovery_item_count(
+            family,
+            item_count,
+            backend.tetrahedron_missing_material_interface_recovery_item_count,
+        )?;
+    }
     Ok(())
 }
 
