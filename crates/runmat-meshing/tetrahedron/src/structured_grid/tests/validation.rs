@@ -44,15 +44,15 @@ fn unsupported_mesh_kind_is_rejected() {
         &geometry,
         VolumeMeshingOptions {
             backend: MeshBackendKind::StructuredGridTetrahedron,
-            kind: MeshKindRequest::Surrogate,
+            kind: MeshKindRequest::DisplayOnly,
             ..VolumeMeshingOptions::default()
         },
     )
-    .expect_err("surrogate mesh kind is not an analysis mesh backend");
+    .expect_err("display-only mesh kind is not an analysis mesh backend");
 
     assert_eq!(
         err,
-        MeshingError::UnsupportedMeshKind(MeshKindRequest::Surrogate)
+        MeshingError::UnsupportedMeshKind(MeshKindRequest::DisplayOnly)
     );
     assert!(err.to_string().contains("unsupported analysis mesh kind"));
 }

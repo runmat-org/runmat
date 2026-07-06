@@ -2466,13 +2466,13 @@ target_size: -0.002
     fn fea_document_mesh_options_reject_unsupported_mesh_kind() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             r#"
-kind: surrogate
+kind: display_only
 "#,
         )
-        .expect("mesh document should parse");
+        .expect("display-only mesh document should parse");
 
         let err = resolve_linear_static_mesh_options(Some(&mesh))
-            .expect_err("unsupported mesh kind is unsupported");
+            .expect_err("display-only mesh kind is unsupported for analysis");
 
         assert!(err.contains("mesh.kind"));
         assert!(err.contains("solid"));

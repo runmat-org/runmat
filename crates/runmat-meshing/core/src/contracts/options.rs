@@ -16,7 +16,7 @@ pub enum MeshKindRequest {
     Solid,
     Shell,
     Beam,
-    Surrogate,
+    DisplayOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
