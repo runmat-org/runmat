@@ -711,6 +711,50 @@ fn auto_backend_generates_through_hole_solid() {
 }
 
 #[test]
+fn auto_backend_generates_close_parallel_wall_slot_solid() {
+    let geometry = close_parallel_wall_slot_geometry();
+    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("close-wall through-slot solid should run through the root solid pipeline");
+
+    let slot_x_min = geometry.surface_meshes[0].vertices[4..8]
+        .iter()
+        .map(|vertex| vertex[0])
+        .fold(f64::INFINITY, f64::min);
+    let slot_x_max = geometry.surface_meshes[0].vertices[4..8]
+        .iter()
+        .map(|vertex| vertex[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "holed_polyhedron"
+    );
+    assert!((slot_x_max - slot_x_min - 0.95).abs() < 1.0e-9);
+    assert_eq!(material_region_ids, BTreeSet::from(["body"]));
+    assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(
+        mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15,
+        "min exact scaled Jacobian was {}",
+        mesh.backend.tetrahedron_min_exact_scaled_jacobian
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["body".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("close-wall through-slot solid mesh should be solve-ready");
+}
+
+#[test]
 fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
     let geometry = split_material_through_hole_plate_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
@@ -1235,6 +1279,27 @@ fn split_material_through_hole_plate_geometry() -> GeometryAsset {
             ],
         ),
     ];
+    geometry
+}
+
+fn close_parallel_wall_slot_geometry() -> GeometryAsset {
+    let mut geometry = through_hole_plate_geometry();
+    geometry.geometry_id = "geo_root_meshing_close_parallel_wall_slot".to_string();
+    geometry.source.path = "/fixtures/generic_close_parallel_wall_slot.step".to_string();
+    geometry.source.sha256 = "generic-close-parallel-wall-slot".to_string();
+    geometry.meshes[0].mesh_id = "close_parallel_wall_slot_surface".to_string();
+    geometry.surface_meshes[0].mesh_id = "close_parallel_wall_slot_surface".to_string();
+    for vertex_index in [4_usize, 7, 12, 15] {
+        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.025;
+    }
+    for vertex_index in [5_usize, 6, 13, 14] {
+        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.975;
+    }
+    geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
+        "body",
+        "close_parallel_wall_slot_surface",
+        32,
+    )];
     geometry
 }
 
