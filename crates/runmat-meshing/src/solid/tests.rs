@@ -799,6 +799,34 @@ fn auto_backend_generates_through_hole_solid() {
 }
 
 #[test]
+fn through_hole_solid_remains_holed_polyhedron_with_generated_sizing() {
+    let geometry = through_hole_plate_study_geometry();
+    let seed_mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("through-hole plate solid should generate seed sizing evidence");
+
+    let refined_mesh = generate_analysis_mesh_with_sizing(
+        &geometry,
+        VolumeMeshingOptions::default(),
+        &seed_mesh.sizing,
+    )
+    .expect("through-hole plate solid should regenerate from generated sizing evidence");
+
+    assert_eq!(
+        refined_mesh.backend.tetrahedron_generation_family,
+        "holed_polyhedron"
+    );
+    validate_analysis_mesh_with_options(
+        &refined_mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["body".to_string()],
+            require_boundary_source_edge_provenance: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("sized through-hole solid mesh should remain solve-ready");
+}
+
+#[test]
 fn auto_backend_generates_close_parallel_wall_slot_solid() {
     let geometry = close_parallel_wall_slot_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
@@ -1308,6 +1336,39 @@ fn close_parallel_wall_slot_geometry() -> GeometryAsset {
         "close_parallel_wall_slot_surface",
         32,
     )];
+    geometry
+}
+
+fn through_hole_plate_study_geometry() -> GeometryAsset {
+    let mut geometry = through_hole_plate_geometry();
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(8, 4)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 4)],
+        ),
+    ]);
     geometry
 }
 
