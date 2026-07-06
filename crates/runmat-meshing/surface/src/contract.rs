@@ -3,7 +3,8 @@ use runmat_meshing_core::{
     SurfaceCadCurveBoundaryProvenance, SurfaceCurveBoundaryValidation, SurfaceLoopCoverage,
     SurfaceMesh, SurfaceMeshNode, SurfaceMeshTriangle, TopologyEntityId,
 };
-use runmat_meshing_surface::{
+
+use crate::{
     SurfaceCadCurveBoundaryEdgeProvenance as SurfaceStageCadCurveBoundaryEdgeProvenance,
     SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, SurfaceLoopCoverageReport,
     SurfaceValidationReport, INTERNAL_SOURCE_EDGE_ID,
@@ -231,11 +232,11 @@ fn surface_cad_curve_boundary_edge_provenance(
 
 #[cfg(test)]
 mod tests {
-    use runmat_meshing_core::{MeshingStage, StageEvidenceStatus};
-    use runmat_meshing_surface::{
+    use crate::{
         SurfaceDiscretization, SurfaceElement, SurfaceNode, SurfaceValidationReport,
         INTERNAL_SOURCE_EDGE_ID,
     };
+    use runmat_meshing_core::{MeshingStage, StageEvidenceStatus};
 
     use super::build_surface_mesh_contract;
 

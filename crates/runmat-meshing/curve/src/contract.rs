@@ -2,7 +2,8 @@ use runmat_meshing_cad::SourceTopologyModel;
 use runmat_meshing_core::{
     CurveMesh, CurveMeshElement, CurveMeshNode, MeshingStage, StageEvidence, TopologyEntityId,
 };
-use runmat_meshing_curve::{
+
+use crate::{
     validate_curve_discretization, CurveDiscretization, CurveValidationError,
     CurveValidationOptions,
 };
@@ -95,12 +96,12 @@ fn curve_entity_id(id: impl ToString) -> TopologyEntityId {
 
 #[cfg(test)]
 mod tests {
-    use runmat_meshing_core::{
-        fixtures::generic_line_source_topology, MeshingStage, StageEvidenceStatus,
-    };
-    use runmat_meshing_curve::{
+    use crate::{
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationOptions, CurveElement,
         CurveNode, CurveValidationError, CurveValidationOptions,
+    };
+    use runmat_meshing_core::{
+        fixtures::generic_line_source_topology, MeshingStage, StageEvidenceStatus,
     };
 
     use super::build_curve_mesh_contract;

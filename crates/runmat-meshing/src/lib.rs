@@ -1,9 +1,7 @@
 //! Topology-first meshing pipeline orchestration.
 
 pub mod analysis_prep;
-pub mod curve_contract;
 pub mod solid;
-pub mod surface_contract;
 pub mod visualization;
 
 pub use analysis_prep::{
@@ -11,12 +9,10 @@ pub use analysis_prep::{
     MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
     PreparedMeshDescriptor, RegionMeshMapping,
 };
-pub use curve_contract::build_curve_mesh_contract;
 pub use solid::{
     generate_analysis_mesh, generate_analysis_mesh_with_sizing, generate_solid_analysis_mesh,
     generate_solid_analysis_mesh_with_sizing, SolidMeshingError,
 };
-pub use surface_contract::build_surface_mesh_contract;
 pub use visualization::{
     map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
     map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,

@@ -5660,10 +5660,8 @@ version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
  "runmat-meshing-cad",
- "runmat-meshing-curve",
  "runmat-meshing-opt",
  "runmat-meshing-size",
- "runmat-meshing-surface",
  "serde",
  "serde_json",
 ]
@@ -5673,6 +5671,7 @@ name = "runmat-meshing-curve"
 version = "0.5.0"
 dependencies = [
  "runmat-meshing-cad",
+ "runmat-meshing-core",
  "runmat-meshing-size",
  "serde",
 ]
@@ -5716,6 +5715,7 @@ version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
  "runmat-meshing-cad",
+ "runmat-meshing-core",
  "runmat-meshing-curve",
  "serde",
 ]

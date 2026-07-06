@@ -2,7 +2,6 @@ extern crate self as runmat_meshing_core;
 
 pub use runmat_meshing_cad as cad;
 pub mod contracts;
-pub use runmat_meshing_curve as curve;
 pub mod fixtures;
 pub use runmat_meshing_opt as opt;
 pub mod quality;
@@ -14,7 +13,6 @@ pub mod source_topology {
         SourceTopologyModel, SourceTopologyVertex,
     };
 }
-pub use runmat_meshing_surface as surface;
 pub mod validation;
 
 pub use cad::eval::{
@@ -57,13 +55,6 @@ pub use contracts::{
     SurfaceMeshTriangle, Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh,
     TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
 };
-pub use curve::{
-    discretize_cad_topology_curves_with_sizing,
-    discretize_cad_topology_curves_with_sizing_and_provider, discretize_topology_curves,
-    CadCurveDiscretization, CadCurveEdgeProvenance, CadCurveEvaluationRequest,
-    CadCurveEvaluatorProvider, CurveDiscretization, CurveDiscretizationError,
-    CurveDiscretizationOptions, CurveElement, CurveNode, NoopCadCurveEvaluatorProvider,
-};
 pub use opt::sliver::recovery::{
     classify_sliver_tetrahedra, evaluate_sliver_removal, SliverClassification,
     SliverClassificationReason, SliverRecoveryError, SliverRecoveryOptions,
@@ -101,19 +92,6 @@ pub use source_topology::{
     SourceTopologyModel, SourceTopologyVertex,
 };
 pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex};
-pub use surface::recovery::{
-    validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
-};
-pub use surface::validate::{
-    validate_surface_discretization, SurfaceValidationError, SurfaceValidationOptions,
-    SurfaceValidationReport,
-};
-pub use surface::{
-    discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
-    discretize_cad_topology_surfaces_with_cad_curves, discretize_topology_surfaces,
-    SurfaceCadCurveBoundaryProvenanceReport, SurfaceDiscretization, SurfaceDiscretizationError,
-    SurfaceDiscretizationOptions, SurfaceElement, SurfaceNode, INTERNAL_SOURCE_EDGE_ID,
-};
 pub use tolerance::MeshingTolerance;
 pub use validation::{
     analysis_mesh_validation_error_code, validate_analysis_mesh,

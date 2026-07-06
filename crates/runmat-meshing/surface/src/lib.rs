@@ -4,10 +4,12 @@ pub const CRATE_PURPOSE: &str = "face-domain triangulation, loop recovery, and s
 
 mod math;
 
+pub mod contract;
 pub mod param_tri;
 pub mod recovery;
 pub mod validate;
 
+pub use contract::build_surface_mesh_contract;
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
     discretize_cad_topology_surfaces_with_cad_curves, discretize_cad_topology_surfaces_with_curves,

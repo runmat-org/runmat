@@ -885,6 +885,7 @@ mod tests {
             bounds_min_m: [0.0, 0.0, 0.0],
             bounds_max_m: [length_m, 0.0, 0.0],
             region_ids: Vec::new(),
+            material_region_ids: Vec::new(),
         }
     }
 

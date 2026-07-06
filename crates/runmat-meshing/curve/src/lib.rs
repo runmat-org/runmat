@@ -2,9 +2,11 @@
 
 pub const CRATE_PURPOSE: &str = "CAD edge discretization and curve mesh validation";
 
+pub mod contract;
 pub mod discretize;
 pub mod validate;
 
+pub use contract::build_curve_mesh_contract;
 pub use discretize::{
     discretize_cad_topology_curves_with_sizing,
     discretize_cad_topology_curves_with_sizing_and_provider, discretize_topology_curves,

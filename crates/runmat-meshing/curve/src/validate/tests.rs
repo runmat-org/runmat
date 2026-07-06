@@ -472,5 +472,6 @@ fn line_topology(length_m: f64) -> SourceTopologyModel {
         bounds_min_m: [0.0, 0.0, 0.0],
         bounds_max_m: [length_m, 0.0, 0.0],
         region_ids: vec!["edge".to_string()],
+        material_region_ids: Vec::new(),
     }
 }

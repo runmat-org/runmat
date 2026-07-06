@@ -43,4 +43,11 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
             "missing focused root orchestration module: {root_orchestration_path}"
         );
     }
+
+    for stale_root_adapter in ["src/curve_contract.rs", "src/surface_contract.rs"] {
+        assert!(
+            !crate_root.join(stale_root_adapter).exists(),
+            "stage contract adapter still lives in root orchestration: {stale_root_adapter}"
+        );
+    }
 }

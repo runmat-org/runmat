@@ -8,13 +8,13 @@ use runmat_meshing_core::{
     TopologyEntityId, VolumeMeshingOptions,
 };
 use runmat_meshing_curve::{
-    discretize_cad_topology_curves_with_sizing_and_provider, CadCurveEvaluationRequest,
-    CadCurveEvaluatorProvider, CurveValidationOptions,
+    build_curve_mesh_contract, discretize_cad_topology_curves_with_sizing_and_provider,
+    CadCurveEvaluationRequest, CadCurveEvaluatorProvider, CurveValidationOptions,
 };
 use runmat_meshing_plc::build::build_protected_boundary_complex;
 use runmat_meshing_surface::{
-    discretize_cad_topology_surfaces_with_cad_curves, validate_cad_topology_surface_discretization,
-    SurfaceValidationOptions,
+    build_surface_mesh_contract, discretize_cad_topology_surfaces_with_cad_curves,
+    validate_cad_topology_surface_discretization, SurfaceValidationOptions,
 };
 use runmat_meshing_tetrahedron::{
     optimize::{
@@ -108,7 +108,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         &GeometryCadCurveEvaluatorProvider { geometry },
     )
     .map_err(SolidMeshingError::Curve)?;
-    let _curve_mesh_contract = crate::build_curve_mesh_contract(
+    let _curve_mesh_contract = build_curve_mesh_contract(
         "solid_curve_mesh",
         &topology,
         &cad_curves.curves,
@@ -131,7 +131,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
     )
     .map_err(SolidMeshingError::SurfaceValidation)?;
     let surface_mesh_contract =
-        crate::build_surface_mesh_contract("solid_surface_mesh", &surface, &surface_validation);
+        build_surface_mesh_contract("solid_surface_mesh", &surface, &surface_validation);
     let plc = build_protected_boundary_complex(&surface_mesh_contract)
         .map_err(SolidMeshingError::ProtectedBoundaryComplex)?;
     let tetrahedron_mesh = generate_solid_tetrahedron_mesh(&plc)?;
