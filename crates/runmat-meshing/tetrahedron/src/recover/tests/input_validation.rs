@@ -177,7 +177,7 @@ fn rejects_recovery_input_boundary_face_with_bad_source_stages() {
 }
 
 #[test]
-fn rejects_recovery_input_boundary_face_absent_from_element_and_plc_topology() {
+fn rejects_recovery_input_boundary_face_absent_from_element_topology() {
     let mut mesh = tetrahedron_mesh();
     mesh.nodes.push(tetrahedron_node(
         entity(MeshingStage::ProtectedBoundaryComplex, "4"),
@@ -192,7 +192,7 @@ fn rejects_recovery_input_boundary_face_absent_from_element_and_plc_topology() {
     assert_eq!(
         build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
         Err(
-            TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementOrPlcTopology {
+            TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementTopology {
                 face_id: entity(
                     MeshingStage::ProtectedBoundaryComplex,
                     "unsupported_boundary_face"

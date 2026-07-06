@@ -37,7 +37,7 @@ pub fn build_recovery_queue_from_plc(
     if tetrahedron_mesh.nodes.is_empty() || tetrahedron_mesh.elements.is_empty() {
         return Err(TetrahedronRecoveryError::EmptyTetrahedronMesh);
     }
-    validate_tetrahedron_recovery_input_mesh(plc, tetrahedron_mesh)?;
+    validate_tetrahedron_recovery_input_mesh(tetrahedron_mesh)?;
 
     let element_face_counts = element_face_counts(tetrahedron_mesh);
     let exterior_boundary_faces = tetrahedron_mesh

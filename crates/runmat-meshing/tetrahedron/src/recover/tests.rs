@@ -748,7 +748,7 @@ fn recovery_stage_result_reports_absent_material_partition_quality_rejection() {
 }
 
 #[test]
-fn recovery_stage_result_rolls_back_absent_material_partition_on_post_insert_audit_failure() {
+fn recovery_stage_result_rejects_stale_absent_material_partition_boundary_topology() {
     let plc = two_region_bipyramid_plc();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();
     mesh.elements.remove(0);
@@ -760,54 +760,18 @@ fn recovery_stage_result_rolls_back_absent_material_partition_on_post_insert_aud
         "stale_face_a_1",
     ));
 
-    let TetrahedronRecoveryError::IncompleteRecovery {
-        recovery_evidence, ..
-    } = recover_tetrahedron_mesh_from_plc(&plc, mesh)
-        .expect_err("stale partition boundary face should roll back insertion")
-    else {
-        panic!("expected incomplete recovery error");
-    };
-
     assert_eq!(
-        recovery_evidence.entity_counts["attempted_absent_material_partition_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["inserted_absent_material_partition_recovery_items"],
-        0
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_elements"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_boundary_faces"],
-        2
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rejected_absent_material_partition_post_insertion_audit"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["missing_source_face_items"],
-        3
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["missing_material_interface_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
-        1
+        recover_tetrahedron_mesh_from_plc(&plc, mesh),
+        Err(
+            TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementTopology {
+                face_id: entity(MeshingStage::ProtectedBoundaryComplex, "stale_facet_a_1"),
+            }
+        )
     );
 }
 
 #[test]
-fn recovery_stage_result_rolls_back_material_partition_with_stale_source_edge_provenance() {
+fn recovery_stage_result_rejects_material_partition_with_stale_source_edge_boundary_topology() {
     let plc = two_region_bipyramid_plc_with_region_a_protected_edge();
     let mut mesh = two_region_bipyramid_tetrahedron_mesh();
     mesh.elements.remove(0);
@@ -816,41 +780,13 @@ fn recovery_stage_result_rolls_back_material_partition_with_stale_source_edge_pr
     mesh.boundary_faces
         .push(boundary_face("facet_a_1", ["0", "2", "3"], "face_a_1"));
 
-    let TetrahedronRecoveryError::IncompleteRecovery {
-        recovery_evidence, ..
-    } = recover_tetrahedron_mesh_from_plc(&plc, mesh)
-        .expect_err("stale source-edge provenance should roll back partition insertion")
-    else {
-        panic!("expected incomplete recovery error");
-    };
-
     assert_eq!(
-        recovery_evidence.entity_counts["attempted_absent_material_partition_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["inserted_absent_material_partition_recovery_items"],
-        0
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_recovery_items"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_elements"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rolled_back_absent_material_partition_boundary_faces"],
-        2
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["rejected_absent_material_partition_post_insertion_audit"],
-        1
-    );
-    assert_eq!(
-        recovery_evidence.entity_counts["missing_material_interface_absent_partition_items"],
-        1
+        recover_tetrahedron_mesh_from_plc(&plc, mesh),
+        Err(
+            TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementTopology {
+                face_id: entity(MeshingStage::ProtectedBoundaryComplex, "facet_a_1"),
+            }
+        )
     );
 }
 
@@ -1047,6 +983,12 @@ fn recovery_stage_result_rejects_missing_queue_items() {
         [1.0, 1.0, 1.0],
     ));
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "4");
+    mesh.boundary_faces = vec![
+        boundary_face("facet_3", ["1", "2", "3"], "face_3"),
+        boundary_face("generated_1_2_4", ["1", "2", "4"], "generated_face_1_2_4"),
+        boundary_face("generated_1_3_4", ["1", "3", "4"], "generated_face_1_3_4"),
+        boundary_face("generated_2_3_4", ["2", "3", "4"], "generated_face_2_3_4"),
+    ];
 
     let recovery_evidence = assert_incomplete_recovery(
         recover_tetrahedron_mesh_from_plc(&plc, mesh).expect_err("missing face should fail"),
@@ -1065,7 +1007,7 @@ fn recovery_stage_result_rejects_missing_queue_items() {
     );
     assert_eq!(
         recovery_evidence.entity_counts["removed_unsupported_boundary_faces"],
-        2
+        0
     );
 }
 
@@ -1405,15 +1347,11 @@ fn recovery_queue_reports_missing_source_edge_absent_from_volume_edges() {
         entity(MeshingStage::ProtectedBoundaryComplex, "3"),
         entity(MeshingStage::ProtectedBoundaryComplex, "4"),
     ];
-    mesh.boundary_faces[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
-    mesh.boundary_faces[3].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+    mesh.boundary_faces = vec![
+        boundary_face("facet_2", ["0", "1", "3"], "face_2"),
+        boundary_face("generated_0_1_4", ["0", "1", "4"], "generated_face_0_1_4"),
+        boundary_face("generated_0_3_4", ["0", "3", "4"], "generated_face_0_3_4"),
+        boundary_face("generated_1_3_4", ["1", "3", "4"], "generated_face_1_3_4"),
     ];
 
     let queue = build_recovery_queue_from_plc(&plc, &mesh)

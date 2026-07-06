@@ -55,7 +55,7 @@ pub enum TetrahedronRecoveryError {
     TetrahedronBoundaryFaceHasRepeatedNode {
         face_id: TopologyEntityId,
     },
-    TetrahedronBoundaryFaceNotInElementOrPlcTopology {
+    TetrahedronBoundaryFaceNotInElementTopology {
         face_id: TopologyEntityId,
     },
     TetrahedronBoundaryFaceSourceFaceStageMismatch {
@@ -158,9 +158,9 @@ impl std::fmt::Display for TetrahedronRecoveryError {
                 "Tetrahedron boundary face {} has repeated nodes",
                 face_id.id
             ),
-            Self::TetrahedronBoundaryFaceNotInElementOrPlcTopology { face_id } => write!(
+            Self::TetrahedronBoundaryFaceNotInElementTopology { face_id } => write!(
                 formatter,
-                "Tetrahedron boundary face {} is not part of the element or PLC topology",
+                "Tetrahedron boundary face {} is not part of the element topology",
                 face_id.id
             ),
             Self::TetrahedronBoundaryFaceSourceFaceStageMismatch {

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    contracts::{MeshingStage, ProtectedBoundaryComplex, TetrahedronMesh, TopologyEntityId},
+    contracts::{MeshingStage, TetrahedronMesh, TopologyEntityId},
     quality::predicate::tetrahedron_signed_volume,
 };
 
@@ -10,7 +10,6 @@ use super::{topology::sorted_topology_ids, TetrahedronRecoveryError};
 const MIN_RECOVERY_INPUT_TETRAHEDRON_VOLUME_M3: f64 = 1.0e-18;
 
 pub(super) fn validate_tetrahedron_recovery_input_mesh(
-    plc: &ProtectedBoundaryComplex,
     tetrahedron_mesh: &TetrahedronMesh,
 ) -> Result<(), TetrahedronRecoveryError> {
     if tetrahedron_mesh.evidence.stage != MeshingStage::TetrahedronMesh {
@@ -97,11 +96,6 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
         element_faces.extend(tetrahedron_element_faces(element.node_ids.clone()));
     }
 
-    let plc_faces = plc
-        .facets
-        .iter()
-        .map(|facet| sorted_topology_ids(facet.node_ids.clone()))
-        .collect::<BTreeSet<_>>();
     let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();
     for boundary_face in &tetrahedron_mesh.boundary_faces {
         if !matches!(
@@ -131,9 +125,9 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
             },
         )?;
         let boundary_face_key = sorted_topology_ids(boundary_face.node_ids.clone());
-        if !element_faces.contains(&boundary_face_key) && !plc_faces.contains(&boundary_face_key) {
+        if !element_faces.contains(&boundary_face_key) {
             return Err(
-                TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementOrPlcTopology {
+                TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementTopology {
                     face_id: boundary_face.face_id.clone(),
                 },
             );
