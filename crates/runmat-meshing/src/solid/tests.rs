@@ -327,6 +327,49 @@ fn auto_backend_preserves_recovered_material_regions_for_split_cube() {
 }
 
 #[test]
+fn auto_backend_generates_thin_arm_solid() {
+    let mesh = generate_analysis_mesh(&thin_arm_geometry(), VolumeMeshingOptions::default())
+        .expect("thin arm should run through the root solid pipeline");
+
+    let bounds = mesh.nodes.iter().fold(
+        ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+        |(mut min, mut max), node| {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(node.coordinates_m[axis]);
+                max[axis] = max[axis].max(node.coordinates_m[axis]);
+            }
+            (min, max)
+        },
+    );
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "boundary_conforming_box"
+    );
+    assert_eq!(material_region_ids, BTreeSet::from(["body"]));
+    assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!((bounds.0[0] - 0.0).abs() < 1.0e-9);
+    assert!((bounds.1[0] - 2.0).abs() < 1.0e-9);
+    assert!((bounds.1[1] - 0.75).abs() < 1.0e-9);
+    assert!((bounds.1[2] - 0.75).abs() < 1.0e-9);
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["body".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("thin arm solid mesh should be solve-ready");
+}
+
+#[test]
 fn explicit_sizing_refines_recovered_cube_source_edges() {
     let sizing = MeshSizingField {
         samples: vec![SizingSample {
@@ -1015,6 +1058,32 @@ fn split_material_cube_geometry() -> GeometryAsset {
             vec![EntityIdRange::new(6, 6)],
         ),
     ];
+    geometry
+}
+
+fn thin_arm_geometry() -> GeometryAsset {
+    let mut geometry = cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_thin_arm".to_string();
+    geometry.source.path = "/fixtures/generic_thin_arm.step".to_string();
+    geometry.source.sha256 = "generic-thin-arm".to_string();
+    geometry.meshes[0].mesh_id = "thin_arm_surface".to_string();
+    geometry.surface_meshes[0].mesh_id = "thin_arm_surface".to_string();
+    for vertex in &mut geometry.surface_meshes[0].vertices {
+        vertex[0] *= 2.0;
+        vertex[1] *= 0.75;
+        vertex[2] *= 0.75;
+    }
+    geometry.regions = vec![Region {
+        region_id: "body".to_string(),
+        name: "body".to_string(),
+        tag: Some("material".to_string()),
+        cad_ownership: None,
+    }];
+    geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
+        "body",
+        "thin_arm_surface",
+        12,
+    )];
     geometry
 }
 
