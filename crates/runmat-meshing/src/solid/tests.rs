@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
     CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
@@ -8,12 +8,20 @@ use runmat_geometry_core::{
     UnitSystem,
 };
 use runmat_meshing_cad::SourceTopologyError;
+use runmat_meshing_core::contracts::{
+    AnalysisBoundaryFace, AnalysisMeshNode, AnalysisVolumeElement,
+};
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisFieldTopologyLocation,
     AnalysisMeshValidationOptions, MeshBackendKind, MeshSizingField, MeshTargetSize,
     QualityThresholds, SizingSample, SourceEntityKind, VolumeMeshingOptions,
     ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID, ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
     TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
+};
+
+use crate::visualization::{
+    map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
+    map_volume_scalar_field_to_boundary_faces,
 };
 
 #[test]
@@ -675,6 +683,105 @@ fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
         },
     )
     .expect("through-hole solid artifact should expose both recovered material regions");
+}
+
+#[test]
+fn generated_solid_mesh_maps_solver_fields_to_boundary_visualization_topology() {
+    let geometry = split_material_through_hole_plate_geometry();
+    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("split-region through-hole solid should generate a solver mesh");
+    let element_values = mesh
+        .volume_elements
+        .iter()
+        .enumerate()
+        .map(|(index, _)| index as f64 + 1.0)
+        .collect::<Vec<_>>();
+    let node_values = mesh
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
+
+    let boundary_scalars = map_volume_scalar_field_to_boundary_faces(&mesh, &element_values)
+        .expect("generated solver element values should map to boundary faces");
+    let boundary_node_vectors = map_nodal_vector_field_to_boundary_nodes(&mesh, &node_values)
+        .expect("generated solver node values should map to boundary nodes");
+    let boundary_face_vectors = map_nodal_vector_field_to_boundary_faces(&mesh, &node_values)
+        .expect("generated solver node values should map to boundary face averages");
+
+    assert_eq!(boundary_scalars.len(), mesh.boundary_faces.len());
+    assert_eq!(boundary_face_vectors.len(), mesh.boundary_faces.len());
+    assert_eq!(
+        boundary_node_vectors.len(),
+        generated_boundary_node_count(&mesh.boundary_faces)
+    );
+
+    let first_face = mesh
+        .boundary_faces
+        .first()
+        .expect("generated mesh should expose boundary faces");
+    let expected_scalar = expected_boundary_face_scalar(&mesh.volume_elements, first_face);
+    let mapped_scalar = boundary_scalars
+        .iter()
+        .find(|value| value.face_id == first_face.face_id)
+        .expect("first boundary face should have a mapped scalar");
+    assert!((mapped_scalar.value - expected_scalar).abs() <= f64::EPSILON);
+
+    let expected_vector = expected_boundary_face_vector(&mesh.nodes, first_face);
+    let mapped_vector = boundary_face_vectors
+        .iter()
+        .find(|value| value.face_id == first_face.face_id)
+        .expect("first boundary face should have a mapped vector");
+    for component in 0..3 {
+        assert!(
+            (mapped_vector.value[component] - expected_vector[component]).abs() <= f64::EPSILON
+        );
+    }
+}
+
+fn generated_boundary_node_count(boundary_faces: &[AnalysisBoundaryFace]) -> usize {
+    boundary_faces
+        .iter()
+        .flat_map(|face| face.node_ids.iter().copied())
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+fn expected_boundary_face_scalar(
+    volume_elements: &[AnalysisVolumeElement],
+    face: &AnalysisBoundaryFace,
+) -> f64 {
+    let values_by_element_id = volume_elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| (element.element_id.as_str(), index as f64 + 1.0))
+        .collect::<BTreeMap<_, _>>();
+    face.adjacent_volume_element_ids
+        .iter()
+        .map(|element_id| values_by_element_id[element_id.as_str()])
+        .sum::<f64>()
+        / face.adjacent_volume_element_ids.len() as f64
+}
+
+fn expected_boundary_face_vector(
+    nodes: &[AnalysisMeshNode],
+    face: &AnalysisBoundaryFace,
+) -> [f64; 3] {
+    let coordinates_by_node_id = nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let mut value = [0.0_f64; 3];
+    for node_id in &face.node_ids {
+        let coordinates = coordinates_by_node_id[node_id];
+        for component in 0..3 {
+            value[component] += coordinates[component];
+        }
+    }
+    for component in &mut value {
+        *component /= face.node_ids.len() as f64;
+    }
+    value
 }
 
 #[test]
