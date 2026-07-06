@@ -241,6 +241,7 @@ pub fn analysis_author_study_op(
         tetrahedron_generation_interior_support_accepted_count: intent
             .mesh_authoring_summary
             .tetrahedron_generation_interior_support_accepted_count,
+        nested_tetrahedron_shell: intent.mesh_authoring_summary.nested_tetrahedron_shell,
         selected_material_region_id: material_region_id,
         selected_fixed_boundary_region_id: fixed_boundary_region_id,
         selected_load_boundary_region_id: load_boundary_region_id,

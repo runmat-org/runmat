@@ -4,7 +4,7 @@ use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing::RegionMeshMapping;
 use runmat_meshing_core::VolumeMeshingOptions;
-use runmat_meshing_evidence::MeshAuthoringSummary;
+use runmat_meshing_evidence::{MeshAuthoringNestedTetrahedronShellSummary, MeshAuthoringSummary};
 use serde::{Deserialize, Serialize};
 
 fn default_prep_coordinate_span_m() -> f64 {
@@ -1920,6 +1920,11 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub tetrahedron_generation_interior_support_candidate_count: usize,
     #[serde(default)]
     pub tetrahedron_generation_interior_support_accepted_count: usize,
+    #[serde(
+        default,
+        skip_serializing_if = "MeshAuthoringNestedTetrahedronShellSummary::is_empty"
+    )]
+    pub nested_tetrahedron_shell: MeshAuthoringNestedTetrahedronShellSummary,
     pub selected_material_region_id: String,
     pub selected_fixed_boundary_region_id: String,
     pub selected_load_boundary_region_id: String,

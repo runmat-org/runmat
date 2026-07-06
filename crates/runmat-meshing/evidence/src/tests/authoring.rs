@@ -108,6 +108,61 @@ fn authoring_summary_exposes_tetrahedron_generation_selection_counts() {
 }
 
 #[test]
+fn authoring_summary_exposes_nested_tetrahedron_shell_counts() {
+    let mut mesh = minimal_evidence_mesh();
+    mesh.backend.tetrahedron_generation_family = "nested_tetrahedron_shell".to_string();
+    mesh.backend
+        .tetrahedron_generation_nested_shell_outer_node_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_inner_node_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_generated_node_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_refill_boundary_face_count = 8;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count = 1;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count = 0;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_barycentric_partition_refill_count = 0;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_outer_facet_count = 4;
+    mesh.backend
+        .tetrahedron_generation_nested_shell_inner_facet_count = 4;
+    let evidence = build_mesh_evidence_artifact(&mesh, &AnalysisMeshValidationOptions::default());
+
+    let summary = build_mesh_authoring_summary(&evidence);
+
+    assert_eq!(summary.nested_tetrahedron_shell.outer_node_count, 4);
+    assert_eq!(summary.nested_tetrahedron_shell.inner_node_count, 4);
+    assert_eq!(summary.nested_tetrahedron_shell.generated_node_count, 1);
+    assert_eq!(
+        summary
+            .nested_tetrahedron_shell
+            .boundary_exact_cover_refill_count,
+        1
+    );
+    assert_eq!(summary.nested_tetrahedron_shell.outer_facet_count, 4);
+    assert_eq!(summary.nested_tetrahedron_shell.inner_facet_count, 4);
+
+    let encoded = serde_json::to_value(&summary).expect("serialize authoring summary");
+    assert_eq!(
+        encoded["nested_tetrahedron_shell"]["outer_node_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        encoded["nested_tetrahedron_shell"]["boundary_exact_cover_refill_count"].as_u64(),
+        Some(1)
+    );
+    assert!(encoded.get("debug").is_none());
+    assert!(encoded.get("mesh").is_none());
+}
+
+#[test]
 fn authoring_summary_marks_failed_quality_thresholds() {
     let mesh = minimal_evidence_mesh();
     let validation = AnalysisMeshValidationOptions {
