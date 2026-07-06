@@ -3741,6 +3741,18 @@ impl PlotRenderer {
             .and_then(|f| f.y_axis_tick_labels_for_axes(axes_index))
     }
 
+    pub fn overlay_x_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_ticks_for_axes(axes_index))
+    }
+
+    pub fn overlay_y_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_ticks_for_axes(axes_index))
+    }
+
     pub fn overlay_histogram_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
         self.last_figure
             .as_ref()

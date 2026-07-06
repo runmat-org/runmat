@@ -5,12 +5,13 @@ use std::borrow::Cow;
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
-    current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
-    select_axes_for_figure, set_axes_style_for_axes, set_figure_background_color, set_figure_name,
-    set_figure_number_title, set_figure_position, set_figure_visible, set_legend_for_axes,
-    set_sg_title_properties_for_figure, set_text_annotation_properties_for_axes,
-    set_text_properties_for_axes, FigureHandle, PlotObjectKind,
+    axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure, decode_axes_handle,
+    decode_plot_object_handle, figure_handle_exists, figure_has_sg_title, legend_entries_snapshot,
+    present_figure_update, select_axes_for_figure, set_axes_style_for_axes,
+    set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
+    set_figure_visible, set_legend_for_axes, set_sg_title_properties_for_figure,
+    set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
+    PlotObjectKind,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -373,6 +374,8 @@ fn get_axes_property(
         axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let axes =
         axes_state_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
+    let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+        .map_err(|err| map_figure_error(builtin, err))?;
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -471,6 +474,22 @@ fn get_axes_property(
             st.insert("ZLim", limit_value(meta.z_limits));
             st.insert("CLim", limit_value(meta.color_limits));
             st.insert(
+                "XTick",
+                tick_value(ticks_or_auto(
+                    meta.x_ticks.as_deref(),
+                    x_bounds(display_bounds),
+                )),
+            );
+            st.insert(
+                "YTick",
+                tick_value(ticks_or_auto(
+                    meta.y_ticks.as_deref(),
+                    y_bounds(display_bounds),
+                )),
+            );
+            st.insert("XTickMode", tick_mode_value(meta.x_ticks.as_ref()));
+            st.insert("YTickMode", tick_mode_value(meta.y_ticks.as_ref()));
+            st.insert(
                 "FontSize",
                 Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
             );
@@ -532,6 +551,16 @@ fn get_axes_property(
         Some("ylim") => Ok(limit_value(meta.y_limits)),
         Some("zlim") => Ok(limit_value(meta.z_limits)),
         Some("clim") => Ok(limit_value(meta.color_limits)),
+        Some("xtick") => Ok(tick_value(ticks_or_auto(
+            meta.x_ticks.as_deref(),
+            x_bounds(display_bounds),
+        ))),
+        Some("ytick") => Ok(tick_value(ticks_or_auto(
+            meta.y_ticks.as_deref(),
+            y_bounds(display_bounds),
+        ))),
+        Some("xtickmode") => Ok(tick_mode_value(meta.x_ticks.as_ref())),
+        Some("ytickmode") => Ok(tick_mode_value(meta.y_ticks.as_ref())),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
@@ -800,6 +829,10 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "ylim" => Cow::Borrowed("ylim"),
         "zlim" => Cow::Borrowed("zlim"),
         "clim" | "caxis" => Cow::Borrowed("clim"),
+        "xtick" => Cow::Borrowed("xtick"),
+        "ytick" => Cow::Borrowed("ytick"),
+        "xtickmode" => Cow::Borrowed("xtickmode"),
+        "ytickmode" => Cow::Borrowed("ytickmode"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
@@ -1126,6 +1159,76 @@ fn apply_axes_property(
             let limits = limits_from_optional_value(value, builtin)?;
             crate::builtins::plotting::state::set_color_limits_for_axes(handle, axes_index, limits)
                 .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "xtick" => {
+            let ticks = ticks_from_value(value, builtin)?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            crate::builtins::plotting::state::set_axis_ticks_for_axes(
+                handle,
+                axes_index,
+                Some(ticks),
+                meta.y_ticks,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "ytick" => {
+            let ticks = ticks_from_value(value, builtin)?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            crate::builtins::plotting::state::set_axis_ticks_for_axes(
+                handle,
+                axes_index,
+                meta.x_ticks,
+                Some(ticks),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "xtickmode" => {
+            let mode = tick_mode_from_value(value, builtin, "XTickMode")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let x = match mode {
+                TickMode::Auto => None,
+                TickMode::Manual => Some(ticks_or_auto(
+                    meta.x_ticks.as_deref(),
+                    x_bounds(display_bounds),
+                )),
+            };
+            crate::builtins::plotting::state::set_axis_ticks_for_axes(
+                handle,
+                axes_index,
+                x,
+                meta.y_ticks,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "ytickmode" => {
+            let mode = tick_mode_from_value(value, builtin, "YTickMode")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let y = match mode {
+                TickMode::Auto => None,
+                TickMode::Manual => Some(ticks_or_auto(
+                    meta.y_ticks.as_deref(),
+                    y_bounds(display_bounds),
+                )),
+            };
+            crate::builtins::plotting::state::set_axis_ticks_for_axes(
+                handle,
+                axes_index,
+                meta.x_ticks,
+                y,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xscale" => {
@@ -3999,6 +4102,73 @@ fn limits_from_optional_value(
     Ok(Some(
         crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?,
     ))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TickMode {
+    Auto,
+    Manual,
+}
+
+fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
+    let tensor = runmat_builtins::Tensor::try_from(value)
+        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let ticks = tensor.data;
+    if ticks.iter().any(|value| !value.is_finite()) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: tick values must be finite"),
+        ));
+    }
+    if ticks.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: tick values must be strictly increasing"),
+        ));
+    }
+    Ok(ticks)
+}
+
+fn tick_mode_from_value(
+    value: &Value,
+    builtin: &'static str,
+    property: &str,
+) -> BuiltinResult<TickMode> {
+    let mode = value_as_string(value).ok_or_else(|| {
+        plotting_error(builtin, format!("{builtin}: {property} must be a string"))
+    })?;
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(TickMode::Auto),
+        "manual" => Ok(TickMode::Manual),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: {property} must be 'auto' or 'manual'"),
+        )),
+    }
+}
+
+fn x_bounds(bounds: Option<(f64, f64, f64, f64)>) -> Option<(f64, f64)> {
+    bounds.map(|(x_min, x_max, _, _)| (x_min, x_max))
+}
+
+fn y_bounds(bounds: Option<(f64, f64, f64, f64)>) -> Option<(f64, f64)> {
+    bounds.map(|(_, _, y_min, y_max)| (y_min, y_max))
+}
+
+fn ticks_or_auto(explicit: Option<&[f64]>, bounds: Option<(f64, f64)>) -> Vec<f64> {
+    if let Some(ticks) = explicit {
+        return ticks.to_vec();
+    }
+    let (lo, hi) = bounds.unwrap_or((-1.0, 1.0));
+    runmat_plot::core::plot_utils::generate_major_ticks(lo, hi)
+}
+
+fn tick_value(data: Vec<f64>) -> Value {
+    tensor_from_vec(data)
+}
+
+fn tick_mode_value(ticks: Option<&Vec<f64>>) -> Value {
+    Value::String(if ticks.is_some() { "manual" } else { "auto" }.into())
 }
 
 fn parse_colormap_name(

@@ -16,6 +16,8 @@ struct AxesView {
     x_label: Option<String>,
     y_label: Option<String>,
     z_label: Option<String>,
+    x_ticks: Option<Vec<f64>>,
+    y_ticks: Option<Vec<f64>>,
     title_scale: u32,
     label_scale: u32,
     tick_scale: u32,
@@ -822,6 +824,30 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         return;
     }
 
+    let (x_min, x_max, y_min, y_max) = axes.bounds_2d;
+    let data_to_x = |value: f32| -> Option<i32> {
+        if value < x_min || value > x_max {
+            return None;
+        }
+        let span = x_max - x_min;
+        if !span.is_finite() || span.abs() <= f32::EPSILON {
+            return None;
+        }
+        let t = (value - x_min) / span;
+        Some((left as f32 + t * (right - left) as f32).round() as i32)
+    };
+    let data_to_y = |value: f32| -> Option<i32> {
+        if value < y_min || value > y_max {
+            return None;
+        }
+        let span = y_max - y_min;
+        if !span.is_finite() || span.abs() <= f32::EPSILON {
+            return None;
+        }
+        let t = (y_max - value) / span;
+        Some((top as f32 + t * (bottom - top) as f32).round() as i32)
+    };
+
     if axes.show_minor_grid {
         let subdivisions = 5;
         for i in 0..=(6 * subdivisions) {
@@ -870,11 +896,24 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     }
 
     if axes.show_grid {
-        for i in 0..=6 {
-            let t = i as f32 / 6.0;
-            let x = (left as f32 + t * (right - left) as f32).round() as i32;
-            let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
-
+        let x_grid: Vec<i32> = axes
+            .x_ticks
+            .as_ref()
+            .map(|ticks| {
+                ticks
+                    .iter()
+                    .filter_map(|value| data_to_x(*value as f32))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                (0..=6)
+                    .map(|i| {
+                        let t = i as f32 / 6.0;
+                        (left as f32 + t * (right - left) as f32).round() as i32
+                    })
+                    .collect()
+            });
+        for x in x_grid {
             let gv = ScreenVertex {
                 x: x as f32,
                 y: top as f32,
@@ -888,7 +927,26 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
                 color: grid_color,
             };
             canvas.draw_line(gv, gv2, 1.0, 0, false);
+        }
 
+        let y_grid: Vec<i32> = axes
+            .y_ticks
+            .as_ref()
+            .map(|ticks| {
+                ticks
+                    .iter()
+                    .filter_map(|value| data_to_y(*value as f32))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                (0..=6)
+                    .map(|i| {
+                        let t = i as f32 / 6.0;
+                        (top as f32 + t * (bottom - top) as f32).round() as i32
+                    })
+                    .collect()
+            });
+        for y in y_grid {
             let gh = ScreenVertex {
                 x: left as f32,
                 y: y as f32,
@@ -935,16 +993,22 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         }
     }
 
-    let (x_min, x_max, y_min, y_max) = axes.bounds_2d;
     let tick_sc = axes.tick_scale as i32;
-    for i in 0..=4 {
-        let t = i as f32 / 4.0;
+    let x_ticks = axes
+        .x_ticks
+        .as_ref()
+        .map(|ticks| ticks.iter().map(|value| *value as f32).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            (0..=4)
+                .map(|i| x_min + (i as f32 / 4.0) * (x_max - x_min))
+                .collect()
+        });
+    for xv in x_ticks {
+        if xv < x_min || xv > x_max {
+            continue;
+        }
+        let t = (xv - x_min) / (x_max - x_min).max(f32::EPSILON);
         let x = (left as f32 + t * (right - left) as f32).round() as i32;
-        let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
-
-        let xv = x_min + t * (x_max - x_min);
-        let yv = y_max - t * (y_max - y_min);
-
         draw_bitmap_text(
             canvas,
             x - 12 * tick_sc,
@@ -953,6 +1017,22 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             axes.tick_scale,
             with_alpha(text_color, 0.9),
         );
+    }
+    let y_ticks = axes
+        .y_ticks
+        .as_ref()
+        .map(|ticks| ticks.iter().map(|value| *value as f32).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            (0..=4)
+                .map(|i| y_max - (i as f32 / 4.0) * (y_max - y_min))
+                .collect()
+        });
+    for yv in y_ticks {
+        if yv < y_min || yv > y_max {
+            continue;
+        }
+        let t = (y_max - yv) / (y_max - y_min).max(f32::EPSILON);
+        let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
         draw_bitmap_text(
             canvas,
             left - 56 * tick_sc,
@@ -1521,6 +1601,10 @@ pub async fn render_figure_rgba_bytes(
         };
 
         let (title, x_label, y_label, z_label) = get_axes_title_and_labels(&figure, axes_index);
+        let (x_ticks, y_ticks) = figure
+            .axes_metadata(axes_index)
+            .map(|meta| (meta.x_ticks.clone(), meta.y_ticks.clone()))
+            .unwrap_or((None, None));
         let (title_scale, label_scale, tick_scale, show_grid, show_minor_grid, show_box) =
             get_axes_style_and_display_prefs(&figure, axes_index);
 
@@ -1535,6 +1619,8 @@ pub async fn render_figure_rgba_bytes(
             x_label,
             y_label,
             z_label,
+            x_ticks,
+            y_ticks,
             title_scale,
             label_scale,
             tick_scale,

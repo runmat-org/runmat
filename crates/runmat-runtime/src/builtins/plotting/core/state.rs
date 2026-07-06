@@ -24,6 +24,8 @@ use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
 
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
+type AxisTickSnapshot = (Option<Vec<f64>>, Option<Vec<f64>>);
+type AxisDisplayBoundsSnapshot = Option<(f64, f64, f64, f64)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
@@ -998,6 +1000,47 @@ pub fn set_axis_limits_for_axes(
     Ok(())
 }
 
+pub fn set_axis_ticks(x: Option<Vec<f64>>, y: Option<Vec<f64>>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_ticks(axes, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_axis_ticks_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x: Option<Vec<f64>>,
+    y: Option<Vec<f64>>,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
+        state.figure.set_axes_ticks(axes_index, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
     let mut reg = registry();
     let handle = reg.current;
@@ -1009,6 +1052,113 @@ pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
         .cloned()
         .unwrap_or_default();
     (meta.x_limits, meta.y_limits)
+}
+
+pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    let axes = state.active_axes;
+    let meta = state
+        .figure
+        .axes_metadata(axes)
+        .cloned()
+        .unwrap_or_default();
+    (meta.x_ticks, meta.y_ticks)
+}
+
+pub fn axis_ticks_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<AxisTickSnapshot, FigureError> {
+    let reg = registry();
+    let state = reg
+        .figures
+        .get(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    let meta = state
+        .figure
+        .axes_metadata(axes_index)
+        .cloned()
+        .unwrap_or_default();
+    Ok((meta.x_ticks, meta.y_ticks))
+}
+
+pub fn axis_display_bounds_snapshot() -> AxisDisplayBoundsSnapshot {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    let axes_index = state.active_axes;
+    display_bounds_for_state_axes(state, axes_index)
+}
+
+pub fn axis_display_bounds_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<AxisDisplayBoundsSnapshot, FigureError> {
+    let mut reg = registry();
+    let state = reg
+        .figures
+        .get_mut(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    Ok(display_bounds_for_state_axes(state, axes_index))
+}
+
+fn display_bounds_for_state_axes(
+    state: &mut FigureState,
+    axes_index: usize,
+) -> AxisDisplayBoundsSnapshot {
+    let bounds = state.figure.data_bounds_for_axes(axes_index);
+    if !(bounds.min.x.is_finite()
+        && bounds.max.x.is_finite()
+        && bounds.min.y.is_finite()
+        && bounds.max.y.is_finite())
+    {
+        return None;
+    }
+
+    let mut x_min = bounds.min.x as f64;
+    let mut x_max = bounds.max.x as f64;
+    let mut y_min = bounds.min.y as f64;
+    let mut y_max = bounds.max.y as f64;
+
+    if let Some(meta) = state.figure.axes_metadata(axes_index) {
+        if let Some((lo, hi)) = meta.x_limits {
+            x_min = lo;
+            x_max = hi;
+        }
+        if let Some((lo, hi)) = meta.y_limits {
+            y_min = lo;
+            y_max = hi;
+        }
+        if meta.axis_equal {
+            let cx = (x_min + x_max) * 0.5;
+            let cy = (y_min + y_max) * 0.5;
+            let size = (x_max - x_min).abs().max((y_max - y_min).abs()).max(0.1);
+            x_min = cx - size * 0.5;
+            x_max = cx + size * 0.5;
+            y_min = cy - size * 0.5;
+            y_max = cy + size * 0.5;
+        }
+    }
+
+    Some((x_min, x_max, y_min, y_max))
 }
 
 pub fn z_limits_snapshot() -> Option<(f64, f64)> {

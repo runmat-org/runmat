@@ -19347,6 +19347,90 @@
       ]
     },
     {
+      "name": "dataTipTextRow",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "row = dataTipTextRow(label, value)",
+          "inputs": [
+            {
+              "name": "label",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Display label for the data-tip row."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value source, expression, or data vector shown by the row."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "row",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Data-tip text row object with Label, Value, and Format properties."
+            }
+          ]
+        },
+        {
+          "label": "row = dataTipTextRow(label, value, format)",
+          "inputs": [
+            {
+              "name": "label",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Display label for the data-tip row."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value source, expression, or data vector shown by the row."
+            },
+            {
+              "name": "format",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"\"",
+              "description": "Optional numeric, datetime, duration, or text display format."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "row",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Data-tip text row object with Label, Value, and Format properties."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DATATIPTEXTROW.INVALID_ARGUMENT",
+          "identifier": "RunMat:dataTipTextRow:InvalidArgument",
+          "when": "The label/format text is not scalar, or the argument count is not supported.",
+          "message": "dataTipTextRow: invalid argument"
+        },
+        {
+          "code": "RM.DATATIPTEXTROW.INTERNAL",
+          "identifier": "RunMat:dataTipTextRow:Internal",
+          "when": "Internal data-tip row object construction fails.",
+          "message": "dataTipTextRow: internal error"
+        }
+      ]
+    },
+    {
       "name": "datasample",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -49274,6 +49358,201 @@
       ]
     },
     {
+      "name": "lassoglm",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = lassoglm(X, Y, distr)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector, or two-column binomial successes/trials matrix."
+            },
+            {
+              "name": "distr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name: normal, binomial, or poisson."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            }
+          ]
+        },
+        {
+          "label": "B = lassoglm(X, Y, distr, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector, or two-column binomial successes/trials matrix."
+            },
+            {
+              "name": "distr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name: normal, binomial, or poisson."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Lambda, Alpha, Standardize, Intercept, Weights, Offset, CV, NumLambda, LambdaRatio, MaxIter, RelTol, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            }
+          ]
+        },
+        {
+          "label": "[B, FitInfo] = lassoglm(X, Y, distr)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector, or two-column binomial successes/trials matrix."
+            },
+            {
+              "name": "distr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name: normal, binomial, or poisson."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            },
+            {
+              "name": "FitInfo",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit information structure containing Lambda, Intercept, Deviance, DF, and diagnostics."
+            }
+          ]
+        },
+        {
+          "label": "[B, FitInfo] = lassoglm(X, Y, distr, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows and predictors in columns."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response vector, or two-column binomial successes/trials matrix."
+            },
+            {
+              "name": "distr",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name: normal, binomial, or poisson."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Lambda, Alpha, Standardize, Intercept, Weights, Offset, CV, NumLambda, LambdaRatio, MaxIter, RelTol, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per Lambda value."
+            },
+            {
+              "name": "FitInfo",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit information structure containing Lambda, Intercept, Deviance, DF, and diagnostics."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LASSOGLM.INVALID_ARGUMENT",
+          "identifier": "RunMat:lassoglm:InvalidArgument",
+          "when": "Inputs, distribution name, dimensions, option names, or option values are malformed.",
+          "message": "lassoglm: invalid argument"
+        },
+        {
+          "code": "RM.LASSOGLM.CONVERGENCE",
+          "identifier": "RunMat:lassoglm:Convergence",
+          "when": "The regularized GLM solver cannot make numerical progress.",
+          "message": "lassoglm: convergence failure"
+        },
+        {
+          "code": "RM.LASSOGLM.INTERNAL",
+          "identifier": "RunMat:lassoglm:Internal",
+          "when": "RunMat cannot construct lassoglm outputs.",
+          "message": "lassoglm: internal error"
+        }
+      ]
+    },
+    {
       "name": "lcm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -49884,6 +50163,132 @@
           "identifier": "RunMat:limit:ArgCount",
           "when": "Too many arguments were supplied.",
           "message": "limit: too many input arguments"
+        }
+      ]
+    },
+    {
+      "name": "line",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = line(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X data."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle scalar or row vector when matrix data creates multiple lines."
+            }
+          ]
+        },
+        {
+          "label": "h = line(X, Y, Z)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X data."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Z data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle scalar or row vector when matrix data creates multiple lines."
+            }
+          ]
+        },
+        {
+          "label": "h = line(X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value pairs such as XData, YData, ZData, Color, LineWidth, and DisplayName."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle scalar or row vector when matrix data creates multiple lines."
+            }
+          ]
+        },
+        {
+          "label": "h = line(Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value pairs such as XData, YData, ZData, Color, LineWidth, and DisplayName."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line graphics handle scalar or row vector when matrix data creates multiple lines."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LINE.INVALID_ARGUMENT",
+          "identifier": "RunMat:line:InvalidArgument",
+          "when": "Line data, axes target, style arguments, or Name/Value pairs are invalid.",
+          "message": "line: invalid argument"
+        },
+        {
+          "code": "RM.LINE.INTERNAL",
+          "identifier": "RunMat:line:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "line: internal operation failed"
         }
       ]
     },
@@ -103274,6 +103679,110 @@
       ]
     },
     {
+      "name": "xticks",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ticks = xticks()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick values."
+            }
+          ]
+        },
+        {
+          "label": "ticks = xticks(ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of X-axis tick values; [] removes tick marks."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick values."
+            }
+          ]
+        },
+        {
+          "label": "mode = xticks(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "ticks = xticks(ax, ticks)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of X-axis tick values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XTICKS.INVALID_ARGUMENT",
+          "identifier": "RunMat:xticks:InvalidArgument",
+          "when": "Argument count, tick vector, mode, or axes handle is invalid.",
+          "message": "xticks: invalid argument"
+        },
+        {
+          "code": "RM.XTICKS.INTERNAL",
+          "identifier": "RunMat:xticks:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "xticks: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "year",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -103660,6 +104169,110 @@
           "identifier": "RunMat:yline:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yline: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "yticks",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ticks = yticks()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick values."
+            }
+          ]
+        },
+        {
+          "label": "ticks = yticks(ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of Y-axis tick values; [] removes tick marks."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick values."
+            }
+          ]
+        },
+        {
+          "label": "mode = yticks(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "ticks = yticks(ax, ticks)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of Y-axis tick values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick values."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.YTICKS.INVALID_ARGUMENT",
+          "identifier": "RunMat:yticks:InvalidArgument",
+          "when": "Argument count, tick vector, mode, or axes handle is invalid.",
+          "message": "yticks: invalid argument"
+        },
+        {
+          "code": "RM.YTICKS.INTERNAL",
+          "identifier": "RunMat:yticks:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "yticks: internal operation failed"
         }
       ]
     },
