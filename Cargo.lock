@@ -5660,7 +5660,6 @@ name = "runmat-meshing-core"
 version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
- "runmat-meshing-cad",
  "runmat-meshing-size",
  "serde",
  "serde_json",

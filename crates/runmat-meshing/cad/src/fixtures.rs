@@ -1,10 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_cad::{
-    SourceTopologyEdge, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex,
-};
+use crate::{SourceTopologyEdge, SourceTopologyFace, SourceTopologyModel, SourceTopologyVertex};
 
-pub const MODULE_PURPOSE: &str = "generic topology-first fixture builders and expected evidence";
+pub const MODULE_PURPOSE: &str =
+    "generic CAD source-topology fixture builders and expected evidence";
 
 pub fn generic_line_source_topology(length_m: f64) -> SourceTopologyModel {
     SourceTopologyModel {

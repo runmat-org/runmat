@@ -38,6 +38,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let core_lib = fs::read_to_string(crate_root.join("core").join("src").join("lib.rs"))
         .expect("core lib should be readable");
     for implementation_crate in [
+        "runmat-meshing-cad",
         "runmat-meshing-curve",
         "runmat-meshing-surface",
         "runmat-meshing-plc",

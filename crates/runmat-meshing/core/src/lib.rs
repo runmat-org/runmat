@@ -1,7 +1,6 @@
 extern crate self as runmat_meshing_core;
 
 pub mod contracts;
-pub mod fixtures;
 pub mod quality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub mod validation;

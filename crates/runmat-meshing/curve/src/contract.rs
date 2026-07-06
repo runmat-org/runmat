@@ -100,9 +100,8 @@ mod tests {
         discretize_topology_curves, CurveDiscretization, CurveDiscretizationOptions, CurveElement,
         CurveNode, CurveValidationError, CurveValidationOptions,
     };
-    use runmat_meshing_core::{
-        fixtures::generic_line_source_topology, MeshingStage, StageEvidenceStatus,
-    };
+    use runmat_meshing_cad::fixtures::generic_line_source_topology;
+    use runmat_meshing_core::{MeshingStage, StageEvidenceStatus};
 
     use super::build_curve_mesh_contract;
 

@@ -8,6 +8,7 @@ pub use runmat_geometry_core::{CadCurveEvaluationSample, CadCurveEvaluationSampl
 mod math;
 
 pub mod eval;
+pub mod fixtures;
 pub mod heal;
 pub mod region_map;
 pub mod topology;
