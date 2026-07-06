@@ -131,19 +131,30 @@ fn meshing_prep_validates_options() {
 }
 
 #[test]
-fn metadata_only_regions_map_to_prepared_meshes() {
+fn metadata_only_regions_are_rejected_without_mesh_mapping() {
     let mut geometry = sample_geometry();
     geometry.region_entity_mappings.clear();
 
-    let prep = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
-        .expect("meshing prep should work");
-    let mapping = prep
-        .region_mappings
-        .iter()
-        .find(|mapping| mapping.region_id == "region_main")
-        .expect("region mapping should exist");
-    assert_eq!(mapping.source_mesh_ids, vec!["mesh_a"]);
-    assert_eq!(mapping.prepared_mesh_ids, vec!["prep_7_mesh_a"]);
+    let err = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
+        .expect_err("metadata-only region should fail closed");
+
+    assert!(err.contains("region region_main has no mesh entity mapping"));
+}
+
+#[test]
+fn stale_region_mesh_mappings_are_rejected() {
+    let mut geometry = sample_geometry();
+    geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
+        "region_main",
+        "missing_mesh",
+        200,
+    )];
+
+    let err = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
+        .expect_err("stale region mapping should fail closed");
+
+    assert!(err.contains("region region_main references unknown mesh entity mapping(s)"));
+    assert!(err.contains("missing_mesh"));
 }
 
 #[test]

@@ -164,28 +164,33 @@ pub fn prepare_geometry_for_analysis(
         mesh_ids.sort();
     }
 
-    let fallback_source_mesh_ids = prepared_meshes
-        .iter()
-        .map(|mesh| mesh.source_mesh_id.clone())
-        .collect::<Vec<_>>();
-    let fallback_prepared_mesh_ids = prepared_meshes
-        .iter()
-        .map(|mesh| mesh.prepared_mesh_id.clone())
-        .collect::<Vec<_>>();
-
     let mut region_mappings = Vec::<RegionMeshMapping>::new();
     for region in &geometry.regions {
         let source_mesh_ids = source_mesh_ids_by_region
             .get(&region.region_id)
             .cloned()
             .filter(|mesh_ids| !mesh_ids.is_empty())
-            .unwrap_or_else(|| fallback_source_mesh_ids.clone());
-        let mut prepared_mesh_ids = source_mesh_ids
+            .ok_or_else(|| {
+                format!(
+                    "region {} has no mesh entity mapping for analysis prep",
+                    region.region_id
+                )
+            })?;
+        let prepared_mesh_ids = source_mesh_ids
             .iter()
             .filter_map(|mesh_id| prepared_by_source.get(mesh_id).cloned())
             .collect::<Vec<_>>();
-        if prepared_mesh_ids.is_empty() {
-            prepared_mesh_ids = fallback_prepared_mesh_ids.clone();
+        if prepared_mesh_ids.len() != source_mesh_ids.len() {
+            let unknown_mesh_ids = source_mesh_ids
+                .iter()
+                .filter(|mesh_id| !prepared_by_source.contains_key(*mesh_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            return Err(format!(
+                "region {} references unknown mesh entity mapping(s): {}",
+                region.region_id,
+                unknown_mesh_ids.join(", ")
+            ));
         }
         region_mappings.push(RegionMeshMapping {
             region_id: region.region_id.clone(),
