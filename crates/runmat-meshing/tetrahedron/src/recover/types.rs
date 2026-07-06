@@ -29,6 +29,14 @@ pub enum TetrahedronRecoveryError {
     DuplicateTetrahedronElement {
         element_id: TopologyEntityId,
     },
+    DuplicateTetrahedronElementTopology {
+        element_id: TopologyEntityId,
+        existing_element_id: TopologyEntityId,
+    },
+    NonManifoldTetrahedronElementFaceTopology {
+        face_node_ids: [TopologyEntityId; 3],
+        adjacent_element_count: usize,
+    },
     TetrahedronElementReferencesUnknownNode {
         element_id: TopologyEntityId,
         node_id: TopologyEntityId,
@@ -118,6 +126,25 @@ impl std::fmt::Display for TetrahedronRecoveryError {
                 formatter,
                 "Tetrahedron mesh contains duplicate element {}",
                 element_id.id
+            ),
+            Self::DuplicateTetrahedronElementTopology {
+                element_id,
+                existing_element_id,
+            } => write!(
+                formatter,
+                "Tetrahedron element {} duplicates topology for element {}",
+                element_id.id, existing_element_id.id
+            ),
+            Self::NonManifoldTetrahedronElementFaceTopology {
+                face_node_ids,
+                adjacent_element_count,
+            } => write!(
+                formatter,
+                "Tetrahedron element face {}-{}-{} has {} adjacent elements",
+                face_node_ids[0].id,
+                face_node_ids[1].id,
+                face_node_ids[2].id,
+                adjacent_element_count
             ),
             Self::TetrahedronElementReferencesUnknownNode {
                 element_id,

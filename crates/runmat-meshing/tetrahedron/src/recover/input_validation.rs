@@ -52,7 +52,8 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
         .collect::<BTreeMap<_, _>>();
 
     let mut element_ids = BTreeSet::<TopologyEntityId>::new();
-    let mut element_faces = BTreeSet::<[TopologyEntityId; 3]>::new();
+    let mut element_topology = BTreeMap::<[TopologyEntityId; 4], TopologyEntityId>::new();
+    let mut element_face_counts = BTreeMap::<[TopologyEntityId; 3], usize>::new();
     for element in &tetrahedron_mesh.elements {
         if element.element_id.stage != MeshingStage::TetrahedronMesh {
             return Err(TetrahedronRecoveryError::TetrahedronElementStageMismatch {
@@ -75,6 +76,16 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 element_id: element.element_id.clone(),
             },
         )?;
+        let element_topology_key = sorted_topology_ids(element.node_ids.clone());
+        if let Some(existing_element_id) = element_topology.get(&element_topology_key) {
+            return Err(
+                TetrahedronRecoveryError::DuplicateTetrahedronElementTopology {
+                    element_id: element.element_id.clone(),
+                    existing_element_id: existing_element_id.clone(),
+                },
+            );
+        }
+        element_topology.insert(element_topology_key, element.element_id.clone());
         if element.material_region_id.trim().is_empty() {
             return Err(
                 TetrahedronRecoveryError::TetrahedronElementEmptyMaterialRegion {
@@ -93,7 +104,19 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 element_id: element.element_id.clone(),
             });
         }
-        element_faces.extend(tetrahedron_element_faces(element.node_ids.clone()));
+        for face in tetrahedron_element_faces(element.node_ids.clone()) {
+            *element_face_counts.entry(face).or_default() += 1;
+        }
+    }
+    for (face_node_ids, adjacent_element_count) in &element_face_counts {
+        if *adjacent_element_count > 2 {
+            return Err(
+                TetrahedronRecoveryError::NonManifoldTetrahedronElementFaceTopology {
+                    face_node_ids: face_node_ids.clone(),
+                    adjacent_element_count: *adjacent_element_count,
+                },
+            );
+        }
     }
 
     let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();
@@ -126,7 +149,7 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
             },
         )?;
         let boundary_face_key = sorted_topology_ids(boundary_face.node_ids.clone());
-        if !element_faces.contains(&boundary_face_key) {
+        if !element_face_counts.contains_key(&boundary_face_key) {
             return Err(
                 TetrahedronRecoveryError::TetrahedronBoundaryFaceNotInElementTopology {
                     face_id: boundary_face.face_id.clone(),

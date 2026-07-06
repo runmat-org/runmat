@@ -88,6 +88,78 @@ fn rejects_recovery_input_with_duplicate_element_id() {
 }
 
 #[test]
+fn rejects_recovery_input_with_duplicate_element_topology() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "duplicate_topology"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "3"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(
+            TetrahedronRecoveryError::DuplicateTetrahedronElementTopology {
+                element_id: entity(MeshingStage::TetrahedronMesh, "duplicate_topology"),
+                existing_element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
+            },
+        )
+    );
+}
+
+#[test]
+fn rejects_recovery_input_with_non_manifold_element_face_topology() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+        [0.0, 0.0, -1.0],
+    ));
+    mesh.nodes.push(tetrahedron_node(
+        entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        [1.0, 1.0, -1.0],
+    ));
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "second_adjacent"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "4"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+    mesh.elements.push(Tetrahedron4Element {
+        element_id: entity(MeshingStage::TetrahedronMesh, "third_adjacent"),
+        node_ids: [
+            entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+            entity(MeshingStage::ProtectedBoundaryComplex, "5"),
+        ],
+        material_region_id: "solid_body".to_string(),
+    });
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(
+            TetrahedronRecoveryError::NonManifoldTetrahedronElementFaceTopology {
+                face_node_ids: [
+                    entity(MeshingStage::ProtectedBoundaryComplex, "0"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "1"),
+                    entity(MeshingStage::ProtectedBoundaryComplex, "2"),
+                ],
+                adjacent_element_count: 3,
+            },
+        )
+    );
+}
+
+#[test]
 fn rejects_recovery_input_element_that_references_unknown_node() {
     let mut mesh = tetrahedron_mesh();
     mesh.elements[0].node_ids[0] = entity(MeshingStage::ProtectedBoundaryComplex, "missing");
