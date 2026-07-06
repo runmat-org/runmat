@@ -219,7 +219,7 @@ impl SizingFieldService for MeshSizingField {
     fn query_segment_size(&self, query: SegmentSizingQuery) -> SizingQueryResult {
         let mut result = self.initial_query_result();
         for sample in &self.samples {
-            if point_lies_on_segment(sample.position_m, query) {
+            if point_influences_segment(sample.position_m, sample.target_size_m, query, self) {
                 result = self.merge_query_target(
                     result,
                     sample.target_size_m,
@@ -228,14 +228,16 @@ impl SizingFieldService for MeshSizingField {
             }
         }
         for sample in &self.anisotropic_samples {
-            if !sample.is_valid_metric() || !point_lies_on_segment(sample.position_m, query) {
-                continue;
-            }
             let sample_target_size_m = sample
                 .target_sizes_m
                 .iter()
                 .copied()
                 .fold(f64::INFINITY, f64::min);
+            if !sample.is_valid_metric()
+                || !point_influences_segment(sample.position_m, sample_target_size_m, query, self)
+            {
+                continue;
+            }
             result = self.merge_query_target(
                 result,
                 sample_target_size_m,
@@ -246,7 +248,12 @@ impl SizingFieldService for MeshSizingField {
     }
 }
 
-fn point_lies_on_segment(point: [f64; 3], query: SegmentSizingQuery) -> bool {
+fn point_influences_segment(
+    point: [f64; 3],
+    target_size_m: f64,
+    query: SegmentSizingQuery,
+    sizing: &MeshSizingField,
+) -> bool {
     if !point.iter().all(|value| value.is_finite())
         || !query.start_m.iter().all(|value| value.is_finite())
         || !query.end_m.iter().all(|value| value.is_finite())
@@ -269,7 +276,12 @@ fn point_lies_on_segment(point: [f64; 3], query: SegmentSizingQuery) -> bool {
         query.start_m[2] + segment[2] * parameter.clamp(0.0, 1.0),
     ];
     let tolerance = segment_length_squared.sqrt().max(1.0) * 1.0e-9;
-    distance(point, closest) <= tolerance.max(1.0e-12)
+    let influence_radius = sizing
+        .clamped_target_size_m(target_size_m)
+        .unwrap_or(0.0)
+        .max(tolerance)
+        .max(1.0e-12);
+    distance(point, closest) <= influence_radius
 }
 
 fn point_matches(left: [f64; 3], right: [f64; 3]) -> bool {
@@ -372,6 +384,28 @@ mod tests {
             end_m: [1.0, 0.0, 0.0],
         });
         assert_eq!(query.target_size_m, Some(0.2));
+        assert_eq!(query.source, SizingQuerySource::LocalSample);
+        assert_eq!(query.contributing_sample_count, 1);
+    }
+
+    #[test]
+    fn segment_sizing_query_uses_samples_within_target_radius() {
+        let sizing = MeshSizingField {
+            global_target_size_m: Some(1.0),
+            samples: vec![SizingSample {
+                position_m: [0.5, 0.25, 0.0],
+                target_size_m: 0.3,
+                reason: Some("boundary_patch".to_string()),
+            }],
+            ..MeshSizingField::default()
+        };
+
+        let query = sizing.query_segment_size(SegmentSizingQuery {
+            start_m: [0.0, 0.0, 0.0],
+            end_m: [1.0, 0.0, 0.0],
+        });
+
+        assert_eq!(query.target_size_m, Some(0.3));
         assert_eq!(query.source, SizingQuerySource::LocalSample);
         assert_eq!(query.contributing_sample_count, 1);
     }

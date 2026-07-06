@@ -427,6 +427,69 @@ fn explicit_sizing_refines_recovered_cube_source_edges() {
 }
 
 #[test]
+fn boundary_focus_sizing_records_load_and_constraint_curve_applications() {
+    let sizing = MeshSizingField {
+        samples: vec![
+            SizingSample {
+                position_m: [0.5, 0.5, 0.0],
+                target_size_m: 0.5,
+                reason: Some("structural.load_regions".to_string()),
+            },
+            SizingSample {
+                position_m: [0.5, 0.5, 1.0],
+                target_size_m: 0.5,
+                reason: Some("structural.constraint_regions".to_string()),
+            },
+        ],
+        ..MeshSizingField::default()
+    };
+
+    let mesh = generate_analysis_mesh_with_sizing(
+        &cube_geometry(),
+        VolumeMeshingOptions::default(),
+        &sizing,
+    )
+    .expect("boundary-focus sizing should refine protected solid curves");
+
+    let inserted_breakpoints_by_reason = mesh
+        .sizing
+        .applied_samples
+        .iter()
+        .map(|application| {
+            (
+                application.reason.as_deref().unwrap_or("unspecified"),
+                application.inserted_breakpoint_count,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(mesh.sizing.rejected_samples, Vec::new());
+    assert!(
+        inserted_breakpoints_by_reason["structural.load_regions"] > 0,
+        "load-region sizing should insert protected-edge breakpoints"
+    );
+    assert!(
+        inserted_breakpoints_by_reason["structural.constraint_regions"] > 0,
+        "constraint-region sizing should insert protected-edge breakpoints"
+    );
+    assert!(mesh.backend.plc_input_protected_edge_count > 12);
+    assert_eq!(
+        mesh.backend
+            .tetrahedron_missing_source_edge_recovery_item_count,
+        0
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            require_boundary_source_edge_provenance: true,
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("boundary-focus refined cube should remain solve-ready with source-edge provenance");
+}
+
+#[test]
 fn explicit_sizing_generates_solve_ready_single_tetrahedron_mesh() {
     let mesh = generate_analysis_mesh(
         &tetrahedron_geometry(),

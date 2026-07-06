@@ -37,6 +37,7 @@ use artifact::{
 };
 pub use error::SolidMeshingError;
 use options::validate_solid_options;
+use sizing::sizing_with_curve_application_evidence;
 use stage_options::{curve_discretization_options, surface_discretization_options};
 use tetrahedron_stage::generate_solid_tetrahedron_mesh;
 
@@ -108,6 +109,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
         &GeometryCadCurveEvaluatorProvider { geometry },
     )
     .map_err(SolidMeshingError::Curve)?;
+    let artifact_sizing = sizing_with_curve_application_evidence(sizing, &topology, curve_options);
     let _curve_mesh_contract = build_curve_mesh_contract(
         "solid_curve_mesh",
         &topology,
@@ -149,7 +151,7 @@ pub fn generate_solid_analysis_mesh_with_sizing(
 
     Ok(analysis_artifact_from_tetrahedron_mesh(
         geometry,
-        sizing,
+        &artifact_sizing,
         &surface_mesh_contract,
         &recovery.recovery_queue,
         initial_backend_quality,
