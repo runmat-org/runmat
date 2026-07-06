@@ -698,16 +698,29 @@ fn auto_backend_generates_through_hole_solid() {
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
+    let source_edge_count = mesh
+        .boundary_edges
+        .iter()
+        .flat_map(|edge| edge.provenance.iter())
+        .filter(|provenance| provenance.source_entity_kind == SourceEntityKind::Edge)
+        .map(|provenance| provenance.source_entity_id.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+    assert_eq!(
+        source_edge_count,
+        mesh.backend.plc_input_protected_edge_count
+    );
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("through-hole solid mesh should validate");
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
             required_material_region_ids: vec!["body".to_string()],
+            require_boundary_source_edge_provenance: true,
             ..AnalysisMeshValidationOptions::default()
         },
     )
-    .expect("through-hole solid mesh should expose the body material region");
+    .expect("through-hole solid mesh should expose body material and source-edge provenance");
 }
 
 #[test]

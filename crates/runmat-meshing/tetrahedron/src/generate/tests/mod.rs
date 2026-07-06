@@ -912,6 +912,31 @@ fn holed_polyhedron_generation_assigns_split_ring_material_regions() {
 }
 
 #[test]
+fn holed_polyhedron_generation_preserves_protected_source_edges() {
+    let plc = protected_edge_through_hole_plate_plc();
+    let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("protected-edge through-hole PLC should generate boundary provenance");
+
+    let recovered_source_edge_ids = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.source_edge_ids.iter().flatten())
+        .map(|source_edge_id| source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let input_source_edge_ids = plc
+        .protected_edges
+        .iter()
+        .map(|edge| edge.source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(recovered_source_edge_ids, input_source_edge_ids);
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_protected_edges"],
+        plc.protected_edges.len()
+    );
+}
+
+#[test]
 fn holed_polyhedron_generation_uses_shape_when_hole_loop_evidence_is_absent() {
     let mut plc = through_hole_plate_plc();
     plc.evidence

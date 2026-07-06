@@ -278,6 +278,47 @@ pub(super) fn through_hole_plate_plc() -> ProtectedBoundaryComplex {
     plc
 }
 
+pub(super) fn protected_edge_through_hole_plate_plc() -> ProtectedBoundaryComplex {
+    let mut plc = through_hole_plate_plc();
+    plc.protected_edges = [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [3, 0],
+        [4, 5],
+        [5, 6],
+        [6, 7],
+        [7, 4],
+        [8, 9],
+        [9, 10],
+        [10, 11],
+        [11, 8],
+        [12, 13],
+        [13, 14],
+        [14, 15],
+        [15, 12],
+        [0, 8],
+        [1, 9],
+        [2, 10],
+        [3, 11],
+        [4, 12],
+        [5, 13],
+        [6, 14],
+        [7, 15],
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(edge_index, node_ids)| {
+        protected_numeric_edge(
+            &format!("protected_edge_{edge_index}"),
+            node_ids,
+            &format!("source_edge_{edge_index}"),
+        )
+    })
+    .collect();
+    plc
+}
+
 fn through_hole_plate_facets() -> Vec<PlcFacet> {
     [
         ("0", [0, 1, 5], "0"),
@@ -361,6 +402,16 @@ fn protected_edge(id: &str, node_ids: [&str; 2], source_edge_id: &str) -> PlcPro
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[0]),
             entity(MeshingStage::ProtectedBoundaryComplex, node_ids[1]),
         ],
+        source_edge_id: entity(MeshingStage::CurveMesh, source_edge_id),
+        cad_curve_boundary: None,
+    }
+}
+
+fn protected_numeric_edge(id: &str, node_ids: [u32; 2], source_edge_id: &str) -> PlcProtectedEdge {
+    PlcProtectedEdge {
+        edge_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
+        node_ids: node_ids
+            .map(|node_id| entity(MeshingStage::ProtectedBoundaryComplex, &node_id.to_string())),
         source_edge_id: entity(MeshingStage::CurveMesh, source_edge_id),
         cad_curve_boundary: None,
     }
