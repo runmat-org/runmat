@@ -18,7 +18,12 @@ const INPUT_PLC_CAD_CURVE_EVIDENCE_KEYS: &[&str] = &[
     "cad_curve_curvature_samples",
 ];
 
-const INPUT_PLC_SURFACE_EVIDENCE_KEYS: &[&str] = &["surface_boundary_nodes"];
+const INPUT_PLC_SURFACE_EVIDENCE_KEYS: &[&str] = &[
+    "surface_boundary_loops",
+    "surface_hole_loops",
+    "surface_boundary_nodes",
+    "surface_boundary_segments",
+];
 
 pub(super) fn record_input_plc_evidence(
     plc: &ProtectedBoundaryComplex,

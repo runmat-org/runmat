@@ -25,6 +25,8 @@ pub enum TetrahedronGenerationError {
     DegenerateSingleTetrahedronPlc,
     UnsupportedConvexPolyhedronPlc,
     DegenerateConvexPolyhedronPlc,
+    UnsupportedHoledPolyhedronPlc,
+    DegenerateHoledPolyhedronPlc,
     UnsupportedStarShapedPolyhedronPlc,
     DegenerateStarShapedPolyhedronPlc,
     DegenerateBoundaryFacet {
@@ -98,6 +100,18 @@ impl std::fmt::Display for TetrahedronGenerationError {
                 write!(
                     formatter,
                     "validated convex polyhedron PLC would create degenerate Tetrahedron4 elements"
+                )
+            }
+            Self::UnsupportedHoledPolyhedronPlc => {
+                write!(
+                    formatter,
+                    "validated PLC is not a supported holed triangulated polyhedron"
+                )
+            }
+            Self::DegenerateHoledPolyhedronPlc => {
+                write!(
+                    formatter,
+                    "validated holed polyhedron PLC would create degenerate Tetrahedron4 elements"
                 )
             }
             Self::UnsupportedStarShapedPolyhedronPlc => {

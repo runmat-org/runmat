@@ -781,6 +781,59 @@ fn solver_generation_supports_convex_polyhedron_plcs() {
 }
 
 #[test]
+fn generates_holed_polyhedron_mesh_from_through_hole_plc() {
+    let plc = through_hole_plate_plc();
+    let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("through-hole PLC should generate a native Tetrahedron mesh");
+
+    assert_eq!(mesh.mesh_id, "holed_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.tetrahedron_generation_family, "holed_polyhedron");
+    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
+    assert_eq!(
+        mesh.evidence.entity_counts["holed_polyhedron_surface_hole_loops"],
+        2
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_surface_hole_loops"],
+        2
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_surface_boundary_loops"],
+        12
+    );
+    assert!(mesh.evidence.entity_counts["tetrahedron4_elements"] > 0);
+    assert!(mesh
+        .elements
+        .iter()
+        .all(|element| element.material_region_id == "body"));
+    let min_scaled_jacobian = mesh.evidence.min_scaled_jacobian.expect("quality evidence");
+    assert!(min_scaled_jacobian > 0.0);
+    assert!((min_scaled_jacobian - min_generated_scaled_jacobian(&mesh)).abs() <= f64::EPSILON);
+}
+
+#[test]
+fn solver_generation_supports_holed_polyhedron_plcs() {
+    let mesh = generate_solver_tetrahedron_mesh_from_plc(&through_hole_plate_plc())
+        .expect("through-hole PLC should use holed-polyhedron generation");
+
+    assert_eq!(mesh.mesh_id, "holed_polyhedron_tetrahedron_mesh");
+    assert_eq!(mesh.tetrahedron_generation_family, "holed_polyhedron");
+    assert_eq!(
+        mesh.evidence.entity_counts["solver_generation_selected_holed_polyhedron"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["solver_generation_rejected_convex_polyhedron_unsupported_convex_polyhedron_plc"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_surface_hole_loops"],
+        2
+    );
+}
+
+#[test]
 fn generates_star_shaped_polyhedron_tetrahedron_mesh_from_dented_corner_box_plc() {
     let plc = dented_corner_box_plc();
 
@@ -890,15 +943,15 @@ fn solver_generation_supports_star_shaped_polyhedron_plcs() {
     assert_eq!(mesh.elements.len(), 12);
     assert_eq!(
         mesh.evidence.entity_counts["solver_generation_attempted_families"],
-        5
+        6
     );
     assert_eq!(
         mesh.evidence.entity_counts["solver_generation_rejected_families"],
-        4
+        5
     );
     assert_eq!(
         mesh.evidence.entity_counts["solver_generation_selected_family_index"],
-        5
+        6
     );
     assert_eq!(
         mesh.evidence.entity_counts["solver_generation_selected_star_shaped_polyhedron"],
@@ -907,6 +960,11 @@ fn solver_generation_supports_star_shaped_polyhedron_plcs() {
     assert_eq!(
         mesh.evidence.entity_counts
             ["solver_generation_rejected_convex_polyhedron_unsupported_convex_polyhedron_plc"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts
+            ["solver_generation_rejected_holed_polyhedron_unsupported_holed_polyhedron_plc"],
         1
     );
 }

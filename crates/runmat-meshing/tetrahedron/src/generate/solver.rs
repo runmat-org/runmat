@@ -2,6 +2,7 @@ use runmat_meshing_core::contracts::ProtectedBoundaryComplex;
 
 use super::{
     generate_convex_polyhedron_tetrahedron_mesh_from_plc,
+    generate_holed_polyhedron_tetrahedron_mesh_from_plc,
     generate_nested_tetrahedron_shell_tetrahedron_mesh_from_plc,
     generate_single_tetrahedron_mesh_from_plc,
     generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc,
@@ -77,18 +78,37 @@ pub fn generate_solver_tetrahedron_mesh_from_plc(
                             rejected_families
                                 .push(("convex_polyhedron", "unsupported_convex_polyhedron_plc"));
 
-                            attempted_families.push("star_shaped_polyhedron");
-                            generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(plc).map(
-                                |mut mesh| {
+                            attempted_families.push("holed_polyhedron");
+                            match generate_holed_polyhedron_tetrahedron_mesh_from_plc(plc) {
+                                Ok(mut mesh) => {
                                     record_solver_family_selection(
                                         &mut mesh,
-                                        "star_shaped_polyhedron",
+                                        "holed_polyhedron",
                                         &attempted_families,
                                         &rejected_families,
                                     );
-                                    mesh
-                                },
-                            )
+                                    Ok(mesh)
+                                }
+                                Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc) => {
+                                    rejected_families.push((
+                                        "holed_polyhedron",
+                                        "unsupported_holed_polyhedron_plc",
+                                    ));
+
+                                    attempted_families.push("star_shaped_polyhedron");
+                                    generate_star_shaped_polyhedron_tetrahedron_mesh_from_plc(plc)
+                                        .map(|mut mesh| {
+                                            record_solver_family_selection(
+                                                &mut mesh,
+                                                "star_shaped_polyhedron",
+                                                &attempted_families,
+                                                &rejected_families,
+                                            );
+                                            mesh
+                                        })
+                                }
+                                Err(err) => Err(err),
+                            }
                         }
                         Err(err) => Err(err),
                     }

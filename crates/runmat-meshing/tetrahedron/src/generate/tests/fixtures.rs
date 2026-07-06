@@ -212,6 +212,104 @@ pub(super) fn dented_corner_box_plc() -> ProtectedBoundaryComplex {
     plc
 }
 
+pub(super) fn through_hole_plate_plc() -> ProtectedBoundaryComplex {
+    let mut plc = ProtectedBoundaryComplex {
+        complex_id: "through_hole_plate".to_string(),
+        nodes: vec![
+            node("0", [0.0, 0.0, 1.0]),
+            node("1", [3.0, 0.0, 1.0]),
+            node("2", [3.0, 3.0, 1.0]),
+            node("3", [0.0, 3.0, 1.0]),
+            node("4", [1.0, 1.0, 1.0]),
+            node("5", [2.0, 1.0, 1.0]),
+            node("6", [2.0, 2.0, 1.0]),
+            node("7", [1.0, 2.0, 1.0]),
+            node("8", [0.0, 0.0, 0.0]),
+            node("9", [3.0, 0.0, 0.0]),
+            node("10", [3.0, 3.0, 0.0]),
+            node("11", [0.0, 3.0, 0.0]),
+            node("12", [1.0, 1.0, 0.0]),
+            node("13", [2.0, 1.0, 0.0]),
+            node("14", [2.0, 2.0, 0.0]),
+            node("15", [1.0, 2.0, 0.0]),
+        ],
+        facets: through_hole_plate_facets(),
+        protected_edges: Vec::<PlcProtectedEdge>::new(),
+        validation: PlcValidationSummary {
+            watertight: true,
+            manifold: true,
+            shell_nesting_classified: true,
+            material_interfaces_classified: true,
+        },
+        evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
+    };
+    plc.evidence
+        .entity_counts
+        .insert("surface_boundary_loops".to_string(), 12);
+    plc.evidence
+        .entity_counts
+        .insert("surface_hole_loops".to_string(), 2);
+    plc.evidence
+        .entity_counts
+        .insert("surface_boundary_nodes".to_string(), 16);
+    plc.evidence
+        .entity_counts
+        .insert("surface_boundary_segments".to_string(), 32);
+    plc
+}
+
+fn through_hole_plate_facets() -> Vec<PlcFacet> {
+    [
+        ("0", [0, 1, 5], "0"),
+        ("1", [0, 5, 4], "0"),
+        ("2", [1, 2, 6], "0"),
+        ("3", [1, 6, 5], "0"),
+        ("4", [2, 3, 7], "0"),
+        ("5", [2, 7, 6], "0"),
+        ("6", [3, 0, 4], "0"),
+        ("7", [3, 4, 7], "0"),
+        ("8", [8, 13, 9], "1"),
+        ("9", [8, 12, 13], "1"),
+        ("10", [9, 14, 10], "1"),
+        ("11", [9, 13, 14], "1"),
+        ("12", [10, 15, 11], "1"),
+        ("13", [10, 14, 15], "1"),
+        ("14", [11, 12, 8], "1"),
+        ("15", [11, 15, 12], "1"),
+        ("16", [0, 8, 9], "2"),
+        ("17", [0, 9, 1], "2"),
+        ("18", [1, 9, 10], "3"),
+        ("19", [1, 10, 2], "3"),
+        ("20", [2, 10, 11], "4"),
+        ("21", [2, 11, 3], "4"),
+        ("22", [3, 11, 8], "5"),
+        ("23", [3, 8, 0], "5"),
+        ("24", [4, 5, 13], "6"),
+        ("25", [4, 13, 12], "6"),
+        ("26", [5, 6, 14], "7"),
+        ("27", [5, 14, 13], "7"),
+        ("28", [6, 7, 15], "8"),
+        ("29", [6, 15, 14], "8"),
+        ("30", [7, 4, 12], "9"),
+        ("31", [7, 12, 15], "9"),
+    ]
+    .into_iter()
+    .map(|(facet_id, node_ids, source_face_id)| {
+        facet_with_numeric_nodes(facet_id, node_ids, source_face_id)
+    })
+    .collect()
+}
+
+fn facet_with_numeric_nodes(id: &str, node_ids: [u32; 3], source_face_id: &str) -> PlcFacet {
+    PlcFacet {
+        facet_id: entity(MeshingStage::ProtectedBoundaryComplex, id),
+        node_ids: node_ids
+            .map(|node_id| entity(MeshingStage::ProtectedBoundaryComplex, &node_id.to_string())),
+        source_face_id: entity(MeshingStage::SurfaceMesh, source_face_id),
+        material_interface_ids: vec!["body".to_string()],
+    }
+}
+
 fn node(id: &str, coordinates_m: [f64; 3]) -> PlcNode {
     PlcNode {
         node_id: entity(MeshingStage::ProtectedBoundaryComplex, id),

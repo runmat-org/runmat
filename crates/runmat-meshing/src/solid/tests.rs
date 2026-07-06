@@ -575,10 +575,10 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
     );
     assert_eq!(
         mesh.backend.tetrahedron_generation_attempted_family_count,
-        5
+        6
     );
-    assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 4);
-    assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 5);
+    assert_eq!(mesh.backend.tetrahedron_generation_rejected_family_count, 5);
+    assert_eq!(mesh.backend.tetrahedron_generation_selected_family_index, 6);
     assert!(
         mesh.backend
             .tetrahedron_generation_interior_support_candidate_count
@@ -609,6 +609,36 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
     assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian > 0.0);
     validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect("star-shaped dented-corner solid mesh should be solve-ready");
+}
+
+#[test]
+fn auto_backend_generates_through_hole_solid() {
+    let geometry = through_hole_plate_geometry();
+    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("through-hole plate solid should run through the root solid pipeline");
+    let quality = QualityThresholds {
+        min_scaled_jacobian: 0.13,
+        ..QualityThresholds::default()
+    };
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "holed_polyhedron"
+    );
+    assert!(!mesh.volume_elements.is_empty());
+    assert!(!mesh.boundary_faces.is_empty());
+    assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    validate_analysis_mesh(&mesh, quality).expect("through-hole solid mesh should validate");
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            quality,
+            required_material_region_ids: vec!["body".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("through-hole solid mesh should expose the body material region");
 }
 
 #[test]
@@ -780,6 +810,99 @@ fn split_material_dented_corner_box_geometry() -> GeometryAsset {
     geometry.source.sha256 = "generic-split-material-dented-corner-box".to_string();
     geometry.surface_meshes[0].vertices[6] = [0.55, 0.55, 0.55];
     geometry
+}
+
+fn through_hole_plate_geometry() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo_root_meshing_through_hole_plate".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/generic_through_hole_plate.step".to_string(),
+            sha256: "generic-through-hole-plate".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "through_hole_plate_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 16,
+            element_count: 32,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "through_hole_plate_surface",
+            vec![
+                [0.0, 0.0, 1.0],
+                [3.0, 0.0, 1.0],
+                [3.0, 3.0, 1.0],
+                [0.0, 3.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [2.0, 1.0, 1.0],
+                [2.0, 2.0, 1.0],
+                [1.0, 2.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [3.0, 3.0, 0.0],
+                [0.0, 3.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [2.0, 2.0, 0.0],
+                [1.0, 2.0, 0.0],
+            ],
+            vec![
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+                [8, 13, 9],
+                [8, 12, 13],
+                [9, 14, 10],
+                [9, 13, 14],
+                [10, 15, 11],
+                [10, 14, 15],
+                [11, 12, 8],
+                [11, 15, 12],
+                [0, 8, 9],
+                [0, 9, 1],
+                [1, 9, 10],
+                [1, 10, 2],
+                [2, 10, 11],
+                [2, 11, 3],
+                [3, 11, 8],
+                [3, 8, 0],
+                [4, 5, 13],
+                [4, 13, 12],
+                [5, 6, 14],
+                [5, 14, 13],
+                [6, 7, 15],
+                [6, 15, 14],
+                [7, 4, 12],
+                [7, 12, 15],
+            ],
+        )],
+        regions: vec![Region {
+            region_id: "body".to_string(),
+            name: "body".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        }],
+        region_entity_mappings: vec![RegionEntityMapping::all_faces(
+            "body",
+            "through_hole_plate_surface",
+            32,
+        )],
+        diagnostics: Vec::new(),
+    }
 }
 
 fn octahedron_geometry() -> GeometryAsset {
