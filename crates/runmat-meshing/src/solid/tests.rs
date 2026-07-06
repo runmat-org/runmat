@@ -514,6 +514,32 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
 }
 
 #[test]
+fn auto_backend_generates_faceted_cylinder_solid() {
+    let mesh = generate_analysis_mesh(
+        &faceted_cylinder_geometry(),
+        VolumeMeshingOptions::default(),
+    )
+    .expect("faceted cylinder should run through the root solid pipeline");
+
+    assert_eq!(mesh.backend.backend, "solid");
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "convex_polyhedron"
+    );
+    assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
+    assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["body".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("faceted cylinder solid mesh should be solve-ready");
+}
+
+#[test]
 fn auto_backend_generates_nested_tetrahedron_shell_solid() {
     let mesh = generate_analysis_mesh(
         &nested_tetrahedron_shell_geometry(),
@@ -1147,6 +1173,85 @@ fn split_material_through_hole_plate_geometry() -> GeometryAsset {
         ),
     ];
     geometry
+}
+
+fn faceted_cylinder_geometry() -> GeometryAsset {
+    let segment_count = 8_u32;
+    let mut vertices = Vec::<[f64; 3]>::new();
+    for z in [0.0_f64, 1.0] {
+        for segment_index in 0..segment_count {
+            let angle = std::f64::consts::TAU * segment_index as f64 / segment_count as f64;
+            vertices.push([angle.cos(), angle.sin(), z]);
+        }
+    }
+
+    let mut triangles = Vec::<[u32; 3]>::new();
+    for segment_index in 1..(segment_count - 1) {
+        triangles.push([0, segment_index + 1, segment_index]);
+    }
+    let top_offset = segment_count;
+    for segment_index in 1..(segment_count - 1) {
+        triangles.push([
+            top_offset,
+            top_offset + segment_index,
+            top_offset + segment_index + 1,
+        ]);
+    }
+    for segment_index in 0..segment_count {
+        let next_segment_index = (segment_index + 1) % segment_count;
+        triangles.push([
+            segment_index,
+            next_segment_index,
+            top_offset + next_segment_index,
+        ]);
+        triangles.push([
+            segment_index,
+            top_offset + next_segment_index,
+            top_offset + segment_index,
+        ]);
+    }
+
+    let element_count = triangles.len() as u64;
+    GeometryAsset {
+        geometry_id: "geo_root_meshing_faceted_cylinder".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/generic_faceted_cylinder.step".to_string(),
+            sha256: "generic-faceted-cylinder".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "faceted_cylinder_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: vertices.len() as u64,
+            element_count,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "faceted_cylinder_surface",
+            vertices,
+            triangles,
+        )],
+        regions: vec![Region {
+            region_id: "body".to_string(),
+            name: "body".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        }],
+        region_entity_mappings: vec![RegionEntityMapping::all_faces(
+            "body",
+            "faceted_cylinder_surface",
+            element_count,
+        )],
+        diagnostics: Vec::new(),
+    }
 }
 
 fn octahedron_geometry() -> GeometryAsset {
