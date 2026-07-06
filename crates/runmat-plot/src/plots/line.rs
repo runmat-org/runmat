@@ -113,6 +113,10 @@ impl LinePlot {
         self.gpu_line_inputs.is_some()
     }
 
+    pub fn has_gpu_source_data(&self) -> bool {
+        self.gpu_line_inputs.is_some()
+    }
+
     pub(crate) fn has_gpu_vertices(&self) -> bool {
         self.gpu_vertices.is_some()
     }

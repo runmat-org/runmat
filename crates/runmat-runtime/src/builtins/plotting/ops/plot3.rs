@@ -585,7 +585,8 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn build_line3_plot(
+pub(super) fn build_line3_plot_for_builtin(
+    builtin: &'static str,
     x: Vec<f64>,
     y: Vec<f64>,
     z: Vec<f64>,
@@ -593,13 +594,23 @@ fn build_line3_plot(
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
     Ok(Line3Plot::new(x, y, z)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot3: {e}")))?
+        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
         .with_label(label))
+}
+
+fn build_line3_plot(
+    x: Vec<f64>,
+    y: Vec<f64>,
+    z: Vec<f64>,
+    label: &str,
+    appearance: &LineAppearance,
+) -> crate::BuiltinResult<Line3Plot> {
+    build_line3_plot_for_builtin(BUILTIN_NAME, x, y, z, label, appearance)
 }
 
 async fn build_line3_gpu_plot_async(

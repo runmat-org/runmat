@@ -584,9 +584,19 @@ pub(super) fn build_line_plot(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
+    build_line_plot_for_builtin(BUILTIN_NAME, x, y, label, appearance)
+}
+
+pub(super) fn build_line_plot_for_builtin(
+    builtin: &'static str,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    label: &str,
+    appearance: &LineAppearance,
+) -> BuiltinResult<LinePlot> {
     let point_count = x.len();
     let mut plot = LinePlot::new(x, y)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?
+        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_label(label)
         .with_style(
             appearance.color,
@@ -756,6 +766,16 @@ async fn build_line_gpu_plot_async(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
+    build_line_gpu_plot_async_for_builtin(BUILTIN_NAME, x, y, label, appearance).await
+}
+
+pub(super) async fn build_line_gpu_plot_async_for_builtin(
+    builtin: &'static str,
+    x: &GpuTensorHandle,
+    y: &GpuTensorHandle,
+    label: &str,
+    appearance: &LineAppearance,
+) -> BuiltinResult<LinePlot> {
     let api_provider_present = runmat_accelerate_api::provider().is_some();
     let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
     let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
@@ -773,7 +793,7 @@ async fn build_line_gpu_plot_async(
         api_provider_for_x_present,
         api_provider_for_y_present
     );
-    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(builtin)?;
 
     let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
         Some(buf) => {
@@ -791,8 +811,8 @@ async fn build_line_gpu_plot_async(
                 api_provider_present, api_provider_for_x_present, x.device_id
             );
             return Err(plotting_error(
-                BUILTIN_NAME,
-                "plot: unable to export GPU X data",
+                builtin,
+                format!("{builtin}: unable to export GPU X data"),
             ));
         }
     };
@@ -812,23 +832,36 @@ async fn build_line_gpu_plot_async(
                 api_provider_present, api_provider_for_y_present, y.device_id
             );
             return Err(plotting_error(
-                BUILTIN_NAME,
-                "plot: unable to export GPU Y data",
+                builtin,
+                format!("{builtin}: unable to export GPU Y data"),
             ));
         }
     };
 
     if x_ref.len < 2 {
-        return Err(plot_err("inputs must contain at least two elements"));
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: inputs must contain at least two elements"),
+        ));
     }
     if x_ref.len != y_ref.len {
-        return Err(plot_err("X and Y inputs must have identical lengths"));
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: X and Y inputs must have identical lengths"),
+        ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err(plot_err("X and Y gpuArrays must have matching precision"));
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: X and Y gpuArrays must have matching precision"),
+        ));
     }
-    let len_u32 =
-        u32::try_from(x_ref.len).map_err(|_| plot_err("point count exceeds supported range"))?;
+    let len_u32 = u32::try_from(x_ref.len).map_err(|_| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: point count exceeds supported range"),
+        )
+    })?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = runmat_plot::gpu::line::LineGpuInputs {
@@ -861,8 +894,8 @@ async fn build_line_gpu_plot_async(
             )
             .map_err(|e| {
                 plotting_error(
-                    BUILTIN_NAME,
-                    format!("plot: failed to build marker vertices: {e}"),
+                    builtin,
+                    format!("{builtin}: failed to build marker vertices: {e}"),
                 )
             })?,
         )
@@ -870,7 +903,7 @@ async fn build_line_gpu_plot_async(
         None
     };
 
-    let bounds = super::gpu_helpers::gpu_xy_bounds_async(x, y, "plot").await?;
+    let bounds = super::gpu_helpers::gpu_xy_bounds_async(x, y, builtin).await?;
     let gpu_style = LineGpuStyle {
         color: appearance.color,
         line_width: appearance.line_width,

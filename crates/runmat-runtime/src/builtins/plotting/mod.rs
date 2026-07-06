@@ -78,6 +78,8 @@ pub(crate) mod isgraphics;
 pub(crate) mod ishandle;
 #[path = "ops/legend.rs"]
 pub(crate) mod legend;
+#[path = "ops/line.rs"]
+pub(crate) mod line;
 #[path = "ops/loglog.rs"]
 pub(crate) mod loglog;
 #[path = "ops/mesh.rs"]

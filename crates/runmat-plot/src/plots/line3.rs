@@ -201,6 +201,30 @@ impl Line3Plot {
         self
     }
 
+    pub fn update_data(
+        &mut self,
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+        z_data: Vec<f64>,
+    ) -> Result<(), String> {
+        if x_data.len() != y_data.len() || x_data.len() != z_data.len() {
+            return Err("Data length mismatch for plot3".to_string());
+        }
+        if x_data.is_empty() {
+            return Err("plot3 requires at least one point".to_string());
+        }
+        self.x_data = x_data;
+        self.y_data = y_data;
+        self.z_data = z_data;
+        self.vertices = None;
+        self.bounds = None;
+        self.dirty = true;
+        self.gpu_vertices = None;
+        self.gpu_vertex_count = None;
+        self.gpu_line_inputs = None;
+        Ok(())
+    }
+
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
     }

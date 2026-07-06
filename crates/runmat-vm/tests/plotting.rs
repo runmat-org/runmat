@@ -98,6 +98,32 @@ fn polarplot_dispatches_and_sets_equal_axes() {
 }
 
 #[test]
+fn line_dispatches_and_round_trips_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = line('XData', [1 2 3], 'YData', [4 5 6], 'Color', 'r', 'LineWidth', 2, 'DisplayName', 'samples'); \
+        if ~ishandle(h); \
+            error('line did not return a graphics handle'); \
+        end; \
+        if get(h, 'LineWidth') ~= 2; \
+            error('line width did not round-trip'); \
+        end; \
+        set(h, 'XData', [7 8 9 10], 'YData', [1 1 1 1]); \
+        x = get(h, 'XData'); \
+        y = get(h, 'YData'); \
+        if x(4) ~= 10 || y(1) ~= 1; \
+            error('line data did not update'); \
+        end; \
+        out = get(h, 'DisplayName');";
+    let vars = execute_source(input).expect("execute line property script");
+    assert!(
+        vars.iter()
+            .any(|value| value == &Value::String("samples".into())),
+        "DisplayName output missing from VM values: {vars:?}"
+    );
+}
+
+#[test]
 fn sphere_returns_coordinates_and_statement_form_plots() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

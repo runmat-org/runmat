@@ -165,13 +165,7 @@ pub fn set_properties(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
-        PlotHandle::PlotChild(state) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_plot_child_property(&state, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
+        PlotHandle::PlotChild(state) => apply_plot_child_properties(&state, args, builtin),
     }
 }
 
@@ -1555,6 +1549,31 @@ fn apply_plot_child_property(
     }
 }
 
+fn apply_plot_child_properties(
+    state: &super::state::PlotChildHandleState,
+    args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let mut pairs = Vec::with_capacity(args.len() / 2);
+    for pair in args.chunks_exact(2) {
+        pairs.push((property_name(&pair[0], builtin)?, &pair[1]));
+    }
+    match state {
+        super::state::PlotChildHandleState::Line(plot) => {
+            apply_line_properties(plot, &pairs, builtin)
+        }
+        super::state::PlotChildHandleState::Line3(plot) => {
+            apply_line3_properties(plot, &pairs, builtin)
+        }
+        _ => {
+            for (key, value) in pairs {
+                apply_plot_child_property(state, &key, value, builtin)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn child_parent_handle(figure: FigureHandle, axes_index: usize) -> Value {
     Value::Num(super::state::encode_axes_handle(figure, axes_index))
 }
@@ -1764,20 +1783,26 @@ fn get_line_property(
             format!("{builtin}: invalid line handle"),
         ));
     };
+    let (x_data, y_data) = line_xy_data_for_properties(&line, builtin)?;
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
-            st.insert("XData", tensor_from_vec(line.x_data.clone()));
-            st.insert("YData", tensor_from_vec(line.y_data.clone()));
+            st.insert("XData", tensor_from_vec(x_data.clone()));
+            st.insert("YData", tensor_from_vec(y_data.clone()));
             st.insert("Color", Value::String(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
                 Value::String(line_style_name(line.line_style).into()),
             );
-            if let Some(label) = line.label.clone() {
-                st.insert("DisplayName", Value::String(label));
-            }
+            st.insert(
+                "DisplayName",
+                Value::String(line.label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "Visible",
+                Value::String(if line.visible { "on" } else { "off" }.into()),
+            );
             insert_line_marker_struct_props(&mut st, line.marker.as_ref());
             Ok(Value::Struct(st))
         }
@@ -1787,12 +1812,15 @@ fn get_line_property(
             line_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(line.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(line.y_data.clone())),
+        Some("xdata") => Ok(tensor_from_vec(x_data)),
+        Some("ydata") => Ok(tensor_from_vec(y_data)),
         Some("color") => Ok(Value::String(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("visible") => Ok(Value::String(
+            if line.visible { "on" } else { "off" }.into(),
+        )),
         Some(name) => line_marker_property_value(&line.marker, name, builtin),
     }
 }
@@ -2169,9 +2197,14 @@ fn get_line3_property(
                 "LineStyle",
                 Value::String(line_style_name(line.line_style).into()),
             );
-            if let Some(label) = line.label.clone() {
-                st.insert("DisplayName", Value::String(label));
-            }
+            st.insert(
+                "DisplayName",
+                Value::String(line.label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "Visible",
+                Value::String(if line.visible { "on" } else { "off" }.into()),
+            );
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("line".into())),
@@ -2187,6 +2220,9 @@ fn get_line3_property(
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("visible") => Ok(Value::String(
+            if line.visible { "on" } else { "off" }.into(),
+        )),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported plot3 property `{other}`"),
@@ -3176,9 +3212,52 @@ fn apply_line_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    apply_line_properties(line_handle, &[(key.to_string(), value)], builtin)
+}
+
+fn apply_line_properties(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let current = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Line(current_line) = current else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid line handle"),
+        ));
+    };
+
+    let (current_x, current_y) = line_xy_data_for_properties(&current_line, builtin)?;
+    let mut x_update = None;
+    let mut y_update = None;
+    let mut style_pairs = Vec::new();
+    for (key, value) in pairs {
+        match key.as_str() {
+            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
+            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
+            _ => style_pairs.push((key.as_str(), *value)),
+        }
+    }
+
+    let next_x = x_update.unwrap_or_else(|| current_x.clone());
+    let next_y = y_update.unwrap_or_else(|| current_y.clone());
+    let update_data = next_x != current_x || next_y != current_y;
+    if update_data && next_x.len() != next_y.len() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: XData and YData must contain the same number of elements"),
+        ));
+    }
+
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
-            apply_line_plot_properties(line, key, value, builtin);
+            if update_data {
+                let _ = line.update_data(next_x.clone(), next_y.clone());
+            }
+            for (key, value) in &style_pairs {
+                apply_line_plot_properties(line, key, value, builtin);
+            }
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;
@@ -3610,30 +3689,89 @@ fn apply_line3_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    apply_line3_properties(line_handle, &[(key.to_string(), value)], builtin)
+}
+
+fn apply_line3_properties(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let current = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Line3(current_line) = current else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid line handle"),
+        ));
+    };
+
+    let mut x_update = None;
+    let mut y_update = None;
+    let mut z_update = None;
+    let mut style_pairs = Vec::new();
+    for (key, value) in pairs {
+        match key.as_str() {
+            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
+            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
+            "zdata" => z_update = Some(line_numeric_data(value, "ZData", builtin)?),
+            _ => style_pairs.push((key.as_str(), *value)),
+        }
+    }
+
+    let next_x = x_update.unwrap_or_else(|| current_line.x_data.clone());
+    let next_y = y_update.unwrap_or_else(|| current_line.y_data.clone());
+    let next_z = z_update.unwrap_or_else(|| current_line.z_data.clone());
+    let update_data = next_x != current_line.x_data
+        || next_y != current_line.y_data
+        || next_z != current_line.z_data;
+    if update_data
+        && (next_x.is_empty() || next_x.len() != next_y.len() || next_x.len() != next_z.len())
+    {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: XData, YData, and ZData must contain the same nonzero number of elements"),
+        ));
+    }
+
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
-            match key {
-                "color" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        line.color = c;
+            if update_data {
+                let _ = line.update_data(next_x.clone(), next_y.clone(), next_z.clone());
+            }
+            for (key, value) in &style_pairs {
+                match *key {
+                    "color" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            line.color = c;
+                        }
                     }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        line.line_width = v as f32;
+                    "linewidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            line.line_width = v as f32;
+                        }
                     }
-                }
-                "linestyle" => {
-                    if let Some(s) = value_as_string(value) {
-                        line.line_style = parse_line_style_name_for_props(&s);
+                    "linestyle" => {
+                        if let Some(s) = value_as_string(value) {
+                            line.line_style = parse_line_style_name_for_props(&s);
+                        }
                     }
+                    "displayname" => {
+                        line.label = value_as_string(value).map(|s| s.to_string());
+                    }
+                    "visible" => {
+                        if let Some(v) = value_as_bool(value) {
+                            line.set_visible(v);
+                        } else if let Some(s) = value_as_string(value) {
+                            line.set_visible(!matches!(
+                                s.trim().to_ascii_lowercase().as_str(),
+                                "off" | "false"
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
-                "displayname" => {
-                    line.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
             }
         }
     })
@@ -3800,8 +3938,52 @@ fn apply_line_plot_properties(
                 }
             }
         }
+        "visible" => {
+            if let Some(v) = value_as_bool(value) {
+                line.set_visible(v);
+            } else if let Some(s) = value_as_string(value) {
+                line.set_visible(!matches!(
+                    s.trim().to_ascii_lowercase().as_str(),
+                    "off" | "false"
+                ));
+            }
+        }
         _ => {}
     }
+}
+
+fn line_numeric_data(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
+    Ok(tensor.data)
+}
+
+fn line_xy_data_for_properties(
+    line: &runmat_plot::plots::LinePlot,
+    builtin: &'static str,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    if !line.x_data.is_empty() && line.x_data.len() == line.y_data.len() {
+        return Ok((line.x_data.clone(), line.y_data.clone()));
+    }
+    if !line.x_data.is_empty() || !line.y_data.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: line source data is inconsistent: XData has {} values, YData has {} values",
+                line.x_data.len(),
+                line.y_data.len()
+            ),
+        ));
+    }
+    if !line.has_gpu_source_data() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    futures::executor::block_on(line.export_scene_xy_data()).map_err(|err| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: unable to read line source data: {err}"),
+        )
+    })
 }
 
 fn limits_from_optional_value(
