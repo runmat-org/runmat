@@ -2463,6 +2463,7 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
             fixed_boundary_region_id: None,
             load_boundary_region_id: None,
             force_n: Some([25.0, -50.0, 0.0]),
+            diagram_observation: None,
         },
         OperationContext::new(Some("trace-author-study".to_string()), None),
     )
@@ -2581,6 +2582,115 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
 }
 
 #[test]
+fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-diagram-observation");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_from_diagram".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: None,
+            fixed_boundary_region_id: None,
+            load_boundary_region_id: None,
+            force_n: None,
+            diagram_observation: Some(AnalysisStudyDiagramObservation {
+                artifact_path: Some("diagram://fixture/free-body.png".to_string()),
+                source_mime_type: Some("image/png".to_string()),
+                summary: Some("fixed tip and loaded root".to_string()),
+                material_region_id: Some("solid".to_string()),
+                fixed_boundary_region_id: Some("tip".to_string()),
+                load_boundary_region_id: Some("root".to_string()),
+                force_n: Some([12.0, -3.0, 4.0]),
+                confidence: Some(0.82),
+            }),
+        },
+        OperationContext::new(Some("trace-author-diagram".to_string()), None),
+    )
+    .expect("diagram observation should author a valid study");
+
+    let model = authored
+        .data
+        .study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "tip");
+    assert_eq!(model.loads[0].region_id, "root");
+    assert_eq!(
+        model.loads[0].kind,
+        LoadKind::Force {
+            fx: 12.0,
+            fy: -3.0,
+            fz: 4.0
+        }
+    );
+    assert_eq!(authored.data.evidence.material_region_source, "diagram");
+    assert_eq!(
+        authored.data.evidence.fixed_boundary_region_source,
+        "diagram"
+    );
+    assert_eq!(
+        authored.data.evidence.load_boundary_region_source,
+        "diagram"
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_artifact_path.as_deref(),
+        Some("diagram://fixture/free-body.png")
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_source_mime_type.as_deref(),
+        Some("image/png")
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_summary.as_deref(),
+        Some("fixed tip and loaded root")
+    );
+    assert_eq!(authored.data.evidence.diagram_confidence, Some(0.82));
+
+    let artifact: serde_json::Value = serde_json::from_slice(
+        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
+    )
+    .expect("parse authoring artifact");
+    assert_eq!(
+        artifact["evidence"]["diagram_artifact_path"].as_str(),
+        Some("diagram://fixture/free-body.png")
+    );
+    assert_eq!(
+        artifact["evidence"]["fixed_boundary_region_source"].as_str(),
+        Some("diagram")
+    );
+    assert_eq!(
+        artifact["evidence"]["load_boundary_region_source"].as_str(),
+        Some("diagram")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
     let _guard = analysis_test_guard();
     let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
@@ -2608,6 +2718,7 @@ fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
             fixed_boundary_region_id: None,
             load_boundary_region_id: None,
             force_n: None,
+            diagram_observation: None,
         },
         OperationContext::new(None, None),
     )

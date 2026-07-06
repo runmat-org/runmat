@@ -15,8 +15,8 @@ use super::{
     analysis_create_model_op, persist_study_evidence, profile_supports_run_kind, study_fingerprint,
     validate_study_issue_codes, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
     AnalysisRunKind, AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence,
-    AnalysisStudyAuthoringIntent, AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION,
-    ANALYSIS_AUTHOR_STUDY_OP_VERSION,
+    AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation, AnalysisStudySpec,
+    ANALYSIS_AUTHOR_STUDY_OPERATION, ANALYSIS_AUTHOR_STUDY_OP_VERSION,
 };
 
 pub fn analysis_author_study_op(
@@ -80,6 +80,7 @@ pub fn analysis_author_study_op(
     let (material_region_id, material_region_source) = select_authoring_material_region(
         &intent.mesh_authoring_summary,
         intent.material_region_id.as_deref(),
+        intent.diagram_observation.as_ref(),
     )
     .map_err(|message| {
         author_study_error(
@@ -96,6 +97,10 @@ pub fn analysis_author_study_op(
         select_authoring_boundary_region(
             &intent.mesh_authoring_summary,
             intent.fixed_boundary_region_id.as_deref(),
+            intent
+                .diagram_observation
+                .as_ref()
+                .and_then(|observation| observation.fixed_boundary_region_id.as_deref()),
             None,
         )
         .map_err(|message| {
@@ -112,6 +117,10 @@ pub fn analysis_author_study_op(
     let (load_boundary_region_id, load_boundary_region_source) = select_authoring_boundary_region(
         &intent.mesh_authoring_summary,
         intent.load_boundary_region_id.as_deref(),
+        intent
+            .diagram_observation
+            .as_ref()
+            .and_then(|observation| observation.load_boundary_region_id.as_deref()),
         Some(fixed_boundary_region_id.as_str()),
     )
     .map_err(|message| {
@@ -126,7 +135,15 @@ pub fn analysis_author_study_op(
         )
     })?;
 
-    let force_n = intent.force_n.unwrap_or([0.0, -1000.0, 0.0]);
+    let force_n = intent
+        .force_n
+        .or_else(|| {
+            intent
+                .diagram_observation
+                .as_ref()
+                .and_then(|observation| observation.force_n)
+        })
+        .unwrap_or([0.0, -1000.0, 0.0]);
     let model_id = intent
         .model_id
         .clone()
@@ -228,6 +245,22 @@ pub fn analysis_author_study_op(
         selected_fixed_boundary_region_id: fixed_boundary_region_id,
         selected_load_boundary_region_id: load_boundary_region_id,
         selected_force_n: force_n,
+        diagram_artifact_path: intent
+            .diagram_observation
+            .as_ref()
+            .and_then(|observation| observation.artifact_path.clone()),
+        diagram_source_mime_type: intent
+            .diagram_observation
+            .as_ref()
+            .and_then(|observation| observation.source_mime_type.clone()),
+        diagram_summary: intent
+            .diagram_observation
+            .as_ref()
+            .and_then(|observation| observation.summary.clone()),
+        diagram_confidence: intent
+            .diagram_observation
+            .as_ref()
+            .and_then(|observation| observation.confidence),
         analysis_mesh_artifact_path: intent.analysis_mesh_artifact_path,
         analysis_mesh_evidence_artifact_path: intent.analysis_mesh_evidence_artifact_path,
         material_region_source,
@@ -291,6 +324,7 @@ fn author_study_error(
 fn select_authoring_material_region(
     summary: &runmat_meshing_evidence::MeshAuthoringSummary,
     requested: Option<&str>,
+    diagram_observation: Option<&AnalysisStudyDiagramObservation>,
 ) -> Result<(String, String), String> {
     if let Some(requested) = requested {
         let Some(region) = summary
@@ -304,6 +338,22 @@ fn select_authoring_material_region(
             ));
         };
         return Ok((region.region_id.clone(), "requested".to_string()));
+    }
+
+    if let Some(region_id) =
+        diagram_observation.and_then(|observation| observation.material_region_id.as_deref())
+    {
+        let Some(region) = summary
+            .regions
+            .material_regions
+            .iter()
+            .find(|region| region.region_id == region_id && region.element_count > 0)
+        else {
+            return Err(format!(
+                "diagram-selected material region `{region_id}` is not available in mesh authoring evidence"
+            ));
+        };
+        return Ok((region.region_id.clone(), "diagram".to_string()));
     }
 
     for required in &summary.regions.required_material_region_ids {
@@ -328,6 +378,7 @@ fn select_authoring_material_region(
 fn select_authoring_boundary_region(
     summary: &runmat_meshing_evidence::MeshAuthoringSummary,
     requested: Option<&str>,
+    diagram_region_id: Option<&str>,
     avoid_region_id: Option<&str>,
 ) -> Result<(String, String), String> {
     if let Some(requested) = requested {
@@ -339,6 +390,19 @@ fn select_authoring_boundary_region(
             ));
         };
         return Ok((region.region_id.clone(), "requested".to_string()));
+    }
+
+    if let Some(region_id) = diagram_region_id {
+        if avoid_region_id != Some(region_id) {
+            let Some(region) = summary.regions.boundary_regions.iter().find(|region| {
+                region.region_id == region_id && region.face_count > 0 && region.fully_recovered
+            }) else {
+                return Err(format!(
+                    "diagram-selected boundary region `{region_id}` is not available and fully recovered in mesh authoring evidence"
+                ));
+            };
+            return Ok((region.region_id.clone(), "diagram".to_string()));
+        }
     }
 
     for required in &summary.regions.required_boundary_region_ids {

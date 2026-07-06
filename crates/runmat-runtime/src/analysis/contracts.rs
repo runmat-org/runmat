@@ -1850,6 +1850,26 @@ pub struct AnalysisStudySpec {
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AnalysisStudyDiagramObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_boundary_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_boundary_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_n: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudyAuthoringIntent {
     pub study_id: String,
@@ -1872,6 +1892,8 @@ pub struct AnalysisStudyAuthoringIntent {
     pub load_boundary_region_id: Option<String>,
     #[serde(default)]
     pub force_n: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_observation: Option<AnalysisStudyDiagramObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1902,6 +1924,14 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub selected_fixed_boundary_region_id: String,
     pub selected_load_boundary_region_id: String,
     pub selected_force_n: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_source_mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram_confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub analysis_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

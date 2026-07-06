@@ -3,7 +3,7 @@ use runmat_builtins::Value;
 
 use crate::analysis::{
     analysis_author_study_op, AnalysisCreateModelProfile, AnalysisRunKind,
-    AnalysisStudyAuthoringIntent,
+    AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
 };
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
@@ -43,6 +43,7 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let mut force_n = None::<[f64; 3]>;
     let mut analysis_mesh_artifact_path = None::<String>;
     let mut analysis_mesh_evidence_artifact_path = None::<String>;
+    let mut diagram_observation = None::<AnalysisStudyDiagramObservation>;
 
     for pair in args[3..].chunks(2) {
         let key = option_key(&pair[0], AUTHOR_STUDY_NAME)?;
@@ -85,6 +86,9 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
                 analysis_mesh_evidence_artifact_path =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
+            "diagramobservation" | "diagramevidence" | "diagram" => {
+                diagram_observation = Some(diagram_observation_from_value(&pair[1])?);
+            }
             other => {
                 return Err(builtin_error(
                     AUTHOR_STUDY_NAME,
@@ -110,6 +114,7 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             fixed_boundary_region_id,
             load_boundary_region_id,
             force_n,
+            diagram_observation,
         },
         OperationContext::new(None, None),
     )
@@ -130,6 +135,21 @@ fn mesh_authoring_summary_from_value(
 
     let json = value_to_json(AUTHOR_STUDY_NAME, value)?;
     mesh_authoring_summary_from_json(json)
+}
+
+fn diagram_observation_from_value(value: &Value) -> BuiltinResult<AnalysisStudyDiagramObservation> {
+    if let Ok(text) = scalar_string(value, AUTHOR_STUDY_NAME, &ERROR_INPUT) {
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+            builtin_error_with_source(AUTHOR_STUDY_NAME, &ERROR_INPUT, err.to_string(), err)
+        })?;
+        return json_deserialize(AUTHOR_STUDY_NAME, json, "diagram observation");
+    }
+
+    json_deserialize(
+        AUTHOR_STUDY_NAME,
+        value_to_json(AUTHOR_STUDY_NAME, value)?,
+        "diagram observation",
+    )
 }
 
 fn mesh_authoring_summary_from_json(
@@ -392,6 +412,20 @@ mod tests {
             Some(GEOMETRY_ASSET_JSON_PROPERTY),
         )
         .expect("geometry asset should convert")
+    }
+
+    fn diagram_observation_value() -> Value {
+        crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({
+            "artifact_path": "diagram://fixture/free-body.png",
+            "source_mime_type": "image/png",
+            "summary": "fixed tip and loaded root",
+            "material_region_id": "solid",
+            "fixed_boundary_region_id": "tip",
+            "load_boundary_region_id": "root",
+            "force_n": [12.0, -3.0, 4.0],
+            "confidence": 0.82
+        }))
+        .expect("diagram observation should convert")
     }
 
     fn authoring_analysis_mesh_artifacts(dir: &std::path::Path) -> (String, String, Value) {
@@ -715,6 +749,37 @@ mod tests {
             run_data.analysis_mesh_evidence_artifact_path.as_deref(),
             Some(evidence_path.as_str())
         );
+    }
+
+    #[test]
+    fn builds_study_from_diagram_observation() {
+        let study = create_author_study_object_from_args(vec![
+            Value::String("authored_diagram_static".to_string()),
+            generic_authoring_geometry_value(),
+            authoring_summary_value(),
+            Value::String("DiagramObservation".to_string()),
+            diagram_observation_value(),
+        ])
+        .expect("diagram observation should author a study");
+
+        let Value::Object(study_object) = study else {
+            panic!("expected authored study object");
+        };
+        let Some(Value::String(payload)) =
+            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
+        else {
+            panic!("expected study JSON payload");
+        };
+        let decoded: crate::analysis::AnalysisStudySpec =
+            serde_json::from_str(payload).expect("authored study should decode");
+        let model = decoded.model.expect("authored study should include model");
+        assert_eq!(model.material_assignments[0].region_id, "solid");
+        assert_eq!(model.boundary_conditions[0].region_id, "tip");
+        assert_eq!(model.loads[0].region_id, "root");
+        let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
+            panic!("diagram-authored study should use a force load");
+        };
+        assert_eq!([fx, fy, fz], [12.0, -3.0, 4.0]);
     }
 
     #[test]
