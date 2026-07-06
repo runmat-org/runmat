@@ -21,6 +21,8 @@ use super::{
 };
 use crate::protected_edges::source_edge_ids_for_boundary_face_edges;
 
+const HOLED_POLYHEDRON_MAX_REFINED_CELL_ASPECT: f64 = 2.0;
+
 pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
@@ -214,7 +216,7 @@ fn axis_aligned_rectangular_through_hole_grid(
     let source_y_values = [y_values[0], y_values[1], y_values[2], y_values[3]];
     let source_z_values = [z_values[0], z_values[1]];
     let refinement_length =
-        smallest_axis_interval(&[&x_values, &y_values, &z_values], tolerance_m)?;
+        holed_polyhedron_refinement_length(&[&x_values, &y_values, &z_values], tolerance_m)?;
     let x_values = refined_axis_values(&x_values, refinement_length, tolerance_m);
     let y_values = refined_axis_values(&y_values, refinement_length, tolerance_m);
     let z_values = refined_axis_values(&z_values, refinement_length, tolerance_m);
@@ -894,7 +896,7 @@ fn unique_axis_values(plc: &ProtectedBoundaryComplex, axis: usize, tolerance_m: 
     values
 }
 
-fn smallest_axis_interval(
+fn holed_polyhedron_refinement_length(
     axis_values: &[&Vec<f64>],
     tolerance_m: f64,
 ) -> Result<f64, TetrahedronGenerationError> {
@@ -908,7 +910,7 @@ fn smallest_axis_interval(
         }
     }
     if smallest_interval.is_finite() {
-        Ok(smallest_interval)
+        Ok(smallest_interval * HOLED_POLYHEDRON_MAX_REFINED_CELL_ASPECT)
     } else {
         Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)
     }
