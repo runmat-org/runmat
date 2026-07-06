@@ -472,13 +472,87 @@ fn generates_structured_box_tetrahedra_from_validated_plc_bounds() {
 }
 
 #[test]
-fn structured_box_generation_keeps_ambiguous_material_ownership_unclassified() {
+fn structured_box_generation_preserves_corner_protected_edges() {
+    let plc = protected_corner_box_plc();
+
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("corner-only protected box PLC should generate structured Tetrahedron mesh");
+
+    let recovered_source_edge_ids = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.source_edge_ids.iter().flatten())
+        .map(|source_edge_id| source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let input_source_edge_ids = plc
+        .protected_edges
+        .iter()
+        .map(|edge| edge.source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(mesh.tetrahedron_generation_family, "structured_box");
+    assert_eq!(mesh.nodes.len(), 8);
+    assert_eq!(mesh.elements.len(), 6);
+    assert_eq!(recovered_source_edge_ids, input_source_edge_ids);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+}
+
+#[test]
+fn structured_box_generation_partitions_elongated_protected_boxes() {
+    let mut plc = protected_corner_box_plc();
+    plc.complex_id = "elongated_protected_corner_box".to_string();
+    for node in &mut plc.nodes {
+        node.coordinates_m[0] *= 3.0;
+        node.coordinates_m[1] *= 0.75;
+        node.coordinates_m[2] *= 0.75;
+    }
+
+    let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
+        .expect("elongated protected box PLC should partition into structured Tetrahedra");
+
+    let recovered_source_edge_ids = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.source_edge_ids.iter().flatten())
+        .map(|source_edge_id| source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let input_source_edge_ids = plc
+        .protected_edges
+        .iter()
+        .map(|edge| edge.source_edge_id.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(mesh.tetrahedron_generation_family, "structured_box");
+    assert_eq!(
+        mesh.evidence.entity_counts["structured_box_x_partitions"],
+        4
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["structured_box_y_partitions"],
+        1
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["structured_box_z_partitions"],
+        1
+    );
+    assert_eq!(mesh.evidence.entity_counts["structured_box_cells"], 4);
+    assert_eq!(mesh.elements.len(), 24);
+    assert_eq!(recovered_source_edge_ids, input_source_edge_ids);
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality") >= 0.15);
+}
+
+#[test]
+fn structured_box_generation_routes_ambiguous_material_ownership_to_boundary_conforming() {
     let plc = with_split_material_ids(box_plc());
 
     let mesh = generate_structured_box_tetrahedron_mesh_from_plc(&plc)
         .expect("validated box PLC should generate initial Tetrahedron mesh");
 
-    assert_eq!(mesh.elements.len(), 6);
+    assert_eq!(
+        mesh.tetrahedron_generation_family,
+        "boundary_conforming_box"
+    );
+    assert_eq!(mesh.elements.len(), plc.facets.len());
     assert!(mesh
         .elements
         .iter()

@@ -205,6 +205,26 @@ pub(super) fn split_edge_box_plc() -> ProtectedBoundaryComplex {
     plc
 }
 
+pub(super) fn protected_corner_box_plc() -> ProtectedBoundaryComplex {
+    let mut plc = box_plc();
+    plc.complex_id = "protected_corner_box".to_string();
+    plc.protected_edges = vec![
+        protected_edge("protected_edge_0", ["0", "1"], "source_edge_0"),
+        protected_edge("protected_edge_1", ["1", "2"], "source_edge_1"),
+        protected_edge("protected_edge_2", ["2", "3"], "source_edge_2"),
+        protected_edge("protected_edge_3", ["3", "0"], "source_edge_3"),
+        protected_edge("protected_edge_4", ["4", "5"], "source_edge_4"),
+        protected_edge("protected_edge_5", ["5", "6"], "source_edge_5"),
+        protected_edge("protected_edge_6", ["6", "7"], "source_edge_6"),
+        protected_edge("protected_edge_7", ["7", "4"], "source_edge_7"),
+        protected_edge("protected_edge_8", ["0", "4"], "source_edge_8"),
+        protected_edge("protected_edge_9", ["1", "5"], "source_edge_9"),
+        protected_edge("protected_edge_10", ["2", "6"], "source_edge_10"),
+        protected_edge("protected_edge_11", ["3", "7"], "source_edge_11"),
+    ];
+    plc
+}
+
 pub(super) fn dented_corner_box_plc() -> ProtectedBoundaryComplex {
     let mut plc = box_plc();
     plc.complex_id = "dented_corner_box".to_string();

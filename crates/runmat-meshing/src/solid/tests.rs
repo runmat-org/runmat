@@ -31,10 +31,7 @@ fn auto_backend_recovers_plc_constraints_for_cube() {
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
-    assert_eq!(
-        mesh.backend.tetrahedron_generation_family,
-        "boundary_conforming_box"
-    );
+    assert_eq!(mesh.backend.tetrahedron_generation_family, "structured_box");
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     let source_face_count = mesh
@@ -348,15 +345,12 @@ fn auto_backend_generates_thin_arm_solid() {
         .collect::<BTreeSet<_>>();
 
     assert_eq!(mesh.backend.backend, "solid");
-    assert_eq!(
-        mesh.backend.tetrahedron_generation_family,
-        "boundary_conforming_box"
-    );
+    assert_eq!(mesh.backend.tetrahedron_generation_family, "structured_box");
     assert_eq!(material_region_ids, BTreeSet::from(["body"]));
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
     assert!((bounds.0[0] - 0.0).abs() < 1.0e-9);
-    assert!((bounds.1[0] - 2.0).abs() < 1.0e-9);
+    assert!((bounds.1[0] - 3.0).abs() < 1.0e-9);
     assert!((bounds.1[1] - 0.75).abs() < 1.0e-9);
     assert!((bounds.1[2] - 0.75).abs() < 1.0e-9);
     validate_analysis_mesh_with_options(
@@ -1069,7 +1063,7 @@ fn thin_arm_geometry() -> GeometryAsset {
     geometry.meshes[0].mesh_id = "thin_arm_surface".to_string();
     geometry.surface_meshes[0].mesh_id = "thin_arm_surface".to_string();
     for vertex in &mut geometry.surface_meshes[0].vertices {
-        vertex[0] *= 2.0;
+        vertex[0] *= 3.0;
         vertex[1] *= 0.75;
         vertex[2] *= 0.75;
     }

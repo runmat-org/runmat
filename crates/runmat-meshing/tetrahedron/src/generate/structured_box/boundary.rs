@@ -4,6 +4,7 @@ use runmat_meshing_core::contracts::{MeshingStage, ProtectedBoundaryComplex, Top
 
 use super::super::{Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError};
 use super::shape::structured_box_side_index;
+use crate::protected_edges::source_edge_ids_for_boundary_face_edges;
 
 pub(super) fn exterior_boundary_faces(
     elements: &[Tetrahedron4Element],
@@ -74,9 +75,11 @@ pub(super) fn exterior_boundary_faces(
                 stage: MeshingStage::TetrahedronMesh,
                 id: format!("structured_box_boundary_face_{boundary_face_index}"),
             },
-            source_edge_ids: super::super::source_edge_ids_for_face_edges(
+            source_edge_ids: source_edge_ids_for_boundary_face_edges(
                 &plc.protected_edges,
+                coordinates_by_id,
                 node_ids.clone(),
+                tolerance,
             ),
             node_ids,
             source_face_id,

@@ -12,7 +12,10 @@ use super::{
 };
 use boundary::exterior_boundary_faces;
 use runmat_meshing_core::{
-    contracts::{MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId},
+    contracts::{
+        MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId,
+        UNCLASSIFIED_MATERIAL_REGION_ID,
+    },
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
 };
 use shape::{plc_nodes_are_box_corners, validate_structured_box_plc};
@@ -25,11 +28,14 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     let bounds = plc_bounds(plc)?;
     let tolerance = structured_box_tolerance(bounds);
     validate_structured_box_plc(plc, bounds, tolerance)?;
-    if !plc.protected_edges.is_empty() || !plc_nodes_are_box_corners(plc, bounds, tolerance) {
+    let material_region_id = plc_material_region_id(plc);
+    if !plc_nodes_are_box_corners(plc, bounds, tolerance)
+        || material_region_id == UNCLASSIFIED_MATERIAL_REGION_ID
+    {
         return generate_boundary_conforming_box_tetrahedron_mesh(plc, bounds, tolerance);
     }
-    let material_region_id = plc_material_region_id(plc);
 
+    let partition_counts = structured_box_axis_partition_counts(bounds);
     let mut nodes = plc
         .nodes
         .iter()
@@ -38,7 +44,7 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
             coordinates_m: node.coordinates_m,
         })
         .collect::<Vec<_>>();
-    let corner_ids = structured_box_corner_nodes(bounds, &mut nodes, tolerance);
+    let grid_node_ids = structured_box_grid_nodes(bounds, partition_counts, &mut nodes, tolerance);
     let tetrahedron_corners = [
         [0, 1, 3, 7],
         [0, 3, 2, 7],
@@ -51,24 +57,39 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
         .iter()
         .map(|node| (node.node_id.clone(), node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    let mut elements = Vec::<Tetrahedron4Element>::with_capacity(tetrahedron_corners.len());
+    let cell_count = partition_counts[0] * partition_counts[1] * partition_counts[2];
+    let mut elements = Vec::<Tetrahedron4Element>::with_capacity(cell_count * 6);
     let mut min_scaled_jacobian = f64::INFINITY;
-    for (tetrahedron_index, corners) in tetrahedron_corners.iter().enumerate() {
-        let mut node_ids = corners.map(|corner| corner_ids[corner].clone());
-        let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-        if tetrahedron_signed_volume(points) < 0.0 {
-            node_ids.swap(1, 2);
+    let mut element_index = 0_usize;
+    for z_index in 0..partition_counts[2] {
+        for y_index in 0..partition_counts[1] {
+            for x_index in 0..partition_counts[0] {
+                let cell_corner_ids = structured_box_cell_corner_ids(
+                    &grid_node_ids,
+                    partition_counts,
+                    [x_index, y_index, z_index],
+                );
+                for corners in tetrahedron_corners {
+                    let mut node_ids = corners.map(|corner| cell_corner_ids[corner].clone());
+                    let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
+                    if tetrahedron_signed_volume(points) < 0.0 {
+                        node_ids.swap(1, 2);
+                    }
+                    let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
+                    min_scaled_jacobian =
+                        min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
+                    elements.push(Tetrahedron4Element {
+                        element_id: TopologyEntityId {
+                            stage: MeshingStage::TetrahedronMesh,
+                            id: format!("structured_box_tetrahedron_{element_index}"),
+                        },
+                        node_ids,
+                        material_region_id: material_region_id.clone(),
+                    });
+                    element_index += 1;
+                }
+            }
         }
-        let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-        min_scaled_jacobian = min_scaled_jacobian.min(tetrahedron_scaled_jacobian(points));
-        elements.push(Tetrahedron4Element {
-            element_id: TopologyEntityId {
-                stage: MeshingStage::TetrahedronMesh,
-                id: format!("structured_box_tetrahedron_{tetrahedron_index}"),
-            },
-            node_ids,
-            material_region_id: material_region_id.clone(),
-        });
     }
 
     let boundary_faces =
@@ -87,6 +108,21 @@ pub fn generate_structured_box_tetrahedron_mesh_from_plc(
     evidence
         .entity_counts
         .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
+    evidence
+        .entity_counts
+        .insert("structured_box_cells".to_string(), cell_count);
+    evidence.entity_counts.insert(
+        "structured_box_x_partitions".to_string(),
+        partition_counts[0],
+    );
+    evidence.entity_counts.insert(
+        "structured_box_y_partitions".to_string(),
+        partition_counts[1],
+    );
+    evidence.entity_counts.insert(
+        "structured_box_z_partitions".to_string(),
+        partition_counts[2],
+    );
     record_input_plc_evidence(plc, &mut evidence);
     record_tetrahedron_material_evidence(&elements, &mut evidence);
     evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
@@ -379,39 +415,131 @@ fn plc_bounds(plc: &ProtectedBoundaryComplex) -> Result<[[f64; 3]; 2], Tetrahedr
     }
 }
 
-fn structured_box_corner_nodes(
+fn structured_box_axis_partition_counts(bounds: [[f64; 3]; 2]) -> [usize; 3] {
+    let [min, max] = bounds;
+    let lengths = [
+        (max[0] - min[0]).abs(),
+        (max[1] - min[1]).abs(),
+        (max[2] - min[2]).abs(),
+    ];
+    let reference_length = lengths
+        .iter()
+        .copied()
+        .filter(|length| *length > f64::EPSILON)
+        .fold(f64::INFINITY, f64::min);
+    lengths.map(|length| (length / reference_length).ceil().max(1.0) as usize)
+}
+
+fn structured_box_grid_nodes(
     bounds: [[f64; 3]; 2],
+    partition_counts: [usize; 3],
     nodes: &mut Vec<TetrahedronMeshNode>,
     tolerance: f64,
-) -> [TopologyEntityId; 8] {
+) -> Vec<TopologyEntityId> {
     let [min, max] = bounds;
-    let corners = [
-        [min[0], min[1], min[2]],
-        [max[0], min[1], min[2]],
-        [min[0], max[1], min[2]],
-        [max[0], max[1], min[2]],
-        [min[0], min[1], max[2]],
-        [max[0], min[1], max[2]],
-        [min[0], max[1], max[2]],
-        [max[0], max[1], max[2]],
-    ];
-    corners.each_ref().map(|coordinates| {
-        if let Some(node) = nodes
-            .iter()
-            .find(|node| same_point(node.coordinates_m, *coordinates, tolerance))
-        {
-            return node.node_id.clone();
+    let grid_node_count =
+        (partition_counts[0] + 1) * (partition_counts[1] + 1) * (partition_counts[2] + 1);
+    let mut grid_node_ids = Vec::<TopologyEntityId>::with_capacity(grid_node_count);
+    for z_index in 0..=partition_counts[2] {
+        for y_index in 0..=partition_counts[1] {
+            for x_index in 0..=partition_counts[0] {
+                let coordinates = [
+                    lerp(min[0], max[0], x_index as f64 / partition_counts[0] as f64),
+                    lerp(min[1], max[1], y_index as f64 / partition_counts[1] as f64),
+                    lerp(min[2], max[2], z_index as f64 / partition_counts[2] as f64),
+                ];
+                if let Some(node) = nodes
+                    .iter()
+                    .find(|node| same_point(node.coordinates_m, coordinates, tolerance))
+                {
+                    grid_node_ids.push(node.node_id.clone());
+                    continue;
+                }
+                let node_id = TopologyEntityId {
+                    stage: MeshingStage::TetrahedronMesh,
+                    id: format!("structured_box_node_{}", nodes.len()),
+                };
+                nodes.push(TetrahedronMeshNode {
+                    node_id: node_id.clone(),
+                    coordinates_m: coordinates,
+                });
+                grid_node_ids.push(node_id);
+            }
         }
-        let node_id = TopologyEntityId {
-            stage: MeshingStage::TetrahedronMesh,
-            id: format!("structured_box_node_{}", nodes.len()),
-        };
-        nodes.push(TetrahedronMeshNode {
-            node_id: node_id.clone(),
-            coordinates_m: *coordinates,
-        });
-        node_id
-    })
+    }
+    grid_node_ids
+}
+
+fn structured_box_cell_corner_ids(
+    grid_node_ids: &[TopologyEntityId],
+    partition_counts: [usize; 3],
+    cell_index: [usize; 3],
+) -> [TopologyEntityId; 8] {
+    let [x_index, y_index, z_index] = cell_index;
+    [
+        structured_box_grid_node_id(grid_node_ids, partition_counts, x_index, y_index, z_index),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index + 1,
+            y_index,
+            z_index,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index,
+            y_index + 1,
+            z_index,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index + 1,
+            y_index + 1,
+            z_index,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index,
+            y_index,
+            z_index + 1,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index + 1,
+            y_index,
+            z_index + 1,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index,
+            y_index + 1,
+            z_index + 1,
+        ),
+        structured_box_grid_node_id(
+            grid_node_ids,
+            partition_counts,
+            x_index + 1,
+            y_index + 1,
+            z_index + 1,
+        ),
+    ]
+}
+
+fn structured_box_grid_node_id(
+    grid_node_ids: &[TopologyEntityId],
+    partition_counts: [usize; 3],
+    x_index: usize,
+    y_index: usize,
+    z_index: usize,
+) -> TopologyEntityId {
+    let x_stride = partition_counts[0] + 1;
+    let y_stride = partition_counts[1] + 1;
+    grid_node_ids[z_index * y_stride * x_stride + y_index * x_stride + x_index].clone()
 }
 
 fn structured_box_tolerance(bounds: [[f64; 3]; 2]) -> f64 {
