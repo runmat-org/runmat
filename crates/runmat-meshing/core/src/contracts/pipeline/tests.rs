@@ -7,8 +7,60 @@ use crate::contracts::{
 };
 
 #[test]
+fn stage_order_rejects_sizing_without_cad_topology() {
+    let artifacts = MeshingStageArtifacts {
+        sizing_field: Some(sizing_field()),
+        ..MeshingStageArtifacts::default()
+    };
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::Sizing,
+            prerequisite: MeshingStage::CadTopology,
+        })
+    );
+}
+
+#[test]
+fn stage_order_rejects_curve_mesh_without_cad_topology() {
+    let artifacts = MeshingStageArtifacts {
+        sizing_field: Some(sizing_field()),
+        curve_mesh: Some(curve_mesh()),
+        ..MeshingStageArtifacts::default()
+    };
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::Sizing,
+            prerequisite: MeshingStage::CadTopology,
+        })
+    );
+}
+
+#[test]
+fn stage_order_rejects_curve_mesh_without_sizing() {
+    let artifacts = MeshingStageArtifacts {
+        cad_model: Some(cad_model()),
+        curve_mesh: Some(curve_mesh()),
+        ..MeshingStageArtifacts::default()
+    };
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::CurveMesh,
+            prerequisite: MeshingStage::Sizing,
+        })
+    );
+}
+
+#[test]
 fn stage_order_rejects_surface_mesh_without_curves() {
     let artifacts = MeshingStageArtifacts {
+        cad_model: Some(cad_model()),
+        sizing_field: Some(sizing_field()),
         surface_mesh: Some(surface_mesh()),
         ..MeshingStageArtifacts::default()
     };
@@ -18,6 +70,39 @@ fn stage_order_rejects_surface_mesh_without_curves() {
         Err(MeshingStageContractError::MissingPrerequisite {
             stage: MeshingStage::SurfaceMesh,
             prerequisite: MeshingStage::CurveMesh,
+        })
+    );
+}
+
+#[test]
+fn stage_order_rejects_plc_without_surface_mesh() {
+    let artifacts = MeshingStageArtifacts {
+        cad_model: Some(cad_model()),
+        sizing_field: Some(sizing_field()),
+        curve_mesh: Some(curve_mesh()),
+        protected_boundary_complex: Some(protected_boundary_complex()),
+        ..MeshingStageArtifacts::default()
+    };
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::ProtectedBoundaryComplex,
+            prerequisite: MeshingStage::SurfaceMesh,
+        })
+    );
+}
+
+#[test]
+fn stage_order_rejects_tetrahedron_mesh_without_plc() {
+    let mut artifacts = complete_prefix_through_surface();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::TetrahedronMesh,
+            prerequisite: MeshingStage::ProtectedBoundaryComplex,
         })
     );
 }
@@ -36,6 +121,20 @@ fn stage_order_rejects_tetrahedron_mesh_without_valid_plc() {
     assert_eq!(
         validate_meshing_stage_order(&artifacts),
         Err(MeshingStageContractError::InvalidProtectedBoundaryComplex)
+    );
+}
+
+#[test]
+fn stage_order_rejects_recovery_without_initial_tetrahedron_mesh() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::ConstraintRecovery,
+            prerequisite: MeshingStage::TetrahedronMesh,
+        })
     );
 }
 
@@ -60,6 +159,21 @@ fn stage_order_rejects_solve_readiness_before_optimization() {
 }
 
 #[test]
+fn stage_order_rejects_optimization_without_recovery() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+    artifacts.optimized_tetrahedron_mesh = Some(tetrahedron_mesh(true, true));
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::MissingPrerequisite {
+            stage: MeshingStage::Optimization,
+            prerequisite: MeshingStage::ConstraintRecovery,
+        })
+    );
+}
+
+#[test]
 fn stage_order_rejects_unrecovered_tetrahedron_recovery_stage() {
     let mut artifacts = complete_prefix_through_plc();
     artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
@@ -68,6 +182,55 @@ fn stage_order_rejects_unrecovered_tetrahedron_recovery_stage() {
     assert_eq!(
         validate_meshing_stage_order(&artifacts),
         Err(MeshingStageContractError::UnrecoveredTetrahedronMesh)
+    );
+}
+
+#[test]
+fn stage_order_rejects_unrecovered_optimized_tetrahedron_mesh() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+    artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+    artifacts.optimized_tetrahedron_mesh = Some(tetrahedron_mesh(false, true));
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::UnrecoveredTetrahedronMesh)
+    );
+}
+
+#[test]
+fn stage_order_rejects_solve_readiness_without_quality_optimization() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+    artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+    artifacts.optimized_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+    artifacts.solve_readiness = Some(SolveReadinessReport {
+        ready: true,
+        evidence: vec![StageEvidence::complete(MeshingStage::SolveReadiness)],
+        failure_counts: BTreeMap::new(),
+    });
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::UnoptimizedTetrahedronMesh)
+    );
+}
+
+#[test]
+fn stage_order_rejects_failed_solve_readiness_report() {
+    let mut artifacts = complete_prefix_through_plc();
+    artifacts.initial_tetrahedron_mesh = Some(tetrahedron_mesh(false, false));
+    artifacts.recovered_tetrahedron_mesh = Some(tetrahedron_mesh(true, false));
+    artifacts.optimized_tetrahedron_mesh = Some(tetrahedron_mesh(true, true));
+    artifacts.solve_readiness = Some(SolveReadinessReport {
+        ready: false,
+        evidence: vec![StageEvidence::complete(MeshingStage::SolveReadiness)],
+        failure_counts: BTreeMap::from([("quality".to_string(), 1)]),
+    });
+
+    assert_eq!(
+        validate_meshing_stage_order(&artifacts),
+        Err(MeshingStageContractError::SolveReadinessFailed)
     );
 }
 
@@ -105,14 +268,20 @@ fn contract_artifacts_round_trip_with_stage_evidence() {
     assert_eq!(decoded, artifacts);
 }
 
-fn complete_prefix_through_plc() -> MeshingStageArtifacts {
+fn complete_prefix_through_surface() -> MeshingStageArtifacts {
     MeshingStageArtifacts {
         cad_model: Some(cad_model()),
         sizing_field: Some(sizing_field()),
         curve_mesh: Some(curve_mesh()),
         surface_mesh: Some(surface_mesh()),
-        protected_boundary_complex: Some(protected_boundary_complex()),
         ..MeshingStageArtifacts::default()
+    }
+}
+
+fn complete_prefix_through_plc() -> MeshingStageArtifacts {
+    MeshingStageArtifacts {
+        protected_boundary_complex: Some(protected_boundary_complex()),
+        ..complete_prefix_through_surface()
     }
 }
 
