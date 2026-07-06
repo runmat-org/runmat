@@ -62,6 +62,8 @@ pub struct SurfaceLoopCoverage {
     pub recovered_face_count: usize,
     pub boundary_loop_count: usize,
     #[serde(default)]
+    pub hole_loop_count: usize,
+    #[serde(default)]
     pub boundary_node_count: usize,
     pub recovered_source_edge_count: usize,
     pub boundary_segment_count: usize,

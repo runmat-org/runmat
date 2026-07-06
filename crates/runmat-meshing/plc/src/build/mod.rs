@@ -208,6 +208,10 @@ pub fn build_protected_boundary_complex(
     if let Some(loop_coverage) = &surface.loop_coverage {
         if loop_coverage.recovered_face_count != surface_source_face_count
             || loop_coverage.boundary_loop_count < surface_source_face_count
+            || loop_coverage.hole_loop_count
+                != loop_coverage
+                    .boundary_loop_count
+                    .saturating_sub(loop_coverage.recovered_face_count)
             || loop_coverage.max_loops_per_face == 0
             || loop_coverage.boundary_node_count == 0
             || loop_coverage.boundary_node_count > surface.nodes.len()
@@ -218,6 +222,7 @@ pub fn build_protected_boundary_complex(
                 recovered_face_count: loop_coverage.recovered_face_count,
                 surface_source_face_count,
                 boundary_loop_count: loop_coverage.boundary_loop_count,
+                hole_loop_count: loop_coverage.hole_loop_count,
                 max_loops_per_face: loop_coverage.max_loops_per_face,
                 boundary_node_count: loop_coverage.boundary_node_count,
                 recovered_source_edge_count: loop_coverage.recovered_source_edge_count,
@@ -265,6 +270,10 @@ pub fn build_protected_boundary_complex(
         evidence.entity_counts.insert(
             "surface_boundary_loops".to_string(),
             loop_coverage.boundary_loop_count,
+        );
+        evidence.entity_counts.insert(
+            "surface_hole_loops".to_string(),
+            loop_coverage.hole_loop_count,
         );
         evidence.entity_counts.insert(
             "surface_boundary_segments".to_string(),

@@ -12,6 +12,7 @@ pub(super) struct SurfaceLoopCoverageAccumulator {
     source_face_count: usize,
     recovered_face_count: usize,
     boundary_loop_count: usize,
+    hole_loop_count: usize,
     boundary_segment_count: usize,
     max_loops_per_face: usize,
     boundary_node_ids: BTreeSet<u32>,
@@ -24,6 +25,7 @@ impl SurfaceLoopCoverageAccumulator {
             source_face_count,
             recovered_face_count: 0,
             boundary_loop_count: 0,
+            hole_loop_count: 0,
             boundary_segment_count: 0,
             max_loops_per_face: 0,
             boundary_node_ids: BTreeSet::new(),
@@ -46,6 +48,7 @@ impl SurfaceLoopCoverageAccumulator {
     ) {
         self.recovered_face_count += 1;
         self.boundary_loop_count += segment_loops.len();
+        self.hole_loop_count += segment_loops.len().saturating_sub(1);
         self.max_loops_per_face = self.max_loops_per_face.max(segment_loops.len());
         for segment in segment_loops.iter().flatten() {
             self.boundary_segment_count += 1;
@@ -62,6 +65,7 @@ impl SurfaceLoopCoverageAccumulator {
             source_face_count: self.source_face_count,
             recovered_face_count: self.recovered_face_count,
             boundary_loop_count: self.boundary_loop_count,
+            hole_loop_count: self.hole_loop_count,
             boundary_node_count: self.boundary_node_ids.len(),
             recovered_source_edge_count: self.recovered_source_edge_ids.len(),
             boundary_segment_count: self.boundary_segment_count,

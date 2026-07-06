@@ -18,6 +18,7 @@ fn builds_valid_plc_from_closed_tetra_surface() {
     assert_eq!(plc.evidence.entity_counts["facets"], 4);
     assert_eq!(plc.evidence.entity_counts["validated_curve_elements"], 6);
     assert_eq!(plc.evidence.entity_counts["surface_boundary_loops"], 4);
+    assert_eq!(plc.evidence.entity_counts["surface_hole_loops"], 0);
     assert_eq!(
         plc.evidence.entity_counts["recovered_surface_source_edges"],
         6
@@ -30,6 +31,17 @@ fn builds_valid_plc_from_closed_tetra_surface() {
     assert_eq!(plc.evidence.entity_counts["shell_nesting_classified"], 1);
     assert_eq!(plc.evidence.entity_counts["outer_shells"], 1);
     assert_eq!(plc.evidence.entity_counts["nested_shells"], 0);
+}
+
+#[test]
+fn carries_surface_hole_loop_evidence_into_plc() {
+    let plc = build_protected_boundary_complex(&through_hole_plate_surface())
+        .expect("closed plate with through-hole should build a PLC");
+
+    assert!(plc.validation.valid_for_volume_meshing());
+    assert_eq!(plc.evidence.entity_counts["surface_boundary_loops"], 12);
+    assert_eq!(plc.evidence.entity_counts["surface_hole_loops"], 2);
+    assert_eq!(plc.evidence.entity_counts["boundary_components"], 1);
 }
 
 #[test]
@@ -215,6 +227,7 @@ fn rejects_surface_with_inconsistent_loop_coverage_evidence() {
             recovered_face_count: 4,
             surface_source_face_count: 4,
             boundary_loop_count: 4,
+            hole_loop_count: 0,
             max_loops_per_face: 1,
             boundary_node_count: 4,
             recovered_source_edge_count: 5,
@@ -237,6 +250,30 @@ fn rejects_surface_with_inconsistent_boundary_loop_count_evidence() {
             recovered_face_count: 4,
             surface_source_face_count: 4,
             boundary_loop_count: 3,
+            hole_loop_count: 0,
+            max_loops_per_face: 1,
+            boundary_node_count: 4,
+            recovered_source_edge_count: 6,
+            protected_source_edge_count: 6,
+            boundary_segment_count: 12,
+        })
+    );
+}
+
+#[test]
+fn rejects_surface_with_inconsistent_hole_loop_count_evidence() {
+    let mut surface = tetra_surface();
+    let mut loop_coverage = loop_coverage();
+    loop_coverage.hole_loop_count = 1;
+    surface.loop_coverage = Some(loop_coverage);
+
+    assert_eq!(
+        build_protected_boundary_complex(&surface),
+        Err(PlcBuildError::InconsistentSurfaceLoopCoverage {
+            recovered_face_count: 4,
+            surface_source_face_count: 4,
+            boundary_loop_count: 4,
+            hole_loop_count: 1,
             max_loops_per_face: 1,
             boundary_node_count: 4,
             recovered_source_edge_count: 6,
@@ -259,6 +296,7 @@ fn rejects_surface_with_inconsistent_boundary_segment_count_evidence() {
             recovered_face_count: 4,
             surface_source_face_count: 4,
             boundary_loop_count: 4,
+            hole_loop_count: 0,
             max_loops_per_face: 1,
             boundary_node_count: 4,
             recovered_source_edge_count: 6,
@@ -281,6 +319,7 @@ fn rejects_surface_with_inconsistent_boundary_node_count_evidence() {
             recovered_face_count: 4,
             surface_source_face_count: 4,
             boundary_loop_count: 4,
+            hole_loop_count: 0,
             max_loops_per_face: 1,
             boundary_node_count: 5,
             recovered_source_edge_count: 6,
@@ -432,6 +471,92 @@ fn tetra_surface() -> SurfaceMesh {
     }
 }
 
+fn through_hole_plate_surface() -> SurfaceMesh {
+    SurfaceMesh {
+        mesh_id: "through_hole_plate_surface".to_string(),
+        nodes: vec![
+            node(0, [0.0, 0.0, 1.0]),
+            node(1, [3.0, 0.0, 1.0]),
+            node(2, [3.0, 3.0, 1.0]),
+            node(3, [0.0, 3.0, 1.0]),
+            node(4, [1.0, 1.0, 1.0]),
+            node(5, [2.0, 1.0, 1.0]),
+            node(6, [2.0, 2.0, 1.0]),
+            node(7, [1.0, 2.0, 1.0]),
+            node(8, [0.0, 0.0, 0.0]),
+            node(9, [3.0, 0.0, 0.0]),
+            node(10, [3.0, 3.0, 0.0]),
+            node(11, [0.0, 3.0, 0.0]),
+            node(12, [1.0, 1.0, 0.0]),
+            node(13, [2.0, 1.0, 0.0]),
+            node(14, [2.0, 2.0, 0.0]),
+            node(15, [1.0, 2.0, 0.0]),
+        ],
+        triangles: through_hole_plate_triangles(),
+        curve_boundary_validation: None,
+        loop_coverage: Some(SurfaceLoopCoverage {
+            source_face_count: 10,
+            recovered_face_count: 10,
+            boundary_loop_count: 12,
+            hole_loop_count: 2,
+            boundary_node_count: 16,
+            recovered_source_edge_count: 0,
+            boundary_segment_count: 32,
+            max_loops_per_face: 2,
+        }),
+        cad_curve_boundary_provenance: None,
+        evidence: StageEvidence::complete(MeshingStage::SurfaceMesh),
+    }
+}
+
+fn through_hole_plate_triangles() -> Vec<SurfaceMeshTriangle> {
+    [
+        (0, [0, 1, 5]),
+        (0, [0, 5, 4]),
+        (0, [1, 2, 6]),
+        (0, [1, 6, 5]),
+        (0, [2, 3, 7]),
+        (0, [2, 7, 6]),
+        (0, [3, 0, 4]),
+        (0, [3, 4, 7]),
+        (1, [8, 13, 9]),
+        (1, [8, 12, 13]),
+        (1, [9, 14, 10]),
+        (1, [9, 13, 14]),
+        (1, [10, 15, 11]),
+        (1, [10, 14, 15]),
+        (1, [11, 12, 8]),
+        (1, [11, 15, 12]),
+        (2, [0, 8, 9]),
+        (2, [0, 9, 1]),
+        (3, [1, 9, 10]),
+        (3, [1, 10, 2]),
+        (4, [2, 10, 11]),
+        (4, [2, 11, 3]),
+        (5, [3, 11, 8]),
+        (5, [3, 8, 0]),
+        (6, [4, 5, 13]),
+        (6, [4, 13, 12]),
+        (7, [5, 6, 14]),
+        (7, [5, 14, 13]),
+        (8, [6, 7, 15]),
+        (8, [6, 15, 14]),
+        (9, [7, 4, 12]),
+        (9, [7, 12, 15]),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(element_id, (source_face_id, node_ids))| {
+        element_with_source_face(
+            element_id as u32,
+            source_face_id,
+            node_ids,
+            internal_source_edges(),
+        )
+    })
+    .collect()
+}
+
 fn edge_shared_tetrahedra_surface() -> SurfaceMesh {
     SurfaceMesh {
         mesh_id: "edge_shared_tetrahedra_surface".to_string(),
@@ -469,6 +594,7 @@ fn loop_coverage() -> SurfaceLoopCoverage {
         source_face_count: 4,
         recovered_face_count: 4,
         boundary_loop_count: 4,
+        hole_loop_count: 0,
         boundary_node_count: 4,
         recovered_source_edge_count: 6,
         boundary_segment_count: 12,
@@ -540,9 +666,18 @@ fn element(
     node_ids: [u32; 3],
     source_edge_ids: impl IntoSourceEdgeIds,
 ) -> SurfaceMeshTriangle {
+    element_with_source_face(element_id, element_id, node_ids, source_edge_ids)
+}
+
+fn element_with_source_face(
+    element_id: u32,
+    source_face_id: u32,
+    node_ids: [u32; 3],
+    source_edge_ids: impl IntoSourceEdgeIds,
+) -> SurfaceMeshTriangle {
     SurfaceMeshTriangle {
         triangle_id: surface_entity_id(element_id),
-        source_face_id: surface_entity_id(element_id),
+        source_face_id: surface_entity_id(source_face_id),
         source_edge_ids: source_edge_ids.into_source_edge_ids(),
         node_ids: node_ids.map(surface_entity_id),
         region_ids: vec!["body".to_string()],

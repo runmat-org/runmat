@@ -10,6 +10,7 @@ pub enum PlcBuildError {
         recovered_face_count: usize,
         surface_source_face_count: usize,
         boundary_loop_count: usize,
+        hole_loop_count: usize,
         max_loops_per_face: usize,
         boundary_node_count: usize,
         recovered_source_edge_count: usize,
@@ -78,6 +79,7 @@ impl std::fmt::Display for PlcBuildError {
                 recovered_face_count,
                 surface_source_face_count,
                 boundary_loop_count,
+                hole_loop_count,
                 max_loops_per_face,
                 boundary_node_count,
                 recovered_source_edge_count,
@@ -85,7 +87,7 @@ impl std::fmt::Display for PlcBuildError {
                 boundary_segment_count,
             } => write!(
                 formatter,
-                "surface loop coverage is inconsistent with PLC input: recovered faces {recovered_face_count}, surface source faces {surface_source_face_count}, boundary loops {boundary_loop_count}, max loops per face {max_loops_per_face}, boundary nodes {boundary_node_count}, recovered source edges {recovered_source_edge_count}, protected source edges {protected_source_edge_count}, boundary segments {boundary_segment_count}"
+                "surface loop coverage is inconsistent with PLC input: recovered faces {recovered_face_count}, surface source faces {surface_source_face_count}, boundary loops {boundary_loop_count}, hole loops {hole_loop_count}, max loops per face {max_loops_per_face}, boundary nodes {boundary_node_count}, recovered source edges {recovered_source_edge_count}, protected source edges {protected_source_edge_count}, boundary segments {boundary_segment_count}"
             ),
             Self::InconsistentCadCurveBoundaryProvenance {
                 reason,

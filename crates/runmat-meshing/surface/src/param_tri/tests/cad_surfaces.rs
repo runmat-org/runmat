@@ -106,6 +106,7 @@ fn curve_driven_cad_surface_uses_curve_boundary_nodes() {
     assert_eq!(loop_coverage.source_face_count, topology.faces.len());
     assert_eq!(loop_coverage.recovered_face_count, topology.faces.len());
     assert_eq!(loop_coverage.boundary_loop_count, topology.faces.len());
+    assert_eq!(loop_coverage.hole_loop_count, 0);
     assert_eq!(
         loop_coverage.recovered_source_edge_count,
         topology.edges.len()
@@ -235,6 +236,7 @@ fn cad_topology_surface_marks_display_diagonal_internal() {
     assert_eq!(loop_coverage.source_face_count, 1);
     assert_eq!(loop_coverage.recovered_face_count, 1);
     assert_eq!(loop_coverage.boundary_loop_count, 1);
+    assert_eq!(loop_coverage.hole_loop_count, 0);
     assert_eq!(loop_coverage.recovered_source_edge_count, 4);
     assert_eq!(loop_coverage.boundary_segment_count, 4);
 }
@@ -271,6 +273,7 @@ fn cad_topology_surface_preserves_holed_face_loops() {
     assert_eq!(loop_coverage.source_face_count, 1);
     assert_eq!(loop_coverage.recovered_face_count, 1);
     assert_eq!(loop_coverage.boundary_loop_count, 2);
+    assert_eq!(loop_coverage.hole_loop_count, 1);
     assert_eq!(loop_coverage.max_loops_per_face, 2);
     assert_eq!(loop_coverage.recovered_source_edge_count, 8);
     assert_eq!(loop_coverage.boundary_segment_count, 8);

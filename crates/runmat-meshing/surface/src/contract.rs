@@ -179,6 +179,7 @@ fn surface_loop_coverage(report: &SurfaceLoopCoverageReport) -> SurfaceLoopCover
         source_face_count: report.source_face_count,
         recovered_face_count: report.recovered_face_count,
         boundary_loop_count: report.boundary_loop_count,
+        hole_loop_count: report.hole_loop_count,
         boundary_node_count: report.boundary_node_count,
         recovered_source_edge_count: report.recovered_source_edge_count,
         boundary_segment_count: report.boundary_segment_count,
