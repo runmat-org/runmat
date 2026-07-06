@@ -5,6 +5,7 @@ use super::backend_counts::tetrahedron_entity_count;
 
 pub(super) fn plc_input_and_generation_summary(
     tetrahedron_mesh: &TetrahedronMesh,
+    base: MeshBackendSummary,
 ) -> MeshBackendSummary {
     MeshBackendSummary {
         plc_input_node_count: tetrahedron_entity_count(tetrahedron_mesh, "input_plc_nodes"),
@@ -163,6 +164,6 @@ pub(super) fn plc_input_and_generation_summary(
             tetrahedron_mesh,
             "nested_tetrahedron_shell_inner_facets",
         ),
-        ..MeshBackendSummary::default()
+        ..base
     }
 }

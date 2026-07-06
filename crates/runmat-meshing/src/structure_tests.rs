@@ -69,6 +69,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "src/solid/artifact/mod.rs",
         "src/solid/artifact/backend_counts.rs",
         "src/solid/artifact/backend_generation.rs",
+        "src/solid/artifact/backend_optimization.rs",
         "src/solid/artifact/backend_quality.rs",
         "src/solid/artifact/backend_summary.rs",
         "src/solid/tetrahedron_stage.rs",

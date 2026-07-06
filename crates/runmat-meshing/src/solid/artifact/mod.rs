@@ -20,6 +20,7 @@ use runmat_meshing_tetrahedron::{generate::TetrahedronMesh, recover::Tetrahedron
 
 mod backend_counts;
 mod backend_generation;
+mod backend_optimization;
 mod backend_quality;
 mod backend_summary;
 
