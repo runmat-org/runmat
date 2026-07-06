@@ -105,6 +105,11 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
     )?;
     validate_recovery_item_count(
+        "recovered_protected_edge_boundary_face",
+        backend.tetrahedron_recovered_protected_edge_boundary_face_count,
+        backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_recovery_item_count(
         "rejected_protected_edge_boundary_face_restoration",
         backend.tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
         backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
@@ -113,6 +118,25 @@ pub(super) fn validate_recovery_evidence_consistency(
         "rejected_cad_curve_protected_edge_boundary_face_restoration",
         backend.tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count,
         backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "protected_edge_boundary_face_restoration_status_items",
+        backend.tetrahedron_attempted_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_recovered_protected_edge_boundary_face_count
+            + backend.tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "cad_curve_protected_edge_boundary_face_restoration_status_items",
+        backend.tetrahedron_attempted_cad_curve_protected_edge_boundary_face_restoration_item_count,
+        backend.tetrahedron_recovered_cad_curve_protected_edge_boundary_face_count
+            + backend
+                .tetrahedron_rejected_cad_curve_protected_edge_boundary_face_restoration_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "protected_edge_boundary_face_restoration_rejection_reason_items",
+        backend.tetrahedron_rejected_protected_edge_boundary_face_restoration_item_count,
+        backend
+            .tetrahedron_rejected_protected_edge_boundary_face_restoration_volume_face_topology_count,
     )?;
     validate_recovered_count(
         "volume_edge_source_edge",
@@ -238,6 +262,18 @@ pub(super) fn validate_recovery_evidence_consistency(
         "rejected_volume_face_source_face_boundary_restoration",
         backend.tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count,
         backend.tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "volume_face_source_face_boundary_restoration_status_items",
+        backend.tetrahedron_attempted_volume_face_source_face_boundary_restoration_item_count,
+        backend.tetrahedron_recovered_volume_face_source_face_recovery_item_count
+            + backend.tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "volume_face_source_face_boundary_restoration_rejection_reason_items",
+        backend.tetrahedron_rejected_volume_face_source_face_boundary_restoration_item_count,
+        backend
+            .tetrahedron_rejected_volume_face_source_face_boundary_restoration_volume_face_topology_count,
     )?;
     validate_recovered_count(
         "absent_face_source_face",
@@ -446,6 +482,30 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_missing_cad_curve_source_edge_recovery_item_count,
         backend.tetrahedron_missing_cad_curve_source_edge_topology_recovery_item_count
             + backend.tetrahedron_missing_cad_curve_source_edge_provenance_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "rejected_boundary_leak",
+        backend.tetrahedron_rejected_boundary_leak_recovery_item_count,
+        backend.tetrahedron_attempted_boundary_leak_recovery_item_count,
+    )?;
+    validate_recovery_item_count(
+        "exposed_boundary_leak_source_face",
+        backend.tetrahedron_exposed_interior_source_face_count,
+        backend.tetrahedron_attempted_boundary_leak_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "boundary_leak_status_items",
+        backend.tetrahedron_attempted_boundary_leak_recovery_item_count,
+        backend.tetrahedron_exposed_interior_source_face_count
+            + backend.tetrahedron_rejected_boundary_leak_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "boundary_leak_rejection_reason_items",
+        backend.tetrahedron_rejected_boundary_leak_recovery_item_count,
+        backend.tetrahedron_rejected_boundary_leak_adjacent_element_count
+            + backend.tetrahedron_rejected_boundary_leak_material_region_mismatch_count
+            + backend.tetrahedron_rejected_boundary_leak_outside_classification_count
+            + backend.tetrahedron_rejected_boundary_leak_closed_surface_coordinate_count,
     )?;
     Ok(())
 }
