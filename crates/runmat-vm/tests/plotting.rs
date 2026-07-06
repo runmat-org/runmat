@@ -51,6 +51,44 @@ fn figure_position_property_pair_round_trips_through_vm() {
 }
 
 #[test]
+fn data_tip_text_row_dispatches_and_round_trips_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        row = dataTipTextRow('Speed', 'YData', '%.2f'); \
+        if ~strcmp(row.Label, 'Speed'); \
+            error('label mismatch'); \
+        end; \
+        if ~strcmp(row.Format, '%.2f'); \
+            error('format mismatch'); \
+        end; \
+        if ~isa(row, 'handle'); \
+            error('dataTipTextRow should be handle-like'); \
+        end; \
+        row2 = row; \
+        row.Label = 'Velocity'; \
+        row.Format = '%.3f'; \
+        if ~strcmp(row.Label, 'Velocity'); \
+            error('updated label mismatch'); \
+        end; \
+        if ~strcmp(row.Format, '%.3f'); \
+            error('updated format mismatch'); \
+        end; \
+        if ~strcmp(row2.Label, 'Velocity'); \
+            error('handle alias label mismatch'); \
+        end; \
+        if ~strcmp(row.Value, 'YData'); \
+            error('value property mismatch'); \
+        end; \
+        out = class(row);";
+    let vars = execute_source(input).expect("execute dataTipTextRow script");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::String(class_name)
+            if class_name == "matlab.graphics.datatip.DataTipTextRow"
+    )));
+}
+
+#[test]
 fn grid_minor_command_form_sets_minor_grid_property() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
