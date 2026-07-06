@@ -75,7 +75,8 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::fixtures::{
-    split_material_through_hole_plate_geometry, through_hole_plate_geometry,
+    nested_tetrahedron_shell_geometry, split_material_through_hole_plate_geometry,
+    through_hole_plate_geometry,
 };
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
@@ -686,6 +687,39 @@ fn split_material_through_hole_study_geometry() -> GeometryAsset {
 fn through_hole_study_geometry() -> GeometryAsset {
     let mut geometry = through_hole_plate_geometry();
     add_through_hole_study_boundary_regions(&mut geometry);
+    geometry
+}
+
+fn nested_tetrahedron_shell_study_geometry() -> GeometryAsset {
+    let mut geometry = nested_tetrahedron_shell_geometry();
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "nested_tetrahedron_shell_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 1)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "nested_tetrahedron_shell_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(1, 1)],
+        ),
+    ]);
     geometry
 }
 
@@ -2977,6 +3011,140 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     assert_eq!(
         envelope.data.refined_analysis_mesh_evidence_artifact_path,
         None
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_consumes_generated_nested_shell_solid_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-nested-shell-solid");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = nested_tetrahedron_shell_study_geometry();
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -250.0,
+            fz: 25.0,
+        },
+    }];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    mesh_options.target_size = runmat_meshing_core::MeshTargetSize::LengthM(10.0);
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("nested-shell solid study should run from generated artifact");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist nested-shell analysis mesh artifact");
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
+    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let mesh_payload = &payload["mesh"];
+    assert_eq!(
+        mesh_payload["backend"]["tetrahedron_generation_family"].as_str(),
+        Some("nested_tetrahedron_shell")
+    );
+    assert_eq!(
+        mesh_payload["backend"]["plc_input_nested_shell_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        mesh_payload["backend"]["plc_input_max_shell_nesting_depth"].as_u64(),
+        Some(1)
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_generation_nested_shell_outer_node_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_generation_nested_shell_inner_node_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert_eq!(
+        mesh_payload["backend"]["tetrahedron_missing_recovery_item_count"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_min_exact_scaled_jacobian"]
+            .as_f64()
+            .unwrap_or_default()
+            >= 0.15
+    );
+    let strategy_count = mesh_payload["backend"]
+        ["tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count"]
+        .as_u64()
+        .unwrap_or_default()
+        + mesh_payload["backend"]
+            ["tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count"]
+            .as_u64()
+            .unwrap_or_default()
+        + mesh_payload["backend"]
+            ["tetrahedron_generation_nested_shell_barycentric_partition_refill_count"]
+            .as_u64()
+            .unwrap_or_default();
+    assert_eq!(strategy_count, 1);
+    let volume_element_count = mesh_payload["volume_elements"]
+        .as_array()
+        .expect("nested-shell volume elements")
+        .len();
+    let boundary_face_count = mesh_payload["boundary_faces"]
+        .as_array()
+        .expect("nested-shell boundary faces")
+        .len();
+
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("nested-shell run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![volume_element_count]);
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist nested-shell solver render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    assert_eq!(
+        topology
+            .meshes
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .sum::<usize>(),
+        boundary_face_count
     );
     let _ = fs::remove_dir_all(&root);
 }
