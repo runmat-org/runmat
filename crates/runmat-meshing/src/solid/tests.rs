@@ -616,10 +616,6 @@ fn auto_backend_generates_through_hole_solid() {
     let geometry = through_hole_plate_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
         .expect("through-hole plate solid should run through the root solid pipeline");
-    let quality = QualityThresholds {
-        min_scaled_jacobian: 0.13,
-        ..QualityThresholds::default()
-    };
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(
@@ -629,11 +625,12 @@ fn auto_backend_generates_through_hole_solid() {
     assert!(!mesh.volume_elements.is_empty());
     assert!(!mesh.boundary_faces.is_empty());
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
-    validate_analysis_mesh(&mesh, quality).expect("through-hole solid mesh should validate");
+    assert!(mesh.backend.tetrahedron_min_exact_scaled_jacobian >= 0.15);
+    validate_analysis_mesh(&mesh, QualityThresholds::default())
+        .expect("through-hole solid mesh should validate");
     validate_analysis_mesh_with_options(
         &mesh,
         AnalysisMeshValidationOptions {
-            quality,
             required_material_region_ids: vec!["body".to_string()],
             ..AnalysisMeshValidationOptions::default()
         },

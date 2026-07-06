@@ -47,7 +47,7 @@ fn generates_positive_tetrahedra_from_validated_tetrahedron_plc() {
         .iter()
         .all(|element| element.material_region_id == "body"));
     let min_scaled_jacobian = mesh.evidence.min_scaled_jacobian.expect("quality evidence");
-    assert!(min_scaled_jacobian > 0.0);
+    assert!(min_scaled_jacobian >= 0.15);
     assert!((min_scaled_jacobian - min_generated_scaled_jacobian(&mesh)).abs() <= f64::EPSILON);
 }
 
