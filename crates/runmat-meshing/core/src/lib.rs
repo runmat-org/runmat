@@ -1,31 +1,12 @@
 extern crate self as runmat_meshing_core;
 
-pub use runmat_meshing_cad as cad;
 pub mod contracts;
 pub mod fixtures;
 pub mod quality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size as size;
-pub mod source_topology {
-    pub use runmat_meshing_cad::topology::{
-        extract_source_topology, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
-        SourceTopologyModel, SourceTopologyVertex,
-    };
-}
 pub mod validation;
 
-pub use cad::eval::{
-    build_cad_evaluation_model, build_cad_evaluation_model_with_provider, project_to_face,
-    summarize_cad_evaluation, CadEvaluationError, CadEvaluationModel, CadEvaluationReport,
-    CadEvaluationSource, CadFaceEvaluationFrame, CadFaceEvaluationRequest,
-    CadFaceEvaluatorProvider, CadFaceProjection, NoopCadFaceEvaluatorProvider,
-};
-pub use cad::topology::{
-    build_cad_topology, validate_cad_topology_model, CadEdge, CadEntityId, CadEntityKind, CadFace,
-    CadLoop, CadShell, CadTopologyError, CadTopologyModel, CadTopologyReport, CadTopologySource,
-    CadVertex, CadVolume,
-};
-pub use cad::{CadCurveEvaluationSample, CadCurveEvaluationSampleSource};
 pub use contracts::artifact::{
     analysis_mesh_field_topology, AnalysisBoundaryEdge, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
@@ -80,10 +61,6 @@ pub use size::field::{
     AnisotropicSizingSample, MeshSizingField, PointSizingQuery, SegmentSizingQuery,
     SizingFieldService, SizingQueryResult, SizingQuerySource, SizingSample,
     SizingSampleApplication, SizingSampleRejection,
-};
-pub use source_topology::{
-    extract_source_topology, SourceTopologyEdge, SourceTopologyError, SourceTopologyFace,
-    SourceTopologyModel, SourceTopologyVertex,
 };
 pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex};
 pub use tolerance::MeshingTolerance;

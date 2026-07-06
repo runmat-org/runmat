@@ -35,6 +35,8 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
 
     let core_manifest = fs::read_to_string(crate_root.join("core").join("Cargo.toml"))
         .expect("core manifest should be readable");
+    let core_lib = fs::read_to_string(crate_root.join("core").join("src").join("lib.rs"))
+        .expect("core lib should be readable");
     for implementation_crate in [
         "runmat-meshing-curve",
         "runmat-meshing-surface",
@@ -46,6 +48,17 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         assert!(
             !core_manifest.contains(implementation_crate),
             "core depends on implementation crate: {implementation_crate}"
+        );
+    }
+    for facade_export in [
+        "pub use runmat_meshing_cad as cad",
+        "pub mod source_topology",
+        "pub use cad::",
+        "pub use source_topology::",
+    ] {
+        assert!(
+            !core_lib.contains(facade_export),
+            "core exposes CAD implementation facade: {facade_export}"
         );
     }
 
