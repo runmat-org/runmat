@@ -835,6 +835,60 @@ fn rejects_attempted_absent_material_partition_count_that_exceeds_typed_input_co
 }
 
 #[test]
+fn rejects_absent_material_partition_status_count_that_does_not_match_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_missing_material_interface_absent_partition_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_absent_material_partition_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_inserted_absent_material_partition_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_rejected_absent_material_partition_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_rejected_absent_material_partition_quality_gate_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("absent partition inserted plus rejected outcomes must match attempts");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "absent_material_partition_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 3,
+        }
+    );
+}
+
+#[test]
+fn rejects_absent_material_partition_rejection_reason_count_that_does_not_match_rejections() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_missing_material_interface_absent_partition_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_absent_material_partition_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_inserted_absent_material_partition_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_rejected_absent_material_partition_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_rejected_absent_material_partition_facet_topology_count = 2;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("absent partition rejection reasons must match rejected outcomes");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "absent_material_partition_rejection_reason_items".to_string(),
+            aggregate_count: 1,
+            typed_count: 2,
+        }
+    );
+}
+
+#[test]
 fn rejects_unrepaired_exact_quality_when_policy_requires_strict_recovery() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend

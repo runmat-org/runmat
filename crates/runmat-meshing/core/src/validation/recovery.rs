@@ -349,6 +349,22 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_rolled_back_absent_material_partition_recovery_item_count,
         backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
     )?;
+    validate_aggregate_recovery_count(
+        "absent_material_partition_status_items",
+        backend.tetrahedron_attempted_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_inserted_absent_material_partition_recovery_item_count
+            + backend.tetrahedron_rejected_absent_material_partition_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "absent_material_partition_rejection_reason_items",
+        backend.tetrahedron_rejected_absent_material_partition_recovery_item_count,
+        backend.tetrahedron_rejected_absent_material_partition_facet_count
+            + backend.tetrahedron_rejected_absent_material_partition_facet_topology_count
+            + backend.tetrahedron_rejected_absent_material_partition_element_exists_count
+            + backend.tetrahedron_rejected_absent_material_partition_interior_face_topology_count
+            + backend.tetrahedron_rejected_absent_material_partition_quality_gate_count
+            + backend.tetrahedron_rejected_absent_material_partition_post_insertion_audit_count,
+    )?;
     let typed_recovery_item_count = backend.tetrahedron_source_face_recovery_item_count
         + backend.tetrahedron_source_edge_recovery_item_count
         + backend.tetrahedron_material_interface_recovery_item_count;
