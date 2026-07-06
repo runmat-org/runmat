@@ -377,11 +377,20 @@ pub(super) fn recovery_summary(
                 recovery_queue,
                 "rejected_material_interface_missing_boundary_ownership",
             ),
+        tetrahedron_rejected_material_interface_missing_interior_ownership_count:
+            recovery_entity_count(
+                recovery_queue,
+                "rejected_material_interface_missing_interior_ownership",
+            ),
         tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count:
             recovery_entity_count(
                 recovery_queue,
                 "rejected_material_interface_ambiguous_boundary_ownership",
             ),
+        tetrahedron_rejected_material_interface_absent_partition_count: recovery_entity_count(
+            recovery_queue,
+            "rejected_material_interface_absent_partition",
+        ),
         tetrahedron_attempted_absent_material_partition_recovery_item_count:
             recovery_entity_count(
                 recovery_queue,

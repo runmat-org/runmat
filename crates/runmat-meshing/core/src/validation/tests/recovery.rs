@@ -574,27 +574,6 @@ fn rejects_recovered_source_face_count_that_exceeds_typed_input_count() {
 }
 
 #[test]
-fn rejects_recovered_material_interface_count_that_exceeds_typed_input_count() {
-    let mut mesh = valid_tetrahedron_mesh();
-    mesh.backend
-        .tetrahedron_material_interface_recovery_item_count = 1;
-    mesh.backend
-        .tetrahedron_recovered_material_interface_recovery_item_count = 2;
-
-    let err = validate_analysis_mesh(&mesh, Default::default())
-        .expect_err("recovered material-interface evidence cannot exceed typed inputs");
-
-    assert_eq!(
-        err,
-        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryEvidence {
-            family: "material_interface".to_string(),
-            recovered_count: 2,
-            input_count: 1,
-        }
-    );
-}
-
-#[test]
 fn rejects_recovered_absent_material_partition_count_that_exceeds_typed_input_count() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
@@ -1035,6 +1014,54 @@ fn rejects_attempted_material_interface_count_that_exceeds_typed_input_count() {
             family: "attempted_material_interface".to_string(),
             item_count: 2,
             input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_material_interface_status_count_that_does_not_match_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_material_interface_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_material_interface_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_recovered_material_interface_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("material-interface outcomes must account for every attempt");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "material_interface_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_material_interface_rejection_reason_count_that_does_not_match_rejections() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_material_interface_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_material_interface_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_recovered_material_interface_recovery_item_count = 1;
+    mesh.backend
+        .tetrahedron_rejected_material_interface_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("material-interface rejection reasons must match rejected items");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "material_interface_rejection_reason_items".to_string(),
+            aggregate_count: 1,
+            typed_count: 0,
         }
     );
 }

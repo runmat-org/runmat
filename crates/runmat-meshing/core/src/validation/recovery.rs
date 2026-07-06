@@ -363,6 +363,20 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_rejected_material_interface_recovery_item_count,
         backend.tetrahedron_attempted_material_interface_recovery_item_count,
     )?;
+    validate_aggregate_recovery_count(
+        "material_interface_status_items",
+        backend.tetrahedron_attempted_material_interface_recovery_item_count,
+        backend.tetrahedron_recovered_material_interface_recovery_item_count
+            + backend.tetrahedron_rejected_material_interface_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "material_interface_rejection_reason_items",
+        backend.tetrahedron_rejected_material_interface_recovery_item_count,
+        backend.tetrahedron_rejected_material_interface_missing_boundary_ownership_count
+            + backend.tetrahedron_rejected_material_interface_missing_interior_ownership_count
+            + backend.tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count
+            + backend.tetrahedron_rejected_material_interface_absent_partition_count,
+    )?;
     validate_recovered_count(
         "material_interface",
         backend.tetrahedron_recovered_material_interface_recovery_item_count,

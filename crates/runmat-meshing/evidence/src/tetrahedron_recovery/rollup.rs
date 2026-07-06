@@ -377,9 +377,15 @@ pub(crate) fn tetrahedron_recovery_evidence(
         rejected_material_interface_missing_boundary_ownership_count: mesh
             .backend
             .tetrahedron_rejected_material_interface_missing_boundary_ownership_count,
+        rejected_material_interface_missing_interior_ownership_count: mesh
+            .backend
+            .tetrahedron_rejected_material_interface_missing_interior_ownership_count,
         rejected_material_interface_ambiguous_boundary_ownership_count: mesh
             .backend
             .tetrahedron_rejected_material_interface_ambiguous_boundary_ownership_count,
+        rejected_material_interface_absent_partition_count: mesh
+            .backend
+            .tetrahedron_rejected_material_interface_absent_partition_count,
         attempted_absent_material_partition_recovery_item_count: mesh
             .backend
             .tetrahedron_attempted_absent_material_partition_recovery_item_count,

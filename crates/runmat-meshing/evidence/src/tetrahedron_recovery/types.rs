@@ -275,7 +275,11 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub rejected_material_interface_missing_boundary_ownership_count: usize,
     #[serde(default)]
+    pub rejected_material_interface_missing_interior_ownership_count: usize,
+    #[serde(default)]
     pub rejected_material_interface_ambiguous_boundary_ownership_count: usize,
+    #[serde(default)]
+    pub rejected_material_interface_absent_partition_count: usize,
     #[serde(default)]
     pub attempted_absent_material_partition_recovery_item_count: usize,
     #[serde(default)]

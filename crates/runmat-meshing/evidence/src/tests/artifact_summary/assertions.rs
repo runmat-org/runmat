@@ -483,8 +483,16 @@ pub(super) fn assert_tetrahedron_recovery_evidence(recovery: &MeshTetrahedronRec
         1
     );
     assert_eq!(
+        recovery.rejected_material_interface_missing_interior_ownership_count,
+        2
+    );
+    assert_eq!(
         recovery.rejected_material_interface_ambiguous_boundary_ownership_count,
         0
+    );
+    assert_eq!(
+        recovery.rejected_material_interface_absent_partition_count,
+        3
     );
     assert_eq!(
         recovery.attempted_absent_material_partition_recovery_item_count,
