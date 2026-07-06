@@ -1,0 +1,75 @@
+{
+  "title": "xscale",
+  "category": "plotting",
+  "keywords": [
+    "xscale",
+    "x axis scale",
+    "log scale",
+    "axes"
+  ],
+  "summary": "Query or set the X-axis scale for the current axes or a specified axes handle.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::xscale::tests"
+  },
+  "description": "`xscale` controls whether the X axis is displayed on a linear or logarithmic scale. It supports query, explicit scale assignment, command-form style string arguments, and explicit axes-target forms.",
+  "syntax": [
+    "scale = xscale()",
+    "xscale(scale)",
+    "xscale(ax, scale)"
+  ],
+  "arguments": [
+    {
+      "name": "scale",
+      "type": "'linear' | 'log'",
+      "description": "Scale value to apply to the X axis."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle. If omitted, the current axes are used."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Switch the X axis to logarithmic scale",
+      "input": "plot(1:1000, log10(1:1000));\nxscale('log');\nxscale()",
+      "output": "ans = 'log'"
+    },
+    {
+      "description": "Apply scale to a specific subplot",
+      "input": "ax = subplot(1, 2, 2);\nplot(ax, 1:100, rand(1, 100));\nxscale(ax, 'log');",
+      "output": "% Only the target axes receives logarithmic X scaling"
+    }
+  ],
+  "notes": [
+    "`xscale` shares state with the axes `XScale` property, so `set(gca, 'XScale', 'log')` and `xscale('log')` are equivalent.",
+    "Passing an explicit axes handle updates that axes without changing the current axes selection."
+  ],
+  "gpu_residency": "`xscale` reads and writes axes metadata. The renderer applies log mapping in its direct GPU coordinate path without gathering GPU-resident plot data.",
+  "related": [
+    {
+      "label": "yscale",
+      "url": "./yscale"
+    },
+    {
+      "label": "semilogx",
+      "url": "./semilogx"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/xscale.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/xscale.rs"
+    }
+  ]
+}

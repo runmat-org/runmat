@@ -26,6 +26,8 @@ pub(crate) mod type_resolvers;
 
 #[path = "ops/area.rs"]
 pub(crate) mod area;
+#[path = "ops/axis_scale.rs"]
+pub(crate) mod axis_scale;
 #[path = "ops/axis_tick_labels.rs"]
 pub(crate) mod axis_tick_labels;
 #[path = "ops/axis_ticks.rs"]
@@ -152,6 +154,8 @@ pub(crate) mod xlabel;
 pub(crate) mod xlim;
 #[path = "ops/xline.rs"]
 pub(crate) mod xline;
+#[path = "ops/xscale.rs"]
+pub(crate) mod xscale;
 #[path = "ops/xticklabels.rs"]
 pub(crate) mod xticklabels;
 #[path = "ops/xticks.rs"]
@@ -162,6 +166,8 @@ pub(crate) mod ylabel;
 pub(crate) mod ylim;
 #[path = "ops/yline.rs"]
 pub(crate) mod yline;
+#[path = "ops/yscale.rs"]
+pub(crate) mod yscale;
 #[path = "ops/yticklabels.rs"]
 pub(crate) mod yticklabels;
 #[path = "ops/yticks.rs"]

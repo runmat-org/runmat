@@ -1526,9 +1526,24 @@ pub fn set_log_modes_for_axes(
     x_log: bool,
     y_log: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
         state.figure.set_axes_log_modes(axes_index, x_log, y_log);
-    })?;
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
 }

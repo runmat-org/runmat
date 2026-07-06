@@ -6,6 +6,8 @@ struct Uniforms {
     viewport_min: vec2<f32>,
     viewport_max: vec2<f32>,
     viewport_px: vec2<f32>,
+    log_flags: vec2<u32>,
+    _pad: vec2<u32>,
 }
 
 struct PointStyleUniforms {
@@ -37,13 +39,35 @@ struct VSOut {
     @location(4) size_px: f32,
 }
 
+fn transform_axis(value: f32, is_log: u32) -> f32 {
+    if (is_log != 0u) {
+        if (value <= 0.0) {
+            return 1e30;
+        }
+        return log10(value);
+    }
+    return value;
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VSOut {
     var out: VSOut;
 
-    let data_range = uniforms.data_max - uniforms.data_min;
+    let data_min = vec2<f32>(
+        transform_axis(uniforms.data_min.x, uniforms.log_flags.x),
+        transform_axis(uniforms.data_min.y, uniforms.log_flags.y)
+    );
+    let data_max = vec2<f32>(
+        transform_axis(uniforms.data_max.x, uniforms.log_flags.x),
+        transform_axis(uniforms.data_max.y, uniforms.log_flags.y)
+    );
+    let position = vec2<f32>(
+        transform_axis(input.position.x, uniforms.log_flags.x),
+        transform_axis(input.position.y, uniforms.log_flags.y)
+    );
+    let data_range = data_max - data_min;
     let viewport_range = uniforms.viewport_max - uniforms.viewport_min;
-    let normalized = (input.position.xy - uniforms.data_min) / data_range;
+    let normalized = (position - data_min) / data_range;
     let center = uniforms.viewport_min + normalized * viewport_range;
 
     let size_px = max(2.0, input.normal.z);

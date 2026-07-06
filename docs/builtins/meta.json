@@ -103937,6 +103937,73 @@
       ]
     },
     {
+      "name": "xscale",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "scale = xscale()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis scale, 'linear' or 'log'."
+            }
+          ]
+        },
+        {
+          "label": "xscale(scale)",
+          "inputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Scale string: 'linear' or 'log'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xscale(ax, scale)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Scale string: 'linear' or 'log'."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XSCALE.INVALID_ARGUMENT",
+          "identifier": "RunMat:xscale:InvalidArgument",
+          "when": "Argument count, scale value, or axes handle is invalid.",
+          "message": "xscale: invalid argument"
+        },
+        {
+          "code": "RM.XSCALE.INTERNAL",
+          "identifier": "RunMat:xscale:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "xscale: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "xticklabels",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -104531,6 +104598,73 @@
           "identifier": "RunMat:yline:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yline: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "yscale",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "scale = yscale()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis scale, 'linear' or 'log'."
+            }
+          ]
+        },
+        {
+          "label": "yscale(scale)",
+          "inputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Scale string: 'linear' or 'log'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "yscale(ax, scale)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Scale string: 'linear' or 'log'."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.YSCALE.INVALID_ARGUMENT",
+          "identifier": "RunMat:yscale:InvalidArgument",
+          "when": "Argument count, scale value, or axes handle is invalid.",
+          "message": "yscale: invalid argument"
+        },
+        {
+          "code": "RM.YSCALE.INTERNAL",
+          "identifier": "RunMat:yscale:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "yscale: internal operation failed"
         }
       ]
     },

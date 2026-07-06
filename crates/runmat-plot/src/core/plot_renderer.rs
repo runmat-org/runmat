@@ -4,7 +4,7 @@
 //! interactive plotting windows and static file exports, ensuring consistent
 //! high-quality output across all use cases.
 
-use crate::core::renderer::Vertex;
+use crate::core::renderer::{DirectUniforms, Vertex};
 use crate::core::{
     BoundingBox, Camera, CameraViewPreset, ClipPolicy, DepthMode, Scene, WgpuRenderer,
 };
@@ -799,6 +799,13 @@ impl PlotRenderer {
             .collect()
     }
 
+    fn direct_log_flags_for_axes(&self, axes_index: usize) -> [u32; 2] {
+        [
+            u32::from(self.overlay_x_log_for_axes(axes_index)),
+            u32::from(self.overlay_y_log_for_axes(axes_index)),
+        ]
+    }
+
     fn refit_2d_cameras_to_scene_bounds(&mut self) {
         for idx in 0..self.axes_cameras.len() {
             if self.axes_has_3d_content(idx) {
@@ -977,8 +984,39 @@ impl PlotRenderer {
                 }
             }
         }
+        if let Some(meta) = self
+            .last_figure
+            .as_ref()
+            .and_then(|fig| fig.axes_metadata(axes_index))
+        {
+            if meta.x_log {
+                (x_min, x_max) = Self::positive_log_bounds(x_min, x_max);
+            }
+            if meta.y_log {
+                (y_min, y_max) = Self::positive_log_bounds(y_min, y_max);
+            }
+        }
 
         Some((x_min, x_max, y_min, y_max))
+    }
+
+    fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
+        if lo.is_finite() && hi.is_finite() && lo > 0.0 && hi > 0.0 && lo != hi {
+            return (lo, hi);
+        }
+        let upper = if hi.is_finite() && hi > 0.0 {
+            hi
+        } else if lo.is_finite() && lo > 0.0 {
+            lo
+        } else {
+            1.0
+        };
+        let lower = (upper / 1000.0).max(f64::MIN_POSITIVE);
+        if lower < upper {
+            (lower, upper)
+        } else {
+            (upper * 0.1, upper * 10.0)
+        }
     }
 
     fn apply_3d_display_limits_to_bounds(
@@ -1446,13 +1484,15 @@ impl PlotRenderer {
 
         // data_bounds passed in from caller: (x_min, y_min, x_max, y_max)
         let (x_min, y_min, x_max, y_max) = (0.0_f64, 0.0_f64, 1.0_f64, 1.0_f64);
-        self.wgpu_renderer.update_direct_uniforms(
-            [x_min as f32, y_min as f32],
-            [x_max as f32, y_max as f32],
-            [ndc_left, ndc_bottom],
-            [ndc_right, ndc_top],
-            [sw, sh],
-        );
+        self.wgpu_renderer
+            .update_direct_uniforms(DirectUniforms::new(
+                [x_min as f32, y_min as f32],
+                [x_max as f32, y_max as f32],
+                [ndc_left, ndc_bottom],
+                [ndc_right, ndc_top],
+                [sw, sh],
+                [0, 0],
+            ));
 
         // Continue with specific pipelines below (implementation omitted here)
         drop(render_pass);
@@ -1565,13 +1605,15 @@ impl PlotRenderer {
                 config.width,
                 config.height
             );
-            self.wgpu_renderer.update_direct_uniforms(
-                [x_min as f32, y_min as f32],
-                [x_max as f32, y_max as f32],
-                [-1.0, -1.0],
-                [1.0, 1.0],
-                [config.width as f32, config.height as f32],
-            );
+            self.wgpu_renderer
+                .update_direct_uniforms(DirectUniforms::new(
+                    [x_min as f32, y_min as f32],
+                    [x_max as f32, y_max as f32],
+                    [-1.0, -1.0],
+                    [1.0, 1.0],
+                    [config.width as f32, config.height as f32],
+                    [0, 0],
+                ));
         }
         for (render_data, _vb, _ib) in &render_items {
             if render_data.pipeline_type == crate::core::PipelineType::Textured {
@@ -2497,7 +2539,8 @@ impl PlotRenderer {
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
-        if is_2d && (show_major_grid || show_minor_grid) {
+        let log_flags = self.direct_log_flags_for_axes(axes_index);
+        if is_2d && log_flags == [0, 0] && (show_major_grid || show_minor_grid) {
             if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
                 if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
                     let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
@@ -2509,11 +2552,14 @@ impl PlotRenderer {
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
-                    [l as f32, b as f32],
-                    [r as f32, t as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [sw.max(1) as f32, sh.max(1) as f32],
+                    DirectUniforms::new(
+                        [l as f32, b as f32],
+                        [r as f32, t as f32],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [sw.max(1) as f32, sh.max(1) as f32],
+                        log_flags,
+                    ),
                 );
                 self.wgpu_renderer.ensure_direct_line_pipeline();
 
@@ -2606,11 +2652,14 @@ impl PlotRenderer {
             if let Some((l, r, b, t)) = bounds_opt {
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
-                    [l as f32, b as f32],
-                    [r as f32, t as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [sw.max(1) as f32, sh.max(1) as f32],
+                    DirectUniforms::new(
+                        [l as f32, b as f32],
+                        [r as f32, t as f32],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [sw.max(1) as f32, sh.max(1) as f32],
+                        log_flags,
+                    ),
                 );
             }
             self.wgpu_renderer.ensure_direct_triangle_pipeline();
@@ -3941,6 +3990,20 @@ mod tests {
         assert!(PlotRenderer::bounds_are_finite(display));
         assert_eq!(display.min.z, 0.0);
         assert_eq!(display.max.z, 0.0);
+    }
+
+    #[test]
+    fn positive_log_bounds_preserve_valid_positive_range() {
+        assert_eq!(PlotRenderer::positive_log_bounds(1.0, 100.0), (1.0, 100.0));
+    }
+
+    #[test]
+    fn positive_log_bounds_recover_from_nonpositive_lower_bound() {
+        let (lo, hi) = PlotRenderer::positive_log_bounds(-10.0, 100.0);
+
+        assert!(lo > 0.0);
+        assert_eq!(hi, 100.0);
+        assert!(lo < hi);
     }
 
     #[test]

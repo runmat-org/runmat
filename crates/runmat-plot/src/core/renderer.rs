@@ -124,6 +124,8 @@ pub struct DirectUniforms {
     pub viewport_min: [f32; 2], // NDC coordinates of viewport bottom-left
     pub viewport_max: [f32; 2], // NDC coordinates of viewport top-right
     pub viewport_px: [f32; 2],  // viewport size in pixels (width, height)
+    pub log_flags: [u32; 2],    // (x_log, y_log), 1 when axis uses log10 mapping
+    pub _pad: [u32; 2],
 }
 
 /// Style uniforms for direct point rendering (scatter markers)
@@ -202,6 +204,7 @@ impl DirectUniforms {
         viewport_min: [f32; 2],
         viewport_max: [f32; 2],
         viewport_px: [f32; 2],
+        log_flags: [u32; 2],
     ) -> Self {
         Self {
             data_min,
@@ -209,6 +212,8 @@ impl DirectUniforms {
             viewport_min,
             viewport_max,
             viewport_px,
+            log_flags,
+            _pad: [0, 0],
         }
     }
 }
@@ -394,6 +399,7 @@ impl WgpuRenderer {
                         [-1.0, -1.0],
                         [1.0, 1.0],
                         [1.0, 1.0],
+                        [0, 0],
                     )]),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
@@ -488,6 +494,7 @@ impl WgpuRenderer {
             [-1.0, -1.0], // viewport_min (full NDC)
             [1.0, 1.0],   // viewport_max (full NDC)
             [1.0, 1.0],   // viewport_px
+            [0, 0],       // log_flags
         );
         let direct_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Direct Uniform Buffer"),
@@ -1638,16 +1645,8 @@ impl WgpuRenderer {
     }
 
     /// Update transformation uniforms for direct viewport rendering
-    pub fn update_direct_uniforms(
-        &mut self,
-        data_min: [f32; 2],
-        data_max: [f32; 2],
-        viewport_min: [f32; 2],
-        viewport_max: [f32; 2],
-        viewport_px: [f32; 2],
-    ) {
-        self.direct_uniforms =
-            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
+    pub fn update_direct_uniforms(&mut self, uniforms: DirectUniforms) {
+        self.direct_uniforms = uniforms;
         self.queue.write_buffer(
             &self.direct_uniform_buffer,
             0,
@@ -1661,18 +1660,8 @@ impl WgpuRenderer {
         );
     }
 
-    pub fn update_direct_uniforms_for_axes(
-        &mut self,
-        axes_index: usize,
-        data_min: [f32; 2],
-        data_max: [f32; 2],
-        viewport_min: [f32; 2],
-        viewport_max: [f32; 2],
-        viewport_px: [f32; 2],
-    ) {
+    pub fn update_direct_uniforms_for_axes(&mut self, axes_index: usize, uniforms: DirectUniforms) {
         self.ensure_axes_uniform_capacity(axes_index + 1);
-        let uniforms =
-            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
         self.queue.write_buffer(
             &self.axes_direct_uniform_buffers[axes_index],
             0,

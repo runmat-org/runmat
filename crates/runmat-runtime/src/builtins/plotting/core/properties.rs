@@ -19,6 +19,7 @@ use super::style::{
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
+use crate::builtins::plotting::axis_scale::scale_mode_from_value;
 use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::builtins::stats::summary::binscatter;
@@ -1360,31 +1361,27 @@ fn apply_axes_property(
             Ok(())
         }
         "xscale" => {
-            let mode = value_as_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: XScale must be a string"))
-            })?;
+            let mode = scale_mode_from_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
             crate::builtins::plotting::state::set_log_modes_for_axes(
                 handle,
                 axes_index,
-                mode.trim().eq_ignore_ascii_case("log"),
+                mode.is_log(),
                 meta.y_log,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "yscale" => {
-            let mode = value_as_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: YScale must be a string"))
-            })?;
+            let mode = scale_mode_from_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
             crate::builtins::plotting::state::set_log_modes_for_axes(
                 handle,
                 axes_index,
                 meta.x_log,
-                mode.trim().eq_ignore_ascii_case("log"),
+                mode.is_log(),
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
