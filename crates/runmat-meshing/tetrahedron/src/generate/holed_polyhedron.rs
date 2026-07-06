@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_meshing_core::{
     contracts::{
         MeshingStage, ProtectedBoundaryComplex, StageEvidence, TopologyEntityId,
-        UNCLASSIFIED_MATERIAL_REGION_ID,
+        DEFAULT_MATERIAL_REGION_ID,
     },
     quality::predicate::{tetrahedron_scaled_jacobian, tetrahedron_signed_volume},
     quality::tolerance::MeshingTolerance,
@@ -14,7 +14,6 @@ use runmat_meshing_plc::validate::{
 
 use super::convex_polyhedron::bounds::plc_coordinates_and_bounds;
 use super::evidence::{record_input_plc_evidence, record_tetrahedron_material_evidence};
-use super::material::plc_material_region_id;
 use super::{
     Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronGenerationError, TetrahedronMesh,
     TetrahedronMeshNode,
@@ -41,21 +40,16 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
 
     let (coordinates_by_id, bounds) = plc_coordinates_and_bounds(plc)?;
     let tolerance = MeshingTolerance::from_bounds(bounds[0], bounds[1]);
-    let material_region_id = plc_material_region_id(plc);
-    if material_region_id == UNCLASSIFIED_MATERIAL_REGION_ID {
-        return generate_segment_star_holed_polyhedron_mesh(
-            plc,
-            surface_hole_loop_count,
-            &coordinates_by_id,
-            bounds,
-            tolerance.absolute_m,
-            &material_region_id,
-        );
-    }
     let grid = axis_aligned_rectangular_through_hole_grid(
         plc,
         &coordinates_by_id,
         bounds,
+        tolerance.absolute_m,
+    )?;
+    let material_regions_by_ring_region = holed_polyhedron_ring_material_regions(
+        plc,
+        &grid,
+        &coordinates_by_id,
         tolerance.absolute_m,
     )?;
     let mut nodes = plc
@@ -80,7 +74,7 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
         &grid,
         &grid_node_ids,
         &coordinates_by_mesh_node_id,
-        &material_region_id,
+        &material_regions_by_ring_region,
         &mut elements,
         &mut min_scaled_jacobian,
     )?;
@@ -164,6 +158,15 @@ impl RectangularThroughHoleGrid {
     fn contains_hole_cell(&self, x_index: usize, y_index: usize) -> bool {
         (self.x_hole_min_index..self.x_hole_max_index).contains(&x_index)
             && (self.y_hole_min_index..self.y_hole_max_index).contains(&y_index)
+    }
+
+    fn cell_center(&self, cell_index: [usize; 2]) -> [f64; 3] {
+        let [x_index, y_index] = cell_index;
+        [
+            0.5 * (self.x_values[x_index] + self.x_values[x_index + 1]),
+            0.5 * (self.y_values[y_index] + self.y_values[y_index + 1]),
+            0.5 * (self.source_z_values[0] + self.source_z_values[1]),
+        ]
     }
 }
 
@@ -273,7 +276,7 @@ fn append_ring_cell_tetrahedra(
     grid: &RectangularThroughHoleGrid,
     grid_node_ids: &[TopologyEntityId],
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    material_region_id: &str,
+    material_regions_by_ring_region: &BTreeMap<HoledRingRegionKey, String>,
     elements: &mut Vec<Tetrahedron4Element>,
     min_scaled_jacobian: &mut f64,
 ) -> Result<(), TetrahedronGenerationError> {
@@ -291,6 +294,12 @@ fn append_ring_cell_tetrahedra(
                 if grid.contains_hole_cell(x_index, y_index) {
                     continue;
                 }
+                let ring_region =
+                    holed_ring_region_key(grid.cell_center([x_index, y_index]), grid, 0.0)
+                        .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+                let material_region_id = material_regions_by_ring_region
+                    .get(&ring_region)
+                    .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
                 let cell_corner_ids = holed_polyhedron_cell_corner_ids(
                     grid,
                     grid_node_ids,
@@ -311,7 +320,7 @@ fn append_ring_cell_tetrahedra(
                             id: format!("holed_polyhedron_tetrahedron_{}", elements.len()),
                         },
                         node_ids,
-                        material_region_id: material_region_id.to_string(),
+                        material_region_id: material_region_id.clone(),
                     });
                 }
             }
@@ -322,6 +331,158 @@ fn append_ring_cell_tetrahedra(
     } else {
         Err(TetrahedronGenerationError::DegenerateHoledPolyhedronPlc)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum HoledRingRegionKey {
+    Bottom,
+    Right,
+    Top,
+    Left,
+}
+
+fn holed_polyhedron_ring_material_regions(
+    plc: &ProtectedBoundaryComplex,
+    grid: &RectangularThroughHoleGrid,
+    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
+    tolerance_m: f64,
+) -> Result<BTreeMap<HoledRingRegionKey, String>, TetrahedronGenerationError> {
+    let plc_material_region_ids = plc
+        .facets
+        .iter()
+        .flat_map(|facet| facet.material_interface_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if plc_material_region_ids.is_empty() {
+        return Ok(holed_polyhedron_uniform_ring_material_regions(
+            DEFAULT_MATERIAL_REGION_ID,
+        ));
+    }
+
+    let mut region_ids_by_ring_region = BTreeMap::<HoledRingRegionKey, BTreeSet<String>>::new();
+    for facet in &plc.facets {
+        if facet.material_interface_ids.len() != 1 {
+            return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
+        }
+        let points = facet.node_ids.clone().map(|node_id| {
+            coordinates_by_id.get(&node_id).copied().ok_or_else(|| {
+                TetrahedronGenerationError::MissingPlcNode {
+                    node_id: node_id.id.clone(),
+                }
+            })
+        });
+        let points = points.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let points = [points[0], points[1], points[2]];
+        let ring_region = holed_facet_ring_region_key(&points, grid, tolerance_m)
+            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        region_ids_by_ring_region
+            .entry(ring_region)
+            .or_default()
+            .insert(facet.material_interface_ids[0].clone());
+    }
+
+    let mut material_regions_by_ring_region = BTreeMap::<HoledRingRegionKey, String>::new();
+    for ring_region in holed_ring_region_keys() {
+        let region_ids = region_ids_by_ring_region
+            .remove(&ring_region)
+            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        let [material_region_id]: [String; 1] = region_ids
+            .into_iter()
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|_| TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        material_regions_by_ring_region.insert(ring_region, material_region_id);
+    }
+    Ok(material_regions_by_ring_region)
+}
+
+fn holed_polyhedron_uniform_ring_material_regions(
+    material_region_id: &str,
+) -> BTreeMap<HoledRingRegionKey, String> {
+    holed_ring_region_keys()
+        .into_iter()
+        .map(|ring_region| (ring_region, material_region_id.to_string()))
+        .collect()
+}
+
+fn holed_ring_region_keys() -> [HoledRingRegionKey; 4] {
+    [
+        HoledRingRegionKey::Bottom,
+        HoledRingRegionKey::Right,
+        HoledRingRegionKey::Top,
+        HoledRingRegionKey::Left,
+    ]
+}
+
+fn holed_ring_region_key(
+    point: [f64; 3],
+    grid: &RectangularThroughHoleGrid,
+    tolerance_m: f64,
+) -> Option<HoledRingRegionKey> {
+    let [_, x_inner_min, x_inner_max, _] = grid.source_x_values;
+    let [_, y_inner_min, y_inner_max, _] = grid.source_y_values;
+    let candidates = [
+        (HoledRingRegionKey::Bottom, y_inner_min - point[1]),
+        (HoledRingRegionKey::Right, point[0] - x_inner_max),
+        (HoledRingRegionKey::Top, point[1] - y_inner_max),
+        (HoledRingRegionKey::Left, x_inner_min - point[0]),
+    ];
+    candidates
+        .into_iter()
+        .filter(|(_, distance)| *distance > tolerance_m)
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(ring_region, _)| ring_region)
+}
+
+fn holed_facet_ring_region_key(
+    points: &[[f64; 3]; 3],
+    grid: &RectangularThroughHoleGrid,
+    tolerance_m: f64,
+) -> Option<HoledRingRegionKey> {
+    match holed_surface_key(points, grid, tolerance_m)? {
+        HoledSurfaceKey::OuterYMin | HoledSurfaceKey::HoleYMin => Some(HoledRingRegionKey::Bottom),
+        HoledSurfaceKey::OuterXMax | HoledSurfaceKey::HoleXMax => Some(HoledRingRegionKey::Right),
+        HoledSurfaceKey::OuterYMax | HoledSurfaceKey::HoleYMax => Some(HoledRingRegionKey::Top),
+        HoledSurfaceKey::OuterXMin | HoledSurfaceKey::HoleXMin => Some(HoledRingRegionKey::Left),
+        HoledSurfaceKey::Top | HoledSurfaceKey::Bottom => {
+            holed_ring_region_key(triangle_centroid(*points), grid, tolerance_m)
+        }
+    }
+}
+
+fn triangle_centroid(points: [[f64; 3]; 3]) -> [f64; 3] {
+    [
+        (points[0][0] + points[1][0] + points[2][0]) / 3.0,
+        (points[0][1] + points[1][1] + points[2][1]) / 3.0,
+        (points[0][2] + points[1][2] + points[2][2]) / 3.0,
+    ]
+}
+
+fn point_lies_in_triangle(point: [f64; 3], triangle: [[f64; 3]; 3], tolerance_m: f64) -> bool {
+    let v0 = vector_subtract(triangle[2], triangle[0]);
+    let v1 = vector_subtract(triangle[1], triangle[0]);
+    let v2 = vector_subtract(point, triangle[0]);
+    let dot00 = dot(v0, v0);
+    let dot01 = dot(v0, v1);
+    let dot02 = dot(v0, v2);
+    let dot11 = dot(v1, v1);
+    let dot12 = dot(v1, v2);
+    let denominator = dot00 * dot11 - dot01 * dot01;
+    if denominator.abs() <= f64::EPSILON {
+        return false;
+    }
+    let inverse_denominator = 1.0 / denominator;
+    let u = (dot11 * dot02 - dot01 * dot12) * inverse_denominator;
+    let v = (dot00 * dot12 - dot01 * dot02) * inverse_denominator;
+    let tolerance = tolerance_m.max(1.0e-12);
+    u >= -tolerance && v >= -tolerance && u + v <= 1.0 + tolerance
+}
+
+fn vector_subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
 }
 
 fn holed_polyhedron_cell_corner_ids(
@@ -362,8 +523,6 @@ fn holed_polyhedron_boundary_faces(
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
     tolerance_m: f64,
 ) -> Result<Vec<TetrahedronBoundaryFace>, TetrahedronGenerationError> {
-    let source_faces_by_surface =
-        source_faces_by_holed_surface(plc, grid, coordinates_by_id, tolerance_m)?;
     let mut face_counts = BTreeMap::<[TopologyEntityId; 3], ([TopologyEntityId; 3], usize)>::new();
     for element in elements {
         for face in tetrahedron_faces(element.node_ids.clone()) {
@@ -380,12 +539,13 @@ fn holed_polyhedron_boundary_faces(
             continue;
         }
         let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-        let surface_key = holed_surface_key(&points, grid, tolerance_m)
-            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-        let source_face_id = source_faces_by_surface
-            .get(&surface_key)
-            .cloned()
-            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+        let source_face_id = source_face_for_holed_boundary_face(
+            plc,
+            grid,
+            &points,
+            coordinates_by_id,
+            tolerance_m,
+        )?;
         boundary_faces.push(TetrahedronBoundaryFace {
             face_id: TopologyEntityId {
                 stage: MeshingStage::TetrahedronMesh,
@@ -418,30 +578,33 @@ enum HoledSurfaceKey {
     HoleXMin,
 }
 
-fn source_faces_by_holed_surface(
+fn source_face_for_holed_boundary_face(
     plc: &ProtectedBoundaryComplex,
     grid: &RectangularThroughHoleGrid,
+    points: &[[f64; 3]; 3],
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
     tolerance_m: f64,
-) -> Result<BTreeMap<HoledSurfaceKey, TopologyEntityId>, TetrahedronGenerationError> {
-    let mut source_faces_by_surface = BTreeMap::<HoledSurfaceKey, TopologyEntityId>::new();
+) -> Result<TopologyEntityId, TetrahedronGenerationError> {
+    let surface_key = holed_surface_key(points, grid, tolerance_m)
+        .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
+    let centroid = triangle_centroid(*points);
     for facet in &plc.facets {
-        let points = facet.node_ids.clone().map(|node_id| {
+        let facet_points = facet.node_ids.clone().map(|node_id| {
             coordinates_by_id.get(&node_id).copied().ok_or_else(|| {
                 TetrahedronGenerationError::MissingPlcNode {
                     node_id: node_id.id.clone(),
                 }
             })
         });
-        let points = points.into_iter().collect::<Result<Vec<_>, _>>()?;
-        let points = [points[0], points[1], points[2]];
-        let surface_key = holed_surface_key(&points, grid, tolerance_m)
-            .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)?;
-        source_faces_by_surface
-            .entry(surface_key)
-            .or_insert_with(|| facet.source_face_id.clone());
+        let facet_points = facet_points.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let facet_points = [facet_points[0], facet_points[1], facet_points[2]];
+        if holed_surface_key(&facet_points, grid, tolerance_m) == Some(surface_key)
+            && point_lies_in_triangle(centroid, facet_points, tolerance_m)
+        {
+            return Ok(facet.source_face_id.clone());
+        }
     }
-    Ok(source_faces_by_surface)
+    Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)
 }
 
 fn holed_surface_key(
@@ -510,375 +673,6 @@ fn tetrahedron_faces(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 3];
 fn sorted_face(mut node_ids: [TopologyEntityId; 3]) -> [TopologyEntityId; 3] {
     node_ids.sort();
     node_ids
-}
-
-fn generate_segment_star_holed_polyhedron_mesh(
-    plc: &ProtectedBoundaryComplex,
-    surface_hole_loop_count: usize,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    bounds: [[f64; 3]; 2],
-    tolerance_m: f64,
-    material_region_id: &str,
-) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
-    let segments = axis_aligned_rectangular_through_hole_segments(
-        plc,
-        coordinates_by_id,
-        bounds,
-        tolerance_m,
-    )?;
-    let mut nodes = plc
-        .nodes
-        .iter()
-        .map(|node| TetrahedronMeshNode {
-            node_id: node.node_id.clone(),
-            coordinates_m: node.coordinates_m,
-        })
-        .collect::<Vec<_>>();
-    let mut coordinates_by_mesh_node_id = coordinates_by_id.clone();
-    let internal_faces_by_segment = internal_segment_faces(&segments);
-
-    let mut elements = Vec::<Tetrahedron4Element>::new();
-    let mut min_scaled_jacobian = f64::INFINITY;
-    for (segment_index, segment) in segments.iter().enumerate() {
-        let segment_faces = segment_faces(plc, segment, &internal_faces_by_segment[segment_index]);
-        let support_node =
-            segment_support_node(segment, coordinates_by_id, &segment_faces, segment_index)?;
-        coordinates_by_mesh_node_id
-            .insert(support_node.node_id.clone(), support_node.coordinates_m);
-        nodes.push(support_node.clone());
-        append_segment_star_tetrahedra(
-            &segment_faces,
-            &support_node,
-            &coordinates_by_mesh_node_id,
-            material_region_id,
-            &mut elements,
-            &mut min_scaled_jacobian,
-        )?;
-    }
-    let boundary_faces = plc
-        .facets
-        .iter()
-        .map(|facet| TetrahedronBoundaryFace {
-            face_id: facet.facet_id.clone(),
-            node_ids: facet.node_ids.clone(),
-            source_face_id: facet.source_face_id.clone(),
-            source_edge_ids: super::source_edge_ids_for_face_edges(
-                &plc.protected_edges,
-                facet.node_ids.clone(),
-            ),
-        })
-        .collect::<Vec<_>>();
-
-    let mut evidence = StageEvidence::complete(MeshingStage::TetrahedronMesh);
-    evidence
-        .entity_counts
-        .insert("nodes".to_string(), nodes.len());
-    evidence
-        .entity_counts
-        .insert("tetrahedron4_elements".to_string(), elements.len());
-    evidence
-        .entity_counts
-        .insert("boundary_faces".to_string(), boundary_faces.len());
-    evidence
-        .entity_counts
-        .insert("plc_boundary_nodes".to_string(), plc.nodes.len());
-    evidence.entity_counts.insert(
-        "holed_polyhedron_surface_hole_loops".to_string(),
-        surface_hole_loop_count,
-    );
-    evidence
-        .entity_counts
-        .insert("holed_polyhedron_segments".to_string(), segments.len());
-    evidence
-        .entity_counts
-        .insert("holed_polyhedron_support_nodes".to_string(), segments.len());
-    record_input_plc_evidence(plc, &mut evidence);
-    record_tetrahedron_material_evidence(&elements, &mut evidence);
-    evidence.min_scaled_jacobian = Some(min_scaled_jacobian);
-
-    Ok(TetrahedronMesh {
-        mesh_id: "holed_polyhedron_tetrahedron_mesh".to_string(),
-        tetrahedron_generation_family: "holed_polyhedron".to_string(),
-        nodes,
-        elements,
-        boundary_faces,
-        recovery_complete: false,
-        quality_optimized: false,
-        evidence,
-    })
-}
-
-#[derive(Debug, Clone)]
-struct ThroughHoleSegment {
-    local_node_ids: [TopologyEntityId; 8],
-}
-
-fn axis_aligned_rectangular_through_hole_segments(
-    plc: &ProtectedBoundaryComplex,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    bounds: [[f64; 3]; 2],
-    tolerance_m: f64,
-) -> Result<[ThroughHoleSegment; 4], TetrahedronGenerationError> {
-    let grid =
-        axis_aligned_rectangular_through_hole_grid(plc, coordinates_by_id, bounds, tolerance_m)?;
-    let [x_min, x_inner_min, x_inner_max, x_max] = grid.source_x_values;
-    let [y_min, y_inner_min, y_inner_max, y_max] = grid.source_y_values;
-    let [z_min, z_max] = grid.source_z_values;
-    let node_at = |x, y, z| node_at(coordinates_by_id, [x, y, z], tolerance_m);
-    Ok([
-        ThroughHoleSegment {
-            local_node_ids: [
-                node_at(x_min, y_min, z_min)?,
-                node_at(x_max, y_min, z_min)?,
-                node_at(x_inner_max, y_inner_min, z_min)?,
-                node_at(x_inner_min, y_inner_min, z_min)?,
-                node_at(x_min, y_min, z_max)?,
-                node_at(x_max, y_min, z_max)?,
-                node_at(x_inner_max, y_inner_min, z_max)?,
-                node_at(x_inner_min, y_inner_min, z_max)?,
-            ],
-        },
-        ThroughHoleSegment {
-            local_node_ids: [
-                node_at(x_max, y_min, z_min)?,
-                node_at(x_max, y_max, z_min)?,
-                node_at(x_inner_max, y_inner_max, z_min)?,
-                node_at(x_inner_max, y_inner_min, z_min)?,
-                node_at(x_max, y_min, z_max)?,
-                node_at(x_max, y_max, z_max)?,
-                node_at(x_inner_max, y_inner_max, z_max)?,
-                node_at(x_inner_max, y_inner_min, z_max)?,
-            ],
-        },
-        ThroughHoleSegment {
-            local_node_ids: [
-                node_at(x_max, y_max, z_min)?,
-                node_at(x_min, y_max, z_min)?,
-                node_at(x_inner_min, y_inner_max, z_min)?,
-                node_at(x_inner_max, y_inner_max, z_min)?,
-                node_at(x_max, y_max, z_max)?,
-                node_at(x_min, y_max, z_max)?,
-                node_at(x_inner_min, y_inner_max, z_max)?,
-                node_at(x_inner_max, y_inner_max, z_max)?,
-            ],
-        },
-        ThroughHoleSegment {
-            local_node_ids: [
-                node_at(x_min, y_max, z_min)?,
-                node_at(x_min, y_min, z_min)?,
-                node_at(x_inner_min, y_inner_min, z_min)?,
-                node_at(x_inner_min, y_inner_max, z_min)?,
-                node_at(x_min, y_max, z_max)?,
-                node_at(x_min, y_min, z_max)?,
-                node_at(x_inner_min, y_inner_min, z_max)?,
-                node_at(x_inner_min, y_inner_max, z_max)?,
-            ],
-        },
-    ])
-}
-
-fn append_segment_star_tetrahedra(
-    faces: &[[TopologyEntityId; 3]],
-    support_node: &TetrahedronMeshNode,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    material_region_id: &str,
-    elements: &mut Vec<Tetrahedron4Element>,
-    min_scaled_jacobian: &mut f64,
-) -> Result<(), TetrahedronGenerationError> {
-    for face in faces {
-        let scaled_jacobian = append_positive_tetrahedron(
-            face,
-            support_node,
-            coordinates_by_id,
-            material_region_id,
-            elements,
-        )?;
-        *min_scaled_jacobian = min_scaled_jacobian.min(scaled_jacobian);
-    }
-    Ok(())
-}
-
-fn segment_faces(
-    plc: &ProtectedBoundaryComplex,
-    segment: &ThroughHoleSegment,
-    internal_faces: &[[TopologyEntityId; 3]],
-) -> Vec<[TopologyEntityId; 3]> {
-    let segment_nodes = segment
-        .local_node_ids
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut boundary_faces = plc
-        .facets
-        .iter()
-        .filter_map(|facet| {
-            facet
-                .node_ids
-                .iter()
-                .all(|node_id| segment_nodes.contains(node_id))
-                .then_some(facet.node_ids.clone())
-        })
-        .collect::<Vec<_>>();
-    boundary_faces.extend(internal_faces.iter().cloned());
-    boundary_faces
-}
-
-fn append_positive_tetrahedron(
-    face: &[TopologyEntityId; 3],
-    support_node: &TetrahedronMeshNode,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    material_region_id: &str,
-    elements: &mut Vec<Tetrahedron4Element>,
-) -> Result<f64, TetrahedronGenerationError> {
-    let mut node_ids = [
-        face[0].clone(),
-        face[1].clone(),
-        face[2].clone(),
-        support_node.node_id.clone(),
-    ];
-    let mut points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-    if tetrahedron_signed_volume(points).abs() <= f64::EPSILON {
-        return Err(TetrahedronGenerationError::DegenerateHoledPolyhedronPlc);
-    }
-    if tetrahedron_signed_volume(points) < 0.0 {
-        node_ids.swap(1, 2);
-        points.swap(1, 2);
-    }
-    let scaled_jacobian = tetrahedron_scaled_jacobian(points);
-    elements.push(Tetrahedron4Element {
-        element_id: TopologyEntityId {
-            stage: MeshingStage::TetrahedronMesh,
-            id: format!("holed_polyhedron_tetrahedron_{}", elements.len()),
-        },
-        node_ids,
-        material_region_id: material_region_id.to_string(),
-    });
-    Ok(scaled_jacobian)
-}
-
-fn segment_support_node(
-    segment: &ThroughHoleSegment,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-    candidate_faces: &[[TopologyEntityId; 3]],
-    segment_index: usize,
-) -> Result<TetrahedronMeshNode, TetrahedronGenerationError> {
-    let mut best_candidate = None::<([f64; 3], f64)>;
-    for candidate in segment_support_candidates(segment, coordinates_by_id) {
-        let candidate_score =
-            segment_support_candidate_score(&candidate, candidate_faces, coordinates_by_id);
-        if best_candidate
-            .as_ref()
-            .is_none_or(|(_, best_score)| candidate_score > *best_score)
-        {
-            best_candidate = Some((candidate, candidate_score));
-        }
-    }
-    let coordinates_m = best_candidate
-        .filter(|(_, score)| *score > 0.0)
-        .map(|(candidate, _)| candidate)
-        .ok_or(TetrahedronGenerationError::DegenerateHoledPolyhedronPlc)?;
-    Ok(TetrahedronMeshNode {
-        node_id: TopologyEntityId {
-            stage: MeshingStage::TetrahedronMesh,
-            id: format!("holed_polyhedron_segment_support_{segment_index}"),
-        },
-        coordinates_m,
-    })
-}
-
-fn segment_support_candidates(
-    segment: &ThroughHoleSegment,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-) -> Vec<[f64; 3]> {
-    let bottom_quad =
-        [0_usize, 1, 2, 3].map(|index| coordinates_by_id[&segment.local_node_ids[index]]);
-    let z_mid = 0.5
-        * (coordinates_by_id[&segment.local_node_ids[0]][2]
-            + coordinates_by_id[&segment.local_node_ids[4]][2]);
-    let mut candidates = vec![segment_centroid(segment, coordinates_by_id)];
-    for u_index in 2..=18 {
-        for v_index in 2..=18 {
-            let u = u_index as f64 / 20.0;
-            let v = v_index as f64 / 20.0;
-            let mut candidate = bilinear_quad_point(bottom_quad, u, v);
-            candidate[2] = z_mid;
-            candidates.push(candidate);
-        }
-    }
-    candidates
-}
-
-fn segment_centroid(
-    segment: &ThroughHoleSegment,
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-) -> [f64; 3] {
-    let mut centroid = [0.0_f64; 3];
-    for node_id in &segment.local_node_ids {
-        let point = coordinates_by_id[node_id];
-        centroid[0] += point[0];
-        centroid[1] += point[1];
-        centroid[2] += point[2];
-    }
-    for coordinate in &mut centroid {
-        *coordinate /= segment.local_node_ids.len() as f64;
-    }
-    centroid
-}
-
-fn bilinear_quad_point(quad: [[f64; 3]; 4], u: f64, v: f64) -> [f64; 3] {
-    let weights = [(1.0 - u) * (1.0 - v), u * (1.0 - v), u * v, (1.0 - u) * v];
-    let mut point = [0.0_f64; 3];
-    for (index, weight) in weights.into_iter().enumerate() {
-        point[0] += weight * quad[index][0];
-        point[1] += weight * quad[index][1];
-        point[2] += weight * quad[index][2];
-    }
-    point
-}
-
-fn segment_support_candidate_score(
-    candidate: &[f64; 3],
-    faces: &[[TopologyEntityId; 3]],
-    coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
-) -> f64 {
-    faces
-        .iter()
-        .map(|face| {
-            let points = [
-                coordinates_by_id[&face[0]],
-                coordinates_by_id[&face[1]],
-                coordinates_by_id[&face[2]],
-                *candidate,
-            ];
-            if tetrahedron_signed_volume(points).abs() <= f64::EPSILON {
-                0.0
-            } else {
-                tetrahedron_scaled_jacobian(points)
-            }
-        })
-        .fold(f64::INFINITY, f64::min)
-}
-
-fn internal_segment_faces(segments: &[ThroughHoleSegment; 4]) -> [Vec<[TopologyEntityId; 3]>; 4] {
-    let mut faces = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    for (left_segment, right_segment, quad) in [
-        (0_usize, 1_usize, shared_quad(&segments[0], [5, 1, 2, 6])),
-        (1, 2, shared_quad(&segments[1], [5, 1, 2, 6])),
-        (2, 3, shared_quad(&segments[2], [5, 1, 2, 6])),
-        (3, 0, shared_quad(&segments[3], [5, 1, 2, 6])),
-    ] {
-        let triangles = [
-            [quad[0].clone(), quad[1].clone(), quad[2].clone()],
-            [quad[0].clone(), quad[2].clone(), quad[3].clone()],
-        ];
-        faces[left_segment].extend(triangles.clone());
-        faces[right_segment].extend(triangles);
-    }
-    faces
-}
-
-fn shared_quad(segment: &ThroughHoleSegment, indices: [usize; 4]) -> [TopologyEntityId; 4] {
-    indices.map(|index| segment.local_node_ids[index].clone())
 }
 
 fn unique_axis_values(plc: &ProtectedBoundaryComplex, axis: usize, tolerance_m: f64) -> Vec<f64> {

@@ -777,6 +777,11 @@ fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
         mesh.backend.tetrahedron_generation_family,
         "holed_polyhedron"
     );
+    assert_eq!(mesh.backend.tetrahedron_material_region_count, 2);
+    assert_eq!(
+        mesh.backend.tetrahedron_unclassified_material_element_count,
+        0
+    );
     assert!(
         mesh.backend
             .tetrahedron_recovered_material_interface_recovery_item_count

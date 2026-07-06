@@ -886,6 +886,32 @@ fn generates_holed_polyhedron_mesh_from_through_hole_plc() {
 }
 
 #[test]
+fn holed_polyhedron_generation_assigns_split_ring_material_regions() {
+    let plc = split_ring_material_through_hole_plate_plc();
+    let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("split-ring through-hole PLC should generate region-owned Tetrahedra");
+
+    let material_region_ids = mesh
+        .elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["unclassified_tetrahedron_material_elements"],
+        0
+    );
+    assert_eq!(
+        mesh.evidence.entity_counts["tetrahedron_material_regions"],
+        2
+    );
+}
+
+#[test]
 fn holed_polyhedron_generation_uses_shape_when_hole_loop_evidence_is_absent() {
     let mut plc = through_hole_plate_plc();
     plc.evidence
@@ -1131,6 +1157,21 @@ fn with_split_material_ids(mut plc: ProtectedBoundaryComplex) -> ProtectedBounda
             "region_a".to_string()
         } else {
             "region_b".to_string()
+        }];
+    }
+    plc
+}
+
+fn split_ring_material_through_hole_plate_plc() -> ProtectedBoundaryComplex {
+    let mut plc = through_hole_plate_plc();
+    for (facet_index, facet) in plc.facets.iter_mut().enumerate() {
+        facet.material_interface_ids = vec![if matches!(
+            facet_index,
+            0..=3 | 8..=11 | 16..=19 | 24..=27
+        ) {
+            "region_base".to_string()
+        } else {
+            "region_cap".to_string()
         }];
     }
     plc
