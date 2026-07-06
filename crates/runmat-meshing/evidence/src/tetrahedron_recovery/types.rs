@@ -139,9 +139,17 @@ pub struct MeshTetrahedronRecoveryEvidence {
     #[serde(default)]
     pub accepted_cad_curve_source_edge_split_refill_candidate_item_count: usize,
     #[serde(default)]
+    pub post_repair_attempted_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub post_repair_attempted_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
     pub applied_source_edge_split_refill_item_count: usize,
     #[serde(default)]
     pub applied_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub post_repair_rejected_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub post_repair_rejected_cad_curve_source_edge_split_refill_item_count: usize,
     #[serde(default)]
     pub rejected_source_edge_split_refill_item_count: usize,
     #[serde(default)]

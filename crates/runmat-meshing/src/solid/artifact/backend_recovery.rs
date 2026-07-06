@@ -108,6 +108,16 @@ pub(super) fn recovery_summary(
                 recovery_queue,
                 "accepted_cad_curve_source_edge_split_refill_candidate_items",
             ),
+        tetrahedron_post_repair_attempted_source_edge_split_refill_item_count:
+            recovery_entity_count(
+                recovery_queue,
+                "post_repair_attempted_source_edge_split_refill_items",
+            ),
+        tetrahedron_post_repair_attempted_cad_curve_source_edge_split_refill_item_count:
+            recovery_entity_count(
+                recovery_queue,
+                "post_repair_attempted_cad_curve_source_edge_split_refill_items",
+            ),
         tetrahedron_applied_source_edge_split_refill_item_count: recovery_entity_count(
             recovery_queue,
             "applied_source_edge_split_refill_items",
@@ -125,6 +135,16 @@ pub(super) fn recovery_summary(
             recovery_entity_count(
                 recovery_queue,
                 "rejected_cad_curve_source_edge_split_refill_items",
+            ),
+        tetrahedron_post_repair_rejected_source_edge_split_refill_item_count:
+            recovery_entity_count(
+                recovery_queue,
+                "post_repair_rejected_source_edge_split_refill_items",
+            ),
+        tetrahedron_post_repair_rejected_cad_curve_source_edge_split_refill_item_count:
+            recovery_entity_count(
+                recovery_queue,
+                "post_repair_rejected_cad_curve_source_edge_split_refill_items",
             ),
         tetrahedron_absent_edge_source_edge_recovery_item_count: recovery_entity_count(
             recovery_queue,

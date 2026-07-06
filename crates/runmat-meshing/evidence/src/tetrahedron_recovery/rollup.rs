@@ -173,12 +173,24 @@ pub(crate) fn tetrahedron_recovery_evidence(
         accepted_cad_curve_source_edge_split_refill_candidate_item_count: mesh
             .backend
             .tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count,
+        post_repair_attempted_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_post_repair_attempted_source_edge_split_refill_item_count,
+        post_repair_attempted_cad_curve_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_post_repair_attempted_cad_curve_source_edge_split_refill_item_count,
         applied_source_edge_split_refill_item_count: mesh
             .backend
             .tetrahedron_applied_source_edge_split_refill_item_count,
         applied_cad_curve_source_edge_split_refill_item_count: mesh
             .backend
             .tetrahedron_applied_cad_curve_source_edge_split_refill_item_count,
+        post_repair_rejected_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_post_repair_rejected_source_edge_split_refill_item_count,
+        post_repair_rejected_cad_curve_source_edge_split_refill_item_count: mesh
+            .backend
+            .tetrahedron_post_repair_rejected_cad_curve_source_edge_split_refill_item_count,
         rejected_source_edge_split_refill_item_count: mesh
             .backend
             .tetrahedron_rejected_source_edge_split_refill_item_count,

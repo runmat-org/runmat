@@ -248,9 +248,17 @@ pub struct MeshBackendSummary {
     #[serde(default)]
     pub tetrahedron_accepted_cad_curve_source_edge_split_refill_candidate_item_count: usize,
     #[serde(default)]
+    pub tetrahedron_post_repair_attempted_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_post_repair_attempted_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
     pub tetrahedron_applied_source_edge_split_refill_item_count: usize,
     #[serde(default)]
     pub tetrahedron_applied_cad_curve_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_post_repair_rejected_source_edge_split_refill_item_count: usize,
+    #[serde(default)]
+    pub tetrahedron_post_repair_rejected_cad_curve_source_edge_split_refill_item_count: usize,
     #[serde(default)]
     pub tetrahedron_rejected_source_edge_split_refill_item_count: usize,
     #[serde(default)]
