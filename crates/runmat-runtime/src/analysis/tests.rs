@@ -74,7 +74,9 @@ use runmat_geometry_core::{
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
-use runmat_meshing_core::fixtures::split_material_through_hole_plate_geometry;
+use runmat_meshing_core::fixtures::{
+    split_material_through_hole_plate_geometry, through_hole_plate_geometry,
+};
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
@@ -673,6 +675,49 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         ],
         diagnostics: Vec::new(),
     }
+}
+
+fn split_material_through_hole_study_geometry() -> GeometryAsset {
+    let mut geometry = split_material_through_hole_plate_geometry();
+    add_through_hole_study_boundary_regions(&mut geometry);
+    geometry
+}
+
+fn through_hole_study_geometry() -> GeometryAsset {
+    let mut geometry = through_hole_plate_geometry();
+    add_through_hole_study_boundary_regions(&mut geometry);
+    geometry
+}
+
+fn add_through_hole_study_boundary_regions(geometry: &mut GeometryAsset) {
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(8, 4)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 4)],
+        ),
+    ]);
 }
 
 fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
@@ -2578,6 +2623,97 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         artifact["evidence"]["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
         Some(1)
     );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_run_consumes_supplied_generated_solid_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("author-study-generated-solid-artifact");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let artifact_root = root.join("supplied_mesh");
+    let (mesh_path, evidence_path, summary) =
+        write_generated_through_hole_analysis_mesh_artifacts(&artifact_root);
+    let geometry = through_hole_study_geometry();
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_generated_solid_static".to_string(),
+            model_id: None,
+            geometry,
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            analysis_mesh_evidence_artifact_path: Some(evidence_path.display().to_string()),
+            material_region_id: Some("body".to_string()),
+            fixed_boundary_region_id: Some("root".to_string()),
+            load_boundary_region_id: Some("tip".to_string()),
+            force_n: Some([0.0, -250.0, 25.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-generated-solid".to_string()), None),
+    )
+    .expect("authoring should produce a study from generated solid mesh evidence");
+    assert_eq!(
+        authored.data.study.analysis_mesh_artifact_path.as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .analysis_mesh_artifact_path
+            .as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+
+    let run = analysis_run_study_op(&authored.data.study, OperationContext::new(None, None))
+        .expect("authored generated solid study should run from supplied artifact");
+    assert_eq!(
+        run.data.analysis_mesh_artifact_path.as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+    assert_eq!(
+        run.data.analysis_mesh_evidence_artifact_path.as_deref(),
+        Some(
+            evidence_path
+                .to_str()
+                .expect("evidence path should be utf-8")
+        )
+    );
+    assert_eq!(run.data.refined_analysis_mesh_artifact_path, None);
+    assert_eq!(
+        run.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+
+    let mesh_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&mesh_path).expect("read supplied analysis mesh artifact"),
+    )
+    .expect("parse supplied analysis mesh artifact");
+    let volume_element_count = mesh_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("supplied volume elements")
+        .len();
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("authored generated solid run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![volume_element_count]);
+    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
+            && diagnostic
+                .message
+                .contains(mesh_path.to_str().expect("mesh path should be utf-8"))
+    }));
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -5262,6 +5398,60 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
     )
     .expect("write analysis mesh artifact");
     (root, mesh_path)
+}
+
+fn write_generated_through_hole_analysis_mesh_artifacts(
+    root: &Path,
+) -> (
+    PathBuf,
+    PathBuf,
+    runmat_meshing_evidence::MeshAuthoringSummary,
+) {
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root).expect("create generated analysis mesh artifact root");
+    let geometry = through_hole_study_geometry();
+    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
+    options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    options.refinement.max_iterations = 0;
+    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
+        .expect("through-hole fixture should generate an analysis mesh");
+    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["body".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options.clone())
+        .expect("generated through-hole mesh should validate");
+    let evidence =
+        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_validation_options": validation_options.clone(),
+            "mesh_authoring_summary": summary,
+            "mesh_evidence": evidence,
+        }))
+        .expect("encode generated mesh evidence artifact"),
+    )
+    .expect("write generated mesh evidence artifact");
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh_options": options,
+            "mesh_validation_options": validation_options,
+            "mesh": mesh,
+        }))
+        .expect("encode generated analysis mesh artifact"),
+    )
+    .expect("write generated analysis mesh artifact");
+    (mesh_path, evidence_path, summary)
 }
 
 #[test]
@@ -12420,35 +12610,7 @@ fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topolog
     let root = temp_artifact_root("figures-solid-through-hole");
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
-    let mut geometry = split_material_through_hole_plate_geometry();
-    geometry.regions.extend([
-        Region {
-            region_id: "root".to_string(),
-            name: "root".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "tip".to_string(),
-            name: "tip".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ]);
-    geometry.region_entity_mappings.extend([
-        RegionEntityMapping::new(
-            "root",
-            "through_hole_plate_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(8, 4)],
-        ),
-        RegionEntityMapping::new(
-            "tip",
-            "through_hole_plate_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(0, 4)],
-        ),
-    ]);
+    let geometry = split_material_through_hole_study_geometry();
     let mut model = sample_solid_model();
     model.geometry_id = geometry.geometry_id.clone();
     model.geometry_revision = geometry.revision;
