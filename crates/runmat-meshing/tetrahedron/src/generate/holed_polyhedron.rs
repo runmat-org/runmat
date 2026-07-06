@@ -21,8 +21,6 @@ use super::{
 };
 use crate::protected_edges::source_edge_ids_for_boundary_face_edges;
 
-const HOLED_POLYHEDRON_RING_CELL_COUNT: usize = 8;
-
 pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
     plc: &ProtectedBoundaryComplex,
 ) -> Result<TetrahedronMesh, TetrahedronGenerationError> {
@@ -77,6 +75,7 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
     let mut elements = Vec::<Tetrahedron4Element>::new();
     let mut min_scaled_jacobian = f64::INFINITY;
     append_ring_cell_tetrahedra(
+        &grid,
         &grid_node_ids,
         &coordinates_by_mesh_node_id,
         &material_region_id,
@@ -110,14 +109,14 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
     );
     evidence.entity_counts.insert(
         "holed_polyhedron_segments".to_string(),
-        HOLED_POLYHEDRON_RING_CELL_COUNT,
+        grid.ring_cell_count(),
     );
     evidence
         .entity_counts
         .insert("holed_polyhedron_support_nodes".to_string(), 0);
     evidence.entity_counts.insert(
         "holed_polyhedron_ring_cells".to_string(),
-        HOLED_POLYHEDRON_RING_CELL_COUNT,
+        grid.ring_cell_count(),
     );
     record_input_plc_evidence(plc, &mut evidence);
     record_tetrahedron_material_evidence(&elements, &mut evidence);
@@ -137,9 +136,33 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
 
 #[derive(Debug, Clone)]
 struct RectangularThroughHoleGrid {
-    x_values: [f64; 4],
-    y_values: [f64; 4],
-    z_values: [f64; 2],
+    source_x_values: [f64; 4],
+    source_y_values: [f64; 4],
+    source_z_values: [f64; 2],
+    x_values: Vec<f64>,
+    y_values: Vec<f64>,
+    z_values: Vec<f64>,
+    x_hole_min_index: usize,
+    x_hole_max_index: usize,
+    y_hole_min_index: usize,
+    y_hole_max_index: usize,
+}
+
+impl RectangularThroughHoleGrid {
+    fn ring_cell_count(&self) -> usize {
+        let x_cell_count = self.x_values.len().saturating_sub(1);
+        let y_cell_count = self.y_values.len().saturating_sub(1);
+        let z_cell_count = self.z_values.len().saturating_sub(1);
+        let hole_cell_count = (self.x_hole_max_index - self.x_hole_min_index)
+            * (self.y_hole_max_index - self.y_hole_min_index)
+            * z_cell_count;
+        x_cell_count * y_cell_count * z_cell_count - hole_cell_count
+    }
+
+    fn contains_hole_cell(&self, x_index: usize, y_index: usize) -> bool {
+        (self.x_hole_min_index..self.x_hole_max_index).contains(&x_index)
+            && (self.y_hole_min_index..self.y_hole_max_index).contains(&y_index)
+    }
 }
 
 fn axis_aligned_rectangular_through_hole_grid(
@@ -187,10 +210,29 @@ fn axis_aligned_rectangular_through_hole_grid(
     ] {
         node_at(coordinates[0], coordinates[1], coordinates[2])?;
     }
+    let source_x_values = [x_values[0], x_values[1], x_values[2], x_values[3]];
+    let source_y_values = [y_values[0], y_values[1], y_values[2], y_values[3]];
+    let source_z_values = [z_values[0], z_values[1]];
+    let refinement_length =
+        smallest_axis_interval(&[&x_values, &y_values, &z_values], tolerance_m)?;
+    let x_values = refined_axis_values(&x_values, refinement_length, tolerance_m);
+    let y_values = refined_axis_values(&y_values, refinement_length, tolerance_m);
+    let z_values = refined_axis_values(&z_values, refinement_length, tolerance_m);
+    let x_hole_min_index = refined_axis_index(&x_values, source_x_values[1], tolerance_m)?;
+    let x_hole_max_index = refined_axis_index(&x_values, source_x_values[2], tolerance_m)?;
+    let y_hole_min_index = refined_axis_index(&y_values, source_y_values[1], tolerance_m)?;
+    let y_hole_max_index = refined_axis_index(&y_values, source_y_values[2], tolerance_m)?;
     Ok(RectangularThroughHoleGrid {
-        x_values: [x_values[0], x_values[1], x_values[2], x_values[3]],
-        y_values: [y_values[0], y_values[1], y_values[2], y_values[3]],
-        z_values: [z_values[0], z_values[1]],
+        source_x_values,
+        source_y_values,
+        source_z_values,
+        x_values,
+        y_values,
+        z_values,
+        x_hole_min_index,
+        x_hole_max_index,
+        y_hole_min_index,
+        y_hole_max_index,
     })
 }
 
@@ -201,9 +243,9 @@ fn holed_polyhedron_grid_nodes(
     tolerance_m: f64,
 ) -> Result<Vec<TopologyEntityId>, TetrahedronGenerationError> {
     let mut grid_node_ids = Vec::<TopologyEntityId>::with_capacity(32);
-    for z in grid.z_values {
-        for y in grid.y_values {
-            for x in grid.x_values {
+    for z in grid.z_values.iter().copied() {
+        for y in grid.y_values.iter().copied() {
+            for x in grid.x_values.iter().copied() {
                 let coordinates = [x, y, z];
                 if let Ok(node_id) = node_at(coordinates_by_id, coordinates, tolerance_m) {
                     grid_node_ids.push(node_id);
@@ -226,6 +268,7 @@ fn holed_polyhedron_grid_nodes(
 }
 
 fn append_ring_cell_tetrahedra(
+    grid: &RectangularThroughHoleGrid,
     grid_node_ids: &[TopologyEntityId],
     coordinates_by_id: &BTreeMap<TopologyEntityId, [f64; 3]>,
     material_region_id: &str,
@@ -240,34 +283,39 @@ fn append_ring_cell_tetrahedra(
         [0, 4, 5, 7],
         [0, 5, 1, 7],
     ];
-    for y_index in 0..3 {
-        for x_index in 0..3 {
-            if x_index == 1 && y_index == 1 {
-                continue;
-            }
-            let cell_corner_ids =
-                holed_polyhedron_cell_corner_ids(grid_node_ids, [x_index, y_index]);
-            for corners in tetrahedron_corners {
-                let mut node_ids = corners.map(|corner| cell_corner_ids[corner].clone());
-                let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-                if tetrahedron_signed_volume(points) < 0.0 {
-                    node_ids.swap(1, 2);
+    for z_index in 0..grid.z_values.len() - 1 {
+        for y_index in 0..grid.y_values.len() - 1 {
+            for x_index in 0..grid.x_values.len() - 1 {
+                if grid.contains_hole_cell(x_index, y_index) {
+                    continue;
                 }
-                let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
-                let scaled_jacobian = tetrahedron_scaled_jacobian(points);
-                *min_scaled_jacobian = min_scaled_jacobian.min(scaled_jacobian);
-                elements.push(Tetrahedron4Element {
-                    element_id: TopologyEntityId {
-                        stage: MeshingStage::TetrahedronMesh,
-                        id: format!("holed_polyhedron_tetrahedron_{}", elements.len()),
-                    },
-                    node_ids,
-                    material_region_id: material_region_id.to_string(),
-                });
+                let cell_corner_ids = holed_polyhedron_cell_corner_ids(
+                    grid,
+                    grid_node_ids,
+                    [x_index, y_index, z_index],
+                );
+                for corners in tetrahedron_corners {
+                    let mut node_ids = corners.map(|corner| cell_corner_ids[corner].clone());
+                    let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
+                    if tetrahedron_signed_volume(points) < 0.0 {
+                        node_ids.swap(1, 2);
+                    }
+                    let points = node_ids.clone().map(|node_id| coordinates_by_id[&node_id]);
+                    let scaled_jacobian = tetrahedron_scaled_jacobian(points);
+                    *min_scaled_jacobian = min_scaled_jacobian.min(scaled_jacobian);
+                    elements.push(Tetrahedron4Element {
+                        element_id: TopologyEntityId {
+                            stage: MeshingStage::TetrahedronMesh,
+                            id: format!("holed_polyhedron_tetrahedron_{}", elements.len()),
+                        },
+                        node_ids,
+                        material_region_id: material_region_id.to_string(),
+                    });
+                }
             }
         }
     }
-    if elements.len() == HOLED_POLYHEDRON_RING_CELL_COUNT * 6 && min_scaled_jacobian.is_finite() {
+    if elements.len() == grid.ring_cell_count() * 6 && min_scaled_jacobian.is_finite() {
         Ok(())
     } else {
         Err(TetrahedronGenerationError::DegenerateHoledPolyhedronPlc)
@@ -275,29 +323,34 @@ fn append_ring_cell_tetrahedra(
 }
 
 fn holed_polyhedron_cell_corner_ids(
+    grid: &RectangularThroughHoleGrid,
     grid_node_ids: &[TopologyEntityId],
-    cell_index: [usize; 2],
+    cell_index: [usize; 3],
 ) -> [TopologyEntityId; 8] {
-    let [x_index, y_index] = cell_index;
+    let [x_index, y_index, z_index] = cell_index;
     [
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index, y_index, 0),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index + 1, y_index, 0),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index, y_index + 1, 0),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index + 1, y_index + 1, 0),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index, y_index, 1),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index + 1, y_index, 1),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index, y_index + 1, 1),
-        holed_polyhedron_grid_node_id(grid_node_ids, x_index + 1, y_index + 1, 1),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index, y_index, z_index),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index + 1, y_index, z_index),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index, y_index + 1, z_index),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index + 1, y_index + 1, z_index),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index, y_index, z_index + 1),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index + 1, y_index, z_index + 1),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index, y_index + 1, z_index + 1),
+        holed_polyhedron_grid_node_id(grid, grid_node_ids, x_index + 1, y_index + 1, z_index + 1),
     ]
 }
 
 fn holed_polyhedron_grid_node_id(
+    grid: &RectangularThroughHoleGrid,
     grid_node_ids: &[TopologyEntityId],
     x_index: usize,
     y_index: usize,
     z_index: usize,
 ) -> TopologyEntityId {
-    grid_node_ids[z_index * 16 + y_index * 4 + x_index].clone()
+    grid_node_ids[z_index * grid.y_values.len() * grid.x_values.len()
+        + y_index * grid.x_values.len()
+        + x_index]
+        .clone()
 }
 
 fn holed_polyhedron_boundary_faces(
@@ -394,9 +447,9 @@ fn holed_surface_key(
     grid: &RectangularThroughHoleGrid,
     tolerance_m: f64,
 ) -> Option<HoledSurfaceKey> {
-    let [x_min, x_inner_min, x_inner_max, x_max] = grid.x_values;
-    let [y_min, y_inner_min, y_inner_max, y_max] = grid.y_values;
-    let [z_min, z_max] = grid.z_values;
+    let [x_min, x_inner_min, x_inner_max, x_max] = grid.source_x_values;
+    let [y_min, y_inner_min, y_inner_max, y_max] = grid.source_y_values;
+    let [z_min, z_max] = grid.source_z_values;
     let all_axis = |axis: usize, value: f64| {
         points
             .iter()
@@ -566,9 +619,9 @@ fn axis_aligned_rectangular_through_hole_segments(
 ) -> Result<[ThroughHoleSegment; 4], TetrahedronGenerationError> {
     let grid =
         axis_aligned_rectangular_through_hole_grid(plc, coordinates_by_id, bounds, tolerance_m)?;
-    let [x_min, x_inner_min, x_inner_max, x_max] = grid.x_values;
-    let [y_min, y_inner_min, y_inner_max, y_max] = grid.y_values;
-    let [z_min, z_max] = grid.z_values;
+    let [x_min, x_inner_min, x_inner_max, x_max] = grid.source_x_values;
+    let [y_min, y_inner_min, y_inner_max, y_max] = grid.source_y_values;
+    let [z_min, z_max] = grid.source_z_values;
     let node_at = |x, y, z| node_at(coordinates_by_id, [x, y, z], tolerance_m);
     Ok([
         ThroughHoleSegment {
@@ -839,6 +892,59 @@ fn unique_axis_values(plc: &ProtectedBoundaryComplex, axis: usize, tolerance_m: 
     }
     values.sort_by(|left, right| left.total_cmp(right));
     values
+}
+
+fn smallest_axis_interval(
+    axis_values: &[&Vec<f64>],
+    tolerance_m: f64,
+) -> Result<f64, TetrahedronGenerationError> {
+    let mut smallest_interval = f64::INFINITY;
+    for values in axis_values {
+        for window in values.windows(2) {
+            let interval = (window[1] - window[0]).abs();
+            if interval > tolerance_m.max(1.0e-12) {
+                smallest_interval = smallest_interval.min(interval);
+            }
+        }
+    }
+    if smallest_interval.is_finite() {
+        Ok(smallest_interval)
+    } else {
+        Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)
+    }
+}
+
+fn refined_axis_values(source_values: &[f64], target_interval: f64, tolerance_m: f64) -> Vec<f64> {
+    let mut values = Vec::<f64>::new();
+    values.push(source_values[0]);
+    for window in source_values.windows(2) {
+        let start = window[0];
+        let end = window[1];
+        let interval = (end - start).abs();
+        let partition_count = (interval / target_interval).ceil().max(1.0) as usize;
+        for partition_index in 1..=partition_count {
+            let fraction = partition_index as f64 / partition_count as f64;
+            let value = start + fraction * (end - start);
+            if values
+                .last()
+                .is_none_or(|existing| !nearly_equal(*existing, value, tolerance_m))
+            {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
+fn refined_axis_index(
+    values: &[f64],
+    source_value: f64,
+    tolerance_m: f64,
+) -> Result<usize, TetrahedronGenerationError> {
+    values
+        .iter()
+        .position(|value| nearly_equal(*value, source_value, tolerance_m))
+        .ok_or(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc)
 }
 
 fn node_at(

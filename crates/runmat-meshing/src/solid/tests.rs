@@ -735,7 +735,7 @@ fn auto_backend_generates_close_parallel_wall_slot_solid() {
         mesh.backend.tetrahedron_generation_family,
         "holed_polyhedron"
     );
-    assert!((slot_x_max - slot_x_min - 0.8).abs() < 1.0e-9);
+    assert!((slot_x_max - slot_x_min - 0.4).abs() < 1.0e-9);
     assert_eq!(material_region_ids, BTreeSet::from(["body"]));
     assert_eq!(mesh.backend.boundary_face_recovery_ratio, 1.0);
     assert_eq!(mesh.backend.tetrahedron_missing_recovery_item_count, 0);
@@ -1290,10 +1290,10 @@ fn close_parallel_wall_slot_geometry() -> GeometryAsset {
     geometry.meshes[0].mesh_id = "close_parallel_wall_slot_surface".to_string();
     geometry.surface_meshes[0].mesh_id = "close_parallel_wall_slot_surface".to_string();
     for vertex_index in [4_usize, 7, 12, 15] {
-        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.1;
+        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.3;
     }
     for vertex_index in [5_usize, 6, 13, 14] {
-        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.9;
+        geometry.surface_meshes[0].vertices[vertex_index][0] = 1.7;
     }
     geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
         "body",
