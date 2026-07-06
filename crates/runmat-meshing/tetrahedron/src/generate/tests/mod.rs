@@ -812,6 +812,24 @@ fn generates_holed_polyhedron_mesh_from_through_hole_plc() {
 }
 
 #[test]
+fn holed_polyhedron_generation_uses_shape_when_hole_loop_evidence_is_absent() {
+    let mut plc = through_hole_plate_plc();
+    plc.evidence
+        .entity_counts
+        .insert("surface_hole_loops".to_string(), 0);
+
+    let mesh = generate_holed_polyhedron_tetrahedron_mesh_from_plc(&plc)
+        .expect("recognized through-hole PLC should not depend on aggregate hole-loop evidence");
+
+    assert_eq!(mesh.tetrahedron_generation_family, "holed_polyhedron");
+    assert_eq!(
+        mesh.evidence.entity_counts["input_plc_surface_hole_loops"],
+        0
+    );
+    assert!(mesh.evidence.min_scaled_jacobian.expect("quality evidence") >= 0.15);
+}
+
+#[test]
 fn solver_generation_supports_holed_polyhedron_plcs() {
     let mesh = generate_solver_tetrahedron_mesh_from_plc(&through_hole_plate_plc())
         .expect("through-hole PLC should use holed-polyhedron generation");

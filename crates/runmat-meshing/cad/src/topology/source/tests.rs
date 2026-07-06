@@ -38,6 +38,55 @@ fn builds_generic_cad_topology_from_source_triangles() {
 }
 
 #[test]
+fn generic_cad_face_healing_ignores_material_region_identity() {
+    let mut geometry = cube_geometry(false);
+    geometry.regions = vec![
+        Region {
+            region_id: "region_base".to_string(),
+            name: "base".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "region_cap".to_string(),
+            name: "cap".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+    ];
+    geometry.region_entity_mappings = vec![
+        RegionEntityMapping::new(
+            "region_base",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 6)],
+        ),
+        RegionEntityMapping::new(
+            "region_cap",
+            "cube_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(6, 6)],
+        ),
+    ];
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+
+    let cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+
+    assert_eq!(cad.source, CadTopologySource::GenericCadMesh);
+    assert_eq!(cad.report.face_count, 6);
+    assert_eq!(cad.report.generic_face_count, 6);
+    assert!(cad.faces.iter().all(|face| face.region_ids.is_empty()));
+    assert!(cad
+        .faces
+        .iter()
+        .any(|face| face.material_region_ids == ["region_base"]));
+    assert!(cad
+        .faces
+        .iter()
+        .any(|face| face.material_region_ids == ["region_cap"]));
+}
+
+#[test]
 fn preserves_semantic_cad_face_regions() {
     let geometry = cube_geometry(true);
     let topology = extract_source_topology(&geometry).expect("topology should extract");

@@ -118,9 +118,17 @@ pub(super) fn evaluator_curves_by_imported_id(
 }
 
 pub(super) fn face_regions_by_source_face(geometry: &GeometryAsset) -> BTreeMap<u32, Vec<String>> {
+    let material_region_ids = geometry
+        .regions
+        .iter()
+        .filter(|region| region.has_material_role())
+        .map(|region| region.region_id.as_str())
+        .collect::<BTreeSet<_>>();
     let mut regions = BTreeMap::<u32, BTreeSet<String>>::new();
     for mapping in &geometry.region_entity_mappings {
-        if !matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element) {
+        if !matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element)
+            || material_region_ids.contains(mapping.region_id.as_str())
+        {
             continue;
         }
         for range in &mapping.ranges {

@@ -28,9 +28,6 @@ pub fn generate_holed_polyhedron_tetrahedron_mesh_from_plc(
         .get("surface_hole_loops")
         .copied()
         .unwrap_or_default();
-    if surface_hole_loop_count == 0 {
-        return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);
-    }
     let component_report = classify_boundary_components(plc);
     if component_report.component_count != 1 {
         return Err(TetrahedronGenerationError::UnsupportedHoledPolyhedronPlc);

@@ -639,6 +639,44 @@ fn auto_backend_generates_through_hole_solid() {
 }
 
 #[test]
+fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
+    let geometry = split_material_through_hole_plate_geometry();
+    let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
+        .expect("split-region through-hole solid should recover material ownership");
+
+    let material_region_ids = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        material_region_ids,
+        BTreeSet::from(["region_base", "region_cap"])
+    );
+    assert!(mesh
+        .volume_elements
+        .iter()
+        .all(|element| element.material_region_id != "unclassified"));
+    assert_eq!(
+        mesh.backend.tetrahedron_generation_family,
+        "holed_polyhedron"
+    );
+    assert!(
+        mesh.backend
+            .tetrahedron_recovered_material_interface_recovery_item_count
+            > 0
+    );
+    validate_analysis_mesh_with_options(
+        &mesh,
+        AnalysisMeshValidationOptions {
+            required_material_region_ids: vec!["region_base".to_string(), "region_cap".to_string()],
+            ..AnalysisMeshValidationOptions::default()
+        },
+    )
+    .expect("through-hole solid artifact should expose both recovered material regions");
+}
+
+#[test]
 fn auto_backend_preserves_recovered_material_regions_for_dented_corner_solid() {
     let mesh = generate_analysis_mesh(
         &split_material_dented_corner_box_geometry(),
@@ -900,6 +938,52 @@ fn through_hole_plate_geometry() -> GeometryAsset {
         )],
         diagnostics: Vec::new(),
     }
+}
+
+fn split_material_through_hole_plate_geometry() -> GeometryAsset {
+    let mut geometry = through_hole_plate_geometry();
+    geometry.geometry_id = "geo_root_meshing_split_material_through_hole_plate".to_string();
+    geometry.source.path = "/fixtures/generic_split_material_through_hole_plate.step".to_string();
+    geometry.source.sha256 = "generic-split-material-through-hole-plate".to_string();
+    geometry.regions = vec![
+        Region {
+            region_id: "region_base".to_string(),
+            name: "base".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "region_cap".to_string(),
+            name: "cap".to_string(),
+            tag: Some("material".to_string()),
+            cad_ownership: None,
+        },
+    ];
+    geometry.region_entity_mappings = vec![
+        RegionEntityMapping::new(
+            "region_base",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![
+                EntityIdRange::new(0, 4),
+                EntityIdRange::new(8, 4),
+                EntityIdRange::new(16, 4),
+                EntityIdRange::new(24, 4),
+            ],
+        ),
+        RegionEntityMapping::new(
+            "region_cap",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![
+                EntityIdRange::new(4, 4),
+                EntityIdRange::new(12, 4),
+                EntityIdRange::new(20, 4),
+                EntityIdRange::new(28, 4),
+            ],
+        ),
+    ];
+    geometry
 }
 
 fn octahedron_geometry() -> GeometryAsset {

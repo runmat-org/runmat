@@ -38,6 +38,12 @@ pub fn build_cad_topology(
     let evaluator_curves = evaluator_curves_by_imported_id(geometry);
     let face_region_by_source_face = face_regions_by_source_face(geometry);
     let material_region_by_source_face = material_regions_by_source_face(geometry);
+    let material_region_ids = geometry
+        .regions
+        .iter()
+        .filter(|region| region.has_material_role())
+        .map(|region| region.region_id.clone())
+        .collect::<BTreeSet<_>>();
     let edge_region_by_source_edge = edge_regions_by_source_edge(geometry);
     let generic_face_ids_by_source_face = if source == CadTopologySource::GenericCadMesh {
         generic_coplanar_face_ids(topology, &face_region_by_source_face)
@@ -65,12 +71,18 @@ pub fn build_cad_topology(
             let mapped_region_ids = face_region_by_source_face
                 .get(&face.source_triangle_id)
                 .cloned();
+            let fallback_region_ids = face
+                .region_ids
+                .iter()
+                .filter(|region_id| !material_region_ids.contains(*region_id))
+                .cloned()
+                .collect::<Vec<_>>();
             let material_region_ids = material_region_by_source_face
                 .get(&face.source_triangle_id)
                 .cloned()
                 .unwrap_or_else(|| face.material_region_ids.clone());
             let identity_region_ids = mapped_region_ids.clone().unwrap_or_default();
-            let region_ids = mapped_region_ids.unwrap_or_else(|| face.region_ids.clone());
+            let region_ids = mapped_region_ids.unwrap_or(fallback_region_ids);
             let imported_face_id =
                 imported_face_id_for_regions(&imported_face_ids_by_region, &identity_region_ids);
             let evaluator_face = imported_face_id.and_then(|face_id| evaluator_faces.get(&face_id));
