@@ -2696,6 +2696,18 @@ fn analysis_author_study_run_consumes_supplied_generated_solid_artifact() {
         &fs::read(&mesh_path).expect("read supplied analysis mesh artifact"),
     )
     .expect("parse supplied analysis mesh artifact");
+    assert_eq!(
+        mesh_payload["mesh_options"]["refinement"]["strategy"].as_str(),
+        Some("auto")
+    );
+    assert!(!mesh_payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("supplied artifact should collect solved adaptive evidence")
+        .is_empty());
+    assert!(!mesh_payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("supplied artifact should retain solved sizing samples")
+        .is_empty());
     let volume_element_count = mesh_payload["mesh"]["volume_elements"]
         .as_array()
         .expect("supplied volume elements")
@@ -5412,8 +5424,6 @@ fn write_generated_through_hole_analysis_mesh_artifacts(
     let geometry = through_hole_study_geometry();
     let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
     options.backend = runmat_meshing_core::MeshBackendKind::Solid;
-    options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    options.refinement.max_iterations = 0;
     let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
         .expect("through-hole fixture should generate an analysis mesh");
     let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {

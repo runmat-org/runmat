@@ -1250,10 +1250,14 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
+            let refinement_candidate_path = analysis_mesh_artifact
+                .as_ref()
+                .filter(|artifact| artifact.allow_refinement)
+                .map(|artifact| artifact.path.as_str());
             let refined_analysis_mesh_artifact = generate_and_persist_refined_study_analysis_mesh(
                 spec,
                 &study_fingerprint,
-                analysis_mesh_artifact_path.as_deref(),
+                refinement_candidate_path,
                 &context,
             )?;
             if let Some(refined_artifact) = refined_analysis_mesh_artifact.as_ref() {
@@ -13677,6 +13681,7 @@ fn attach_prep_artifact_to_electromagnetic_options(
 struct StudyAnalysisMeshArtifact {
     path: String,
     evidence_path: String,
+    allow_refinement: bool,
 }
 
 fn generate_and_persist_study_analysis_mesh(
@@ -13698,6 +13703,7 @@ fn generate_and_persist_study_analysis_mesh(
         return Ok(Some(StudyAnalysisMeshArtifact {
             path: path.to_string(),
             evidence_path,
+            allow_refinement: false,
         }));
     }
 
@@ -13814,6 +13820,7 @@ fn generate_and_persist_study_analysis_mesh(
     Ok(Some(StudyAnalysisMeshArtifact {
         path: mesh_path,
         evidence_path,
+        allow_refinement: true,
     }))
 }
 
