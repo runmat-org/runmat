@@ -1,10 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::contracts::{
-    MeshingStage, ProtectedBoundaryComplex, TetrahedronMesh, TopologyEntityId,
+use runmat_meshing_core::{
+    contracts::{MeshingStage, ProtectedBoundaryComplex, TetrahedronMesh, TopologyEntityId},
+    quality::predicate::tetrahedron_signed_volume,
 };
 
 use super::{topology::sorted_topology_ids, TetrahedronRecoveryError};
+
+const MIN_RECOVERY_INPUT_TETRAHEDRON_VOLUME_M3: f64 = 1.0e-18;
 
 pub(super) fn validate_tetrahedron_recovery_input_mesh(
     plc: &ProtectedBoundaryComplex,
@@ -43,6 +46,11 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
             });
         }
     }
+    let node_coordinates = tetrahedron_mesh
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
 
     let mut element_ids = BTreeSet::<TopologyEntityId>::new();
     let mut element_faces = BTreeSet::<[TopologyEntityId; 3]>::new();
@@ -74,6 +82,17 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                     element_id: element.element_id.clone(),
                 },
             );
+        }
+        let signed_volume = tetrahedron_signed_volume(tetrahedron_element_points(
+            element.node_ids.clone(),
+            &node_coordinates,
+        ));
+        if !signed_volume.is_finite()
+            || signed_volume.abs() <= MIN_RECOVERY_INPUT_TETRAHEDRON_VOLUME_M3
+        {
+            return Err(TetrahedronRecoveryError::DegenerateTetrahedronElement {
+                element_id: element.element_id.clone(),
+            });
         }
         element_faces.extend(tetrahedron_element_faces(element.node_ids.clone()));
     }
@@ -140,6 +159,18 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
     }
 
     Ok(())
+}
+
+fn tetrahedron_element_points(
+    node_ids: [TopologyEntityId; 4],
+    node_coordinates: &BTreeMap<TopologyEntityId, [f64; 3]>,
+) -> [[f64; 3]; 4] {
+    [
+        node_coordinates[&node_ids[0]],
+        node_coordinates[&node_ids[1]],
+        node_coordinates[&node_ids[2]],
+        node_coordinates[&node_ids[3]],
+    ]
 }
 
 fn tetrahedron_element_faces(node_ids: [TopologyEntityId; 4]) -> [[TopologyEntityId; 3]; 4] {

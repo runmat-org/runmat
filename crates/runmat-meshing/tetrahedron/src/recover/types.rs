@@ -39,6 +39,9 @@ pub enum TetrahedronRecoveryError {
     TetrahedronElementEmptyMaterialRegion {
         element_id: TopologyEntityId,
     },
+    DegenerateTetrahedronElement {
+        element_id: TopologyEntityId,
+    },
     TetrahedronBoundaryFaceStageMismatch {
         face_id: TopologyEntityId,
     },
@@ -128,6 +131,11 @@ impl std::fmt::Display for TetrahedronRecoveryError {
             Self::TetrahedronElementEmptyMaterialRegion { element_id } => write!(
                 formatter,
                 "Tetrahedron element {} has empty material-region ownership",
+                element_id.id
+            ),
+            Self::DegenerateTetrahedronElement { element_id } => write!(
+                formatter,
+                "Tetrahedron element {} has degenerate geometry",
                 element_id.id
             ),
             Self::TetrahedronBoundaryFaceStageMismatch { face_id } => write!(

@@ -119,6 +119,19 @@ fn rejects_recovery_input_element_with_empty_material_region() {
 }
 
 #[test]
+fn rejects_recovery_input_with_degenerate_tetrahedron_element() {
+    let mut mesh = tetrahedron_mesh();
+    mesh.nodes[3].coordinates_m = [1.0, 1.0, 0.0];
+
+    assert_eq!(
+        build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh),
+        Err(TetrahedronRecoveryError::DegenerateTetrahedronElement {
+            element_id: entity(MeshingStage::TetrahedronMesh, "tetrahedron_1"),
+        })
+    );
+}
+
+#[test]
 fn rejects_recovery_input_with_duplicate_boundary_face_id() {
     let mut mesh = tetrahedron_mesh();
     let mut duplicate_face = boundary_face("facet_1", ["0", "3", "1"], "face_2");

@@ -705,7 +705,7 @@ fn recovery_stage_result_reports_absent_material_partition_quality_rejection() {
         .iter_mut()
         .find(|node| node.node_id.id == "4")
         .expect("fixture should carry apex node")
-        .coordinates_m = [0.5, 0.5, 0.0];
+        .coordinates_m = [0.5, 0.5, 1.0e-12];
 
     let recovery_evidence = assert_incomplete_recovery(
         recover_tetrahedron_mesh_from_plc(&plc, mesh)
@@ -1397,7 +1397,7 @@ fn recovery_queue_reports_missing_source_edge_absent_from_volume_edges() {
     let mut mesh = tetrahedron_mesh();
     mesh.nodes.push(tetrahedron_node(
         entity(MeshingStage::ProtectedBoundaryComplex, "4"),
-        [2.0, 0.0, 0.0],
+        [2.0, 1.0, 0.0],
     ));
     mesh.elements[0].node_ids = [
         entity(MeshingStage::ProtectedBoundaryComplex, "0"),
