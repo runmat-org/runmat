@@ -22,6 +22,7 @@ mod backend_counts;
 mod backend_generation;
 mod backend_optimization;
 mod backend_quality;
+mod backend_recovery;
 mod backend_summary;
 
 use backend_quality::backend_quality_evidence;
