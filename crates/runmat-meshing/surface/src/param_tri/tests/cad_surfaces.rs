@@ -242,7 +242,8 @@ fn cad_topology_surface_marks_display_diagonal_internal() {
 #[test]
 fn cad_topology_surface_preserves_holed_face_loops() {
     let topology = holed_square_topology();
-    let cad_topology = holed_square_cad_topology(&topology);
+    let mut cad_topology = holed_square_cad_topology(&topology);
+    cad_topology.faces[0].loop_edge_ids = cad_topology.loops[0].edge_ids.clone();
     let cad_evaluation = holed_square_cad_evaluation(&topology);
     let curves = discretize_topology_curves(
         &topology,

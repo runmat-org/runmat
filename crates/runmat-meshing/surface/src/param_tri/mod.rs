@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_meshing_cad::{
-    project_to_face, CadEvaluationModel, CadFace, CadTopologyModel, SourceTopologyEdge,
+    project_to_face, CadEvaluationModel, CadFace, CadLoop, CadTopologyModel, SourceTopologyEdge,
     SourceTopologyFace, SourceTopologyModel,
 };
 use runmat_meshing_curve::{
@@ -329,6 +329,11 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
             .map(|provenance| (provenance.source_edge_id, provenance))
             .collect::<BTreeMap<_, _>>()
     });
+    let cad_loops_by_id = cad_topology
+        .loops
+        .iter()
+        .map(|cad_loop| (cad_loop.entity_id.id.as_str(), cad_loop))
+        .collect::<BTreeMap<_, _>>();
 
     let mut elements = Vec::<SurfaceElement>::new();
     let mut loop_coverage = SurfaceLoopCoverageAccumulator::new(cad_topology.faces.len());
@@ -338,14 +343,14 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
     let mut exact_cad_sample_node_count = 0_usize;
     let mut rejected_exact_cad_sample_count = 0_usize;
     for cad_face in &cad_topology.faces {
-        let face = cad_face_surface_seed(cad_face, &topology_edges)?;
+        let face = cad_face_surface_seed(cad_face, &cad_loops_by_id, &topology_edges)?;
         validate_face_vertices(topology, &face)?;
         let frame = frames_by_cad_face.get(&cad_face.entity_id.id).ok_or(
             SurfaceDiscretizationError::MissingCadFaceFrame {
                 source_face_id: face.face_id,
             },
         )?;
-        let source_edge_ids = cad_face_loop_source_edge_ids(cad_face)?;
+        let source_edge_ids = cad_face_loop_source_edge_ids(cad_face, &cad_loops_by_id)?;
         let segments = curve_segments_for_source_edges(
             &topology_edges,
             &curve_nodes_by_edge,
@@ -388,6 +393,7 @@ fn discretize_cad_topology_surfaces_with_curve_inputs(
 
 fn cad_face_surface_seed(
     cad_face: &CadFace,
+    cad_loops_by_id: &BTreeMap<&str, &CadLoop>,
     topology_edges: &BTreeMap<u32, &SourceTopologyEdge>,
 ) -> Result<SourceTopologyFace, SurfaceDiscretizationError> {
     let face_id = cad_face.source_face_ids.first().copied().ok_or_else(|| {
@@ -395,7 +401,7 @@ fn cad_face_surface_seed(
             cad_face_id: cad_face.entity_id.id.clone(),
         }
     })?;
-    let source_edge_ids = cad_face_loop_source_edge_ids(cad_face)?;
+    let source_edge_ids = cad_face_loop_source_edge_ids(cad_face, cad_loops_by_id)?;
     if source_edge_ids.len() < 3 {
         return Err(SurfaceDiscretizationError::EmptyFaceLoop { face_id });
     }
@@ -437,20 +443,45 @@ fn cad_curve_validation_options() -> CurveValidationOptions {
 
 fn cad_face_loop_source_edge_ids(
     cad_face: &CadFace,
+    cad_loops_by_id: &BTreeMap<&str, &CadLoop>,
 ) -> Result<Vec<u32>, SurfaceDiscretizationError> {
-    cad_face
-        .loop_edge_ids
-        .iter()
-        .map(|loop_edge_id| {
-            loop_edge_id
-                .strip_prefix("cad_edge_")
-                .and_then(|edge_id| edge_id.parse::<u32>().ok())
-                .ok_or_else(|| SurfaceDiscretizationError::InvalidCadLoopEdgeId {
-                    cad_face_id: cad_face.entity_id.id.clone(),
-                    loop_edge_id: loop_edge_id.clone(),
+    if cad_face.loop_ids.is_empty() {
+        return Err(SurfaceDiscretizationError::CadFaceWithoutLoops {
+            cad_face_id: cad_face.entity_id.id.clone(),
+        });
+    }
+    let mut source_edge_ids = Vec::<u32>::new();
+    for loop_id in &cad_face.loop_ids {
+        let cad_loop = cad_loops_by_id.get(loop_id.as_str()).ok_or_else(|| {
+            SurfaceDiscretizationError::MissingCadFaceLoop {
+                cad_face_id: cad_face.entity_id.id.clone(),
+                loop_id: loop_id.clone(),
+            }
+        })?;
+        if cad_loop.face_id != cad_face.entity_id.id {
+            return Err(SurfaceDiscretizationError::CadLoopFaceMismatch {
+                cad_face_id: cad_face.entity_id.id.clone(),
+                loop_id: loop_id.clone(),
+                actual_face_id: cad_loop.face_id.clone(),
+            });
+        }
+        source_edge_ids.extend(
+            cad_loop
+                .edge_ids
+                .iter()
+                .map(|loop_edge_id| {
+                    loop_edge_id
+                        .strip_prefix("cad_edge_")
+                        .and_then(|edge_id| edge_id.parse::<u32>().ok())
+                        .ok_or_else(|| SurfaceDiscretizationError::InvalidCadLoopEdgeId {
+                            cad_face_id: cad_face.entity_id.id.clone(),
+                            loop_edge_id: loop_edge_id.clone(),
+                        })
                 })
-        })
-        .collect()
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    Ok(source_edge_ids)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

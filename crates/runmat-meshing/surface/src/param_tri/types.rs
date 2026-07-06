@@ -136,6 +136,18 @@ pub enum SurfaceDiscretizationError {
     CadFaceWithoutSourceFaces {
         cad_face_id: String,
     },
+    CadFaceWithoutLoops {
+        cad_face_id: String,
+    },
+    MissingCadFaceLoop {
+        cad_face_id: String,
+        loop_id: String,
+    },
+    CadLoopFaceMismatch {
+        cad_face_id: String,
+        loop_id: String,
+        actual_face_id: String,
+    },
     InvalidCadLoopEdgeId {
         cad_face_id: String,
         loop_edge_id: String,
@@ -185,6 +197,25 @@ impl std::fmt::Display for SurfaceDiscretizationError {
             Self::CadFaceWithoutSourceFaces { cad_face_id } => write!(
                 formatter,
                 "CAD face {cad_face_id} does not reference any source faces"
+            ),
+            Self::CadFaceWithoutLoops { cad_face_id } => write!(
+                formatter,
+                "CAD face {cad_face_id} does not reference any CAD loops"
+            ),
+            Self::MissingCadFaceLoop {
+                cad_face_id,
+                loop_id,
+            } => write!(
+                formatter,
+                "CAD face {cad_face_id} references missing CAD loop {loop_id}"
+            ),
+            Self::CadLoopFaceMismatch {
+                cad_face_id,
+                loop_id,
+                actual_face_id,
+            } => write!(
+                formatter,
+                "CAD face {cad_face_id} references CAD loop {loop_id} owned by {actual_face_id}"
             ),
             Self::InvalidCadLoopEdgeId {
                 cad_face_id,
