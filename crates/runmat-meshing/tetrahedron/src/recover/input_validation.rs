@@ -97,6 +97,7 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
     }
 
     let mut boundary_face_ids = BTreeSet::<TopologyEntityId>::new();
+    let mut boundary_face_topology = BTreeMap::<[TopologyEntityId; 3], TopologyEntityId>::new();
     for boundary_face in &tetrahedron_mesh.boundary_faces {
         if !matches!(
             boundary_face.face_id.stage,
@@ -132,6 +133,15 @@ pub(super) fn validate_tetrahedron_recovery_input_mesh(
                 },
             );
         }
+        if let Some(existing_face_id) = boundary_face_topology.get(&boundary_face_key) {
+            return Err(
+                TetrahedronRecoveryError::DuplicateTetrahedronBoundaryFaceTopology {
+                    face_id: boundary_face.face_id.clone(),
+                    existing_face_id: existing_face_id.clone(),
+                },
+            );
+        }
+        boundary_face_topology.insert(boundary_face_key, boundary_face.face_id.clone());
         if boundary_face.source_face_id.stage != MeshingStage::SurfaceMesh {
             return Err(
                 TetrahedronRecoveryError::TetrahedronBoundaryFaceSourceFaceStageMismatch {

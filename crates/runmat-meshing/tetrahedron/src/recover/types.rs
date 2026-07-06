@@ -48,6 +48,10 @@ pub enum TetrahedronRecoveryError {
     DuplicateTetrahedronBoundaryFace {
         face_id: TopologyEntityId,
     },
+    DuplicateTetrahedronBoundaryFaceTopology {
+        face_id: TopologyEntityId,
+        existing_face_id: TopologyEntityId,
+    },
     TetrahedronBoundaryFaceReferencesUnknownNode {
         face_id: TopologyEntityId,
         node_id: TopologyEntityId,
@@ -147,6 +151,14 @@ impl std::fmt::Display for TetrahedronRecoveryError {
                 formatter,
                 "Tetrahedron mesh contains duplicate boundary face {}",
                 face_id.id
+            ),
+            Self::DuplicateTetrahedronBoundaryFaceTopology {
+                face_id,
+                existing_face_id,
+            } => write!(
+                formatter,
+                "Tetrahedron boundary face {} duplicates topology for boundary face {}",
+                face_id.id, existing_face_id.id
             ),
             Self::TetrahedronBoundaryFaceReferencesUnknownNode { face_id, node_id } => write!(
                 formatter,

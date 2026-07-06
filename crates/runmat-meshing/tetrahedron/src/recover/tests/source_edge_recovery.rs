@@ -880,16 +880,14 @@ fn source_edge_provenance_repair_normalizes_boundary_slots_without_recovering_vo
     ];
     plc.protected_edges[0].source_edge_id = entity(MeshingStage::CurveMesh, "edge_2");
     let mut mesh = tetrahedron_mesh();
-    mesh.boundary_faces[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
-    mesh.boundary_faces[3].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "2")))
+    });
     let initial_queue = build_recovery_queue_from_plc(&plc, &mesh)
         .expect("volume-edge source edge should be reported before recovery");
 
@@ -904,7 +902,7 @@ fn source_edge_provenance_repair_normalizes_boundary_slots_without_recovering_vo
         initial_queue.evidence.entity_counts["missing_source_edge_provenance_items"],
         0
     );
-    assert_eq!(repair.repaired_count, 2);
+    assert_eq!(repair.repaired_count, 1);
     assert_eq!(repair.repaired_cad_curve_source_edge_count, 0);
     assert!(mesh.boundary_faces.iter().all(|face| {
         crate::protected_edges::face_edges(face.node_ids.clone())

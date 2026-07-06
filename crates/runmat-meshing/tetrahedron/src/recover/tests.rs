@@ -161,7 +161,7 @@ fn recovery_stage_result_carries_audited_mesh_and_queue_evidence() {
 }
 
 #[test]
-fn recovery_stage_result_removes_redundant_boundary_face_before_audit() {
+fn recovery_stage_result_rejects_duplicate_boundary_face_topology() {
     let mut mesh = tetrahedron_mesh();
     mesh.boundary_faces.push(boundary_face(
         "extra_boundary_face",
@@ -169,38 +169,17 @@ fn recovery_stage_result_removes_redundant_boundary_face_before_audit() {
         "other",
     ));
 
-    let result = recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh)
-        .expect("redundant boundary face should be removed before final recovery audit");
-
-    assert!(result.tetrahedron_mesh.recovery_complete);
-    assert_eq!(result.tetrahedron_mesh.boundary_faces.len(), 4);
     assert_eq!(
-        result
-            .tetrahedron_mesh
-            .boundary_faces
-            .iter()
-            .filter(|face| {
-                sorted_face_ids(face.node_ids.clone())
-                    == sorted_face_ids([
-                        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-                        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-                        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-                    ])
-            })
-            .count(),
-        1
-    );
-    assert_eq!(
-        result.recovery_queue.evidence.entity_counts["removed_redundant_boundary_faces"],
-        1
-    );
-    assert_eq!(
-        result.recovery_queue.evidence.entity_counts["recovered_source_face_items"],
-        1
-    );
-    assert_eq!(
-        result.recovery_queue.evidence.entity_counts["missing_items"],
-        0
+        recover_tetrahedron_mesh_from_plc(&tetrahedron_plc(), mesh),
+        Err(
+            TetrahedronRecoveryError::DuplicateTetrahedronBoundaryFaceTopology {
+                face_id: entity(
+                    MeshingStage::ProtectedBoundaryComplex,
+                    "extra_boundary_face"
+                ),
+                existing_face_id: entity(MeshingStage::ProtectedBoundaryComplex, "facet_1"),
+            }
+        )
     );
 }
 
@@ -1176,11 +1155,7 @@ fn recovery_queue_accepts_subdivided_boundary_source_face_coverage() {
 #[test]
 fn recovery_queue_reports_partial_boundary_source_face_provenance() {
     let mut mesh = tetrahedron_mesh();
-    mesh.boundary_faces.push(boundary_face(
-        "extra_boundary_face",
-        ["1", "0", "2"],
-        "other",
-    ));
+    mesh.boundary_faces[0].source_face_id = entity(MeshingStage::SurfaceMesh, "other");
 
     let queue = build_recovery_queue_from_plc(&tetrahedron_plc(), &mesh)
         .expect("partial source-face provenance should be reported before recovery");
@@ -1285,16 +1260,14 @@ fn recovery_queue_reports_missing_source_edge() {
     ];
     plc.protected_edges[0].source_edge_id = entity(MeshingStage::CurveMesh, "edge_2");
     let mut mesh = tetrahedron_mesh();
-    mesh.boundary_faces[0].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "0"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
-    mesh.boundary_faces[3].node_ids = [
-        entity(MeshingStage::ProtectedBoundaryComplex, "2"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "1"),
-        entity(MeshingStage::ProtectedBoundaryComplex, "3"),
-    ];
+    mesh.boundary_faces.retain(|face| {
+        !(face
+            .node_ids
+            .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "0"))
+            && face
+                .node_ids
+                .contains(&entity(MeshingStage::ProtectedBoundaryComplex, "2")))
+    });
 
     let queue = build_recovery_queue_from_plc(&plc, &mesh)
         .expect("missing source edges should be reported as recovery evidence");
