@@ -51,6 +51,14 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
             "core depends on implementation crate: {implementation_crate}"
         );
     }
+    let evidence_manifest = fs::read_to_string(crate_root.join("evidence").join("Cargo.toml"))
+        .expect("evidence manifest should be readable");
+    for implementation_crate in ["runmat-meshing-size"] {
+        assert!(
+            !evidence_manifest.contains(implementation_crate),
+            "evidence depends on implementation crate instead of core contract exports: {implementation_crate}"
+        );
+    }
     for facade_export in [
         "pub use runmat_meshing_cad as cad",
         "pub use runmat_meshing_size as size",

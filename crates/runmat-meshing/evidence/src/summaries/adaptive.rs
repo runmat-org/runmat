@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::contracts::AnalysisMeshArtifact;
-use runmat_meshing_size::adaptive::{AdaptiveConvergenceStatus, RefinementIndicatorStatus};
+use runmat_meshing_core::{
+    contracts::AnalysisMeshArtifact, AdaptiveConvergenceStatus, RefinementIndicatorStatus,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshAdaptiveEvidence {

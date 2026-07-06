@@ -5,8 +5,8 @@ use runmat_meshing_core::{
         BoundaryElementKind, MeshBackendSummary, VolumeElementKind,
     },
     quality::{AnalysisMeshQualityReport, ElementQuality},
+    MeshSizingField,
 };
-use runmat_meshing_size::field::MeshSizingField;
 
 pub(super) fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
     AnalysisMeshNode {
