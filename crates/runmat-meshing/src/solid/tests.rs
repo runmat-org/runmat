@@ -7,6 +7,7 @@ use runmat_geometry_core::{
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
     UnitSystem,
 };
+use runmat_meshing_cad::SourceTopologyError;
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisFieldTopologyLocation,
     AnalysisMeshValidationOptions, MeshBackendKind, MeshSizingField, MeshTargetSize,
@@ -730,6 +731,31 @@ fn explicit_structured_grid_tetrahedron_backend_runs_structured_stage() {
     assert_eq!(mesh.backend.backend, "structured_grid_tetrahedron");
 }
 
+#[test]
+fn auto_backend_rejects_open_shell_before_volume_meshing() {
+    let err = generate_analysis_mesh(&open_shell_cube_geometry(), VolumeMeshingOptions::default())
+        .expect_err("open shell should fail before volume meshing");
+
+    assert!(matches!(
+        err,
+        SolidMeshingError::SourceTopology(SourceTopologyError::OpenBoundaryEdge { count: 1, .. })
+    ));
+}
+
+#[test]
+fn auto_backend_rejects_nonmanifold_edge_before_volume_meshing() {
+    let err = generate_analysis_mesh(
+        &nonmanifold_edge_cube_geometry(),
+        VolumeMeshingOptions::default(),
+    )
+    .expect_err("nonmanifold edge should fail before volume meshing");
+
+    assert!(matches!(
+        err,
+        SolidMeshingError::SourceTopology(SourceTopologyError::OpenBoundaryEdge { count: 3, .. })
+    ));
+}
+
 fn cube_geometry() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo_root_meshing_cube".to_string(),
@@ -793,6 +819,36 @@ fn cube_geometry() -> GeometryAsset {
         )],
         diagnostics: Vec::new(),
     }
+}
+
+fn open_shell_cube_geometry() -> GeometryAsset {
+    let mut geometry = cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_open_shell_cube".to_string();
+    geometry.source.path = "/fixtures/generic_open_shell_cube.step".to_string();
+    geometry.source.sha256 = "generic-open-shell-cube".to_string();
+    geometry.meshes[0].element_count = 10;
+    geometry.surface_meshes[0].triangles.truncate(10);
+    geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
+        "region_boundary",
+        "cube_surface",
+        10,
+    )];
+    geometry
+}
+
+fn nonmanifold_edge_cube_geometry() -> GeometryAsset {
+    let mut geometry = cube_geometry();
+    geometry.geometry_id = "geo_root_meshing_nonmanifold_edge_cube".to_string();
+    geometry.source.path = "/fixtures/generic_nonmanifold_edge_cube.step".to_string();
+    geometry.source.sha256 = "generic-nonmanifold-edge-cube".to_string();
+    geometry.meshes[0].element_count = 13;
+    geometry.surface_meshes[0].triangles.push([0, 1, 4]);
+    geometry.region_entity_mappings = vec![RegionEntityMapping::all_faces(
+        "region_boundary",
+        "cube_surface",
+        13,
+    )];
+    geometry
 }
 
 fn split_material_cube_geometry() -> GeometryAsset {
