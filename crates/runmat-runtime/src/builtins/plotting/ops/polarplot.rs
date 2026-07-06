@@ -20,7 +20,7 @@ use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plot::build_line_plot;
 use super::plotting_error;
 use super::state::{
-    current_axes_state, current_hold_enabled, line_color_for_series_index,
+    current_axes_state, current_hold_enabled, line_color_for_axes_series_index,
     next_line_color_for_axes, next_line_style_for_axes, render_active_plot,
     set_line_style_order_for_axes, PlotRenderOptions,
 };
@@ -206,7 +206,7 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
             series.appearance.color = if hold_enabled {
                 next_line_color_for_axes(axes)
             } else {
-                line_color_for_series_index(series_idx)
+                line_color_for_axes_series_index(axes, series_idx)
             };
         }
 

@@ -40,6 +40,8 @@ pub(crate) mod clim;
 pub(crate) mod close;
 #[path = "ops/cmds.rs"]
 pub(crate) mod cmds;
+#[path = "ops/colororder.rs"]
+pub(crate) mod colororder;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
 #[path = "ops/contour3.rs"]

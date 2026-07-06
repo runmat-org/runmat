@@ -95,14 +95,34 @@ impl LineStyleCycle {
 
 #[derive(Clone, Default)]
 struct LineColorCycle {
+    order: Option<Vec<Vec4>>,
     cursor: usize,
 }
 
 impl LineColorCycle {
     fn next(&mut self) -> Vec4 {
-        let color = line_color_for_series_index(self.cursor);
+        let color = match self.order.as_deref() {
+            Some(order) if !order.is_empty() => order[self.cursor % order.len()],
+            _ => line_color_for_series_index(self.cursor),
+        };
         self.cursor = self.cursor.saturating_add(1);
         color
+    }
+
+    fn color_at(&self, index: usize) -> Vec4 {
+        match self.order.as_deref() {
+            Some(order) if !order.is_empty() => order[index % order.len()],
+            _ => line_color_for_series_index(index),
+        }
+    }
+
+    fn set_order(&mut self, order: &[Vec4]) {
+        self.order = if order.is_empty() {
+            None
+        } else {
+            Some(order.to_vec())
+        };
+        self.cursor = 0;
     }
 
     fn reset_cursor(&mut self) {
@@ -117,6 +137,7 @@ struct FigureState {
     hold_per_axes: HashMap<usize, bool>,
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
+    figure_color_order: Option<Vec<Vec4>>,
     revision: u64,
 }
 
@@ -130,6 +151,7 @@ impl FigureState {
             hold_per_axes: HashMap::new(),
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
+            figure_color_order: None,
             revision: 0,
         }
     }
@@ -147,7 +169,16 @@ impl FigureState {
     }
 
     fn color_cycle_for_axes_mut(&mut self, axes_index: usize) -> &mut LineColorCycle {
-        self.line_color_cycles.entry(axes_index).or_default()
+        match self.line_color_cycles.entry(axes_index) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let mut cycle = LineColorCycle::default();
+                if let Some(order) = self.figure_color_order.as_deref() {
+                    cycle.set_order(order);
+                }
+                entry.insert(cycle)
+            }
+        }
     }
 
     fn reset_cycle(&mut self, axes_index: usize) {
@@ -691,6 +722,94 @@ pub fn set_axes_style_for_axes(
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_style(axes_index, style);
     })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn default_color_order() -> Vec<Vec4> {
+    let theme = current_plot_theme_config().build_theme();
+    (0..8).map(|idx| theme.get_data_color(idx)).collect()
+}
+
+pub fn color_order_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<Vec<Vec4>, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    if let Some(order) = state
+        .figure
+        .axes_metadata(axes_index)
+        .and_then(|meta| meta.color_order.clone())
+    {
+        return Ok(order);
+    }
+    Ok(state
+        .figure_color_order
+        .clone()
+        .unwrap_or_else(default_color_order))
+}
+
+pub fn color_order_for_figure(handle: FigureHandle) -> Result<Vec<Vec4>, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    Ok(state
+        .figure_color_order
+        .clone()
+        .unwrap_or_else(default_color_order))
+}
+
+pub fn set_color_order_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    colors: &[Vec4],
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = get_state_mut(&mut reg, handle);
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
+        state.color_cycle_for_axes_mut(axes_index).set_order(colors);
+        state
+            .figure
+            .set_axes_color_order(axes_index, colors.to_vec());
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_color_order_for_figure(
+    handle: FigureHandle,
+    colors: &[Vec4],
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = get_state_mut(&mut reg, handle);
+        state.figure_color_order = Some(colors.to_vec());
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        for axes_index in 0..total_axes {
+            state.color_cycle_for_axes_mut(axes_index).set_order(colors);
+        }
+        state.figure.set_all_axes_color_order(colors.to_vec());
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
 }
@@ -2841,6 +2960,30 @@ pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
 pub fn line_color_for_series_index(series_index: usize) -> Vec4 {
     let theme = current_plot_theme_config().build_theme();
     theme.get_data_color(series_index)
+}
+
+pub fn line_color_for_axes_series_index(axes_index: usize, series_index: usize) -> Vec4 {
+    if let Some(color) = with_active_color_cycle(axes_index, |cycle| cycle.color_at(series_index)) {
+        return color;
+    }
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state
+        .color_cycle_for_axes_mut(axes_index)
+        .color_at(series_index)
+}
+
+pub fn line_color_for_target_axes_series_index(
+    handle: FigureHandle,
+    axes_index: usize,
+    series_index: usize,
+) -> Vec4 {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    state
+        .color_cycle_for_axes_mut(axes_index)
+        .color_at(series_index)
 }
 
 pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {

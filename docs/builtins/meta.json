@@ -10461,6 +10461,131 @@
       ]
     },
     {
+      "name": "colororder",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = colororder()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current color order as an m-by-3 RGB triplet matrix."
+            }
+          ]
+        },
+        {
+          "label": "C = colororder(target)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure or axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current color order as an m-by-3 RGB triplet matrix."
+            }
+          ]
+        },
+        {
+          "label": "colororder(colors)",
+          "inputs": [
+            {
+              "name": "colors",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current color order as an m-by-3 RGB triplet matrix."
+            }
+          ]
+        },
+        {
+          "label": "colororder(palettename)",
+          "inputs": [
+            {
+              "name": "colors",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current color order as an m-by-3 RGB triplet matrix."
+            }
+          ]
+        },
+        {
+          "label": "colororder(target, colors)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure or axes handle."
+            },
+            {
+              "name": "colors",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current color order as an m-by-3 RGB triplet matrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.COLORORDER.INVALID_ARGUMENT",
+          "identifier": "RunMat:colororder:InvalidArgument",
+          "when": "Target handle, color array, palette name, or color specification is invalid.",
+          "message": "colororder: invalid argument"
+        },
+        {
+          "code": "RM.COLORORDER.INTERNAL",
+          "identifier": "RunMat:colororder:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "colororder: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "combinations",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

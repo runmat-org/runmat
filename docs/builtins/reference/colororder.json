@@ -1,0 +1,83 @@
+{
+  "title": "colororder",
+  "category": "plotting",
+  "keywords": [
+    "colororder",
+    "color order",
+    "plot colors",
+    "axes palette",
+    "matlab colororder"
+  ],
+  "summary": "Set or query the plotting color order in MATLAB and RunMat.",
+  "requires_feature": null,
+  "gpu": {
+    "residency": "host",
+    "fusion": "none",
+    "notes": "`colororder` updates figure and axes styling metadata. It does not inspect, gather, or transform plotted data buffers."
+  },
+  "tested": {
+    "unit": "builtins::plotting::colororder::tests"
+  },
+  "description": "`colororder` controls the implicit series colors used by line-style plotting commands. RunMat supports querying the current color order, setting figure-wide or axes-specific palettes, RGB triplet matrices, string and cell string color specifications, hex colors, and common MATLAB palette names.",
+  "behaviors": [
+    "`colororder()` returns the current figure color order as an m-by-3 RGB triplet matrix.",
+    "`colororder(colors)` sets the color order for the current figure and applies it to existing axes.",
+    "`colororder(ax, colors)` sets the color order for the specified axes without changing the current axes.",
+    "`colororder(fig, colors)` sets the color order for every axes in the specified figure.",
+    "Numeric color arrays must be m-by-3 RGB triplet matrices with finite values in [0, 1]. A single RGB triplet vector is accepted as one color.",
+    "String and cell string color arrays accept MATLAB color names, short color tokens, and `#RGB` or `#RRGGBB` hex strings.",
+    "Palette names include `default`, `gem`, `gem12`, `glow`, `glow12`, `sail`, `reef`, `meadow`, `dye`, and `earth`.",
+    "Changing the color order recolors existing line/scatter/bar-family series cyclically and controls future implicit plot colors."
+  ],
+  "examples": [
+    {
+      "description": "Set a custom RGB color order",
+      "input": "x = 0:0.1:1;\nplot(x, x, x, x.^2, x, x.^3);\ncolororder([1 0 0; 0 0.5 0; 0 0 1]);",
+      "output": "% Existing and future implicit series use red, green, and blue cyclically."
+    },
+    {
+      "description": "Use color names and hex strings",
+      "input": "colororder({'red', '#00AAFF', 'black'});\nplot(1:5, rand(5,3));"
+    },
+    {
+      "description": "Set an axes-specific color order",
+      "input": "ax1 = subplot(1,2,1);\nplot(rand(5,3));\nax2 = subplot(1,2,2);\nplot(rand(5,3));\ncolororder(ax2, 'gem');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is colororder different from colormap?",
+      "answer": "`colororder` controls the discrete sequence of implicit colors for plot series such as lines and scatter groups. `colormap` controls continuous color mapping for image, surface, heatmap, and contour data."
+    },
+    {
+      "question": "Does colororder gather gpuArray plot data?",
+      "answer": "No. The builtin only updates axes and figure style metadata plus existing plot object colors. It does not read or materialize plotted numeric data."
+    },
+    {
+      "question": "Does setting colororder change the current axes?",
+      "answer": "No. Targeted forms such as `colororder(ax, colors)` update that axes without selecting it as the current axes."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/colororder.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/colororder.rs"
+  }
+}

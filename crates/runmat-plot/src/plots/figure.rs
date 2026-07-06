@@ -155,6 +155,7 @@ pub struct AxesMetadata {
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub colormap: ColorMap,
+    pub color_order: Option<Vec<Vec4>>,
     pub color_limits: Option<(f64, f64)>,
     pub axes_style: TextStyle,
     pub title_style: TextStyle,
@@ -972,6 +973,85 @@ impl Figure {
             self.sync_legacy_fields_from_active_axes();
         }
         self.dirty = true;
+    }
+
+    pub fn set_axes_color_order(&mut self, axes_index: usize, colors: Vec<Vec4>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.color_order = Some(colors.clone());
+        }
+        self.recolor_axes_plots(axes_index, &colors);
+        self.dirty = true;
+    }
+
+    pub fn set_all_axes_color_order(&mut self, colors: Vec<Vec4>) {
+        let total_axes = self.total_axes().max(1);
+        self.ensure_axes_metadata_capacity(total_axes);
+        for axes_index in 0..total_axes {
+            if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+                meta.color_order = Some(colors.clone());
+            }
+            self.recolor_axes_plots(axes_index, &colors);
+        }
+        self.dirty = true;
+    }
+
+    fn recolor_axes_plots(&mut self, axes_index: usize, colors: &[Vec4]) {
+        if colors.is_empty() {
+            return;
+        }
+        let mut series = 0usize;
+        for (plot_index, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(plot_index).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            let color = colors[series % colors.len()];
+            match plot {
+                PlotElement::Line(line) => {
+                    line.set_color(color);
+                    series += 1;
+                }
+                PlotElement::Scatter(scatter) => {
+                    scatter.set_color(color);
+                    scatter.set_edge_color(color);
+                    series += 1;
+                }
+                PlotElement::Bar(bar) => {
+                    bar.set_color(color);
+                    series += 1;
+                }
+                PlotElement::Stairs(stairs) => {
+                    stairs.color = color;
+                    series += 1;
+                }
+                PlotElement::Stem(stem) => {
+                    stem.color = color;
+                    series += 1;
+                }
+                PlotElement::Area(area) => {
+                    area.color = Vec4::new(color.x, color.y, color.z, area.color.w);
+                    series += 1;
+                }
+                PlotElement::ErrorBar(errorbar) => {
+                    errorbar.color = color;
+                    series += 1;
+                }
+                PlotElement::Quiver(quiver) => {
+                    quiver.color = color;
+                    series += 1;
+                }
+                PlotElement::Line3(line) => {
+                    line.color = color;
+                    series += 1;
+                }
+                PlotElement::Scatter3(scatter) => {
+                    *scatter = scatter.clone().with_color(color);
+                    scatter.edge_color = color;
+                    series += 1;
+                }
+                _ => {}
+            }
+        }
     }
 
     fn total_axes(&self) -> usize {

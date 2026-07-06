@@ -770,7 +770,10 @@ pub(crate) fn parse_color_value(
     ))
 }
 
-fn color_from_name_or_token(name: &str) -> Option<Vec4> {
+pub(crate) fn color_from_name_or_token(name: &str) -> Option<Vec4> {
+    if let Some(color) = color_from_hex(name) {
+        return Some(color);
+    }
     if name.chars().count() == 1 {
         return name.chars().next().and_then(color_from_token);
     }
@@ -785,6 +788,24 @@ fn color_from_name_or_token(name: &str) -> Option<Vec4> {
         "white" => Some(Vec4::new(1.0, 1.0, 1.0, 1.0)),
         _ => None,
     }
+}
+
+fn color_from_hex(name: &str) -> Option<Vec4> {
+    let hex = name.strip_prefix('#')?;
+    let expanded;
+    let digits = match hex.len() {
+        3 => {
+            expanded = hex.chars().flat_map(|ch| [ch, ch]).collect::<String>();
+            expanded.as_str()
+        }
+        6 => hex,
+        _ => return None,
+    };
+    let value = u32::from_str_radix(digits, 16).ok()?;
+    let r = ((value >> 16) & 0xff) as f32 / 255.0;
+    let g = ((value >> 8) & 0xff) as f32 / 255.0;
+    let b = (value & 0xff) as f32 / 255.0;
+    Some(Vec4::new(r, g, b, 1.0))
 }
 
 pub(crate) fn color_from_token(token: char) -> Option<Vec4> {

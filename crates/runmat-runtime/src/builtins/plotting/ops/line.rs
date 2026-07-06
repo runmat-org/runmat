@@ -16,8 +16,9 @@ use super::plot3::build_line3_plot_for_builtin;
 use super::plotting_error;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
-    append_active_plot, current_figure_handle, line_color_for_series_index, register_line3_handle,
-    register_line_handle, PlotRenderOptions,
+    append_active_plot, current_axes_state, current_figure_handle,
+    line_color_for_target_axes_series_index, register_line3_handle, register_line_handle,
+    PlotRenderOptions,
 };
 use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_bool, value_as_string, LineAppearance,
@@ -245,6 +246,10 @@ async fn parse_line_args(
     let color_explicit = parsed_style.color_explicit;
     let appearance = parsed_style.appearance;
     let label = parsed_style.label.unwrap_or_default();
+    let color_target = options.axes_target.unwrap_or_else(|| {
+        let axes = current_axes_state();
+        (axes.handle, axes.active_index)
+    });
     let x = options
         .x
         .take()
@@ -262,11 +267,21 @@ async fn parse_line_args(
             &label,
             &appearance,
             color_explicit,
+            color_target,
             options.visible,
         )
         .await?
     } else {
-        build_2d_objects(x, y, &label, &appearance, color_explicit, options.visible).await?
+        build_2d_objects(
+            x,
+            y,
+            &label,
+            &appearance,
+            color_explicit,
+            color_target,
+            options.visible,
+        )
+        .await?
     };
     Ok(ParsedLineCall {
         axes_target: options.axes_target,
@@ -410,10 +425,16 @@ async fn build_2d_objects(
     label: &str,
     appearance: &LineAppearance,
     color_explicit: bool,
+    color_target: (super::state::FigureHandle, usize),
     visible: Option<bool>,
 ) -> BuiltinResult<Vec<LineObject>> {
     let x = NumericInput::from_value(x, BUILTIN_NAME)?;
     let y = NumericInput::from_value(y, BUILTIN_NAME)?;
+    let mut base_appearance = appearance.clone();
+    if !color_explicit {
+        base_appearance.color =
+            line_color_for_target_axes_series_index(color_target.0, color_target.1, 0);
+    }
 
     if let (Some(x_gpu), Some(y_gpu)) = (x.gpu_handle(), y.gpu_handle()) {
         if x.len() == y.len()
@@ -426,7 +447,7 @@ async fn build_2d_objects(
                 x_gpu,
                 y_gpu,
                 label,
-                appearance,
+                &base_appearance,
             )
             .await
             {
@@ -448,9 +469,10 @@ async fn build_2d_objects(
         .into_iter()
         .enumerate()
         .map(|(idx, (x, y))| {
-            let mut appearance = appearance.clone();
-            if idx > 0 && !color_explicit {
-                appearance.color = line_color_for_series_index(idx);
+            let mut appearance = base_appearance.clone();
+            if !color_explicit {
+                appearance.color =
+                    line_color_for_target_axes_series_index(color_target.0, color_target.1, idx);
             }
             let mut plot = build_line_plot_for_builtin(BUILTIN_NAME, x, y, label, &appearance)?;
             if label.is_empty() {
@@ -471,6 +493,7 @@ async fn build_3d_objects(
     label: &str,
     appearance: &LineAppearance,
     color_explicit: bool,
+    color_target: (super::state::FigureHandle, usize),
     visible: Option<bool>,
 ) -> BuiltinResult<Vec<LineObject>> {
     let x = NumericInput::from_value(x, BUILTIN_NAME)?
@@ -488,8 +511,9 @@ async fn build_3d_objects(
         .enumerate()
         .map(|(idx, (x, y, z))| {
             let mut appearance = appearance.clone();
-            if idx > 0 && !color_explicit {
-                appearance.color = line_color_for_series_index(idx);
+            if !color_explicit {
+                appearance.color =
+                    line_color_for_target_axes_series_index(color_target.0, color_target.1, idx);
             }
             let mut plot = build_line3_plot_for_builtin(BUILTIN_NAME, x, y, z, label, &appearance)?;
             if label.is_empty() {

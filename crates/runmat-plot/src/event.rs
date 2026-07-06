@@ -1118,6 +1118,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub colorbar_enabled: bool,
     pub colormap: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_order: Option<Vec<[f32; 3]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
     #[serde(default)]
@@ -1255,6 +1257,9 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: format!("{:?}", value.colormap),
+            color_order: value
+                .color_order
+                .map(|colors| colors.into_iter().map(|c| [c.x, c.y, c.z]).collect()),
             color_limits: value.color_limits.map(|(a, b)| [a, b]),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
@@ -1299,6 +1304,12 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
+            color_order: value.color_order.map(|colors| {
+                colors
+                    .into_iter()
+                    .map(|[r, g, b]| glam::Vec4::new(r, g, b, 1.0))
+                    .collect()
+            }),
             color_limits: value.color_limits.map(|[a, b]| (a, b)),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
