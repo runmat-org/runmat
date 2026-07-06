@@ -74,6 +74,7 @@ use runmat_geometry_core::{
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
+use runmat_meshing_core::fixtures::split_material_through_hole_plate_geometry;
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
@@ -12409,6 +12410,138 @@ fn analysis_generate_study_run_figures_returns_mesh_figures() {
         .map(|field| field.values.len())
         .sum::<usize>();
     assert_eq!(overlay_triangle_count, solver_triangle_count);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topology() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("figures-solid-through-hole");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut geometry = split_material_through_hole_plate_geometry();
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(8, 4)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 4)],
+        ),
+    ]);
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "region_base".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "region_cap".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.backend = runmat_meshing_core::MeshBackendKind::Solid;
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("split-material through-hole solid study should run");
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("study figures should be generated");
+
+    let artifact_path = run
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("solid study should persist analysis mesh artifact");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist analysis mesh render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    let solver_triangle_count = topology
+        .meshes
+        .iter()
+        .map(|mesh| mesh.triangles.len())
+        .sum::<usize>();
+    assert_eq!(
+        solver_triangle_count,
+        payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("analysis mesh boundary faces")
+            .len()
+    );
+    let stress_figure = figures
+        .iter()
+        .find(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        })
+        .expect("von Mises figure should be generated");
+    let overlay_triangle_count = stress_figure
+        .figure
+        .plots()
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
+            _ => None,
+        })
+        .filter(|field| {
+            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
+                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
+        })
+        .map(|field| field.values.len())
+        .sum::<usize>();
+    assert_eq!(overlay_triangle_count, solver_triangle_count);
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[cfg(feature = "plot-core")]
