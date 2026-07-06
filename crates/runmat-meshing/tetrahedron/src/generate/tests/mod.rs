@@ -862,7 +862,7 @@ fn generates_holed_polyhedron_mesh_from_through_hole_plc() {
 
     assert_eq!(mesh.mesh_id, "holed_polyhedron_tetrahedron_mesh");
     assert_eq!(mesh.tetrahedron_generation_family, "holed_polyhedron");
-    assert_eq!(mesh.boundary_faces.len(), plc.facets.len());
+    assert!(mesh.boundary_faces.len() > plc.facets.len());
     assert_eq!(
         mesh.evidence.entity_counts["holed_polyhedron_surface_hole_loops"],
         2
