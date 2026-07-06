@@ -16,5 +16,6 @@ runmat-meshing-core = { workspace = true }
 runmat-meshing-curve = { workspace = true }
 runmat-meshing-opt = { workspace = true }
 runmat-meshing-plc = { workspace = true }
+runmat-meshing-size = { workspace = true }
 runmat-meshing-surface = { workspace = true }
 runmat-meshing-tetrahedron = { workspace = true }

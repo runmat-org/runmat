@@ -52,8 +52,10 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     }
     for facade_export in [
         "pub use runmat_meshing_cad as cad",
+        "pub use runmat_meshing_size as size",
         "pub mod source_topology",
         "pub use cad::",
+        "pub use size::",
         "pub use source_topology::",
     ] {
         assert!(

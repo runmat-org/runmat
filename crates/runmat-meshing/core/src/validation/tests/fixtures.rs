@@ -5,8 +5,8 @@ use crate::{
         BoundaryElementKind, MeshEntityProvenance, SourceEntityKind, VolumeElementKind,
     },
     quality::AnalysisMeshQualityReport,
-    size::field::MeshSizingField,
 };
+use runmat_meshing_size::field::MeshSizingField;
 
 pub(super) fn valid_tetrahedron_mesh() -> AnalysisMeshArtifact {
     AnalysisMeshArtifact {

@@ -4,7 +4,6 @@ pub mod contracts;
 pub mod fixtures;
 pub mod quality;
 pub use quality::{predicate, spatial_index, tolerance};
-pub use runmat_meshing_size as size;
 pub mod validation;
 
 pub use contracts::artifact::{
@@ -57,7 +56,7 @@ pub use runmat_meshing_size::adaptive::{
     RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
     SizingFieldUpdate,
 };
-pub use size::field::{
+pub use runmat_meshing_size::field::{
     AnisotropicSizingSample, MeshSizingField, PointSizingQuery, SegmentSizingQuery,
     SizingFieldService, SizingQueryResult, SizingQuerySource, SizingSample,
     SizingSampleApplication, SizingSampleRejection,

@@ -8,15 +8,15 @@ use runmat_meshing_core::{
     },
     contracts::{AnalysisMeshArtifact, MeshBackendSummary},
     quality::{AnalysisMeshQualityReport, ElementQuality},
-    size::field::{
-        AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
-        SizingSampleRejection,
-    },
     validation::AnalysisMeshValidationOptions,
 };
 use runmat_meshing_size::adaptive::{
     AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorStatus,
     RefinementIndicatorSummary, RefinementMarker, SizingFieldUpdate,
+};
+use runmat_meshing_size::field::{
+    AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+    SizingSampleRejection,
 };
 use std::collections::BTreeMap;
 

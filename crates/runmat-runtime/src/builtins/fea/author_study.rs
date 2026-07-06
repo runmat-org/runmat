@@ -379,6 +379,7 @@ mod tests {
                     EntityKind::Face,
                     vec![EntityIdRange::new(1, 1)],
                 ),
+                RegionEntityMapping::all_faces("solid", "surface", 2),
             ],
             diagnostics: Vec::new(),
         };
@@ -401,8 +402,7 @@ mod tests {
                 AnalysisVolumeElement, BoundaryElementKind, MeshBackendSummary, VolumeElementKind,
             },
             quality::{AnalysisMeshQualityReport, ElementQuality},
-            size::field::MeshSizingField,
-            AnalysisMeshValidationOptions,
+            AnalysisMeshValidationOptions, MeshSizingField,
         };
 
         let mut mesh = AnalysisMeshArtifact {

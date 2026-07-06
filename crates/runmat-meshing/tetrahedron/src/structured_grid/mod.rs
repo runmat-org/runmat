@@ -13,10 +13,10 @@ use runmat_meshing_core::{
     },
     quality::predicate::tetrahedron_scaled_jacobian,
     quality::{AnalysisMeshQualityReport, ElementQuality, QualityThresholds},
-    size::field::{
-        AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
-        SizingSampleRejection,
-    },
+};
+use runmat_meshing_size::field::{
+    AnisotropicSizingSample, MeshSizingField, SizingSample, SizingSampleApplication,
+    SizingSampleRejection,
 };
 
 pub trait VolumeMesher {

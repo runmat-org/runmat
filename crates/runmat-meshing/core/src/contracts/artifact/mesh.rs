@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{quality::AnalysisMeshQualityReport, size::field::MeshSizingField};
 use runmat_meshing_size::adaptive::AdaptiveIterationSummary;
+use runmat_meshing_size::field::MeshSizingField;
+
+use crate::quality::AnalysisMeshQualityReport;
 
 use super::MeshBackendSummary;
 use crate::contracts::{

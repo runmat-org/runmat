@@ -15,3 +15,4 @@ runmat-geometry-core = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-opt = { workspace = true }
 runmat-meshing-plc = { workspace = true }
+runmat-meshing-size = { workspace = true }

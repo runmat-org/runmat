@@ -41,12 +41,12 @@ use runmat_meshing_core::{
         },
         AnalysisMeshQualityReport, ElementQuality,
     },
-    size::field::MeshSizingField,
 };
 use runmat_meshing_opt::sliver::{
     classify_sliver_tetrahedra, evaluate_sliver_removal, SliverRecoveryOptions,
     SliverTetrahedronQuality,
 };
+use runmat_meshing_size::field::MeshSizingField;
 use runmat_meshing_tetrahedron::{
     generate::TetrahedronMesh,
     recover::{TetrahedronRecoveryKind, TetrahedronRecoveryQueue, TetrahedronRecoveryStatus},

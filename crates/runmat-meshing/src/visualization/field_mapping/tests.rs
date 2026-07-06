@@ -7,7 +7,7 @@ use runmat_meshing_core::{
         ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
     },
     quality::AnalysisMeshQualityReport,
-    size::field::MeshSizingField,
+    MeshSizingField,
 };
 
 #[test]

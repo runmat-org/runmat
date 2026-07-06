@@ -5641,6 +5641,7 @@ dependencies = [
  "runmat-meshing-curve",
  "runmat-meshing-opt",
  "runmat-meshing-plc",
+ "runmat-meshing-size",
  "runmat-meshing-surface",
  "runmat-meshing-tetrahedron",
  "serde",
@@ -5727,6 +5728,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-meshing-opt",
  "runmat-meshing-plc",
+ "runmat-meshing-size",
  "serde",
  "serde_json",
 ]
