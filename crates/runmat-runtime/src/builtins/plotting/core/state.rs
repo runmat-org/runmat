@@ -25,6 +25,7 @@ use crate::{BuiltinResult, RuntimeError};
 
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
 type AxisTickSnapshot = (Option<Vec<f64>>, Option<Vec<f64>>);
+type AxisTickLabelSnapshot = (Option<Vec<String>>, Option<Vec<String>>);
 type AxisDisplayBoundsSnapshot = Option<(f64, f64, f64, f64)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1181,6 +1182,47 @@ pub fn set_axis_ticks_for_axes(
     Ok(())
 }
 
+pub fn set_axis_tick_labels(x: Option<Vec<String>>, y: Option<Vec<String>>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_tick_labels(axes, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_axis_tick_labels_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x: Option<Vec<String>>,
+    y: Option<Vec<String>>,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
+        state.figure.set_axes_tick_labels(axes_index, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
     let mut reg = registry();
     let handle = reg.current;
@@ -1207,6 +1249,19 @@ pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
     (meta.x_ticks, meta.y_ticks)
 }
 
+pub fn axis_tick_labels_snapshot() -> AxisTickLabelSnapshot {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    let axes = state.active_axes;
+    let meta = state
+        .figure
+        .axes_metadata(axes)
+        .cloned()
+        .unwrap_or_default();
+    (meta.x_tick_labels, meta.y_tick_labels)
+}
+
 pub fn axis_ticks_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -1230,6 +1285,31 @@ pub fn axis_ticks_snapshot_for_axes(
         .cloned()
         .unwrap_or_default();
     Ok((meta.x_ticks, meta.y_ticks))
+}
+
+pub fn axis_tick_labels_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<AxisTickLabelSnapshot, FigureError> {
+    let reg = registry();
+    let state = reg
+        .figures
+        .get(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    let meta = state
+        .figure
+        .axes_metadata(axes_index)
+        .cloned()
+        .unwrap_or_default();
+    Ok((meta.x_tick_labels, meta.y_tick_labels))
 }
 
 pub fn axis_display_bounds_snapshot() -> AxisDisplayBoundsSnapshot {

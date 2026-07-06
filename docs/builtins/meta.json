@@ -103937,6 +103937,110 @@
       ]
     },
     {
+      "name": "xticklabels",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "labels = xticklabels()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        },
+        {
+          "label": "labels = xticklabels(labels)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for X-axis tick labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        },
+        {
+          "label": "mode = xticklabels(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick label mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "labels = xticklabels(ax, labels)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for X-axis tick labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XTICKLABELS.INVALID_ARGUMENT",
+          "identifier": "RunMat:xticklabels:InvalidArgument",
+          "when": "Argument count, tick label values, mode, or axes handle is invalid.",
+          "message": "xticklabels: invalid argument"
+        },
+        {
+          "code": "RM.XTICKLABELS.INTERNAL",
+          "identifier": "RunMat:xticklabels:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "xticklabels: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "xticks",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -104427,6 +104531,110 @@
           "identifier": "RunMat:yline:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yline: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "yticklabels",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "labels = yticklabels()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        },
+        {
+          "label": "labels = yticklabels(labels)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for Y-axis tick labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        },
+        {
+          "label": "mode = yticklabels(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick label mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "labels = yticklabels(ax, labels)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for Y-axis tick labels."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick labels as a cell array of character vectors."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.YTICKLABELS.INVALID_ARGUMENT",
+          "identifier": "RunMat:yticklabels:InvalidArgument",
+          "when": "Argument count, tick label values, mode, or axes handle is invalid.",
+          "message": "yticklabels: invalid argument"
+        },
+        {
+          "code": "RM.YTICKLABELS.INTERNAL",
+          "identifier": "RunMat:yticklabels:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "yticklabels: internal operation failed"
         }
       ]
     },

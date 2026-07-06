@@ -1,4 +1,4 @@
-use runmat_builtins::{StringArray, StructValue, Tensor, Value};
+use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{LegendStyle, TextStyle};
 use std::borrow::Cow;
 
@@ -8,8 +8,9 @@ use super::state::{
     axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure, decode_axes_handle,
     decode_plot_object_handle, figure_handle_exists, figure_has_sg_title, legend_entries_snapshot,
     present_figure_update, select_axes_for_figure, set_axes_style_for_axes,
-    set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
-    set_figure_visible, set_legend_for_axes, set_sg_title_properties_for_figure,
+    set_axis_tick_labels_for_axes, set_axis_ticks_for_axes, set_figure_background_color,
+    set_figure_name, set_figure_number_title, set_figure_position, set_figure_visible,
+    set_legend_for_axes, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };
@@ -504,6 +505,30 @@ fn get_axes_property(
             st.insert("XTickMode", tick_mode_value(meta.x_ticks.as_ref()));
             st.insert("YTickMode", tick_mode_value(meta.y_ticks.as_ref()));
             st.insert(
+                "XTickLabel",
+                tick_label_value(tick_labels_or_auto(
+                    meta.x_tick_labels.as_deref(),
+                    meta.x_ticks.as_deref(),
+                    x_bounds(display_bounds),
+                )),
+            );
+            st.insert(
+                "YTickLabel",
+                tick_label_value(tick_labels_or_auto(
+                    meta.y_tick_labels.as_deref(),
+                    meta.y_ticks.as_deref(),
+                    y_bounds(display_bounds),
+                )),
+            );
+            st.insert(
+                "XTickLabelMode",
+                tick_mode_value(meta.x_tick_labels.as_ref()),
+            );
+            st.insert(
+                "YTickLabelMode",
+                tick_mode_value(meta.y_tick_labels.as_ref()),
+            );
+            st.insert(
                 "FontSize",
                 Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
             );
@@ -580,6 +605,18 @@ fn get_axes_property(
         ))),
         Some("xtickmode") => Ok(tick_mode_value(meta.x_ticks.as_ref())),
         Some("ytickmode") => Ok(tick_mode_value(meta.y_ticks.as_ref())),
+        Some("xticklabel") => Ok(tick_label_value(tick_labels_or_auto(
+            meta.x_tick_labels.as_deref(),
+            meta.x_ticks.as_deref(),
+            x_bounds(display_bounds),
+        ))),
+        Some("yticklabel") => Ok(tick_label_value(tick_labels_or_auto(
+            meta.y_tick_labels.as_deref(),
+            meta.y_ticks.as_deref(),
+            y_bounds(display_bounds),
+        ))),
+        Some("xticklabelmode") => Ok(tick_mode_value(meta.x_tick_labels.as_ref())),
+        Some("yticklabelmode") => Ok(tick_mode_value(meta.y_tick_labels.as_ref())),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
@@ -855,6 +892,10 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "ytick" => Cow::Borrowed("ytick"),
         "xtickmode" => Cow::Borrowed("xtickmode"),
         "ytickmode" => Cow::Borrowed("ytickmode"),
+        "xticklabel" => Cow::Borrowed("xticklabel"),
+        "yticklabel" => Cow::Borrowed("yticklabel"),
+        "xticklabelmode" => Cow::Borrowed("xticklabelmode"),
+        "yticklabelmode" => Cow::Borrowed("yticklabelmode"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
@@ -1190,26 +1231,16 @@ fn apply_axes_property(
             let ticks = ticks_from_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_ticks_for_axes(
-                handle,
-                axes_index,
-                Some(ticks),
-                meta.y_ticks,
-            )
-            .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_ticks_for_axes(handle, axes_index, Some(ticks), meta.y_ticks)
+                .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "ytick" => {
             let ticks = ticks_from_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_ticks_for_axes(
-                handle,
-                axes_index,
-                meta.x_ticks,
-                Some(ticks),
-            )
-            .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks))
+                .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xtickmode" => {
@@ -1225,13 +1256,8 @@ fn apply_axes_property(
                     x_bounds(display_bounds),
                 )),
             };
-            crate::builtins::plotting::state::set_axis_ticks_for_axes(
-                handle,
-                axes_index,
-                x,
-                meta.y_ticks,
-            )
-            .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_ticks_for_axes(handle, axes_index, x, meta.y_ticks)
+                .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "ytickmode" => {
@@ -1247,13 +1273,90 @@ fn apply_axes_property(
                     y_bounds(display_bounds),
                 )),
             };
-            crate::builtins::plotting::state::set_axis_ticks_for_axes(
+            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, y)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "xticklabel" => {
+            let labels = tick_labels_from_value(value, builtin)?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let ticks = ticks_or_auto(meta.x_ticks.as_deref(), x_bounds(display_bounds));
+            set_axis_ticks_for_axes(handle, axes_index, Some(ticks.clone()), meta.y_ticks)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_labels_for_axes(
                 handle,
                 axes_index,
-                meta.x_ticks,
-                y,
+                Some(labels_padded_to_ticks(labels, ticks.len())),
+                meta.y_tick_labels,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "yticklabel" => {
+            let labels = tick_labels_from_value(value, builtin)?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let ticks = ticks_or_auto(meta.y_ticks.as_deref(), y_bounds(display_bounds));
+            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks.clone()))
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_labels_for_axes(
+                handle,
+                axes_index,
+                meta.x_tick_labels,
+                Some(labels_padded_to_ticks(labels, ticks.len())),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "xticklabelmode" => {
+            let mode = tick_mode_from_value(value, builtin, "XTickLabelMode")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let x_labels = match mode {
+                TickMode::Auto => None,
+                TickMode::Manual => Some(tick_labels_or_auto(
+                    meta.x_tick_labels.as_deref(),
+                    meta.x_ticks.as_deref(),
+                    x_bounds(display_bounds),
+                )),
+            };
+            if matches!(mode, TickMode::Manual) {
+                let ticks = ticks_or_auto(meta.x_ticks.as_deref(), x_bounds(display_bounds));
+                set_axis_ticks_for_axes(handle, axes_index, Some(ticks), meta.y_ticks)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            set_axis_tick_labels_for_axes(handle, axes_index, x_labels, meta.y_tick_labels)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "yticklabelmode" => {
+            let mode = tick_mode_from_value(value, builtin, "YTickLabelMode")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let y_labels = match mode {
+                TickMode::Auto => None,
+                TickMode::Manual => Some(tick_labels_or_auto(
+                    meta.y_tick_labels.as_deref(),
+                    meta.y_ticks.as_deref(),
+                    y_bounds(display_bounds),
+                )),
+            };
+            if matches!(mode, TickMode::Manual) {
+                let ticks = ticks_or_auto(meta.y_ticks.as_deref(), y_bounds(display_bounds));
+                set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks))
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            set_axis_tick_labels_for_axes(handle, axes_index, meta.x_tick_labels, y_labels)
+                .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xscale" => {
@@ -4192,8 +4295,74 @@ fn tick_value(data: Vec<f64>) -> Value {
     tensor_from_vec(data)
 }
 
-fn tick_mode_value(ticks: Option<&Vec<f64>>) -> Value {
+fn tick_mode_value<T>(ticks: Option<&Vec<T>>) -> Value {
     Value::String(if ticks.is_some() { "manual" } else { "auto" }.into())
+}
+
+fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::String(s) => Ok(vec![s.clone()]),
+        Value::StringArray(strings) => Ok(strings.data.clone()),
+        Value::CharArray(chars) => Ok(char_array_rows(chars)),
+        Value::Cell(cell) => {
+            let mut labels = Vec::with_capacity(cell.data.len());
+            for entry in &cell.data {
+                labels.extend(tick_labels_from_value(entry, builtin)?);
+            }
+            Ok(labels)
+        }
+        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(Vec::new()),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: tick labels must be a string array or cell array of text, got {other:?}"),
+        )),
+    }
+}
+
+fn tick_labels_or_auto(
+    explicit: Option<&[String]>,
+    ticks: Option<&[f64]>,
+    bounds: Option<(f64, f64)>,
+) -> Vec<String> {
+    if let Some(labels) = explicit {
+        return labels.to_vec();
+    }
+    ticks_or_auto(ticks, bounds)
+        .into_iter()
+        .map(runmat_plot::core::plot_utils::format_tick_label)
+        .collect()
+}
+
+fn labels_padded_to_ticks(mut labels: Vec<String>, tick_count: usize) -> Vec<String> {
+    if labels.len() < tick_count {
+        labels.resize(tick_count, String::new());
+    }
+    labels
+}
+
+fn tick_label_value(labels: Vec<String>) -> Value {
+    let values = labels
+        .iter()
+        .map(|label| Value::CharArray(CharArray::new_row(label)))
+        .collect::<Vec<_>>();
+    Value::Cell(CellArray::new(values, 1, labels.len()).expect("valid tick-label cell array"))
+}
+
+fn char_array_rows(chars: &CharArray) -> Vec<String> {
+    if chars.rows == 0 || chars.cols == 0 {
+        return Vec::new();
+    }
+    (0..chars.rows)
+        .map(|row| {
+            let start = row * chars.cols;
+            let end = start + chars.cols;
+            chars.data[start..end]
+                .iter()
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
 }
 
 fn parse_colormap_name(

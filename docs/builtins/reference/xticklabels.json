@@ -1,0 +1,87 @@
+{
+  "title": "xticklabels",
+  "category": "plotting",
+  "keywords": [
+    "xticklabels",
+    "x tick labels",
+    "axes",
+    "plot labels"
+  ],
+  "summary": "Query or set X-axis tick labels for the current axes or a specified axes handle.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::xticklabels::tests"
+  },
+  "description": "`xticklabels` controls the display text associated with X-axis tick marks. It supports query, explicit label assignment, automatic mode, manual mode, mode query, and explicit axes-target forms.",
+  "syntax": [
+    "labels = xticklabels()",
+    "labels = xticklabels(labels)",
+    "mode = xticklabels(mode)",
+    "labels = xticklabels(ax, labels)",
+    "mode = xticklabels(ax, 'mode')"
+  ],
+  "arguments": [
+    {
+      "name": "labels",
+      "type": "cell array of character vectors | string array | char array | []",
+      "description": "Labels to associate with the current X-axis ticks. Fewer labels than ticks are padded with empty character vectors; an empty cell or empty numeric array removes labels."
+    },
+    {
+      "name": "mode",
+      "type": "'auto' | 'manual' | 'mode'",
+      "description": "'auto' returns tick labels to automatic generation, 'manual' freezes current labels, and 'mode' queries the current label mode."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle. If omitted, the current axes are used."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Set X-axis tick values and labels",
+      "input": "plot(0:10, (0:10).^2);\nxticks([0 5 10]);\nxticklabels({'x = 0', 'x = 5', 'x = 10'});",
+      "output": "% The X-axis shows the three supplied labels"
+    },
+    {
+      "description": "Query and reset label mode",
+      "input": "xticklabels({'A', 'B'});\nxticklabels('mode')\nxticklabels('auto');",
+      "output": "ans = 'manual'\n% Labels return to automatic numeric formatting"
+    },
+    {
+      "description": "Set labels on a specific axes",
+      "input": "ax = subplot(1, 2, 1);\nplot(ax, 1:3);\nxticks(ax, [1 2 3]);\nxticklabels(ax, {'one', 'two', 'three'});",
+      "output": "% Only the target axes receives the labels"
+    }
+  ],
+  "notes": [
+    "Setting explicit labels also freezes the X tick values at their current positions, matching MATLAB's XTickMode side effect.",
+    "Automatic labels are formatted from the current X tick values and cached display bounds, so this builtin does not gather plot data from accelerated backends."
+  ],
+  "gpu_residency": "`xticklabels` only reads and writes axes metadata. It does not gather GPU-resident plot data; automatic labels are generated from current tick metadata and cached display bounds.",
+  "related": [
+    {
+      "label": "xticks",
+      "url": "./xticks"
+    },
+    {
+      "label": "yticklabels",
+      "url": "./yticklabels"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/xticklabels.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/xticklabels.rs"
+    }
+  ]
+}
