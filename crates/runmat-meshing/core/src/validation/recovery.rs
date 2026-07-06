@@ -279,6 +279,18 @@ pub(super) fn validate_recovery_evidence_consistency(
         backend.tetrahedron_rejected_cad_curve_absent_source_edge_recovery_item_count,
         backend.tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count,
     )?;
+    validate_aggregate_recovery_count(
+        "absent_source_edge_status_items",
+        backend.tetrahedron_attempted_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_reconnected_absent_source_edge_recovery_item_count
+            + backend.tetrahedron_rejected_absent_source_edge_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "cad_curve_absent_source_edge_status_items",
+        backend.tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count,
+        backend.tetrahedron_reconnected_cad_curve_absent_source_edge_recovery_item_count
+            + backend.tetrahedron_rejected_cad_curve_absent_source_edge_recovery_item_count,
+    )?;
     validate_recovery_item_count(
         "attempted_source_face_diagonal_pair",
         backend.tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
@@ -298,6 +310,12 @@ pub(super) fn validate_recovery_evidence_consistency(
         "rejected_source_face_diagonal_item",
         backend.tetrahedron_rejected_source_face_diagonal_recovery_item_count,
         backend.tetrahedron_absent_face_source_face_recovery_item_count,
+    )?;
+    validate_aggregate_recovery_count(
+        "source_face_diagonal_pair_status_items",
+        backend.tetrahedron_attempted_source_face_diagonal_recovery_pair_count,
+        backend.tetrahedron_recovered_source_face_diagonal_pair_count
+            + backend.tetrahedron_rejected_source_face_diagonal_recovery_pair_count,
     )?;
     validate_recovery_item_count(
         "attempted_material_interface",

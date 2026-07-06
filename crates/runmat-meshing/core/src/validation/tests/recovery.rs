@@ -772,6 +772,56 @@ fn rejects_rejected_absent_source_edge_count_that_exceeds_attempted_count() {
 }
 
 #[test]
+fn rejects_absent_source_edge_status_count_that_does_not_match_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_edge_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_absent_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_reconnected_absent_source_edge_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("absent source-edge outcomes must account for every attempt");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "absent_source_edge_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_cad_curve_absent_source_edge_status_count_that_does_not_match_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_edge_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_absent_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_cad_curve_absent_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_reconnected_absent_source_edge_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_reconnected_cad_curve_absent_source_edge_recovery_item_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("CAD curve absent source-edge outcomes must account for every CAD attempt");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "cad_curve_absent_source_edge_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 1,
+        }
+    );
+}
+
+#[test]
 fn rejects_attempted_volume_face_source_face_restoration_count_that_exceeds_typed_input_count() {
     let mut mesh = valid_tetrahedron_mesh();
     mesh.backend
@@ -788,6 +838,29 @@ fn rejects_attempted_volume_face_source_face_restoration_count_that_exceeds_type
             family: "attempted_volume_face_source_face_boundary_restoration".to_string(),
             item_count: 2,
             input_count: 1,
+        }
+    );
+}
+
+#[test]
+fn rejects_source_face_diagonal_pair_status_count_that_does_not_match_attempts() {
+    let mut mesh = valid_tetrahedron_mesh();
+    mesh.backend
+        .tetrahedron_absent_face_source_face_recovery_item_count = 2;
+    mesh.backend
+        .tetrahedron_attempted_source_face_diagonal_recovery_pair_count = 2;
+    mesh.backend
+        .tetrahedron_recovered_source_face_diagonal_pair_count = 1;
+
+    let err = validate_analysis_mesh(&mesh, Default::default())
+        .expect_err("source-face diagonal pair outcomes must account for every attempted pair");
+
+    assert_eq!(
+        err,
+        AnalysisMeshValidationError::InconsistentTetrahedronRecoveryAggregateEvidence {
+            family: "source_face_diagonal_pair_status_items".to_string(),
+            aggregate_count: 2,
+            typed_count: 1,
         }
     );
 }
