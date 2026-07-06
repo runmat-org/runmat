@@ -81,6 +81,54 @@ fn preserves_semantic_cad_face_regions() {
 }
 
 #[test]
+fn preserves_disconnected_semantic_face_loops_as_holes() {
+    let geometry = annulus_face_geometry();
+    let topology = extract_source_topology(&geometry).expect("topology should extract");
+
+    let cad = build_cad_topology(&geometry, &topology).expect("cad topology should build");
+
+    assert_eq!(cad.source, CadTopologySource::SemanticCad);
+    assert_eq!(cad.report.semantic_face_count, 1);
+    assert_eq!(cad.report.hole_loop_count, 1);
+    let semantic_face = cad
+        .faces
+        .iter()
+        .find(|face| face.entity_id.id == "face_000007")
+        .expect("semantic annulus face should be merged");
+    assert_eq!(semantic_face.source_face_ids.len(), 8);
+    assert_eq!(semantic_face.loop_edge_ids.len(), 8);
+    assert_eq!(semantic_face.loop_ids.len(), 2);
+
+    let face_loops = cad
+        .loops
+        .iter()
+        .filter(|cad_loop| cad_loop.face_id == semantic_face.entity_id.id)
+        .collect::<Vec<_>>();
+    assert_eq!(face_loops.len(), 2);
+    let outer_loop = face_loops
+        .iter()
+        .find(|cad_loop| cad_loop.is_outer)
+        .expect("outer loop should be present");
+    let hole_loop = face_loops
+        .iter()
+        .find(|cad_loop| !cad_loop.is_outer)
+        .expect("hole loop should be present");
+    assert_eq!(outer_loop.edge_ids.len(), 4);
+    assert_eq!(hole_loop.edge_ids.len(), 4);
+    assert!(outer_loop
+        .edge_ids
+        .iter()
+        .all(|edge_id| !hole_loop.edge_ids.contains(edge_id)));
+    assert!(outer_loop
+        .edge_ids
+        .iter()
+        .chain(hole_loop.edge_ids.iter())
+        .all(|edge_id| semantic_face.loop_edge_ids.contains(edge_id)));
+    assert!(outer_loop.entity_id.id.ends_with("_outer"));
+    assert!(hole_loop.entity_id.id.ends_with("_hole_1"));
+}
+
+#[test]
 fn validates_normalized_cad_topology_references_and_report_counts() {
     let geometry = cube_geometry(false);
     let topology = extract_source_topology(&geometry).expect("topology should extract");
@@ -499,6 +547,113 @@ fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
             }],
         });
     geometry
+}
+
+fn annulus_face_geometry() -> runmat_geometry_core::GeometryAsset {
+    let face_region = Region {
+        region_id: "face_000007".to_string(),
+        name: "annulus face".to_string(),
+        tag: Some("cad_face".to_string()),
+        cad_ownership: Some(CadRegionOwnership {
+            face_id: Some(7),
+            curve_id: None,
+            label: Some(CadLabelRef {
+                label_entry: "0:1:7".to_string(),
+                name: "annulus face".to_string(),
+                kind: CadSemanticKind::Face,
+            }),
+            owner_path: Vec::new(),
+            layers: Vec::new(),
+            color: None,
+            material: None,
+        }),
+    };
+    runmat_geometry_core::GeometryAsset {
+        geometry_id: "geo_cad_topology_annulus".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/annulus_face.step".to_string(),
+            sha256: "annulus-face".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "annulus_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 16,
+            element_count: 32,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "annulus_surface",
+            vec![
+                [0.0, 0.0, 1.0],
+                [3.0, 0.0, 1.0],
+                [3.0, 3.0, 1.0],
+                [0.0, 3.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [2.0, 1.0, 1.0],
+                [2.0, 2.0, 1.0],
+                [1.0, 2.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [3.0, 3.0, 0.0],
+                [0.0, 3.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [2.0, 2.0, 0.0],
+                [1.0, 2.0, 0.0],
+            ],
+            vec![
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+                [8, 13, 9],
+                [8, 12, 13],
+                [9, 14, 10],
+                [9, 13, 14],
+                [10, 15, 11],
+                [10, 14, 15],
+                [11, 12, 8],
+                [11, 15, 12],
+                [0, 8, 9],
+                [0, 9, 1],
+                [1, 9, 10],
+                [1, 10, 2],
+                [2, 10, 11],
+                [2, 11, 3],
+                [3, 11, 8],
+                [3, 8, 0],
+                [4, 5, 13],
+                [4, 13, 12],
+                [5, 6, 14],
+                [5, 14, 13],
+                [6, 7, 15],
+                [6, 15, 14],
+                [7, 4, 12],
+                [7, 12, 15],
+            ],
+        )],
+        regions: vec![face_region],
+        region_entity_mappings: vec![RegionEntityMapping::new(
+            "face_000007",
+            "annulus_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 8)],
+        )],
+        diagnostics: Vec::new(),
+    }
 }
 
 fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {

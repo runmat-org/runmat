@@ -116,8 +116,22 @@ pub fn build_cad_topology(
             }
         })
         .collect::<Vec<_>>();
+    let edge_node_ids_by_cad_edge_id = topology
+        .edges
+        .iter()
+        .map(|edge| (format!("cad_edge_{}", edge.edge_id), edge.node_ids))
+        .collect::<BTreeMap<_, _>>();
+    let vertex_coordinates_by_node_id = topology
+        .vertices
+        .iter()
+        .map(|vertex| (vertex.vertex_id, vertex.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
     let mut faces = merge_stable_cad_faces(face_seeds);
-    let loops = attach_outer_loops(&mut faces);
+    let loops = attach_face_loops(
+        &mut faces,
+        &edge_node_ids_by_cad_edge_id,
+        &vertex_coordinates_by_node_id,
+    );
 
     let face_ids_by_source_face = faces
         .iter()
@@ -258,22 +272,142 @@ pub fn build_cad_topology(
     Ok(model)
 }
 
-fn attach_outer_loops(faces: &mut [CadFace]) -> Vec<CadLoop> {
+fn attach_face_loops(
+    faces: &mut [CadFace],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> Vec<CadLoop> {
     let mut loops = Vec::<CadLoop>::with_capacity(faces.len());
     for face in faces {
-        let loop_id = format!("cad_loop_{}_outer", face.entity_id.id);
-        face.loop_ids = vec![loop_id.clone()];
-        loops.push(CadLoop {
-            entity_id: CadEntityId {
-                kind: CadEntityKind::Loop,
-                id: loop_id,
-            },
-            face_id: face.entity_id.id.clone(),
-            edge_ids: face.loop_edge_ids.clone(),
-            is_outer: true,
-        });
+        let components = split_loop_edge_components(
+            &face.loop_edge_ids,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        );
+        let mut loop_ids = Vec::<String>::with_capacity(components.len());
+        for (component_index, edge_ids) in components.into_iter().enumerate() {
+            let loop_id = if component_index == 0 {
+                format!("cad_loop_{}_outer", face.entity_id.id)
+            } else {
+                format!("cad_loop_{}_hole_{component_index}", face.entity_id.id)
+            };
+            loop_ids.push(loop_id.clone());
+            loops.push(CadLoop {
+                entity_id: CadEntityId {
+                    kind: CadEntityKind::Loop,
+                    id: loop_id,
+                },
+                face_id: face.entity_id.id.clone(),
+                edge_ids,
+                is_outer: component_index == 0,
+            });
+        }
+        face.loop_ids = loop_ids;
     }
     loops
+}
+
+fn split_loop_edge_components(
+    loop_edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> Vec<Vec<String>> {
+    let mut remaining = loop_edge_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut components = Vec::<Vec<String>>::new();
+    while let Some(start_edge_id) = remaining.iter().next().cloned() {
+        remaining.remove(&start_edge_id);
+        let mut component = vec![start_edge_id.clone()];
+        let mut component_node_ids = component_node_ids(
+            std::slice::from_ref(&start_edge_id),
+            edge_node_ids_by_cad_edge_id,
+        );
+
+        loop {
+            let adjacent_edge_ids = remaining
+                .iter()
+                .filter(|edge_id| {
+                    edge_node_ids_by_cad_edge_id
+                        .get(*edge_id)
+                        .is_some_and(|node_ids| {
+                            component_node_ids.contains(&node_ids[0])
+                                || component_node_ids.contains(&node_ids[1])
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if adjacent_edge_ids.is_empty() {
+                break;
+            }
+            for edge_id in adjacent_edge_ids {
+                remaining.remove(&edge_id);
+                if let Some(node_ids) = edge_node_ids_by_cad_edge_id.get(&edge_id) {
+                    component_node_ids.insert(node_ids[0]);
+                    component_node_ids.insert(node_ids[1]);
+                }
+                component.push(edge_id);
+            }
+        }
+
+        component.sort();
+        components.push(component);
+    }
+
+    components.sort_by(|left, right| {
+        component_span2(
+            right,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        )
+        .total_cmp(&component_span2(
+            left,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        ))
+        .then_with(|| right.len().cmp(&left.len()))
+        .then_with(|| left.first().cmp(&right.first()))
+    });
+    components
+}
+
+fn component_node_ids(
+    edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+) -> BTreeSet<u32> {
+    edge_ids
+        .iter()
+        .filter_map(|edge_id| edge_node_ids_by_cad_edge_id.get(edge_id))
+        .flat_map(|node_ids| node_ids.iter().copied())
+        .collect()
+}
+
+fn component_span2(
+    edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> f64 {
+    let node_ids = component_node_ids(edge_ids, edge_node_ids_by_cad_edge_id);
+    let mut bounds_min = [f64::INFINITY; 3];
+    let mut bounds_max = [f64::NEG_INFINITY; 3];
+    let mut point_count = 0_usize;
+    for point in node_ids
+        .iter()
+        .filter_map(|node_id| vertex_coordinates_by_node_id.get(node_id))
+    {
+        point_count += 1;
+        for axis in 0..3 {
+            bounds_min[axis] = bounds_min[axis].min(point[axis]);
+            bounds_max[axis] = bounds_max[axis].max(point[axis]);
+        }
+    }
+    if point_count == 0 {
+        return 0.0;
+    }
+    let span = [
+        bounds_max[0] - bounds_min[0],
+        bounds_max[1] - bounds_min[1],
+        bounds_max[2] - bounds_min[2],
+    ];
+    span[0] * span[0] + span[1] * span[1] + span[2] * span[2]
 }
 
 pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTopologyError> {
