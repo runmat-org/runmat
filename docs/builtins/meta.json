@@ -57559,6 +57559,187 @@
       ]
     },
     {
+      "name": "mnrfit",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "B = mnrfit(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Response class vector or two-column binomial counts matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per non-reference response category."
+            }
+          ]
+        },
+        {
+          "label": "B = mnrfit(X, Y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Response class vector or two-column binomial counts matrix."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Model, Link, Constant, Weights, IterationLimit, Tolerance, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per non-reference response category."
+            }
+          ]
+        },
+        {
+          "label": "[B, dev, stats] = mnrfit(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Response class vector or two-column binomial counts matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per non-reference response category."
+            },
+            {
+              "name": "dev",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Model deviance."
+            },
+            {
+              "name": "stats",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit statistics structure containing beta, se, t, p, covb, coeffcorr, and dfe."
+            }
+          ]
+        },
+        {
+          "label": "[B, dev, stats] = mnrfit(X, Y, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Predictor matrix with observations in rows."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Response class vector or two-column binomial counts matrix."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options such as Model, Link, Constant, Weights, IterationLimit, Tolerance, and Options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Coefficient matrix with one column per non-reference response category."
+            },
+            {
+              "name": "dev",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Model deviance."
+            },
+            {
+              "name": "stats",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fit statistics structure containing beta, se, t, p, covb, coeffcorr, and dfe."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MNRFIT.INVALID_ARGUMENT",
+          "identifier": "RunMat:mnrfit:InvalidArgument",
+          "when": "Inputs, response values, dimensions, or options are malformed.",
+          "message": "mnrfit: invalid argument"
+        },
+        {
+          "code": "RM.MNRFIT.CONVERGENCE",
+          "identifier": "RunMat:mnrfit:Convergence",
+          "when": "The multinomial logistic solver cannot make numerical progress.",
+          "message": "mnrfit: convergence failure"
+        },
+        {
+          "code": "RM.MNRFIT.INTERNAL",
+          "identifier": "RunMat:mnrfit:Internal",
+          "when": "RunMat cannot allocate or construct mnrfit outputs.",
+          "message": "mnrfit: internal error"
+        }
+      ]
+    },
+    {
       "name": "mod",
       "output_mode": "Fixed",
       "completion_policy": "Public",

@@ -123,6 +123,22 @@ fn fitdist_surface_executes_from_scripts() {
 }
 
 #[test]
+fn mnrfit_surface_executes_from_scripts() {
+    let vars = execute_source(
+        "X = [0; 1; 2; 3; 4]; y = [1; 2; 1; 2; 2]; [B,dev,stats] = mnrfit(X, y, 'IterationLimit', 200, 'Tolerance', 1e-7); sz = size(B); rows = sz(1); cols = sz(2); se = stats.se; sesz = size(se); serows = sesz(1); secols = sesz(2); dfe = stats.dfe; cn = stats.classNames; c1 = cn(1); c2 = cn(2);",
+    )
+    .expect("mnrfit script");
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
+    assert!(has_num(&vars, 2.0));
+    assert!(has_num(&vars, 1.0));
+    assert!(has_num(&vars, 3.0));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(value) if value.is_finite())));
+}
+
+#[test]
 fn fitctree_surface_executes_from_scripts() {
     let vars = execute_source(
         "X = [0; 1; 2; 3]; y = [0; 0; 1; 1]; mdl = fitctree(X, y, 'MaxNumSplits', 1, 'MinParentSize', 2); [label,score,node,cnum] = predict(mdl, [0.5; 2.5]); a = label(1); b = label(2); s11 = score(1,1); n1 = node(1); c2 = cnum(2);",
