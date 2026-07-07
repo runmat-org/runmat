@@ -386,6 +386,7 @@ impl PlotOverlay {
         let explicit_tick_labels = plot_renderer
             .overlay_x_tick_labels_for_axes(axes_index)
             .filter(|labels| !labels.is_empty());
+        let x_tick_format = plot_renderer.overlay_x_tick_format_for_axes(axes_index);
         let categorical_tick_labels = plot_renderer
             .overlay_categorical_labels_for_axes(axes_index)
             .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
@@ -415,9 +416,10 @@ impl PlotOverlay {
                     .map(|d| format!("10^{d}"))
                     .collect()
             } else {
+                let formatter = plot_utils::TickLabelFormatter::new(x_tick_format.as_deref());
                 plot_utils::generate_major_ticks(x_min, x_max)
                     .into_iter()
-                    .map(plot_utils::format_tick_label)
+                    .map(|value| formatter.format(value))
                     .collect()
             }
         } else {
@@ -1867,6 +1869,14 @@ impl PlotOverlay {
                 axes_index.and_then(|idx| plot_renderer.overlay_x_tick_labels_for_axes(idx));
             let explicit_y_labels =
                 axes_index.and_then(|idx| plot_renderer.overlay_y_tick_labels_for_axes(idx));
+            let explicit_x_format =
+                axes_index.and_then(|idx| plot_renderer.overlay_x_tick_format_for_axes(idx));
+            let explicit_y_format =
+                axes_index.and_then(|idx| plot_renderer.overlay_y_tick_format_for_axes(idx));
+            let x_tick_formatter =
+                plot_utils::TickLabelFormatter::new(explicit_x_format.as_deref());
+            let y_tick_formatter =
+                plot_utils::TickLabelFormatter::new(explicit_y_format.as_deref());
 
             // Histogram numeric tick support and categorical axis support
             let (mut cat_x, mut cat_y) = (false, false);
@@ -1920,7 +1930,7 @@ impl PlotOverlay {
                     let label = explicit_x_labels
                         .as_ref()
                         .and_then(|labels| labels.get(tick_idx).cloned())
-                        .unwrap_or_else(|| plot_utils::format_tick_label(*x_val));
+                        .unwrap_or_else(|| x_tick_formatter.format(*x_val));
                     ui.painter().text(
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
@@ -1997,7 +2007,7 @@ impl PlotOverlay {
                     let label = explicit_y_labels
                         .as_ref()
                         .and_then(|labels| labels.get(tick_idx).cloned())
-                        .unwrap_or_else(|| plot_utils::format_tick_label(*y_val));
+                        .unwrap_or_else(|| y_tick_formatter.format(*y_val));
                     ui.painter().text(
                         Pos2::new(border_left - label_offset, y_screen),
                         Align2::CENTER_CENTER,
@@ -2174,7 +2184,7 @@ impl PlotOverlay {
                     ui.painter().text(
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
-                        plot_utils::format_tick_label(x_val),
+                        x_tick_formatter.format(x_val),
                         tick_font.clone(),
                         label_color,
                     );
@@ -2222,7 +2232,7 @@ impl PlotOverlay {
                     ui.painter().text(
                         Pos2::new(border_left - label_offset, y_screen),
                         Align2::CENTER_CENTER,
-                        plot_utils::format_tick_label(y_val),
+                        y_tick_formatter.format(y_val),
                         tick_font.clone(),
                         label_color,
                     );

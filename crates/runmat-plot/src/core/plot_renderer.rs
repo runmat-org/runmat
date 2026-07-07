@@ -3808,6 +3808,18 @@ impl PlotRenderer {
             .and_then(|f| f.y_axis_tick_labels_for_axes(axes_index))
     }
 
+    pub fn overlay_x_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_tick_format_for_axes(axes_index))
+    }
+
+    pub fn overlay_y_tick_format_for_axes(&self, axes_index: usize) -> Option<String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_tick_format_for_axes(axes_index))
+    }
+
     pub fn overlay_x_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
         self.last_figure
             .as_ref()
@@ -4137,6 +4149,302 @@ pub mod plot_utils {
             trim_fixed(format!("{value:.2}"))
         } else {
             trim_fixed(format!("{value:.1}"))
+        }
+    }
+
+    pub fn canonical_tick_label_format(format: &str) -> String {
+        match format.trim().to_ascii_lowercase().as_str() {
+            "auto" => "%g".to_string(),
+            "usd" => "$%,.2f".to_string(),
+            "eur" => "\u{20AC}%,.2f".to_string(),
+            "gbp" => "\u{00A3}%,.2f".to_string(),
+            "jpy" => "\u{00A5}%,d".to_string(),
+            "degrees" => "%g\u{00B0}".to_string(),
+            "percentage" => "%g%%".to_string(),
+            _ => format.to_string(),
+        }
+    }
+
+    pub fn format_tick_label_with_format(value: f64, format: Option<&str>) -> String {
+        TickLabelFormatter::new(format).format(value)
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct TickLabelFormatter {
+        spec: Option<NumericTickFormat>,
+    }
+
+    impl TickLabelFormatter {
+        pub fn new(format: Option<&str>) -> Self {
+            let spec = format
+                .map(canonical_tick_label_format)
+                .and_then(|format| NumericTickFormat::parse(&format));
+            Self { spec }
+        }
+
+        pub fn format(&self, value: f64) -> String {
+            let Some(spec) = &self.spec else {
+                return format_tick_label(value);
+            };
+            spec.format(value)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct NumericTickFormat {
+        prefix: String,
+        suffix: String,
+        flags: TickFormatFlags,
+        width: Option<usize>,
+        precision: Option<usize>,
+        conversion: char,
+    }
+
+    #[derive(Debug, Clone, Copy, Default)]
+    struct TickFormatFlags {
+        thousands: bool,
+        plus: bool,
+        zero_pad: bool,
+        left: bool,
+        alternate: bool,
+    }
+
+    impl NumericTickFormat {
+        fn parse(format: &str) -> Option<Self> {
+            let chars: Vec<char> = format.chars().collect();
+            let mut index = 0usize;
+            while index < chars.len() {
+                if chars[index] == '%' {
+                    if chars.get(index + 1) == Some(&'%') {
+                        index += 2;
+                        continue;
+                    }
+                    break;
+                }
+                index += 1;
+            }
+            if index >= chars.len() {
+                return None;
+            }
+
+            let prefix = decode_percent_literals(&chars[..index]);
+            index += 1;
+            let mut flags = TickFormatFlags::default();
+            while index < chars.len() {
+                match chars[index] {
+                    ',' => flags.thousands = true,
+                    '+' => flags.plus = true,
+                    '0' => flags.zero_pad = true,
+                    '-' => flags.left = true,
+                    '#' => flags.alternate = true,
+                    _ => break,
+                }
+                index += 1;
+            }
+
+            let width_start = index;
+            while index < chars.len() && chars[index].is_ascii_digit() {
+                index += 1;
+            }
+            let width = parse_usize(&chars[width_start..index]);
+
+            let precision = if chars.get(index) == Some(&'.') {
+                index += 1;
+                let precision_start = index;
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+                parse_usize(&chars[precision_start..index]).or(Some(0))
+            } else {
+                None
+            };
+
+            let conversion = *chars.get(index)?;
+            if !matches!(conversion, 'd' | 'i' | 'f' | 'e' | 'E' | 'g' | 'G') {
+                return None;
+            }
+            index += 1;
+            let suffix = decode_percent_literals(&chars[index..]);
+            Some(Self {
+                prefix,
+                suffix,
+                flags,
+                width,
+                precision,
+                conversion,
+            })
+        }
+
+        fn format(&self, value: f64) -> String {
+            let mut body = match self.conversion {
+                'd' | 'i' => format_integer(value, self.precision, self.flags),
+                'f' => format_fixed(value, self.precision.unwrap_or(6), self.flags),
+                'e' => format_exponential(value, self.precision.unwrap_or(6), false),
+                'E' => format_exponential(value, self.precision.unwrap_or(6), true),
+                'g' => format_general(value, self.precision.unwrap_or(6), false, self.flags),
+                'G' => format_general(value, self.precision.unwrap_or(6), true, self.flags),
+                _ => format_tick_label(value),
+            };
+            if self.flags.plus && value.is_sign_positive() && !body.starts_with('+') {
+                body.insert(0, '+');
+            }
+            if self.flags.thousands {
+                body = add_thousands_separators(&body);
+            }
+            body = apply_width(body, self.width, self.flags);
+            format!("{}{}{}", self.prefix, body, self.suffix)
+        }
+    }
+
+    fn parse_usize(chars: &[char]) -> Option<usize> {
+        if chars.is_empty() {
+            return None;
+        }
+        chars.iter().collect::<String>().parse().ok()
+    }
+
+    fn decode_percent_literals(chars: &[char]) -> String {
+        let mut out = String::new();
+        let mut index = 0usize;
+        while index < chars.len() {
+            if chars[index] == '%' && chars.get(index + 1) == Some(&'%') {
+                out.push('%');
+                index += 2;
+            } else {
+                out.push(chars[index]);
+                index += 1;
+            }
+        }
+        out
+    }
+
+    fn format_integer(value: f64, precision: Option<usize>, flags: TickFormatFlags) -> String {
+        let rounded = if value.is_finite() {
+            value.round()
+        } else {
+            value
+        };
+        let mut text = format!("{rounded:.0}");
+        if let Some(precision) = precision {
+            let negative = text.starts_with('-');
+            let digits = if negative { &text[1..] } else { &text };
+            if digits.len() < precision {
+                let mut padded = "0".repeat(precision - digits.len());
+                padded.push_str(digits);
+                text = if negative {
+                    format!("-{padded}")
+                } else {
+                    padded
+                };
+            }
+        }
+        if flags.alternate && !text.contains('.') {
+            text.push('.');
+        }
+        text
+    }
+
+    fn format_fixed(value: f64, precision: usize, flags: TickFormatFlags) -> String {
+        let mut text = format!("{value:.precision$}");
+        if precision == 0 && flags.alternate && !text.contains('.') {
+            text.push('.');
+        }
+        text
+    }
+
+    fn format_exponential(value: f64, precision: usize, upper: bool) -> String {
+        let text = format!("{value:.precision$e}");
+        if upper {
+            text.to_ascii_uppercase()
+        } else {
+            text
+        }
+    }
+
+    fn format_general(value: f64, precision: usize, upper: bool, flags: TickFormatFlags) -> String {
+        if value == 0.0 {
+            return "0".to_string();
+        }
+        let abs = value.abs();
+        let use_exp = abs < 1e-4 || abs >= 10f64.powi(precision as i32);
+        let text = if use_exp {
+            let decimals = precision.saturating_sub(1);
+            format_exponential(value, decimals, upper)
+        } else {
+            let integer_digits = abs.log10().floor().max(0.0) as usize + 1;
+            let decimals = precision.saturating_sub(integer_digits);
+            format_fixed(value, decimals, flags)
+        };
+        if flags.alternate {
+            text
+        } else {
+            trim_general_zeros(text)
+        }
+    }
+
+    fn trim_general_zeros(mut text: String) -> String {
+        let exp_index = text.find(['e', 'E']);
+        let suffix = exp_index.map(|idx| text.split_off(idx));
+        if text.contains('.') {
+            while text.ends_with('0') {
+                text.pop();
+            }
+            if text.ends_with('.') {
+                text.pop();
+            }
+        }
+        if let Some(suffix) = suffix {
+            text.push_str(&suffix);
+        }
+        text
+    }
+
+    fn add_thousands_separators(text: &str) -> String {
+        let (sign, rest) = match text.strip_prefix('-') {
+            Some(rest) => ("-", rest),
+            None => match text.strip_prefix('+') {
+                Some(rest) => ("+", rest),
+                None => ("", text),
+            },
+        };
+        let (integer, suffix) = rest
+            .find(['.', 'e', 'E'])
+            .map(|idx| rest.split_at(idx))
+            .unwrap_or((rest, ""));
+        let chars: Vec<char> = integer.chars().collect();
+        let mut out = String::new();
+        for (idx, ch) in chars.iter().enumerate() {
+            if idx > 0 && (chars.len() - idx).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(*ch);
+        }
+        format!("{sign}{out}{suffix}")
+    }
+
+    fn apply_width(mut text: String, width: Option<usize>, flags: TickFormatFlags) -> String {
+        let Some(width) = width else {
+            return text;
+        };
+        let len = text.chars().count();
+        if len >= width {
+            return text;
+        }
+        let pad = width - len;
+        if flags.left {
+            text.push_str(&" ".repeat(pad));
+            text
+        } else if flags.zero_pad {
+            let mut chars = text.chars();
+            match chars.next() {
+                Some(sign @ ('-' | '+')) => {
+                    let rest = chars.collect::<String>();
+                    format!("{sign}{}{rest}", "0".repeat(pad))
+                }
+                _ => format!("{}{text}", "0".repeat(pad)),
+            }
+        } else {
+            format!("{}{text}", " ".repeat(pad))
         }
     }
 

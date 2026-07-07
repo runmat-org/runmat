@@ -8,9 +8,9 @@ use super::state::{
     axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure, decode_axes_handle,
     decode_plot_object_handle, figure_handle_exists, figure_has_sg_title, legend_entries_snapshot,
     present_figure_update, select_axes_for_figure, set_axes_style_for_axes,
-    set_axis_tick_labels_for_axes, set_axis_ticks_for_axes, set_figure_background_color,
-    set_figure_name, set_figure_number_title, set_figure_position, set_figure_visible,
-    set_legend_for_axes, set_sg_title_properties_for_figure,
+    set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes, set_axis_ticks_for_axes,
+    set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
+    set_figure_visible, set_legend_for_axes, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };
@@ -31,6 +31,7 @@ const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
 pub enum PlotHandle {
     Figure(FigureHandle),
     Axes(FigureHandle, usize),
+    Ruler(FigureHandle, usize, PlotObjectKind),
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
     PlotChild(Box<super::state::PlotChildHandleState>),
@@ -45,6 +46,9 @@ pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResul
         if axes_handle_exists(handle, axes_index) {
             return Ok(match kind {
                 PlotObjectKind::Legend => PlotHandle::Legend(handle, axes_index),
+                PlotObjectKind::XAxis | PlotObjectKind::YAxis => {
+                    PlotHandle::Ruler(handle, axes_index, kind)
+                }
                 _ => PlotHandle::Text(handle, axes_index, kind),
             });
         }
@@ -76,6 +80,9 @@ pub fn get_properties(
     match handle {
         PlotHandle::Axes(handle, axes_index) => {
             get_axes_property(handle, axes_index, property, builtin)
+        }
+        PlotHandle::Ruler(handle, axes_index, kind) => {
+            get_ruler_property(handle, axes_index, kind, property, builtin)
         }
         PlotHandle::Text(handle, axes_index, kind) => {
             get_text_property(handle, axes_index, kind, property, builtin)
@@ -120,6 +127,13 @@ pub fn set_properties(
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 apply_axes_property(handle, axes_index, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::Ruler(handle, axes_index, kind) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_ruler_property(handle, axes_index, kind, &key, &pair[1], builtin)?;
             }
             Ok(())
         }
@@ -438,6 +452,22 @@ fn get_axes_property(
                     PlotObjectKind::Legend,
                 )),
             );
+            st.insert(
+                "XAxis",
+                Value::Num(super::state::encode_plot_object_handle(
+                    handle,
+                    axes_index,
+                    PlotObjectKind::XAxis,
+                )),
+            );
+            st.insert(
+                "YAxis",
+                Value::Num(super::state::encode_plot_object_handle(
+                    handle,
+                    axes_index,
+                    PlotObjectKind::YAxis,
+                )),
+            );
             st.insert("LegendVisible", Value::Bool(meta.legend_enabled));
             st.insert("Type", Value::String("axes".into()));
             st.insert("Parent", Value::Num(handle.as_u32() as f64));
@@ -511,6 +541,7 @@ fn get_axes_property(
                     meta.x_tick_labels.as_deref(),
                     meta.x_ticks.as_deref(),
                     x_bounds(display_bounds),
+                    meta.x_tick_format.as_deref(),
                 )),
             );
             st.insert(
@@ -519,6 +550,7 @@ fn get_axes_property(
                     meta.y_tick_labels.as_deref(),
                     meta.y_ticks.as_deref(),
                     y_bounds(display_bounds),
+                    meta.y_tick_format.as_deref(),
                 )),
             );
             st.insert(
@@ -528,6 +560,14 @@ fn get_axes_property(
             st.insert(
                 "YTickLabelMode",
                 tick_mode_value(meta.y_tick_labels.as_ref()),
+            );
+            st.insert(
+                "XTickLabelFormat",
+                Value::String(tick_format_or_default(meta.x_tick_format.as_deref())),
+            );
+            st.insert(
+                "YTickLabelFormat",
+                Value::String(tick_format_or_default(meta.y_tick_format.as_deref())),
             );
             st.insert(
                 "FontSize",
@@ -573,6 +613,16 @@ fn get_axes_property(
             axes_index,
             PlotObjectKind::Legend,
         ))),
+        Some("xaxis") => Ok(Value::Num(super::state::encode_plot_object_handle(
+            handle,
+            axes_index,
+            PlotObjectKind::XAxis,
+        ))),
+        Some("yaxis") => Ok(Value::Num(super::state::encode_plot_object_handle(
+            handle,
+            axes_index,
+            PlotObjectKind::YAxis,
+        ))),
         Some("view") => {
             let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
             let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
@@ -610,14 +660,22 @@ fn get_axes_property(
             meta.x_tick_labels.as_deref(),
             meta.x_ticks.as_deref(),
             x_bounds(display_bounds),
+            meta.x_tick_format.as_deref(),
         ))),
         Some("yticklabel") => Ok(tick_label_value(tick_labels_or_auto(
             meta.y_tick_labels.as_deref(),
             meta.y_ticks.as_deref(),
             y_bounds(display_bounds),
+            meta.y_tick_format.as_deref(),
         ))),
         Some("xticklabelmode") => Ok(tick_mode_value(meta.x_tick_labels.as_ref())),
         Some("yticklabelmode") => Ok(tick_mode_value(meta.y_tick_labels.as_ref())),
+        Some("xticklabelformat") => Ok(Value::String(tick_format_or_default(
+            meta.x_tick_format.as_deref(),
+        ))),
+        Some("yticklabelformat") => Ok(Value::String(tick_format_or_default(
+            meta.y_tick_format.as_deref(),
+        ))),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
@@ -669,10 +727,13 @@ fn get_text_property(
                 PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
                 PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
                 PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
-                PlotObjectKind::Legend | PlotObjectKind::SuperTitle => unreachable!(),
+                PlotObjectKind::Legend
+                | PlotObjectKind::SuperTitle
+                | PlotObjectKind::XAxis
+                | PlotObjectKind::YAxis => unreachable!(),
             }
         }
-        PlotObjectKind::Legend => unreachable!(),
+        PlotObjectKind::Legend | PlotObjectKind::XAxis | PlotObjectKind::YAxis => unreachable!(),
     };
     let parent = if matches!(kind, PlotObjectKind::SuperTitle) {
         Value::Num(handle.as_u32() as f64)
@@ -732,6 +793,51 @@ fn get_text_property(
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported text property `{other}`"),
+        )),
+    }
+}
+
+fn get_ruler_property(
+    handle: FigureHandle,
+    axes_index: usize,
+    kind: PlotObjectKind,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let meta =
+        axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
+    let (axis_name, format) = match kind {
+        PlotObjectKind::XAxis => ("x", meta.x_tick_format.as_deref()),
+        PlotObjectKind::YAxis => ("y", meta.y_tick_format.as_deref()),
+        _ => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: invalid ruler handle"),
+            ))
+        }
+    };
+    let parent = Value::Num(super::state::encode_axes_handle(handle, axes_index));
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("numericruler".into()));
+            st.insert("Parent", parent);
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("Axis", Value::String(axis_name.into()));
+            st.insert(
+                "TickLabelFormat",
+                Value::String(tick_format_or_default(format)),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("numericruler".into())),
+        Some("parent") => Ok(parent),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("axis") => Ok(Value::String(axis_name.into())),
+        Some("ticklabelformat") => Ok(Value::String(tick_format_or_default(format))),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported ruler property `{other}`"),
         )),
     }
 }
@@ -875,6 +981,9 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xlabel" => Cow::Borrowed("xlabel"),
         "ylabel" => Cow::Borrowed("ylabel"),
         "zlabel" => Cow::Borrowed("zlabel"),
+        "xaxis" => Cow::Borrowed("xaxis"),
+        "yaxis" => Cow::Borrowed("yaxis"),
+        "axis" => Cow::Borrowed("axis"),
         "view" => Cow::Borrowed("view"),
         "grid" | "xgrid" | "ygrid" | "zgrid" => Cow::Borrowed("grid"),
         "minorgrid" | "xminorgrid" | "yminorgrid" | "zminorgrid" => Cow::Borrowed("minorgrid"),
@@ -897,6 +1006,9 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "yticklabel" => Cow::Borrowed("yticklabel"),
         "xticklabelmode" => Cow::Borrowed("xticklabelmode"),
         "yticklabelmode" => Cow::Borrowed("yticklabelmode"),
+        "xticklabelformat" => Cow::Borrowed("xticklabelformat"),
+        "yticklabelformat" => Cow::Borrowed("yticklabelformat"),
+        "ticklabelformat" => Cow::Borrowed("ticklabelformat"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
@@ -1326,6 +1438,7 @@ fn apply_axes_property(
                     meta.x_tick_labels.as_deref(),
                     meta.x_ticks.as_deref(),
                     x_bounds(display_bounds),
+                    meta.x_tick_format.as_deref(),
                 )),
             };
             if matches!(mode, TickMode::Manual) {
@@ -1349,6 +1462,7 @@ fn apply_axes_property(
                     meta.y_tick_labels.as_deref(),
                     meta.y_ticks.as_deref(),
                     y_bounds(display_bounds),
+                    meta.y_tick_format.as_deref(),
                 )),
             };
             if matches!(mode, TickMode::Manual) {
@@ -1357,6 +1471,22 @@ fn apply_axes_property(
                     .map_err(|err| map_figure_error(builtin, err))?;
             }
             set_axis_tick_labels_for_axes(handle, axes_index, meta.x_tick_labels, y_labels)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "xticklabelformat" => {
+            let format = tick_format_from_value(value, builtin, "XTickLabelFormat")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_formats_for_axes(handle, axes_index, Some(format), meta.y_tick_format)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "yticklabelformat" => {
+            let format = tick_format_from_value(value, builtin, "YTickLabelFormat")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_formats_for_axes(handle, axes_index, meta.x_tick_format, Some(format))
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
@@ -1389,6 +1519,40 @@ fn apply_axes_property(
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported axes property `{other}`"),
+        )),
+    }
+}
+
+fn apply_ruler_property(
+    handle: FigureHandle,
+    axes_index: usize,
+    kind: PlotObjectKind,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "ticklabelformat" => {
+            let format = tick_format_from_value(value, builtin, "TickLabelFormat")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let (x_format, y_format) = match kind {
+                PlotObjectKind::XAxis => (Some(format), meta.y_tick_format),
+                PlotObjectKind::YAxis => (meta.x_tick_format, Some(format)),
+                _ => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: invalid ruler handle"),
+                    ))
+                }
+            };
+            set_axis_tick_formats_for_axes(handle, axes_index, x_format, y_format)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported ruler property `{other}`"),
         )),
     }
 }
@@ -4272,6 +4436,22 @@ fn tick_mode_from_value(
     }
 }
 
+fn tick_format_from_value(
+    value: &Value,
+    builtin: &'static str,
+    property: &'static str,
+) -> BuiltinResult<String> {
+    let format = value_as_string(value)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: {property} must be text")))?;
+    Ok(runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(&format))
+}
+
+fn tick_format_or_default(format: Option<&str>) -> String {
+    runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(
+        format.unwrap_or("%g"),
+    )
+}
+
 fn x_bounds(bounds: Option<(f64, f64, f64, f64)>) -> Option<(f64, f64)> {
     bounds.map(|(x_min, x_max, _, _)| (x_min, x_max))
 }
@@ -4320,13 +4500,15 @@ fn tick_labels_or_auto(
     explicit: Option<&[String]>,
     ticks: Option<&[f64]>,
     bounds: Option<(f64, f64)>,
+    format: Option<&str>,
 ) -> Vec<String> {
     if let Some(labels) = explicit {
         return labels.to_vec();
     }
+    let formatter = runmat_plot::core::plot_utils::TickLabelFormatter::new(format);
     ticks_or_auto(ticks, bounds)
         .into_iter()
-        .map(runmat_plot::core::plot_utils::format_tick_label)
+        .map(|tick| formatter.format(tick))
         .collect()
 }
 
@@ -4407,8 +4589,10 @@ fn apply_axes_text_alias(
         PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
         PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
         PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
-        PlotObjectKind::Legend => unreachable!(),
-        PlotObjectKind::SuperTitle => unreachable!(),
+        PlotObjectKind::Legend
+        | PlotObjectKind::SuperTitle
+        | PlotObjectKind::XAxis
+        | PlotObjectKind::YAxis => unreachable!(),
     };
     set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
@@ -4960,6 +5144,8 @@ fn key_name(kind: PlotObjectKind) -> &'static str {
         PlotObjectKind::ZLabel => "ZLabel",
         PlotObjectKind::Legend => "Legend",
         PlotObjectKind::SuperTitle => "SGTitle",
+        PlotObjectKind::XAxis => "XAxis",
+        PlotObjectKind::YAxis => "YAxis",
     }
 }
 
@@ -4975,8 +5161,10 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
             PlotObjectKind::XLabel => self.x_label_style.clone(),
             PlotObjectKind::YLabel => self.y_label_style.clone(),
             PlotObjectKind::ZLabel => self.z_label_style.clone(),
-            PlotObjectKind::Legend => TextStyle::default(),
-            PlotObjectKind::SuperTitle => TextStyle::default(),
+            PlotObjectKind::Legend
+            | PlotObjectKind::SuperTitle
+            | PlotObjectKind::XAxis
+            | PlotObjectKind::YAxis => TextStyle::default(),
         }
     }
 }

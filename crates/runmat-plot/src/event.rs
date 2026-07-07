@@ -1092,6 +1092,10 @@ pub struct SerializedAxesMetadata {
     pub x_tick_labels: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_tick_labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_tick_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_tick_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1247,6 +1251,8 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             y_ticks: value.y_ticks,
             x_tick_labels: value.x_tick_labels,
             y_tick_labels: value.y_tick_labels,
+            x_tick_format: value.x_tick_format,
+            y_tick_format: value.y_tick_format,
             x_limits: value.x_limits.map(|(a, b)| [a, b]),
             y_limits: value.y_limits.map(|(a, b)| [a, b]),
             z_limits: value.z_limits.map(|(a, b)| [a, b]),
@@ -1295,6 +1301,8 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             y_ticks: value.y_ticks,
             x_tick_labels: value.x_tick_labels,
             y_tick_labels: value.y_tick_labels,
+            x_tick_format: value.x_tick_format,
+            y_tick_format: value.y_tick_format,
             x_limits: value.x_limits.map(|[a, b]| (a, b)),
             y_limits: value.y_limits.map(|[a, b]| (a, b)),
             z_limits: value.z_limits.map(|[a, b]| (a, b)),

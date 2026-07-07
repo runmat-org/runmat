@@ -142,6 +142,7 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
         return match handle {
             PlotHandle::Figure(handle) => Ok(Some(handle)),
             PlotHandle::Axes(_, _)
+            | PlotHandle::Ruler(_, _, _)
             | PlotHandle::Text(_, _, _)
             | PlotHandle::Legend(_, _)
             | PlotHandle::PlotChild(_) => Err(plotting_error(

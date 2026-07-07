@@ -144,6 +144,37 @@ fn zoom_object_dispatches_and_preserves_mode_properties() {
 }
 
 #[test]
+fn tickformat_dispatches_and_updates_axes_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        plot(1:3, [10 20 30]); \
+        xticks([1 2 3]); \
+        yticks([10 20 30]); \
+        xtickformat('%.1f s'); \
+        ytickformat('usd'); \
+        ax = gca(); \
+        xaxis = get(ax, 'XAxis'); \
+        yaxis = get(ax, 'YAxis'); \
+        if ~strcmp(get(xaxis, 'TickLabelFormat'), '%.1f s'); \
+            error('x tick format mismatch'); \
+        end; \
+        if ~strcmp(get(yaxis, 'TickLabelFormat'), '$%,.2f'); \
+            error('y tick format mismatch'); \
+        end; \
+        set(xaxis, 'TickLabelFormat', '%.2f ms'); \
+        if ~strcmp(xtickformat(), '%.2f ms'); \
+            error('x ruler set mismatch'); \
+        end; \
+        xtickformat('%.1f s'); \
+        labels = xticklabels(); \
+        if ~strcmp(labels{1}, '1.0 s'); \
+            error('formatted x tick label mismatch'); \
+        end;";
+    execute_source(input).expect("execute tickformat script");
+}
+
+#[test]
 fn polarplot_dispatches_and_sets_equal_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

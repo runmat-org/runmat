@@ -19,6 +19,8 @@ struct AxesView {
     z_label: Option<String>,
     x_ticks: Option<Vec<f64>>,
     y_ticks: Option<Vec<f64>>,
+    x_tick_format: Option<String>,
+    y_tick_format: Option<String>,
     title_scale: u32,
     label_scale: u32,
     tick_scale: u32,
@@ -801,18 +803,6 @@ fn draw_text_centered(
     draw_bitmap_text(canvas, x, y, text, scale, color);
 }
 
-fn format_tick(v: f32) -> String {
-    if !v.is_finite() {
-        return "nan".to_string();
-    }
-    let abs = v.abs();
-    if abs >= 1000.0 || (abs > 0.0 && abs < 0.01) {
-        format!("{v:.2e}")
-    } else {
-        format!("{v:.3}")
-    }
-}
-
 fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let frame_color = [162, 170, 184, 255];
     let grid_color = [104, 114, 130, 110];
@@ -1009,6 +999,12 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     }
 
     let tick_sc = axes.tick_scale as i32;
+    let x_tick_formatter = crate::core::plot_renderer::plot_utils::TickLabelFormatter::new(
+        axes.x_tick_format.as_deref(),
+    );
+    let y_tick_formatter = crate::core::plot_renderer::plot_utils::TickLabelFormatter::new(
+        axes.y_tick_format.as_deref(),
+    );
     let x_ticks = axes
         .x_ticks
         .as_ref()
@@ -1028,7 +1024,7 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             canvas,
             x - 12 * tick_sc,
             bottom + 6 + tick_sc,
-            &format_tick(xv),
+            &x_tick_formatter.format(xv as f64),
             axes.tick_scale,
             with_alpha(text_color, 0.9),
         );
@@ -1052,7 +1048,7 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             canvas,
             left - 56 * tick_sc,
             y - 4 * tick_sc,
-            &format_tick(yv),
+            &y_tick_formatter.format(yv as f64),
             axes.tick_scale,
             with_alpha(text_color, 0.9),
         );
@@ -1626,10 +1622,17 @@ pub async fn render_figure_rgba_bytes(
         };
 
         let text = get_axes_title_and_labels(&figure, axes_index);
-        let (x_ticks, y_ticks) = figure
+        let (x_ticks, y_ticks, x_tick_format, y_tick_format) = figure
             .axes_metadata(axes_index)
-            .map(|meta| (meta.x_ticks.clone(), meta.y_ticks.clone()))
-            .unwrap_or((None, None));
+            .map(|meta| {
+                (
+                    meta.x_ticks.clone(),
+                    meta.y_ticks.clone(),
+                    meta.x_tick_format.clone(),
+                    meta.y_tick_format.clone(),
+                )
+            })
+            .unwrap_or((None, None, None, None));
         let (title_scale, label_scale, tick_scale, show_grid, show_minor_grid, show_box) =
             get_axes_style_and_display_prefs(&figure, axes_index);
 
@@ -1647,6 +1650,8 @@ pub async fn render_figure_rgba_bytes(
             z_label: text.z_label,
             x_ticks,
             y_ticks,
+            x_tick_format,
+            y_tick_format,
             title_scale,
             label_scale,
             tick_scale,

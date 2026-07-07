@@ -4,7 +4,8 @@ use super::axis_ticks::TickAxis;
 use super::op_common::axes_target::AxesTarget;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
-    axis_display_bounds_snapshot, axis_display_bounds_snapshot_for_axes, axis_tick_labels_snapshot,
+    axis_display_bounds_snapshot, axis_display_bounds_snapshot_for_axes,
+    axis_tick_formats_snapshot, axis_tick_formats_snapshot_for_axes, axis_tick_labels_snapshot,
     axis_tick_labels_snapshot_for_axes, axis_ticks_snapshot, axis_ticks_snapshot_for_axes,
     set_axis_tick_labels, set_axis_tick_labels_for_axes, set_axis_ticks, set_axis_ticks_for_axes,
 };
@@ -137,10 +138,28 @@ fn current_labels(
     if let Some(labels) = explicit {
         return Ok(labels);
     }
+    let format = current_format(builtin, axis, target)?;
+    let formatter = runmat_plot::core::plot_utils::TickLabelFormatter::new(format.as_deref());
     Ok(current_ticks(builtin, axis, target)?
         .into_iter()
-        .map(format_tick_label)
+        .map(|tick| formatter.format(tick))
         .collect())
+}
+
+fn current_format(
+    builtin: &'static str,
+    axis: TickAxis,
+    target: AxesTarget,
+) -> BuiltinResult<Option<String>> {
+    let formats = match target {
+        Some((handle, axes_index)) => axis_tick_formats_snapshot_for_axes(handle, axes_index)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?,
+        None => axis_tick_formats_snapshot(),
+    };
+    Ok(match axis {
+        TickAxis::X => formats.0,
+        TickAxis::Y => formats.1,
+    })
 }
 
 fn current_ticks(
@@ -335,10 +354,6 @@ fn value_as_string(value: &Value) -> Option<String> {
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         _ => None,
     }
-}
-
-fn format_tick_label(value: f64) -> String {
-    runmat_plot::core::plot_utils::format_tick_label(value)
 }
 
 #[cfg(test)]

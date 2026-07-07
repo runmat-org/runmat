@@ -104004,6 +104004,94 @@
       ]
     },
     {
+      "name": "xtickformat",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "fmt = xtickformat()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label format."
+            }
+          ]
+        },
+        {
+          "label": "xtickformat(fmt)",
+          "inputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, date, or duration tick label format."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "fmt = xtickformat(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label format."
+            }
+          ]
+        },
+        {
+          "label": "xtickformat(ax, fmt)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            },
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, date, or duration tick label format."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XTICKFORMAT.INVALID_ARGUMENT",
+          "identifier": "RunMat:xtickformat:InvalidArgument",
+          "when": "Argument count, format value, or axes handle is invalid.",
+          "message": "xtickformat: invalid argument"
+        },
+        {
+          "code": "RM.XTICKFORMAT.INTERNAL",
+          "identifier": "RunMat:xtickformat:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "xtickformat: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "xticklabels",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -104665,6 +104753,94 @@
           "identifier": "RunMat:yscale:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yscale: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "ytickformat",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "fmt = ytickformat()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label format."
+            }
+          ]
+        },
+        {
+          "label": "ytickformat(fmt)",
+          "inputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, date, or duration tick label format."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "fmt = ytickformat(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label format."
+            }
+          ]
+        },
+        {
+          "label": "ytickformat(ax, fmt)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            },
+            {
+              "name": "fmt",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric, date, or duration tick label format."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.YTICKFORMAT.INVALID_ARGUMENT",
+          "identifier": "RunMat:ytickformat:InvalidArgument",
+          "when": "Argument count, format value, or axes handle is invalid.",
+          "message": "ytickformat: invalid argument"
+        },
+        {
+          "code": "RM.YTICKFORMAT.INTERNAL",
+          "identifier": "RunMat:ytickformat:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "ytickformat: internal operation failed"
         }
       ]
     },
