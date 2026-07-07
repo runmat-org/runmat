@@ -317,6 +317,84 @@ impl PlotOverlay {
         (text.chars().count() as f32) * font_size * 0.56
     }
 
+    fn rotated_text_extent(width: f32, height: f32, angle_degrees: f64) -> (f32, f32) {
+        if angle_degrees.abs() <= f64::EPSILON {
+            return (width, height);
+        }
+        let radians = (angle_degrees as f32).to_radians();
+        let sin = radians.sin().abs();
+        let cos = radians.cos().abs();
+        (width * cos + height * sin, width * sin + height * cos)
+    }
+
+    fn estimate_x_axis_max_tick_label_width(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        scale: f32,
+    ) -> f32 {
+        let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
+        let labels = self.estimate_x_axis_tick_labels(plot_renderer, axes_index);
+        if labels.is_empty() {
+            Self::approx_text_width_points("-1.00", tick_font_size)
+        } else {
+            labels
+                .iter()
+                .map(|label| Self::approx_text_width_points(label, tick_font_size))
+                .fold(0.0_f32, f32::max)
+        }
+    }
+
+    fn estimate_x_axis_tick_labels(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+    ) -> Vec<String> {
+        let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
+        let explicit_tick_labels = plot_renderer
+            .overlay_x_tick_labels_for_axes(axes_index)
+            .filter(|labels| !labels.is_empty());
+        let x_tick_format = plot_renderer.overlay_x_tick_format_for_axes(axes_index);
+        let categorical_tick_labels = plot_renderer
+            .overlay_categorical_labels_for_axes(axes_index)
+            .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
+            .or_else(|| {
+                plot_renderer
+                    .overlay_categorical_labels()
+                    .and_then(|(is_x, labels)| if is_x { Some(labels.clone()) } else { None })
+            });
+
+        if let Some(labels) = explicit_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some(labels) = categorical_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some((x_min, x_max, _y_min, _y_max)) =
+            plot_renderer.overlay_display_bounds_for_axes(axes_index)
+        {
+            if x_log && x_min > 0.0 && x_max > 0.0 {
+                let start_decade = x_min.log10().floor() as i32;
+                let end_decade = x_max.log10().ceil() as i32;
+                (start_decade..=end_decade)
+                    .map(|d| format!("10^{d}"))
+                    .collect()
+            } else {
+                let formatter = plot_utils::TickLabelFormatter::new(x_tick_format.as_deref());
+                plot_utils::generate_major_ticks(x_min, x_max)
+                    .into_iter()
+                    .map(|value| formatter.format(value))
+                    .collect()
+            }
+        } else {
+            vec!["-1.00".to_string(), "1.00".to_string()]
+        }
+    }
+
     fn estimate_y_axis_band_width(
         &self,
         plot_renderer: &PlotRenderer,
@@ -365,7 +443,9 @@ impl PlotOverlay {
             Self::approx_text_width_points("-1.00", tick_font_size)
         };
 
-        let y_tick_zone = label_offset + max_label_width * 0.5 + 4.0 * scale;
+        let y_angle = plot_renderer.overlay_y_tick_label_rotation_for_axes(axes_index);
+        let (label_width, _) = Self::rotated_text_extent(max_label_width, tick_font_size, y_angle);
+        let y_tick_zone = label_offset + label_width * 0.5 + 4.0 * scale;
         let y_label_zone = if has_y_label {
             11.0 * scale
         } else {
@@ -381,50 +461,7 @@ impl PlotOverlay {
         scale: f32,
     ) -> f32 {
         let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
-        let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
-
-        let explicit_tick_labels = plot_renderer
-            .overlay_x_tick_labels_for_axes(axes_index)
-            .filter(|labels| !labels.is_empty());
-        let x_tick_format = plot_renderer.overlay_x_tick_format_for_axes(axes_index);
-        let categorical_tick_labels = plot_renderer
-            .overlay_categorical_labels_for_axes(axes_index)
-            .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
-            .or_else(|| {
-                plot_renderer
-                    .overlay_categorical_labels()
-                    .and_then(|(is_x, labels)| if is_x { Some(labels.clone()) } else { None })
-            });
-
-        let labels: Vec<String> = if let Some(labels) = explicit_tick_labels {
-            labels
-                .iter()
-                .map(|label| truncate_label(label, 14))
-                .collect()
-        } else if let Some(labels) = categorical_tick_labels {
-            labels
-                .iter()
-                .map(|label| truncate_label(label, 14))
-                .collect()
-        } else if let Some((x_min, x_max, _y_min, _y_max)) =
-            plot_renderer.overlay_display_bounds_for_axes(axes_index)
-        {
-            if x_log && x_min > 0.0 && x_max > 0.0 {
-                let start_decade = x_min.log10().floor() as i32;
-                let end_decade = x_max.log10().ceil() as i32;
-                (start_decade..=end_decade)
-                    .map(|d| format!("10^{d}"))
-                    .collect()
-            } else {
-                let formatter = plot_utils::TickLabelFormatter::new(x_tick_format.as_deref());
-                plot_utils::generate_major_ticks(x_min, x_max)
-                    .into_iter()
-                    .map(|value| formatter.format(value))
-                    .collect()
-            }
-        } else {
-            vec!["-1.00".to_string(), "1.00".to_string()]
-        };
+        let labels = self.estimate_x_axis_tick_labels(plot_renderer, axes_index);
 
         let max_edge_label_width = if labels.is_empty() {
             Self::approx_text_width_points("-1.00", tick_font_size)
@@ -436,7 +473,10 @@ impl PlotOverlay {
             left.max(right)
         };
 
-        (max_edge_label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
+        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let (label_width, _) =
+            Self::rotated_text_extent(max_edge_label_width, tick_font_size, x_angle);
+        (label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -478,7 +518,14 @@ impl PlotOverlay {
         } else {
             0.0
         };
-        let mut x_h = ((24.0 + if has_x_label { 14.0 } else { 0.0 }) * scale).min(outer_h * 0.28);
+        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let x_tick_label_width =
+            self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, scale);
+        let (_, x_tick_label_height) =
+            Self::rotated_text_extent(x_tick_label_width, 13.0 * scale, x_angle);
+        let x_tick_band = (15.0 * scale + x_tick_label_height + 4.0 * scale).max(24.0 * scale);
+        let mut x_h =
+            (x_tick_band + if has_x_label { 14.0 * scale } else { 0.0 }).min(outer_h * 0.28);
         let y_band_estimate =
             self.estimate_y_axis_band_width(plot_renderer, axes_index, has_y_label, scale);
         let mut y_w = y_band_estimate.min(outer_w * 0.30);
@@ -1424,7 +1471,7 @@ impl PlotOverlay {
 
                 // Draw axes if enabled
                 if config.show_axes {
-                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, None);
+                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, Some(0));
                     for overlay_axes in 1..plot_renderer.figure_axes_count() {
                         if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(0) {
                             self.draw_axes(
@@ -1965,6 +2012,12 @@ impl PlotOverlay {
                 plot_utils::TickLabelFormatter::new(explicit_x_format.as_deref());
             let y_tick_formatter =
                 plot_utils::TickLabelFormatter::new(explicit_y_format.as_deref());
+            let x_tick_angle = axes_index
+                .map(|idx| plot_renderer.overlay_x_tick_label_rotation_for_axes(idx))
+                .unwrap_or(0.0);
+            let y_tick_angle = axes_index
+                .map(|idx| plot_renderer.overlay_y_tick_label_rotation_for_axes(idx))
+                .unwrap_or(0.0);
 
             // Histogram numeric tick support and categorical axis support
             let (mut cat_x, mut cat_y) = (false, false);
@@ -2022,12 +2075,14 @@ impl PlotOverlay {
                             .as_ref()
                             .and_then(|labels| labels.get(tick_idx).cloned())
                             .unwrap_or_else(|| x_tick_formatter.format(*x_val));
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(x_screen, border_bottom + label_offset),
                             Align2::CENTER_CENTER,
                             truncate_label(&label, 14),
                             tick_font.clone(),
                             label_color,
+                            x_tick_angle,
                         );
                     }
                 }
@@ -2061,12 +2116,14 @@ impl PlotOverlay {
                             Stroke::new(1.0, axis_color),
                         );
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(x_screen, border_bottom + label_offset),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            x_tick_angle,
                         );
                     }
                 }
@@ -2100,12 +2157,14 @@ impl PlotOverlay {
                         .as_ref()
                         .and_then(|labels| labels.get(tick_idx).cloned())
                         .unwrap_or_else(|| y_tick_formatter.format(*y_val));
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         truncate_label(&label, 14),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
                 }
             }
@@ -2138,12 +2197,14 @@ impl PlotOverlay {
                             Stroke::new(1.0, axis_color),
                         );
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(y_label_x, y_screen),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            y_tick_angle,
                         );
                     }
                 }
@@ -2186,12 +2247,14 @@ impl PlotOverlay {
                         );
                         // Label
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(x_screen, border_bottom + label_offset),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            x_tick_angle,
                         );
                     }
                 } else {
@@ -2222,12 +2285,14 @@ impl PlotOverlay {
                         );
                         // Label
                         let text = truncate_label(label, 14);
-                        ui.painter().text(
+                        Self::draw_tick_label(
+                            ui,
                             Pos2::new(y_label_x, y_screen),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
                             label_color,
+                            y_tick_angle,
                         );
                     }
                 }
@@ -2253,12 +2318,14 @@ impl PlotOverlay {
                         Stroke::new(1.0, axis_color),
                     );
                     // Label like 10^d
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
                         label_color,
+                        x_tick_angle,
                     );
                 }
             } else if draw_x_axis && !cat_x && !custom_hist_x {
@@ -2273,12 +2340,14 @@ impl PlotOverlay {
                         ],
                         Stroke::new(1.0, axis_color),
                     );
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(x_screen, border_bottom + label_offset),
                         Align2::CENTER_CENTER,
                         x_tick_formatter.format(x_val),
                         tick_font.clone(),
                         label_color,
+                        x_tick_angle,
                     );
                 }
             }
@@ -2301,12 +2370,14 @@ impl PlotOverlay {
                         ],
                         Stroke::new(1.0, axis_color),
                     );
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
                 }
             } else if !cat_y {
@@ -2321,16 +2392,51 @@ impl PlotOverlay {
                         ],
                         Stroke::new(1.0, axis_color),
                     );
-                    ui.painter().text(
+                    Self::draw_tick_label(
+                        ui,
                         Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         y_tick_formatter.format(y_val),
                         tick_font.clone(),
                         label_color,
+                        y_tick_angle,
                     );
                 }
             }
         }
+    }
+
+    fn draw_tick_label(
+        ui: &egui::Ui,
+        pos: Pos2,
+        anchor: Align2,
+        text: impl ToString,
+        font_id: FontId,
+        text_color: Color32,
+        angle_degrees: f64,
+    ) {
+        if angle_degrees.abs() <= f64::EPSILON {
+            ui.painter().text(pos, anchor, text, font_id, text_color);
+            return;
+        }
+
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.to_string(), font_id, text_color);
+        let size = galley.size();
+        let rect = anchor.anchor_size(pos, size);
+        let local_anchor = pos - rect.min;
+        let radians = (angle_degrees as f32).to_radians();
+        let sin = radians.sin();
+        let cos = radians.cos();
+        let rotated_anchor = egui::vec2(
+            local_anchor.x * cos - local_anchor.y * sin,
+            local_anchor.x * sin + local_anchor.y * cos,
+        );
+        let mut shape = egui::epaint::TextShape::new(pos - rotated_anchor, galley, text_color);
+        shape.angle = radians;
+        shape.override_text_color = Some(text_color);
+        ui.painter().add(shape);
     }
 
     /// Draw a CAD-style XYZ orientation gizmo in the bottom-left corner of the plot rect.

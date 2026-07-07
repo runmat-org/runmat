@@ -104344,6 +104344,94 @@
       ]
     },
     {
+      "name": "xtickangle",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "angle = xtickangle()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label rotation in degrees."
+            }
+          ]
+        },
+        {
+          "label": "xtickangle(angle)",
+          "inputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis tick label rotation in degrees."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "angle = xtickangle(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label rotation in degrees."
+            }
+          ]
+        },
+        {
+          "label": "xtickangle(ax, angle)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            },
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis tick label rotation in degrees."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.XTICKANGLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:xtickangle:InvalidArgument",
+          "when": "Argument count, angle value, or axes handle is invalid.",
+          "message": "xtickangle: invalid argument"
+        },
+        {
+          "code": "RM.XTICKANGLE.INTERNAL",
+          "identifier": "RunMat:xtickangle:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "xtickangle: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "xtickformat",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -105093,6 +105181,94 @@
           "identifier": "RunMat:yscale:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yscale: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "ytickangle",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "angle = ytickangle()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label rotation in degrees."
+            }
+          ]
+        },
+        {
+          "label": "ytickangle(angle)",
+          "inputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis tick label rotation in degrees."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "angle = ytickangle(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label rotation in degrees."
+            }
+          ]
+        },
+        {
+          "label": "ytickangle(ax, angle)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle or array of axes handles."
+            },
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis tick label rotation in degrees."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.YTICKANGLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:ytickangle:InvalidArgument",
+          "when": "Argument count, angle value, or axes handle is invalid.",
+          "message": "ytickangle: invalid argument"
+        },
+        {
+          "code": "RM.YTICKANGLE.INTERNAL",
+          "identifier": "RunMat:ytickangle:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "ytickangle: internal operation failed"
         }
       ]
     },

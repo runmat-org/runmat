@@ -11,9 +11,9 @@ use super::state::{
     root_default_properties, root_default_property, root_figure_handles, root_show_hidden_handles,
     root_units, select_axes_for_figure, select_current_figure_if_exists,
     set_axes_position_for_axes, set_axes_style_for_axes, set_axes_units_for_axes,
-    set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes, set_axis_ticks_for_axes,
-    set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
-    set_figure_visible, set_legend_for_axes, set_root_default_property,
+    set_axis_tick_angles_for_axes, set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes,
+    set_axis_ticks_for_axes, set_figure_background_color, set_figure_name, set_figure_number_title,
+    set_figure_position, set_figure_visible, set_legend_for_axes, set_root_default_property,
     set_root_show_hidden_handles, set_root_units, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind, RootPropertyValue,
@@ -778,6 +778,14 @@ fn get_axes_property(
                 Value::String(tick_format_or_default(meta.y_tick_format.as_deref())),
             );
             st.insert(
+                "XTickLabelRotation",
+                Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0)),
+            );
+            st.insert(
+                "YTickLabelRotation",
+                Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0)),
+            );
+            st.insert(
                 "FontSize",
                 Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
             );
@@ -885,6 +893,8 @@ fn get_axes_property(
         Some("yticklabelformat") => Ok(Value::String(tick_format_or_default(
             meta.y_tick_format.as_deref(),
         ))),
+        Some("xticklabelrotation") => Ok(Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0))),
+        Some("yticklabelrotation") => Ok(Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0))),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
@@ -1018,9 +1028,17 @@ fn get_ruler_property(
 ) -> BuiltinResult<Value> {
     let meta =
         axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
-    let (axis_name, format) = match kind {
-        PlotObjectKind::XAxis => ("x", meta.x_tick_format.as_deref()),
-        PlotObjectKind::YAxis => ("y", meta.y_tick_format.as_deref()),
+    let (axis_name, format, rotation) = match kind {
+        PlotObjectKind::XAxis => (
+            "x",
+            meta.x_tick_format.as_deref(),
+            meta.x_tick_label_rotation,
+        ),
+        PlotObjectKind::YAxis => (
+            "y",
+            meta.y_tick_format.as_deref(),
+            meta.y_tick_label_rotation,
+        ),
         _ => {
             return Err(plotting_error(
                 builtin,
@@ -1040,6 +1058,7 @@ fn get_ruler_property(
                 "TickLabelFormat",
                 Value::String(tick_format_or_default(format)),
             );
+            st.insert("TickLabelRotation", Value::Num(rotation.unwrap_or(0.0)));
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("numericruler".into())),
@@ -1047,6 +1066,7 @@ fn get_ruler_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("axis") => Ok(Value::String(axis_name.into())),
         Some("ticklabelformat") => Ok(Value::String(tick_format_or_default(format))),
+        Some("ticklabelrotation") => Ok(Value::Num(rotation.unwrap_or(0.0))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported ruler property `{other}`"),
@@ -1225,6 +1245,9 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xticklabelformat" => Cow::Borrowed("xticklabelformat"),
         "yticklabelformat" => Cow::Borrowed("yticklabelformat"),
         "ticklabelformat" => Cow::Borrowed("ticklabelformat"),
+        "xticklabelrotation" => Cow::Borrowed("xticklabelrotation"),
+        "yticklabelrotation" => Cow::Borrowed("yticklabelrotation"),
+        "ticklabelrotation" => Cow::Borrowed("ticklabelrotation"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
@@ -1713,6 +1736,32 @@ fn apply_axes_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
+        "xticklabelrotation" => {
+            let angle = tick_angle_from_value(value, builtin, "XTickLabelRotation")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_angles_for_axes(
+                handle,
+                axes_index,
+                Some(angle),
+                meta.y_tick_label_rotation,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "yticklabelrotation" => {
+            let angle = tick_angle_from_value(value, builtin, "YTickLabelRotation")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            set_axis_tick_angles_for_axes(
+                handle,
+                axes_index,
+                meta.x_tick_label_rotation,
+                Some(angle),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
         "xscale" => {
             let mode = scale_mode_from_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
@@ -1813,6 +1862,24 @@ fn apply_ruler_property(
                 }
             };
             set_axis_tick_formats_for_axes(handle, axes_index, x_format, y_format)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "ticklabelrotation" => {
+            let angle = tick_angle_from_value(value, builtin, "TickLabelRotation")?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let (x_angle, y_angle) = match kind {
+                PlotObjectKind::XAxis => (Some(angle), meta.y_tick_label_rotation),
+                PlotObjectKind::YAxis => (meta.x_tick_label_rotation, Some(angle)),
+                _ => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: invalid ruler handle"),
+                    ))
+                }
+            };
+            set_axis_tick_angles_for_axes(handle, axes_index, x_angle, y_angle)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
@@ -4710,6 +4777,32 @@ fn tick_format_from_value(
     let format = value_as_string(value)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: {property} must be text")))?;
     Ok(runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(&format))
+}
+
+fn tick_angle_from_value(
+    value: &Value,
+    builtin: &'static str,
+    property: &'static str,
+) -> BuiltinResult<f64> {
+    let angle = scalar_numeric_value(value)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: {property} must be numeric")))?;
+    if angle.is_finite() {
+        Ok(angle)
+    } else {
+        Err(plotting_error(
+            builtin,
+            format!("{builtin}: {property} must be finite"),
+        ))
+    }
+}
+
+fn scalar_numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Int(value) => Some(value.to_f64()),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        _ => None,
+    }
 }
 
 fn tick_format_or_default(format: Option<&str>) -> String {

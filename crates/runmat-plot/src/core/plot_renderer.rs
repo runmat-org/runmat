@@ -3934,6 +3934,20 @@ impl PlotRenderer {
             .and_then(|f| f.y_axis_tick_format_for_axes(axes_index))
     }
 
+    pub fn overlay_x_tick_label_rotation_for_axes(&self, axes_index: usize) -> f64 {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_tick_label_rotation_for_axes(axes_index))
+            .unwrap_or(0.0)
+    }
+
+    pub fn overlay_y_tick_label_rotation_for_axes(&self, axes_index: usize) -> f64 {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_tick_label_rotation_for_axes(axes_index))
+            .unwrap_or(0.0)
+    }
+
     pub fn overlay_x_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {
         self.last_figure
             .as_ref()

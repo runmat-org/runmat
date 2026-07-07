@@ -120,6 +120,26 @@ fn linkaxes_propagates_limits_and_supports_off_mode() {
 }
 
 #[test]
+fn tickangle_dispatches_and_round_trips_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax1 = subplot(1,2,1); \
+        ax2 = subplot(1,2,2); \
+        xtickangle(ax1, 45); \
+        if xtickangle(ax1) ~= 45; error('xtickangle scalar target failed'); end; \
+        if xtickangle(ax2) ~= 0; error('xtickangle target isolation failed'); end; \
+        xtickangle([ax1 ax2], -30); \
+        if xtickangle(ax2) ~= -30; error('xtickangle array target failed'); end; \
+        ytickangle(ax2, 25); \
+        if ytickangle(ax2) ~= 25; error('ytickangle scalar target failed'); end; \
+        set(get(ax2, 'YAxis'), 'TickLabelRotation', -45); \
+        if ytickangle(ax2) ~= -45; error('ytickangle ruler property failed'); end; \
+        if get(ax2, 'YTickLabelRotation') ~= -45; error('ytickangle axes property failed'); end;";
+    execute_source(input).expect("execute tickangle script");
+}
+
+#[test]
 fn figure_position_property_pair_round_trips_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

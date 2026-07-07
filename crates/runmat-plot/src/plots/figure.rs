@@ -147,6 +147,8 @@ pub struct AxesMetadata {
     pub y_tick_labels: Option<Vec<String>>,
     pub x_tick_format: Option<String>,
     pub y_tick_format: Option<String>,
+    pub x_tick_label_rotation: Option<f64>,
+    pub y_tick_label_rotation: Option<f64>,
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
@@ -622,6 +624,20 @@ impl Figure {
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.x_tick_format = x_format;
             meta.y_tick_format = y_format;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_tick_label_rotations(
+        &mut self,
+        axes_index: usize,
+        x_angle: Option<f64>,
+        y_angle: Option<f64>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_label_rotation = x_angle;
+            meta.y_tick_label_rotation = y_angle;
         }
         self.dirty = true;
     }
@@ -1940,6 +1956,18 @@ impl Figure {
         self.axes_metadata
             .get(axes_index)
             .and_then(|meta| meta.y_tick_format.clone())
+    }
+
+    pub fn x_axis_tick_label_rotation_for_axes(&self, axes_index: usize) -> Option<f64> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_label_rotation)
+    }
+
+    pub fn y_axis_tick_label_rotation_for_axes(&self, axes_index: usize) -> Option<f64> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_label_rotation)
     }
 
     pub fn x_axis_ticks_for_axes(&self, axes_index: usize) -> Option<Vec<f64>> {

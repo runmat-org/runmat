@@ -30,6 +30,8 @@ pub(crate) mod area;
 pub(crate) mod axes;
 #[path = "ops/axis_scale.rs"]
 pub(crate) mod axis_scale;
+#[path = "ops/axis_tick_angle.rs"]
+pub(crate) mod axis_tick_angle;
 #[path = "ops/axis_tick_format.rs"]
 pub(crate) mod axis_tick_format;
 #[path = "ops/axis_tick_labels.rs"]
@@ -168,6 +170,8 @@ pub(crate) mod xlim;
 pub(crate) mod xline;
 #[path = "ops/xscale.rs"]
 pub(crate) mod xscale;
+#[path = "ops/xtickangle.rs"]
+pub(crate) mod xtickangle;
 #[path = "ops/xtickformat.rs"]
 pub(crate) mod xtickformat;
 #[path = "ops/xticklabels.rs"]
@@ -182,6 +186,8 @@ pub(crate) mod ylim;
 pub(crate) mod yline;
 #[path = "ops/yscale.rs"]
 pub(crate) mod yscale;
+#[path = "ops/ytickangle.rs"]
+pub(crate) mod ytickangle;
 #[path = "ops/ytickformat.rs"]
 pub(crate) mod ytickformat;
 #[path = "ops/yticklabels.rs"]
