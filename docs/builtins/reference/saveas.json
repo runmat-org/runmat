@@ -1,0 +1,71 @@
+{
+  "title": "saveas",
+  "category": "plotting",
+  "keywords": [
+    "saveas",
+    "figure export",
+    "figure save",
+    "png",
+    "fig"
+  ],
+  "summary": "Save a figure to a file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`saveas` gathers handle, filename, and format metadata only. PNG exports use RunMat's shared plotting renderer; FIG exports serialize the figure scene payload."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::figure_persistence::tests",
+    "integration": "figure persistence round-trip and PNG export regression coverage"
+  },
+  "description": "`saveas(fig, filename)` saves the specified figure or graphics object parent figure. RunMat supports RunMat FIG scene files and PNG image export.",
+  "behaviors": [
+    "`saveas(fig, filename)` infers the output format from `.fig` or `.png`; names without an extension save as `.fig`.",
+    "`saveas(fig, filename, formattype)` uses the explicit format. If `filename` has no extension, RunMat appends the standard extension for that format.",
+    "Figure, axes, text, legend, ruler, and plot-child handles save their parent figure.",
+    "PDF, EPS, SVG, JPEG, TIFF, and MATLAB code-generation formats are recognized as unsupported until those exporters exist."
+  ],
+  "examples": [
+    {
+      "description": "Save a figure scene",
+      "input": "plot(1:5, [1 4 2 5 3]);\nsaveas(gcf, \"plot_state.fig\");"
+    },
+    {
+      "description": "Save a PNG image",
+      "input": "plot(0:0.1:1, (0:0.1:1).^2);\nsaveas(gcf, \"quadratic\", \"png\");"
+    }
+  ],
+  "links": [
+    {
+      "label": "savefig",
+      "url": "./savefig"
+    },
+    {
+      "label": "openfig",
+      "url": "./openfig"
+    },
+    {
+      "label": "print",
+      "url": "./print"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs"
+  },
+  "gpu_residency": "`saveas` is an I/O sink. It returns a host logical status and does not launch numeric GPU kernels.",
+  "gpu_behavior": [
+    "PNG export uses the same renderer path as `print`.",
+    "FIG export serializes plotting state through the replay scene exporter.",
+    "Unsupported export formats fail before any partial output is written."
+  ]
+}

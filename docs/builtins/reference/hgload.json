@@ -1,0 +1,60 @@
+{
+  "title": "hgload",
+  "category": "plotting",
+  "keywords": [
+    "hgload",
+    "graphics load",
+    "fig",
+    "plotting"
+  ],
+  "summary": "Load graphics object hierarchies from RunMat FIG files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`hgload` is an I/O and plotting-state operation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::figure_persistence::tests",
+    "integration": "hgload property override regression coverage"
+  },
+  "description": "`hgload(filename)` loads top-level graphics objects from a RunMat FIG file. The two-output form returns previous property values for overridden top-level figure properties.",
+  "behaviors": [
+    "`hgload(filename)` appends `.fig` when the filename has no extension and returns a scalar handle or row vector of handles.",
+    "`[h, old] = hgload(filename, property_structure)` applies recognized top-level figure property overrides after import.",
+    "Unrecognized override fields are ignored and omitted from `old`, matching MATLAB's documented top-level override behavior."
+  ],
+  "examples": [
+    {
+      "description": "Load and override figure name",
+      "input": "plot(1:3);\nhgsave(gcf, \"named.fig\");\n[h, old] = hgload(\"named.fig\", struct(\"Name\", \"Loaded\"));"
+    }
+  ],
+  "links": [
+    {
+      "label": "hgsave",
+      "url": "./hgsave"
+    },
+    {
+      "label": "openfig",
+      "url": "./openfig"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs"
+  },
+  "gpu_residency": "`hgload` returns host graphics handles and optional host cell/struct metadata.",
+  "gpu_behavior": [
+    "No numeric GPU kernel is launched.",
+    "Loaded figure content can render through the normal plotting renderer."
+  ]
+}

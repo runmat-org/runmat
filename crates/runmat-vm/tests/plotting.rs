@@ -188,6 +188,45 @@ fn figure_position_property_pair_round_trips_through_vm() {
 }
 
 #[test]
+fn figure_persistence_round_trips_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let mut fig_path = std::env::temp_dir();
+    fig_path.push(format!(
+        "runmat_vm_figure_persistence_{}.fig",
+        std::process::id()
+    ));
+    let mut png_path = fig_path.clone();
+    png_path.set_extension("png");
+    let _ = std::fs::remove_file(&fig_path);
+    let _ = std::fs::remove_file(&png_path);
+
+    let fig_text = fig_path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let png_text = png_path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let input = format!(
+        "\
+        f = figure('Name', 'Persisted'); \
+        plot(1:3, [1 4 9]); \
+        savefig(\"{fig_text}\"); \
+        h = openfig(\"{fig_text}\", 'invisible'); \
+        if ~isgraphics(h); error('openfig did not return a graphics handle'); end; \
+        if ~strcmp(get(h, 'Name'), 'Persisted'); error('figure name did not persist'); end; \
+        saveas(h, \"{png_text}\", 'png');"
+    );
+    execute_source(&input).expect("execute figure persistence script");
+
+    let png = std::fs::read(&png_path).expect("read saveas png");
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let _ = std::fs::remove_file(&fig_path);
+    let _ = std::fs::remove_file(&png_path);
+}
+
+#[test]
 fn data_tip_text_row_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
