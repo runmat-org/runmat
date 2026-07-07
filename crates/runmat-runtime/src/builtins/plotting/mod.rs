@@ -26,6 +26,8 @@ pub(crate) mod type_resolvers;
 
 #[path = "ops/area.rs"]
 pub(crate) mod area;
+#[path = "ops/axes.rs"]
+pub(crate) mod axes;
 #[path = "ops/axis_scale.rs"]
 pub(crate) mod axis_scale;
 #[path = "ops/axis_tick_format.rs"]

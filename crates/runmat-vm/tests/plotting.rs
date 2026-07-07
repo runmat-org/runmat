@@ -348,6 +348,71 @@ fn bare_gca_can_set_axes_font_size() {
 }
 
 #[test]
+fn axes_creates_axes_and_round_trips_position_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax = axes('Position', [0.2 0.3 0.4 0.5], 'Units', 'normalized'); \
+        if ~ishandle(ax); \
+            error('axes did not return a handle'); \
+        end; \
+        if ~strcmp(get(ax, 'Type'), 'axes'); \
+            error('axes type mismatch'); \
+        end; \
+        p = get(ax, 'Position'); \
+        if p(1) ~= 0.2 || p(2) ~= 0.3 || p(3) ~= 0.4 || p(4) ~= 0.5; \
+            error('axes position mismatch'); \
+        end; \
+        if ~strcmp(ax.Units, 'normalized'); \
+            error('axes units mismatch'); \
+        end;";
+    execute_source(input).expect("execute axes position script");
+}
+
+#[test]
+fn axes_parent_property_targets_figure_and_updates_current_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f = figure(3); \
+        ax = axes('Parent', f, 'Units', 'pixels', 'Position', [10 20 300 200]); \
+        if get(ax, 'Parent') ~= f; \
+            error('axes parent mismatch'); \
+        end; \
+        if gcf() ~= f; \
+            error('axes parent did not update current figure'); \
+        end; \
+        if gca() ~= ax; \
+            error('axes parent did not update current axes'); \
+        end; \
+        p = ax.Position; \
+        if p(1) ~= 10 || p(2) ~= 20 || p(3) ~= 300 || p(4) ~= 200; \
+            error('axes parent position mismatch'); \
+        end;";
+    execute_source(input).expect("execute axes parent script");
+}
+
+#[test]
+fn axes_existing_handle_selection_preserves_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax1 = axes('Units', 'normalized'); \
+        ax2 = axes('Units', 'pixels', 'Position', [5 6 70 80]); \
+        axes(ax1); \
+        if gca() ~= ax1; \
+            error('axes(ax) did not select existing axes'); \
+        end; \
+        axes(ax2, 'Units', 'normalized'); \
+        if gca() ~= ax2; \
+            error('axes(ax, props) did not select target axes'); \
+        end; \
+        if ~strcmp(get(ax2, 'Units'), 'normalized'); \
+            error('axes(ax, props) did not apply properties'); \
+        end;";
+    execute_source(input).expect("execute axes selection script");
+}
+
+#[test]
 fn gca_returns_active_subplot_axes_handle() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

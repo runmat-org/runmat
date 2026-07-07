@@ -4748,6 +4748,82 @@
       ]
     },
     {
+      "name": "axes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ax = axes()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axes handle."
+            }
+          ]
+        },
+        {
+          "label": "ax = axes(target)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Existing axes handle to make current, or figure handle to parent new axes."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axes handle."
+            }
+          ]
+        },
+        {
+          "label": "ax = axes(property, value, ...)",
+          "inputs": [
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Axes property/value pairs. The construction-time Parent property may target a figure."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axes handle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.AXES.INVALID_ARGUMENT",
+          "identifier": "RunMat:axes:InvalidArgument",
+          "when": "Unsupported handle or property/value arguments are provided.",
+          "message": "axes: invalid argument"
+        },
+        {
+          "code": "RM.AXES.INTERNAL",
+          "identifier": "RunMat:axes:Internal",
+          "when": "Internal axes state operation fails.",
+          "message": "axes: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "axis",
       "output_mode": "Fixed",
       "completion_policy": "Public",

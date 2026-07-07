@@ -9,7 +9,8 @@ use super::state::{
     current_figure_handle_if_exists, decode_axes_handle, decode_plot_object_handle,
     figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
     root_default_properties, root_default_property, root_figure_handles, root_show_hidden_handles,
-    root_units, select_axes_for_figure, select_current_figure_if_exists, set_axes_style_for_axes,
+    root_units, select_axes_for_figure, select_current_figure_if_exists,
+    set_axes_position_for_axes, set_axes_style_for_axes, set_axes_units_for_axes,
     set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes, set_axis_ticks_for_axes,
     set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
     set_figure_visible, set_legend_for_axes, set_root_default_property,
@@ -676,6 +677,8 @@ fn get_axes_property(
             st.insert("LegendVisible", Value::Bool(meta.legend_enabled));
             st.insert("Type", Value::String("axes".into()));
             st.insert("Parent", Value::Num(handle.as_u32() as f64));
+            st.insert("Position", figure_position_value(meta.position));
+            st.insert("Units", Value::String(meta.units.clone()));
             st.insert(
                 "Children",
                 handles_value(vec![
@@ -892,6 +895,8 @@ fn get_axes_property(
         Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
         Some("type") => Ok(Value::String("axes".into())),
         Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
+        Some("position") => Ok(figure_position_value(meta.position)),
+        Some("units") => Ok(Value::String(meta.units)),
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
         Some("children") => Ok(handles_value(vec![
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title),
@@ -1751,6 +1756,30 @@ fn apply_axes_property(
                 handle, axes_index, location,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "position" => {
+            let position = parse_figure_position(value, builtin)?;
+            set_axes_position_for_axes(handle, axes_index, position)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "units" => {
+            let units = value_as_string(value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
+                .trim()
+                .to_ascii_lowercase();
+            if !matches!(
+                units.as_str(),
+                "normalized" | "pixels" | "inches" | "centimeters" | "points" | "characters"
+            ) {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported axes Units `{units}`"),
+                ));
+            }
+            set_axes_units_for_axes(handle, axes_index, units)
+                .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         other => Err(plotting_error(

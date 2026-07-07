@@ -133,6 +133,9 @@ pub struct AxesMetadata {
     pub axes_kind: AxesKind,
     pub overlay_parent: Option<usize>,
     pub y_axis_location: String,
+    pub position: [f64; 4],
+    pub position_explicit: bool,
+    pub units: String,
     pub title: Option<String>,
     pub subtitle: Option<String>,
     pub x_label: Option<String>,
@@ -250,6 +253,9 @@ impl Figure {
             axes_kind: AxesKind::Cartesian,
             overlay_parent: None,
             y_axis_location: "left".into(),
+            position: [0.13, 0.11, 0.775, 0.815],
+            position_explicit: false,
+            units: "normalized".into(),
             x_limits: None,
             y_limits: None,
             z_limits: None,
@@ -335,6 +341,15 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         self.active_axes_index = axes_index;
         self.sync_legacy_fields_from_active_axes();
+        self.dirty = true;
+    }
+
+    pub fn ensure_axes(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axes_kind = AxesKind::Cartesian;
+            meta.overlay_parent = None;
+        }
         self.dirty = true;
     }
 
@@ -884,7 +899,11 @@ impl Figure {
             .map(|(index, _)| index + 1)
             .max()
             .unwrap_or(0);
-        self.total_axes().max(plotted_axes).max(overlay_axes).max(1)
+        self.total_axes()
+            .max(plotted_axes)
+            .max(overlay_axes)
+            .max(self.axes_metadata.len())
+            .max(1)
     }
 
     pub fn ensure_overlay_axes(&mut self, parent_axes_index: usize) -> usize {
@@ -929,6 +948,23 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.y_axis_location = location.into();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_position(&mut self, axes_index: usize, position: [f64; 4]) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.position = position;
+            meta.position_explicit = true;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_units(&mut self, axes_index: usize, units: impl Into<String>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.units = units.into();
         }
         self.dirty = true;
     }

@@ -575,6 +575,39 @@ impl PlotOverlay {
         )
     }
 
+    fn positioned_axes_outer_rect(
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+    ) -> Rect {
+        let Some((position, units)) = plot_renderer.overlay_position_for_axes(axes_index) else {
+            return outer;
+        };
+        let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
+            (
+                position[0] as f32 * outer.width(),
+                position[1] as f32 * outer.height(),
+                position[2] as f32 * outer.width(),
+                position[3] as f32 * outer.height(),
+            )
+        } else {
+            (
+                position[0] as f32,
+                position[1] as f32,
+                position[2] as f32,
+                position[3] as f32,
+            )
+        };
+        let width = width.max(1.0).min(outer.width().max(1.0));
+        let height = height.max(1.0).min(outer.height().max(1.0));
+        let x = (outer.min.x + left).clamp(outer.min.x, outer.max.x - 1.0);
+        let y = (outer.max.y - bottom - height).clamp(outer.min.y, outer.max.y - 1.0);
+        Rect::from_min_size(
+            egui::pos2(x, y),
+            egui::vec2(width.min(outer.max.x - x), height.min(outer.max.y - y)),
+        )
+    }
+
     fn panel_layout_for_axes(
         &self,
         outer: Rect,
@@ -657,10 +690,14 @@ impl PlotOverlay {
         };
         let (rows, cols) = plot_renderer.figure_axes_grid();
         if rows * cols <= 1 {
-            vec![
-                self.panel_layout_for_axes(plot_area, plot_renderer, 0, font_scale)
-                    .plot_rect,
-            ]
+            (0..plot_renderer.figure_axes_count().max(1))
+                .map(|axes_index| {
+                    let axes_outer =
+                        Self::positioned_axes_outer_rect(plot_area, plot_renderer, axes_index);
+                    self.panel_layout_for_axes(axes_outer, plot_renderer, axes_index, font_scale)
+                        .plot_rect
+                })
+                .collect()
         } else {
             let rects = self.compute_subplot_rects(
                 plot_area,
@@ -673,7 +710,9 @@ impl PlotOverlay {
                 .into_iter()
                 .enumerate()
                 .map(|(axes_index, rect)| {
-                    self.panel_layout_for_axes(rect, plot_renderer, axes_index, font_scale)
+                    let axes_outer =
+                        Self::positioned_axes_outer_rect(rect, plot_renderer, axes_index);
+                    self.panel_layout_for_axes(axes_outer, plot_renderer, axes_index, font_scale)
                         .plot_rect
                 })
                 .collect()
@@ -1138,20 +1177,26 @@ impl PlotOverlay {
             }
         }
 
-        if rows * cols > 1 {
-            let rects = self.compute_subplot_rects(
-                plot_area_rect,
-                rows,
-                cols,
-                Self::SUBPLOT_GAP_POINTS,
-                Self::SUBPLOT_GAP_POINTS,
-            );
+        let axes_count = plot_renderer.figure_axes_count().max(1);
+        if rows * cols > 1 || axes_count > 1 {
+            let rects = if rows * cols > 1 {
+                self.compute_subplot_rects(
+                    plot_area_rect,
+                    rows,
+                    cols,
+                    Self::SUBPLOT_GAP_POINTS,
+                    Self::SUBPLOT_GAP_POINTS,
+                )
+            } else {
+                vec![plot_area_rect; axes_count]
+            };
             for (i, cell_rect) in rects.iter().enumerate() {
+                let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
                 let cam = plot_renderer
                     .axes_camera(i)
                     .unwrap_or_else(|| plot_renderer.camera());
                 let panel_layout =
-                    self.panel_layout_for_axes(*cell_rect, plot_renderer, i, config.font_scale);
+                    self.panel_layout_for_axes(cell_rect, plot_renderer, i, config.font_scale);
                 let r =
                     Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
                 let frame_rect =
@@ -1456,13 +1501,13 @@ impl PlotOverlay {
                 );
             }
         }
-        let centered_plot_rect = if rows * cols <= 1 {
+        let centered_plot_rect = if rows * cols <= 1 && axes_count <= 1 {
             self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale)
                 .plot_rect
         } else {
             plot_area_rect
         };
-        for (label, pos) in if rows * cols <= 1 {
+        for (label, pos) in if rows * cols <= 1 && axes_count <= 1 {
             plot_renderer.active_axes_pie_labels()
         } else {
             Vec::new()
@@ -1471,7 +1516,7 @@ impl PlotOverlay {
         }
 
         // Draw legend if enabled and entries available
-        if rows * cols <= 1 && plot_renderer.overlay_show_legend() {
+        if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend() {
             self.draw_legend(
                 ui,
                 centered_plot_rect,

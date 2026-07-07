@@ -2137,6 +2137,30 @@ pub fn set_y_axis_location_for_axes(
     Ok(())
 }
 
+pub fn set_axes_position_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    position: [f64; 4],
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_position(axes_index, position);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_axes_units_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    units: String,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_units(axes_index, units);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_view_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -3249,6 +3273,24 @@ pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result
     state.active_axes = axes_index;
     state.figure.set_active_axes_index(axes_index);
     Ok(())
+}
+
+pub fn create_axes_for_figure(
+    target: Option<FigureHandle>,
+) -> Result<(FigureHandle, usize), FigureError> {
+    let mut reg = registry();
+    let handle = target.unwrap_or(reg.current);
+    let axes_index = {
+        let state = get_state_mut(&mut reg, handle);
+        let axes_index = axes_count(state);
+        state.figure.ensure_axes(axes_index);
+        state.figure.set_active_axes_index(axes_index);
+        state.active_axes = axes_index;
+        state.reset_cycle(axes_index);
+        axes_index
+    };
+    reg.current = handle;
+    Ok((handle, axes_index))
 }
 
 fn with_axes_target_mut<R>(

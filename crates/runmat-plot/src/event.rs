@@ -1081,6 +1081,18 @@ pub struct SerializedAxesMetadata {
         skip_serializing_if = "is_left_axis"
     )]
     pub y_axis_location: String,
+    #[serde(
+        default = "default_axes_position",
+        skip_serializing_if = "is_default_axes_position"
+    )]
+    pub position: [f64; 4],
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub position_explicit: bool,
+    #[serde(
+        default = "default_axes_units",
+        skip_serializing_if = "is_normalized_units"
+    )]
+    pub units: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1166,6 +1178,22 @@ fn default_y_axis_location() -> String {
 
 fn is_left_axis(value: &str) -> bool {
     value == "left"
+}
+
+fn default_axes_position() -> [f64; 4] {
+    [0.13, 0.11, 0.775, 0.815]
+}
+
+fn is_default_axes_position(value: &[f64; 4]) -> bool {
+    *value == default_axes_position()
+}
+
+fn default_axes_units() -> String {
+    "normalized".into()
+}
+
+fn is_normalized_units(value: &str) -> bool {
+    value == "normalized"
 }
 
 impl From<AxesKind> for SerializedAxesKind {
@@ -1259,6 +1287,9 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,
+            position: value.position,
+            position_explicit: value.position_explicit,
+            units: value.units,
             title: value.title,
             subtitle: value.subtitle,
             x_label: value.x_label,
@@ -1311,6 +1342,9 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,
+            position: value.position,
+            position_explicit: value.position_explicit,
+            units: value.units,
             title: value.title,
             subtitle: value.subtitle,
             x_label: value.x_label,
