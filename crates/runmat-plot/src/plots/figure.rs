@@ -131,6 +131,8 @@ impl Default for LegendStyle {
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
     pub axes_kind: AxesKind,
+    pub overlay_parent: Option<usize>,
+    pub y_axis_location: String,
     pub title: Option<String>,
     pub subtitle: Option<String>,
     pub x_label: Option<String>,
@@ -243,6 +245,26 @@ pub enum PlotType {
 }
 
 impl Figure {
+    fn default_axes_metadata() -> AxesMetadata {
+        AxesMetadata {
+            axes_kind: AxesKind::Cartesian,
+            overlay_parent: None,
+            y_axis_location: "left".into(),
+            x_limits: None,
+            y_limits: None,
+            z_limits: None,
+            grid_enabled: true,
+            minor_grid_enabled: false,
+            box_enabled: true,
+            axis_equal: false,
+            legend_enabled: true,
+            colorbar_enabled: false,
+            colormap: ColorMap::Parula,
+            color_limits: None,
+            ..Default::default()
+        }
+    }
+
     /// Create a new empty figure
     pub fn new() -> Self {
         Self {
@@ -276,42 +298,14 @@ impl Figure {
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
             active_axes_index: 0,
-            axes_metadata: vec![AxesMetadata {
-                axes_kind: AxesKind::Cartesian,
-                x_limits: None,
-                y_limits: None,
-                z_limits: None,
-                grid_enabled: true,
-                minor_grid_enabled: false,
-                box_enabled: true,
-                axis_equal: false,
-                legend_enabled: true,
-                colorbar_enabled: false,
-                colormap: ColorMap::Parula,
-                color_limits: None,
-                ..Default::default()
-            }],
+            axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
         }
     }
 
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
-            self.axes_metadata.push(AxesMetadata {
-                axes_kind: AxesKind::Cartesian,
-                x_limits: None,
-                y_limits: None,
-                z_limits: None,
-                grid_enabled: true,
-                minor_grid_enabled: false,
-                box_enabled: true,
-                axis_equal: false,
-                legend_enabled: true,
-                colorbar_enabled: false,
-                colormap: ColorMap::Parula,
-                color_limits: None,
-                ..Default::default()
-            });
+            self.axes_metadata.push(Self::default_axes_metadata());
         }
     }
 
@@ -874,6 +868,71 @@ impl Figure {
         (self.axes_rows, self.axes_cols)
     }
 
+    pub fn axes_count(&self) -> usize {
+        let plotted_axes = self
+            .plot_axes_indices
+            .iter()
+            .copied()
+            .max()
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let overlay_axes = self
+            .axes_metadata
+            .iter()
+            .enumerate()
+            .filter(|(_, meta)| meta.overlay_parent.is_some())
+            .map(|(index, _)| index + 1)
+            .max()
+            .unwrap_or(0);
+        self.total_axes().max(plotted_axes).max(overlay_axes).max(1)
+    }
+
+    pub fn ensure_overlay_axes(&mut self, parent_axes_index: usize) -> usize {
+        let parent = parent_axes_index.min(self.total_axes().saturating_sub(1));
+        if let Some((index, _)) = self
+            .axes_metadata
+            .iter()
+            .enumerate()
+            .find(|(_, meta)| meta.overlay_parent == Some(parent))
+        {
+            return index;
+        }
+
+        let index = self.axes_metadata.len().max(self.total_axes());
+        self.ensure_axes_metadata_capacity(index + 1);
+        if let Some(parent_meta) = self.axes_metadata.get(parent).cloned() {
+            if let Some(meta) = self.axes_metadata.get_mut(index) {
+                *meta = parent_meta;
+                meta.overlay_parent = Some(parent);
+                meta.y_axis_location = "right".into();
+                meta.y_limits = None;
+                meta.y_ticks = None;
+                meta.y_tick_labels = None;
+                meta.y_tick_format = None;
+                meta.y_label = None;
+                meta.legend_enabled = false;
+                meta.grid_enabled = false;
+                meta.minor_grid_enabled = false;
+            }
+        }
+        self.dirty = true;
+        index
+    }
+
+    pub fn axes_overlay_parent(&self, axes_index: usize) -> Option<usize> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.overlay_parent)
+    }
+
+    pub fn set_axes_y_axis_location(&mut self, axes_index: usize, location: impl Into<String>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_axis_location = location.into();
+        }
+        self.dirty = true;
+    }
+
     /// Axes index mapping for plots (length equals number of plots)
     pub fn plot_axes_indices(&self) -> &[usize] {
         &self.plot_axes_indices
@@ -890,7 +949,7 @@ impl Figure {
                 "assign_plot_to_axes: index {plot_index} out of bounds"
             ));
         }
-        let max_axes = self.axes_rows.max(1) * self.axes_cols.max(1);
+        let max_axes = self.axes_count();
         let ai = axes_index.min(max_axes.saturating_sub(1));
         self.plot_axes_indices[plot_index] = ai;
         self.dirty = true;
@@ -900,7 +959,20 @@ impl Figure {
     pub fn set_subplot_grid(&mut self, rows: usize, cols: usize) {
         self.axes_rows = rows.max(1);
         self.axes_cols = cols.max(1);
-        self.ensure_axes_metadata_capacity(self.axes_rows * self.axes_cols);
+        let grid_axes = self.axes_rows * self.axes_cols;
+        self.ensure_axes_metadata_capacity(grid_axes);
+        for axes_index in 0..grid_axes {
+            if self
+                .axes_metadata
+                .get(axes_index)
+                .is_some_and(|meta| meta.overlay_parent.is_some())
+            {
+                self.clear_axes(axes_index);
+                if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+                    *meta = Self::default_axes_metadata();
+                }
+            }
+        }
         self.active_axes_index = self.active_axes_index.min(
             self.axes_rows
                 .saturating_mul(self.axes_cols)
@@ -1093,7 +1165,7 @@ impl Figure {
     }
 
     fn normalize_axes_index(&self, axes_index: usize) -> usize {
-        let total = self.total_axes().max(1);
+        let total = self.axes_count();
         axes_index.min(total - 1)
     }
 
@@ -2670,6 +2742,27 @@ mod tests {
         assert!(right.colorbar_enabled);
         assert_eq!(format!("{:?}", right.colormap), "Hot");
         assert_eq!(right.color_limits, Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn subplot_grid_expansion_reclaims_overlay_axes_slots() {
+        let mut figure = Figure::new();
+        let overlay_axes = figure.ensure_overlay_axes(0);
+        assert_eq!(overlay_axes, 1);
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![10.0, 20.0]).unwrap(),
+            overlay_axes,
+        );
+        assert_eq!(figure.axes_overlay_parent(overlay_axes), Some(0));
+        assert_eq!(figure.axes_count(), 2);
+
+        figure.set_subplot_grid(2, 1);
+
+        let second_subplot = figure.axes_metadata(1).unwrap();
+        assert_eq!(second_subplot.overlay_parent, None);
+        assert_eq!(second_subplot.y_axis_location, "left");
+        assert!(figure.plot_axes_indices().is_empty());
+        assert_eq!(figure.axes_count(), 2);
     }
 
     #[test]

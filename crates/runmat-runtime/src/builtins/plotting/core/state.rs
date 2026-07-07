@@ -843,7 +843,7 @@ pub fn color_order_for_axes(
 ) -> Result<Vec<Vec4>, FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -881,7 +881,7 @@ pub fn set_color_order_for_axes(
     let figure_clone = {
         let mut reg = registry();
         let state = get_state_mut(&mut reg, handle);
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -908,7 +908,7 @@ pub fn set_color_order_for_figure(
         let mut reg = registry();
         let state = get_state_mut(&mut reg, handle);
         state.figure_color_order = Some(colors.to_vec());
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         for axes_index in 0..total_axes {
             state.color_cycle_for_axes_mut(axes_index).set_order(colors);
         }
@@ -1269,7 +1269,7 @@ pub fn set_axis_ticks_for_axes(
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -1310,7 +1310,7 @@ pub fn set_axis_tick_labels_for_axes(
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -1351,7 +1351,7 @@ pub fn set_axis_tick_formats_for_axes(
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -1428,7 +1428,7 @@ pub fn axis_ticks_snapshot_for_axes(
         .figures
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -1453,7 +1453,7 @@ pub fn axis_tick_labels_snapshot_for_axes(
         .figures
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -1478,7 +1478,7 @@ pub fn axis_tick_formats_snapshot_for_axes(
         .figures
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -1511,7 +1511,7 @@ pub fn axis_display_bounds_snapshot_for_axes(
         .figures
         .get_mut(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -1564,7 +1564,7 @@ fn display_bounds_for_state_axes(
 }
 
 fn axes_count(state: &FigureState) -> usize {
-    state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1)
+    state.figure.axes_count()
 }
 
 fn validate_axes_index(state: &FigureState, axes_index: usize) -> Result<(), FigureError> {
@@ -2083,7 +2083,7 @@ pub fn set_log_modes_for_axes(
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -2095,6 +2095,18 @@ pub fn set_log_modes_for_axes(
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_y_axis_location_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    location: String,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_y_axis_location(axes_index, location);
+    })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
 }
@@ -2120,7 +2132,7 @@ pub fn legend_entries_snapshot(
 ) -> Result<Vec<runmat_plot::plots::LegendEntry>, FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -2639,7 +2651,7 @@ pub fn set_heatmap_display_labels(
         };
 
         let state = get_state_mut(&mut reg, figure);
-        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        let total_axes = axes_count(state);
         if axes_index >= total_axes {
             return Err(FigureError::InvalidSubplotIndex {
                 rows: state.figure.axes_rows.max(1),
@@ -3111,8 +3123,7 @@ pub fn current_axes_state() -> FigureAxesState {
 pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
-    axes_index < total_axes
+    axes_index < axes_count(state)
 }
 
 pub fn figure_handle_exists(handle: FigureHandle) -> bool {
@@ -3126,7 +3137,7 @@ pub fn axes_metadata_snapshot(
 ) -> Result<runmat_plot::plots::AxesMetadata, FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -3147,7 +3158,7 @@ pub fn axes_state_snapshot(
 ) -> Result<FigureAxesState, FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -3172,7 +3183,7 @@ pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, Figur
 pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     Ok((0..total_axes)
         .map(|idx| encode_axes_handle(handle, idx))
         .collect())
@@ -3181,7 +3192,7 @@ pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureE
 pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -3203,7 +3214,7 @@ fn with_axes_target_mut<R>(
 ) -> Result<(R, Figure), FigureError> {
     let mut reg = registry();
     let state = get_state_mut(&mut reg, handle);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
             rows: state.figure.axes_rows.max(1),
@@ -3395,6 +3406,43 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     state.active_axes = index;
     state.figure.set_active_axes_index(index);
     Ok(())
+}
+
+pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), FigureError> {
+    let mut reg = registry();
+    let handle = reg.current;
+    let (left_axes, right_axes) = {
+        let state = get_state_mut(&mut reg, handle);
+        let left_axes = state.active_axes;
+        let right_axes = state.figure.ensure_overlay_axes(left_axes);
+        state.figure.clear_axes(left_axes);
+        state.figure.clear_axes(right_axes);
+        state.figure.set_axes_kind(left_axes, AxesKind::Cartesian);
+        state.figure.set_axes_kind(right_axes, AxesKind::Cartesian);
+        state.figure.set_axes_limits(left_axes, None, None);
+        state.figure.set_axes_limits(right_axes, None, None);
+        state.figure.set_axes_z_limits(left_axes, None);
+        state.figure.set_axes_z_limits(right_axes, None);
+        state.figure.set_axes_y_axis_location(left_axes, "left");
+        state.figure.set_axes_y_axis_location(right_axes, "right");
+        state.figure.set_axes_grid_enabled(right_axes, false);
+        state.figure.set_axes_minor_grid_enabled(right_axes, false);
+        state.figure.set_axes_legend_enabled(right_axes, false);
+        state.reset_cycle(left_axes);
+        state.reset_cycle(right_axes);
+        state.active_axes = left_axes;
+        state.figure.set_active_axes_index(left_axes);
+        (left_axes, right_axes)
+    };
+    purge_plot_children_for_axes(&mut reg, handle, left_axes);
+    purge_plot_children_for_axes(&mut reg, handle, right_axes);
+    Ok((
+        handle,
+        left_axes,
+        right_axes,
+        encode_axes_handle(handle, left_axes),
+        encode_axes_handle(handle, right_axes),
+    ))
 }
 
 pub fn render_active_plot<F>(

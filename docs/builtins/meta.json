@@ -71075,6 +71075,153 @@
       ]
     },
     {
+      "name": "plotyy",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2)",
+          "inputs": [
+            {
+              "name": "X1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X data for the left axes."
+            },
+            {
+              "name": "Y1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data for the left axes."
+            },
+            {
+              "name": "X2",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X data for the right axes."
+            },
+            {
+              "name": "Y2",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data for the right axes."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two axes handles [left right]."
+            },
+            {
+              "name": "h1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the left axes."
+            },
+            {
+              "name": "h2",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the right axes."
+            }
+          ]
+        },
+        {
+          "label": "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2,fun)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "X1, Y1, X2, Y2 followed by one plotting function selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two axes handles [left right]."
+            },
+            {
+              "name": "h1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the left axes."
+            },
+            {
+              "name": "h2",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the right axes."
+            }
+          ]
+        },
+        {
+          "label": "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2,fun1,fun2)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "X1, Y1, X2, Y2 followed by left and right plotting function selectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two axes handles [left right]."
+            },
+            {
+              "name": "h1",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the left axes."
+            },
+            {
+              "name": "h2",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Line handle or handles for the right axes."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PLOTYY.INVALID_ARGUMENT",
+          "identifier": "RunMat:plotyy:InvalidArgument",
+          "when": "Input count, plotting function selector, or line data is invalid.",
+          "message": "plotyy: invalid argument"
+        },
+        {
+          "code": "RM.PLOTYY.INTERNAL",
+          "identifier": "RunMat:plotyy:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "plotyy: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "plus",
       "output_mode": "Fixed",
       "completion_policy": "Public",

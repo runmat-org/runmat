@@ -1074,6 +1074,13 @@ impl From<SerializedLegendStyle> for LegendStyle {
 pub struct SerializedAxesMetadata {
     #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
     pub axes_kind: SerializedAxesKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_parent: Option<usize>,
+    #[serde(
+        default = "default_y_axis_location",
+        skip_serializing_if = "is_left_axis"
+    )]
+    pub y_axis_location: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1151,6 +1158,14 @@ pub enum SerializedAxesKind {
 
 fn is_cartesian_axes_kind(value: &SerializedAxesKind) -> bool {
     *value == SerializedAxesKind::Cartesian
+}
+
+fn default_y_axis_location() -> String {
+    "left".into()
+}
+
+fn is_left_axis(value: &str) -> bool {
+    value == "left"
 }
 
 impl From<AxesKind> for SerializedAxesKind {
@@ -1242,6 +1257,8 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
             axes_kind: value.axes_kind.into(),
+            overlay_parent: value.overlay_parent,
+            y_axis_location: value.y_axis_location,
             title: value.title,
             subtitle: value.subtitle,
             x_label: value.x_label,
@@ -1292,6 +1309,8 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
             axes_kind: value.axes_kind.into(),
+            overlay_parent: value.overlay_parent,
+            y_axis_location: value.y_axis_location,
             title: value.title,
             subtitle: value.subtitle,
             x_label: value.x_label,

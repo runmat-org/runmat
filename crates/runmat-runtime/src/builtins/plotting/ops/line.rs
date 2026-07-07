@@ -6,7 +6,7 @@ use runmat_builtins::{
     Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::{Line3Plot, LinePlot};
+use runmat_plot::plots::{Figure, Line3Plot, LinePlot};
 
 use super::common::{numeric_pair, numeric_triplet};
 use super::op_common::line_inputs::NumericInput;
@@ -163,18 +163,9 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         move |figure, axes_index| {
             *axes_index_out.borrow_mut() = Some(axes_index);
             let objects = objects.take().expect("line objects consumed exactly once");
-            for object in objects {
-                let (plot_index, is_3d) = match object {
-                    LineObject::TwoD(plot) => {
-                        (figure.add_line_plot_on_axes(plot, axes_index), false)
-                    }
-                    LineObject::ThreeD(plot) => {
-                        figure.set_axes_z_limits(axes_index, None);
-                        (figure.add_line3_plot_on_axes(plot, axes_index), true)
-                    }
-                };
-                plot_indices_slot.borrow_mut().push((plot_index, is_3d));
-            }
+            plot_indices_slot
+                .borrow_mut()
+                .extend(append_line_objects_to_figure(figure, axes_index, objects));
             Ok(())
         },
     );
@@ -201,14 +192,31 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(handles_value(handles))
 }
 
-struct ParsedLineCall {
-    axes_target: AxesTarget,
-    objects: Vec<LineObject>,
+pub(super) struct ParsedLineCall {
+    pub(super) axes_target: AxesTarget,
+    pub(super) objects: Vec<LineObject>,
 }
 
-enum LineObject {
+pub(super) enum LineObject {
     TwoD(LinePlot),
     ThreeD(Line3Plot),
+}
+
+pub(super) fn append_line_objects_to_figure(
+    figure: &mut Figure,
+    axes_index: usize,
+    objects: Vec<LineObject>,
+) -> Vec<(usize, bool)> {
+    objects
+        .into_iter()
+        .map(|object| match object {
+            LineObject::TwoD(plot) => (figure.add_line_plot_on_axes(plot, axes_index), false),
+            LineObject::ThreeD(plot) => {
+                figure.set_axes_z_limits(axes_index, None);
+                (figure.add_line3_plot_on_axes(plot, axes_index), true)
+            }
+        })
+        .collect()
 }
 
 struct LineOptions {
@@ -220,7 +228,7 @@ struct LineOptions {
     visible: Option<bool>,
 }
 
-async fn parse_line_args(
+pub(super) async fn parse_line_args(
     leading_axes: AxesTarget,
     args: Vec<Value>,
 ) -> BuiltinResult<ParsedLineCall> {
@@ -583,7 +591,7 @@ fn same_matrix_shape(a: &Tensor, b: &Tensor) -> bool {
     a.rows() == b.rows() && a.cols() == b.cols() && !is_vector_tensor(a) && !is_vector_tensor(b)
 }
 
-fn handles_value(handles: Vec<f64>) -> Value {
+pub(super) fn handles_value(handles: Vec<f64>) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0])
     } else {

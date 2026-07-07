@@ -108,6 +108,8 @@ pub(crate) mod pie;
 pub(crate) mod plot;
 #[path = "ops/plot3.rs"]
 pub(crate) mod plot3;
+#[path = "ops/plotyy.rs"]
+pub(crate) mod plotyy;
 #[path = "ops/polarplot.rs"]
 pub(crate) mod polarplot;
 #[path = "ops/print.rs"]

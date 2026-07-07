@@ -494,7 +494,7 @@ impl PlotRenderer {
         self.last_axes_view_bounds = None;
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
-        let num_axes = rows.max(1) * cols.max(1);
+        let num_axes = figure.axes_count();
         let axes_view_contract = Self::axes_view_contract_for_figure(&figure);
         let axes_view_contract_changed =
             self.last_axes_view_contract.as_ref() != Some(&axes_view_contract);
@@ -709,7 +709,8 @@ impl PlotRenderer {
             device: &self.wgpu_renderer.device,
             queue: &self.wgpu_renderer.queue,
         };
-        let view_bounds = self.axes_view_bounds_for_count(rows.max(1) * cols.max(1));
+        let axes_count = figure.axes_count();
+        let view_bounds = self.axes_view_bounds_for_count(axes_count);
         let viewport_hint = if axes_plot_sizes_px.is_some() || rows.max(1) * cols.max(1) <= 1 {
             Some(viewport_px)
         } else {
@@ -724,7 +725,7 @@ impl PlotRenderer {
 
         for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate()
         {
-            let axes_index = axes_index.min(rows * cols - 1);
+            let axes_index = axes_index.min(axes_count.saturating_sub(1));
             // Create scene node for this plot element
             let node = SceneNode {
                 id: node_id_counter as u64,
@@ -755,10 +756,31 @@ impl PlotRenderer {
         &mut self,
         axes_plot_sizes_px: &[(u32, u32)],
     ) {
-        let normalized: Vec<(u32, u32)> = axes_plot_sizes_px
+        let mut normalized: Vec<(u32, u32)> = axes_plot_sizes_px
             .iter()
             .map(|&(w, h)| (w.max(1), h.max(1)))
             .collect();
+        let Some(figure) = self.last_figure.clone() else {
+            let view_bounds = self.axes_view_bounds_for_count(normalized.len().max(1));
+            self.last_axes_plot_sizes_px = Some(normalized);
+            self.last_axes_view_bounds = Some(view_bounds);
+            return;
+        };
+        let axes_count = figure.axes_count();
+        if normalized.len() < axes_count {
+            let grid_len = normalized.len().max(1);
+            for axes_index in normalized.len()..axes_count {
+                let parent = figure
+                    .axes_overlay_parent(axes_index)
+                    .unwrap_or(axes_index)
+                    .min(grid_len - 1);
+                let size = normalized.get(parent).copied().unwrap_or((
+                    self.wgpu_renderer.surface_config.width.max(1),
+                    self.wgpu_renderer.surface_config.height.max(1),
+                ));
+                normalized.push(size);
+            }
+        }
         if normalized.iter().any(|&(w, h)| w < 2 || h < 2) {
             log::debug!(
                 target: "runmat_plot.viewport_rebuild",
@@ -767,17 +789,12 @@ impl PlotRenderer {
             );
             return;
         }
-        let view_bounds = self.axes_view_bounds_for_count(normalized.len().max(1));
+        let view_bounds = self.axes_view_bounds_for_count(axes_count);
         if self.last_axes_plot_sizes_px.as_ref() == Some(&normalized)
             && self.last_axes_view_bounds.as_ref() == Some(&view_bounds)
         {
             return;
         }
-        let Some(figure) = self.last_figure.clone() else {
-            self.last_axes_plot_sizes_px = Some(normalized);
-            self.last_axes_view_bounds = Some(view_bounds);
-            return;
-        };
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
         self.add_figure_to_scene_with_axes_plot_sizes(figure, Some(&normalized));
@@ -1881,7 +1898,7 @@ impl PlotRenderer {
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
         let (rows, cols) = self.figure_axes_grid();
-        let axes_count = rows.saturating_mul(cols);
+        let axes_count = self.figure_axes_count();
         log::debug!(
             "runmat-plot: renderer.scene_to_target.start rows={} cols={} axes_count={} width={} height={}",
             rows,
@@ -1902,8 +1919,28 @@ impl PlotRenderer {
             );
         }
 
-        let viewports =
-            Self::compute_tiled_viewports(config.width.max(1), config.height.max(1), rows, cols);
+        let mut viewports = if rows.saturating_mul(cols) <= 1 {
+            let full = (0, 0, config.width.max(1), config.height.max(1));
+            vec![full; axes_count.max(1)]
+        } else {
+            Self::compute_tiled_viewports(config.width.max(1), config.height.max(1), rows, cols)
+        };
+        if viewports.len() < axes_count {
+            let grid_len = viewports.len().max(1);
+            for axes_index in viewports.len()..axes_count {
+                let parent = self
+                    .overlay_parent_for_axes(axes_index)
+                    .unwrap_or(axes_index)
+                    .min(grid_len - 1);
+                let viewport = viewports.get(parent).copied().unwrap_or((
+                    0,
+                    0,
+                    config.width.max(1),
+                    config.height.max(1),
+                ));
+                viewports.push(viewport);
+            }
+        }
         log::debug!(
             "runmat-plot: renderer.scene_to_target.branch_subplot_axes viewports={}",
             viewports.len()
@@ -3774,6 +3811,24 @@ impl PlotRenderer {
             .as_ref()
             .map(|f| f.axes_grid())
             .unwrap_or((1, 1))
+    }
+    pub fn figure_axes_count(&self) -> usize {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.axes_count())
+            .unwrap_or(1)
+    }
+    pub fn overlay_parent_for_axes(&self, axes_index: usize) -> Option<usize> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_overlay_parent(axes_index))
+    }
+    pub fn overlay_y_axis_location_for_axes(&self, axes_index: usize) -> &str {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.y_axis_location.as_str())
+            .unwrap_or("left")
     }
     /// Return categorical labels if any (is_x_axis, &labels)
     pub fn overlay_categorical_labels(&self) -> Option<(bool, &Vec<String>)> {

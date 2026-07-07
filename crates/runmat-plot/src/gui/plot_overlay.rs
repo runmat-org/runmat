@@ -1228,6 +1228,18 @@ impl PlotOverlay {
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_axes(ui, r, plot_renderer, config, b, Some(i));
+                    for overlay_axes in 0..plot_renderer.figure_axes_count() {
+                        if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(i) {
+                            self.draw_axes(
+                                ui,
+                                r,
+                                plot_renderer,
+                                config,
+                                plot_renderer.view_bounds_for_axes(overlay_axes),
+                                Some(overlay_axes),
+                            );
+                        }
+                    }
                 }
 
                 if config.show_title {
@@ -1368,6 +1380,18 @@ impl PlotOverlay {
                 // Draw axes if enabled
                 if config.show_axes {
                     self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, None);
+                    for overlay_axes in 1..plot_renderer.figure_axes_count() {
+                        if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(0) {
+                            self.draw_axes(
+                                ui,
+                                centered_plot_rect,
+                                plot_renderer,
+                                config,
+                                plot_renderer.view_bounds_for_axes(overlay_axes),
+                                Some(overlay_axes),
+                            );
+                        }
+                    }
                     // Emphasize zero baseline if within data range
                     if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
                         .view_bounds()
@@ -1854,6 +1878,25 @@ impl PlotOverlay {
             let label_color = self.theme_text_color();
             let border_left = plot_rect.min.x;
             let border_bottom = plot_rect.max.y;
+            let y_axis_on_right = axes_index
+                .map(|idx| plot_renderer.overlay_y_axis_location_for_axes(idx) == "right")
+                .unwrap_or(false);
+            let draw_x_axis = !y_axis_on_right;
+            let y_axis_x = if y_axis_on_right {
+                plot_rect.max.x
+            } else {
+                border_left
+            };
+            let y_tick_outer_x = if y_axis_on_right {
+                y_axis_x + tick_length
+            } else {
+                y_axis_x - tick_length
+            };
+            let y_label_x = if y_axis_on_right {
+                y_axis_x + label_offset
+            } else {
+                y_axis_x - label_offset
+            };
 
             let x_log = axes_index
                 .map(|idx| plot_renderer.overlay_x_log_for_axes(idx))
@@ -1881,7 +1924,7 @@ impl PlotOverlay {
             // Histogram numeric tick support and categorical axis support
             let (mut cat_x, mut cat_y) = (false, false);
             let mut custom_hist_x = false;
-            if explicit_x_ticks.is_none() {
+            if draw_x_axis && explicit_x_ticks.is_none() {
                 if let Some((true, edges)) =
                     axes_index.and_then(|idx| plot_renderer.overlay_histogram_edges_for_axes(idx))
                 {
@@ -1902,45 +1945,49 @@ impl PlotOverlay {
                     );
                 }
             }
-            if let Some(ticks) = explicit_x_ticks.as_ref() {
-                cat_x = true;
-                for (tick_idx, x_val) in ticks.iter().enumerate() {
-                    if *x_val < x_min || *x_val > x_max {
-                        continue;
-                    }
-                    let x_screen = if x_log {
-                        if *x_val <= 0.0 || x_min <= 0.0 || x_max <= 0.0 {
+            if draw_x_axis {
+                if let Some(ticks) = explicit_x_ticks.as_ref() {
+                    cat_x = true;
+                    for (tick_idx, x_val) in ticks.iter().enumerate() {
+                        if *x_val < x_min || *x_val > x_max {
                             continue;
                         }
-                        plot_rect.min.x
-                            + (((*x_val).log10() - x_min.log10()) / (x_max.log10() - x_min.log10()))
-                                as f32
-                                * plot_rect.width()
-                    } else {
-                        plot_rect.min.x + ((*x_val - x_min) / x_range) as f32 * plot_rect.width()
-                    };
-                    let x_screen = Self::snap_coord(x_screen, ppp);
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(x_screen, border_bottom),
-                            Pos2::new(x_screen, border_bottom + tick_length),
-                        ],
-                        Stroke::new(1.0, axis_color),
-                    );
-                    let label = explicit_x_labels
-                        .as_ref()
-                        .and_then(|labels| labels.get(tick_idx).cloned())
-                        .unwrap_or_else(|| x_tick_formatter.format(*x_val));
-                    ui.painter().text(
-                        Pos2::new(x_screen, border_bottom + label_offset),
-                        Align2::CENTER_CENTER,
-                        truncate_label(&label, 14),
-                        tick_font.clone(),
-                        label_color,
-                    );
+                        let x_screen = if x_log {
+                            if *x_val <= 0.0 || x_min <= 0.0 || x_max <= 0.0 {
+                                continue;
+                            }
+                            plot_rect.min.x
+                                + (((*x_val).log10() - x_min.log10())
+                                    / (x_max.log10() - x_min.log10()))
+                                    as f32
+                                    * plot_rect.width()
+                        } else {
+                            plot_rect.min.x
+                                + ((*x_val - x_min) / x_range) as f32 * plot_rect.width()
+                        };
+                        let x_screen = Self::snap_coord(x_screen, ppp);
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(x_screen, border_bottom),
+                                Pos2::new(x_screen, border_bottom + tick_length),
+                            ],
+                            Stroke::new(1.0, axis_color),
+                        );
+                        let label = explicit_x_labels
+                            .as_ref()
+                            .and_then(|labels| labels.get(tick_idx).cloned())
+                            .unwrap_or_else(|| x_tick_formatter.format(*x_val));
+                        ui.painter().text(
+                            Pos2::new(x_screen, border_bottom + label_offset),
+                            Align2::CENTER_CENTER,
+                            truncate_label(&label, 14),
+                            tick_font.clone(),
+                            label_color,
+                        );
+                    }
                 }
             }
-            if explicit_x_ticks.is_none() {
+            if draw_x_axis && explicit_x_ticks.is_none() {
                 if let Some(labels) = explicit_x_labels
                     .as_ref()
                     .filter(|labels| !labels.is_empty())
@@ -1999,8 +2046,8 @@ impl PlotOverlay {
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
                         Stroke::new(1.0, axis_color),
                     );
@@ -2009,7 +2056,7 @@ impl PlotOverlay {
                         .and_then(|labels| labels.get(tick_idx).cloned())
                         .unwrap_or_else(|| y_tick_formatter.format(*y_val));
                     ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         truncate_label(&label, 14),
                         tick_font.clone(),
@@ -2040,14 +2087,14 @@ impl PlotOverlay {
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         ui.painter().line_segment(
                             [
-                                Pos2::new(border_left - tick_length, y_screen),
-                                Pos2::new(border_left, y_screen),
+                                Pos2::new(y_tick_outer_x, y_screen),
+                                Pos2::new(y_axis_x, y_screen),
                             ],
                             Stroke::new(1.0, axis_color),
                         );
                         let text = truncate_label(label, 14);
                         ui.painter().text(
-                            Pos2::new(border_left - label_offset, y_screen),
+                            Pos2::new(y_label_x, y_screen),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
@@ -2066,7 +2113,7 @@ impl PlotOverlay {
             {
                 if (is_x && cat_x) || (!is_x && cat_y) {
                     // Explicit axes tick labels take precedence over inferred bar labels.
-                } else if is_x {
+                } else if is_x && draw_x_axis {
                     cat_x = true;
                     let stride = Self::label_stride(&labels, plot_rect.width(), tick_font.size);
                     // Draw X categorical labels at integer positions (1..n)
@@ -2123,15 +2170,15 @@ impl PlotOverlay {
                         // Tick
                         ui.painter().line_segment(
                             [
-                                Pos2::new(border_left - tick_length, y_screen),
-                                Pos2::new(border_left, y_screen),
+                                Pos2::new(y_tick_outer_x, y_screen),
+                                Pos2::new(y_axis_x, y_screen),
                             ],
                             Stroke::new(1.0, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
                         ui.painter().text(
-                            Pos2::new(border_left - label_offset, y_screen),
+                            Pos2::new(y_label_x, y_screen),
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
@@ -2142,7 +2189,7 @@ impl PlotOverlay {
             }
 
             // Draw X-axis ticks and labels (categorical handled above)
-            if x_log && !cat_x {
+            if draw_x_axis && x_log && !cat_x {
                 let start_decade = x_min.log10().floor() as i32;
                 let end_decade = x_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
@@ -2169,7 +2216,7 @@ impl PlotOverlay {
                         label_color,
                     );
                 }
-            } else if !cat_x && !custom_hist_x {
+            } else if draw_x_axis && !cat_x && !custom_hist_x {
                 for x_val in plot_utils::generate_major_ticks(x_min, x_max) {
                     let x_screen =
                         plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
@@ -2204,13 +2251,13 @@ impl PlotOverlay {
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
                         Stroke::new(1.0, axis_color),
                     );
                     ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
@@ -2224,13 +2271,13 @@ impl PlotOverlay {
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
-                            Pos2::new(border_left - tick_length, y_screen),
-                            Pos2::new(border_left, y_screen),
+                            Pos2::new(y_tick_outer_x, y_screen),
+                            Pos2::new(y_axis_x, y_screen),
                         ],
                         Stroke::new(1.0, axis_color),
                     );
                     ui.painter().text(
-                        Pos2::new(border_left - label_offset, y_screen),
+                        Pos2::new(y_label_x, y_screen),
                         Align2::CENTER_CENTER,
                         y_tick_formatter.format(y_val),
                         tick_font.clone(),

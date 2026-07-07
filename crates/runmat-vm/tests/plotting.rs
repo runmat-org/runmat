@@ -217,6 +217,57 @@ fn line_dispatches_and_round_trips_properties() {
 }
 
 #[test]
+fn plotyy_dispatches_and_returns_dual_axes_outputs() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        [ax,h1,h2] = plotyy(1:3, [10 20 30], 1:3, [100 400 900], 'semilogx', 'semilogy'); \
+        if numel(ax) ~= 2; \
+            error('plotyy axes output mismatch'); \
+        end; \
+        if ~ishandle(h1) || ~ishandle(h2); \
+            error('plotyy line handles invalid'); \
+        end; \
+        if ~strcmp(get(ax(1), 'YAxisLocation'), 'left'); \
+            error('left y axis location mismatch'); \
+        end; \
+        if ~strcmp(get(ax(2), 'YAxisLocation'), 'right'); \
+            error('right y axis location mismatch'); \
+        end; \
+        if ~strcmp(get(ax(1), 'XScale'), 'log'); \
+            error('left x scale mismatch'); \
+        end; \
+        if ~strcmp(get(ax(2), 'YScale'), 'log'); \
+            error('right y scale mismatch'); \
+        end;";
+    execute_source(input).expect("execute plotyy script");
+}
+
+#[test]
+fn plotyy_preserves_subplot_parent_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        subplot(1, 2, 2); \
+        [ax,h1,h2] = plotyy(1:3, [10 20 30], 1:3, [100 400 900]); \
+        if numel(ax) ~= 2; \
+            error('plotyy subplot axes output mismatch'); \
+        end; \
+        if ~ishandle(h1) || ~ishandle(h2); \
+            error('plotyy subplot line handles invalid'); \
+        end; \
+        if ax(1) == ax(2); \
+            error('plotyy subplot axes handles were not distinct'); \
+        end; \
+        if ~strcmp(get(ax(2), 'YAxisLocation'), 'right'); \
+            error('plotyy subplot right y axis location mismatch'); \
+        end; \
+        if gca() ~= ax(1); \
+            error('plotyy subplot did not restore left axes as current'); \
+        end;";
+    execute_source(input).expect("execute subplot plotyy script");
+}
+
+#[test]
 fn sphere_returns_coordinates_and_statement_form_plots() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

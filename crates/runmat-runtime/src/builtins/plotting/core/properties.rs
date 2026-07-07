@@ -581,6 +581,7 @@ fn get_axes_property(
                 "YScale",
                 Value::String(if meta.y_log { "log" } else { "linear" }.into()),
             );
+            st.insert("YAxisLocation", Value::String(meta.y_axis_location.clone()));
             Ok(Value::Struct(st))
         }
         Some("title") => Ok(Value::Num(super::state::encode_plot_object_handle(
@@ -683,6 +684,7 @@ fn get_axes_property(
         Some("yscale") => Ok(Value::String(
             if meta.y_log { "log" } else { "linear" }.into(),
         )),
+        Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
         Some("type") => Ok(Value::String("axes".into())),
         Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
@@ -1011,6 +1013,7 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "ticklabelformat" => Cow::Borrowed("ticklabelformat"),
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
+        "yaxislocation" => Cow::Borrowed("yaxislocation"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
         "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
         "children" => Cow::Borrowed("children"),
@@ -1512,6 +1515,25 @@ fn apply_axes_property(
                 axes_index,
                 meta.x_log,
                 mode.is_log(),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "yaxislocation" => {
+            let location = value_as_string(value)
+                .ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: YAxisLocation must be text"))
+                })?
+                .trim()
+                .to_ascii_lowercase();
+            if !matches!(location.as_str(), "left" | "right") {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: YAxisLocation must be 'left' or 'right'"),
+                ));
+            }
+            crate::builtins::plotting::state::set_y_axis_location_for_axes(
+                handle, axes_index, location,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
