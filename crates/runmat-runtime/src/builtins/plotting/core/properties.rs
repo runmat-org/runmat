@@ -5,14 +5,17 @@ use std::borrow::Cow;
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
-    axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure, decode_axes_handle,
-    decode_plot_object_handle, figure_handle_exists, figure_has_sg_title, legend_entries_snapshot,
-    present_figure_update, select_axes_for_figure, set_axes_style_for_axes,
+    axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure,
+    current_figure_handle_if_exists, decode_axes_handle, decode_plot_object_handle,
+    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
+    root_default_properties, root_default_property, root_figure_handles, root_show_hidden_handles,
+    root_units, select_axes_for_figure, select_current_figure_if_exists, set_axes_style_for_axes,
     set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes, set_axis_ticks_for_axes,
     set_figure_background_color, set_figure_name, set_figure_number_title, set_figure_position,
-    set_figure_visible, set_legend_for_axes, set_sg_title_properties_for_figure,
+    set_figure_visible, set_legend_for_axes, set_root_default_property,
+    set_root_show_hidden_handles, set_root_units, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
-    PlotObjectKind,
+    PlotObjectKind, RootPropertyValue,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -29,6 +32,7 @@ const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
+    Root,
     Figure(FigureHandle),
     Axes(FigureHandle, usize),
     Ruler(FigureHandle, usize, PlotObjectKind),
@@ -39,6 +43,15 @@ pub enum PlotHandle {
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
     let scalar = handle_scalar(value, builtin)?;
+    if scalar == 0.0 {
+        return Ok(PlotHandle::Root);
+    }
+    if !scalar.is_finite() || scalar < 0.0 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported or invalid plotting handle"),
+        ));
+    }
     if let Ok(state) = super::state::plot_child_handle_snapshot(scalar) {
         return Ok(PlotHandle::PlotChild(Box::new(state)));
     }
@@ -78,6 +91,7 @@ pub fn get_properties(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match handle {
+        PlotHandle::Root => get_root_property(property, builtin),
         PlotHandle::Axes(handle, axes_index) => {
             get_axes_property(handle, axes_index, property, builtin)
         }
@@ -107,6 +121,14 @@ pub fn set_properties(
         ));
     }
     match handle {
+        PlotHandle::Root => {
+            for pair in args.chunks_exact(2) {
+                let raw_key = property_name_text(&pair[0], builtin)?;
+                let key = canonical_property_name(raw_key.trim()).into_owned();
+                apply_root_property(&key, raw_key.trim(), &pair[1], builtin)?;
+            }
+            Ok(())
+        }
         PlotHandle::Figure(handle) => {
             let mut needs_present = false;
             for pair in args.chunks_exact(2) {
@@ -378,6 +400,189 @@ fn get_figure_property(
             builtin,
             format!("{builtin}: unsupported figure property `{other}`"),
         )),
+    }
+}
+
+fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinResult<Value> {
+    match property.map(canonical_property_name).as_deref() {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Handle", Value::Num(0.0));
+            st.insert("Type", Value::String("root".into()));
+            st.insert("CurrentFigure", current_root_figure_value());
+            st.insert("Children", root_children_value());
+            st.insert("Parent", empty_handle_value());
+            st.insert("ScreenSize", root_screen_size_value());
+            st.insert("MonitorPositions", root_screen_size_value());
+            st.insert("Units", Value::String(root_units()));
+            st.insert(
+                "ShowHiddenHandles",
+                Value::String(on_off(root_show_hidden_handles()).into()),
+            );
+            for (name, value) in root_default_properties() {
+                st.insert(name, root_property_value_to_value(value));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("handle") => Ok(Value::Num(0.0)),
+        Some("type") => Ok(Value::String("root".into())),
+        Some("currentfigure") => Ok(current_root_figure_value()),
+        Some("children") => Ok(root_children_value()),
+        Some("parent") => Ok(empty_handle_value()),
+        Some("screensize") => Ok(root_screen_size_value()),
+        Some("monitorpositions") => Ok(root_screen_size_value()),
+        Some("units") => Ok(Value::String(root_units())),
+        Some("showhiddenhandles") => Ok(Value::String(on_off(root_show_hidden_handles()).into())),
+        Some(default) if is_root_default_property(default) => Ok(root_default_property(default)
+            .map(root_property_value_to_value)
+            .unwrap_or_else(|| Value::String(String::new()))),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported root property `{other}`"),
+        )),
+    }
+}
+
+fn apply_root_property(
+    key: &str,
+    display_key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "currentfigure" => {
+            let resolved = resolve_plot_handle(value, builtin)?;
+            let PlotHandle::Figure(handle) = resolved else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentFigure must be a figure handle"),
+                ));
+            };
+            select_current_figure_if_exists(handle)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "units" => {
+            let units = value_as_text_string(value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
+                .trim()
+                .to_ascii_lowercase();
+            if !matches!(
+                units.as_str(),
+                "pixels" | "normalized" | "inches" | "centimeters" | "points" | "characters"
+            ) {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported root Units `{units}`"),
+                ));
+            }
+            set_root_units(units);
+            Ok(())
+        }
+        "showhiddenhandles" => {
+            let enabled = value_as_bool(value).ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: ShowHiddenHandles must be 'on' or 'off'"),
+                )
+            })?;
+            set_root_show_hidden_handles(enabled);
+            Ok(())
+        }
+        "handle" | "type" | "children" | "parent" | "screensize" | "monitorpositions" => {
+            Err(plotting_error(
+                builtin,
+                format!("{builtin}: root property `{key}` is read-only"),
+            ))
+        }
+        default if is_root_default_property(default) => {
+            let stored = root_property_value_from_value(value, builtin)?;
+            set_root_default_property(default.to_string(), display_key.to_string(), stored);
+            Ok(())
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported root property `{other}`"),
+        )),
+    }
+}
+
+fn current_root_figure_value() -> Value {
+    current_figure_handle_if_exists()
+        .map(|handle| Value::Num(handle.as_u32() as f64))
+        .unwrap_or_else(empty_handle_value)
+}
+
+fn root_children_value() -> Value {
+    handles_value(
+        root_figure_handles()
+            .into_iter()
+            .map(|handle| handle.as_u32() as f64)
+            .collect(),
+    )
+}
+
+fn root_screen_size_value() -> Value {
+    tensor_from_vec(vec![1.0, 1.0, 1920.0, 1080.0])
+}
+
+fn empty_handle_value() -> Value {
+    Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor shape is valid"))
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+fn is_root_default_property(name: &str) -> bool {
+    name.starts_with("default") && name.len() > "default".len()
+}
+
+fn root_property_value_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<RootPropertyValue> {
+    match value {
+        Value::Bool(value) => Ok(RootPropertyValue::Bool(*value)),
+        Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
+        Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
+        Value::String(value) => Ok(RootPropertyValue::String(value.clone())),
+        Value::CharArray(value) => Ok(RootPropertyValue::String(value.data.iter().collect())),
+        Value::Tensor(value) => Ok(RootPropertyValue::Tensor(value.clone())),
+        Value::StringArray(value) => Ok(RootPropertyValue::StringArray {
+            rows: value.rows,
+            cols: value.cols,
+            shape: value.shape.clone(),
+            data: value.data.clone(),
+        }),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported root default property value"),
+        )),
+    }
+}
+
+fn root_property_value_to_value(value: RootPropertyValue) -> Value {
+    match value {
+        RootPropertyValue::Bool(value) => Value::Bool(value),
+        RootPropertyValue::Num(value) => Value::Num(value),
+        RootPropertyValue::String(value) => Value::String(value),
+        RootPropertyValue::Tensor(value) => Value::Tensor(value),
+        RootPropertyValue::StringArray {
+            rows,
+            cols,
+            shape,
+            data,
+        } => Value::StringArray(StringArray {
+            rows,
+            cols,
+            shape,
+            data,
+        }),
     }
 }
 
@@ -956,8 +1161,12 @@ fn get_legend_property(
 }
 
 fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
+    property_name_text(value, builtin).map(|s| canonical_property_name(s.trim()).into_owned())
+}
+
+fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     value_as_string(value)
-        .map(|s| canonical_property_name(s.trim()).into_owned())
+        .map(|s| s.trim().to_string())
         .ok_or_else(|| {
             plotting_error(
                 builtin,
@@ -1015,10 +1224,16 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
+        "currentfigure" => Cow::Borrowed("currentfigure"),
         "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
         "children" => Cow::Borrowed("children"),
+        "handle" => Cow::Borrowed("handle"),
         "parent" => Cow::Borrowed("parent"),
         "type" => Cow::Borrowed("type"),
+        "screensize" => Cow::Borrowed("screensize"),
+        "monitorpositions" => Cow::Borrowed("monitorpositions"),
+        "units" => Cow::Borrowed("units"),
+        "showhiddenhandles" => Cow::Borrowed("showhiddenhandles"),
         "number" => Cow::Borrowed("number"),
         "name" => Cow::Borrowed("name"),
         "numbertitle" => Cow::Borrowed("numbertitle"),

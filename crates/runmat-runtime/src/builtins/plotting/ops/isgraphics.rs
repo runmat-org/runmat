@@ -64,7 +64,7 @@ pub fn isgraphics_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
         Value::Num(v) => Some(*v),
         _ => None,
     } {
-        if !v.is_finite() || v <= 0.0 {
+        if !v.is_finite() || v < 0.0 {
             return Ok(false);
         }
     }

@@ -37296,6 +37296,27 @@
       ]
     },
     {
+      "name": "groot",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "root = groot()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "root",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Root graphics object handle."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "groupcounts",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

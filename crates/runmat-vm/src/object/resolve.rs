@@ -556,8 +556,8 @@ fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
 
 fn is_possible_graphics_handle_value(value: &Value) -> bool {
     match value {
-        Value::Num(v) => v.is_finite() && *v > 0.0,
-        Value::Int(i) => i.to_f64() > 0.0,
+        Value::Num(v) => v.is_finite() && *v >= 0.0,
+        Value::Int(i) => i.to_f64() >= 0.0,
         _ => false,
     }
 }

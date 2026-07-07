@@ -1,0 +1,95 @@
+{
+  "title": "groot",
+  "category": "plotting",
+  "keywords": [
+    "groot",
+    "root graphics object",
+    "graphics root",
+    "plotting"
+  ],
+  "summary": "Return the root graphics object handle.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`groot` reads and updates host-side graphics state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::groot::tests",
+    "vm": "runmat-vm plotting::groot_supports_root_handle_properties_and_dot_access"
+  },
+  "description": "`groot` returns the MATLAB-compatible root graphics object handle, numeric handle `0`. Root properties expose global plotting state such as the current figure, open figure children, screen metadata, units, and show-hidden-handles mode.",
+  "behaviors": [
+    "`groot()` returns scalar numeric handle `0`.",
+    "`get(groot, 'Type')` returns `'root'`.",
+    "`get(groot, 'CurrentFigure')` returns the current figure handle, or an empty handle array when no figure exists.",
+    "`get(groot, 'Children')` returns currently open figure handles in stable ascending order.",
+    "`set(groot, 'CurrentFigure', fig)` selects an existing figure as current.",
+    "`set(groot, 'default...', value)` stores arbitrary root default properties for compatibility with scripts that configure graphics defaults."
+  ],
+  "examples": [
+    {
+      "description": "Read root graphics properties",
+      "input": "r = groot();\n{get(r, 'Type'), isempty(get(r, 'CurrentFigure'))}",
+      "output": "{'root', true}"
+    },
+    {
+      "description": "Select a current figure through the root object",
+      "input": "r = groot();\nf1 = figure(1);\nf2 = figure(2);\nset(r, 'CurrentFigure', f1);\ngcf()",
+      "output": "ans = 1"
+    },
+    {
+      "description": "Round-trip a root default graphics property",
+      "input": "set(groot, 'defaultAxesTickLabelInterpreter', 'latex');\nget(groot, 'defaultAxesTickLabelInterpreter')",
+      "output": "ans = 'latex'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `groot` the same value as MATLAB's root object?",
+      "answer": "Yes. RunMat uses numeric handle `0` for the root graphics object."
+    },
+    {
+      "question": "Does setting root defaults restyle all future graphics objects?",
+      "answer": "RunMat stores and returns common scalar, text, string-array, and numeric-array `default...` root properties for compatibility. Full automatic application of every MATLAB root default is handled incrementally as each graphics property area is implemented."
+    },
+    {
+      "question": "Does `groot` gather GPU arrays?",
+      "answer": "No. It only touches graphics metadata and global plotting state."
+    }
+  ],
+  "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/groot.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/groot.rs"
+  },
+  "gpu_residency": "`groot` returns a host-side numeric graphics handle and does not interact with GPU residency.",
+  "gpu_behavior": [
+    "`groot` performs no provider dispatch; it reads or updates root plotting metadata in the runtime registry."
+  ]
+}

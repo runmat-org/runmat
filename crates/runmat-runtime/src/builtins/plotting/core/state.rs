@@ -362,8 +362,31 @@ struct PlotRegistry {
     current: FigureHandle,
     next_handle: FigureHandle,
     figures: HashMap<FigureHandle, FigureState>,
+    root_defaults: HashMap<String, RootPropertyEntry>,
+    root_units: String,
+    root_show_hidden_handles: bool,
     next_plot_child_handle: u64,
     plot_children: HashMap<u64, PlotChildHandleState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RootPropertyEntry {
+    pub display_name: String,
+    pub value: RootPropertyValue,
+}
+
+#[derive(Clone, Debug)]
+pub enum RootPropertyValue {
+    Bool(bool),
+    Num(f64),
+    String(String),
+    Tensor(Tensor),
+    StringArray {
+        rows: usize,
+        cols: usize,
+        shape: Vec<usize>,
+        data: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -488,6 +511,9 @@ impl Default for PlotRegistry {
             current: FigureHandle::default(),
             next_handle: FigureHandle::default().next(),
             figures: HashMap::new(),
+            root_defaults: HashMap::new(),
+            root_units: "pixels".to_string(),
+            root_show_hidden_handles: false,
             next_plot_child_handle: 1u64 << 40,
             plot_children: HashMap::new(),
         }
@@ -3107,6 +3133,24 @@ pub fn current_figure_handle() -> FigureHandle {
     registry().current
 }
 
+pub fn current_figure_handle_if_exists() -> Option<FigureHandle> {
+    let reg = registry();
+    if reg.figures.contains_key(&reg.current) {
+        Some(reg.current)
+    } else {
+        None
+    }
+}
+
+pub fn select_current_figure_if_exists(handle: FigureHandle) -> Result<(), FigureError> {
+    let mut reg = registry();
+    if !reg.figures.contains_key(&handle) {
+        return Err(FigureError::InvalidHandle(handle.as_u32()));
+    }
+    reg.current = handle;
+    Ok(())
+}
+
 pub fn current_axes_state() -> FigureAxesState {
     let mut reg = registry();
     let handle = reg.current;
@@ -3266,6 +3310,59 @@ pub fn reset_hold_state_for_run() {
 pub fn figure_handles() -> Vec<FigureHandle> {
     let reg = registry();
     reg.figures.keys().copied().collect()
+}
+
+pub fn root_figure_handles() -> Vec<FigureHandle> {
+    let mut handles = figure_handles();
+    handles.sort_by_key(|handle| handle.as_u32());
+    handles
+}
+
+pub fn root_default_properties() -> Vec<(String, RootPropertyValue)> {
+    let reg = registry();
+    let mut properties: Vec<_> = reg
+        .root_defaults
+        .iter()
+        .map(|(key, entry)| (key.clone(), entry.display_name.clone(), entry.value.clone()))
+        .collect();
+    properties.sort_by(|(left, _, _), (right, _, _)| left.cmp(right));
+    properties
+        .into_iter()
+        .map(|(_, display_name, value)| (display_name, value))
+        .collect()
+}
+
+pub fn root_default_property(name: &str) -> Option<RootPropertyValue> {
+    registry()
+        .root_defaults
+        .get(name)
+        .map(|entry| entry.value.clone())
+}
+
+pub fn set_root_default_property(name: String, display_name: String, value: RootPropertyValue) {
+    registry().root_defaults.insert(
+        name,
+        RootPropertyEntry {
+            display_name,
+            value,
+        },
+    );
+}
+
+pub fn root_units() -> String {
+    registry().root_units.clone()
+}
+
+pub fn set_root_units(units: String) {
+    registry().root_units = units;
+}
+
+pub fn root_show_hidden_handles() -> bool {
+    registry().root_show_hidden_handles
+}
+
+pub fn set_root_show_hidden_handles(enabled: bool) {
+    registry().root_show_hidden_handles = enabled;
 }
 
 pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {

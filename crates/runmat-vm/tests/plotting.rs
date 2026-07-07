@@ -34,6 +34,47 @@ fn figure_dot_property_access_routes_to_graphics_get() {
 }
 
 #[test]
+fn groot_supports_root_handle_properties_and_dot_access() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        r = groot(); \
+        if r ~= 0; error('root handle mismatch'); end; \
+        if ~ishandle(r); error('root should be a handle'); end; \
+        if ~isgraphics(r); error('root should be graphics'); end; \
+        if ~strcmp(get(r, 'Type'), 'root'); error('root type mismatch'); end; \
+        if ~strcmp(r.Type, 'root'); error('root dot type mismatch'); end; \
+        if ~isempty(get(r, 'CurrentFigure')); error('unexpected current figure'); end; \
+        if ~isempty(get(r, 'Parent')); error('unexpected root parent'); end; \
+        f = figure(7); \
+        if get(r, 'CurrentFigure') ~= f; error('current figure mismatch'); end; \
+        children = get(r, 'Children'); \
+        if numel(children) ~= 1 || children(1) ~= f; error('children mismatch'); end; \
+        out = r.Type;";
+    execute_source(input).expect("execute groot property script");
+}
+
+#[test]
+fn groot_set_updates_current_figure_and_round_trips_defaults() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        r = groot(); \
+        f1 = figure(11); \
+        f2 = figure(12); \
+        set(r, 'CurrentFigure', f1); \
+        if gcf() ~= f1; error('CurrentFigure did not update'); end; \
+        set(r, 'ShowHiddenHandles', 'on'); \
+        if ~strcmp(get(r, 'ShowHiddenHandles'), 'on'); error('ShowHiddenHandles mismatch'); end; \
+        set(r, 'Units', 'normalized'); \
+        if ~strcmp(r.Units, 'normalized'); error('Units mismatch'); end; \
+        set(r, 'defaultAxesTickLabelInterpreter', 'latex'); \
+        if ~strcmp(get(r, 'defaultAxesTickLabelInterpreter'), 'latex'); error('default mismatch'); end; \
+        props = get(r); \
+        if ~strcmp(props.defaultAxesTickLabelInterpreter, 'latex'); error('default field spelling mismatch'); end; \
+        out = get(r, 'defaultAxesTickLabelInterpreter');";
+    execute_source(input).expect("execute groot set script");
+}
+
+#[test]
 fn figure_position_property_pair_round_trips_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

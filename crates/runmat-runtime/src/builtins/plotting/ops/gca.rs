@@ -141,7 +141,8 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
     if let Ok(handle) = resolve_plot_handle(value, "gca") {
         return match handle {
             PlotHandle::Figure(handle) => Ok(Some(handle)),
-            PlotHandle::Axes(_, _)
+            PlotHandle::Root
+            | PlotHandle::Axes(_, _)
             | PlotHandle::Ruler(_, _, _)
             | PlotHandle::Text(_, _, _)
             | PlotHandle::Legend(_, _)
