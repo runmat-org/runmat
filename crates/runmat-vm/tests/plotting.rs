@@ -94,6 +94,37 @@ fn gobjects_preallocates_assignable_graphics_handle_arrays() {
 }
 
 #[test]
+fn ancestor_dispatches_graphics_parent_queries() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax = gca; \
+        missingLegend = get(ax, 'Legend'); \
+        if ~isempty(ancestor(missingLegend, 'legend')); error('missing legend should not self-match'); end; \
+        h = gobjects(1, 1); \
+        h(1) = plot(1:3, [1 4 9]); \
+        ax = gca; \
+        fig = gcf; \
+        if ancestor(h(1), 'line') ~= h(1); error('line self ancestor mismatch'); end; \
+        if ancestor(h(1), 'axes') ~= ax; error('axes ancestor mismatch'); end; \
+        if ancestor(h(1), {'axes','figure'}) ~= ax; error('nearest ancestor mismatch'); end; \
+        if ancestor(h(1), {'axes','figure'}, 'toplevel') ~= fig; error('top ancestor mismatch'); end; \
+        if ~isempty(ancestor(h(1), 'legend')); error('unexpected legend ancestor'); end; \
+        if ~isempty(ancestor(NaN, 'axes')); error('invalid handle should return empty'); end; \
+        hh = gobjects(1, 2); \
+        hh(1) = h(1); \
+        aa = ancestor(hh, 'axes'); \
+        if numel(aa) ~= 1 || aa(1) ~= ax; error('array ancestor should omit invalid placeholders'); end; \
+        set(h(1), 'DisplayName', 'signal'); \
+        lgd = legend(); \
+        if ancestor(lgd, 'legend') ~= lgd; error('created legend should self-match'); end; \
+        xaxis = get(ax, 'XAxis'); \
+        if ancestor(xaxis, 'numericruler') ~= xaxis; error('ruler self ancestor mismatch'); end; \
+        if ancestor(xaxis, 'axes') ~= ax; error('ruler axes ancestor mismatch'); end;";
+    execute_source(input).expect("execute ancestor graphics parent script");
+}
+
+#[test]
 fn linkaxes_propagates_limits_and_supports_off_mode() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

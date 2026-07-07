@@ -536,6 +536,57 @@ pub enum PlotChildHandleState {
     Text(TextAnnotationHandleState),
 }
 
+impl PlotChildHandleState {
+    pub fn figure_axes(&self) -> (FigureHandle, usize) {
+        match self {
+            Self::Histogram(state) => (state.figure, state.axes_index),
+            Self::Line(state)
+            | Self::Scatter(state)
+            | Self::Bar(state)
+            | Self::Stairs(state)
+            | Self::Surface(state)
+            | Self::Patch(state)
+            | Self::Line3(state)
+            | Self::Scatter3(state)
+            | Self::Contour(state)
+            | Self::ContourFill(state)
+            | Self::ReferenceLine(state)
+            | Self::Pie(state) => (state.figure, state.axes_index),
+            Self::Stem(state) => (state.figure, state.axes_index),
+            Self::ErrorBar(state) => (state.figure, state.axes_index),
+            Self::Quiver(state) => (state.figure, state.axes_index),
+            Self::Image(state) => (state.figure, state.axes_index),
+            Self::Heatmap(state) => (state.figure, state.axes_index),
+            Self::Binscatter(state) => (state.figure, state.axes_index),
+            Self::Area(state) => (state.figure, state.axes_index),
+            Self::Text(state) => (state.figure, state.axes_index),
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::Histogram(_) => "histogram",
+            Self::Line(_) | Self::Line3(_) => "line",
+            Self::Scatter(_) | Self::Scatter3(_) => "scatter",
+            Self::Bar(_) => "bar",
+            Self::Stem(_) => "stem",
+            Self::ErrorBar(_) => "errorbar",
+            Self::Stairs(_) => "stairs",
+            Self::Quiver(_) => "quiver",
+            Self::Image(_) => "image",
+            Self::Heatmap(_) => "heatmap",
+            Self::Binscatter(_) => "binscatter",
+            Self::Area(_) => "area",
+            Self::Surface(_) => "surface",
+            Self::Patch(_) => "patch",
+            Self::Contour(_) | Self::ContourFill(_) => "contour",
+            Self::ReferenceLine(_) => "constantline",
+            Self::Pie(_) => "pie",
+            Self::Text(_) => "text",
+        }
+    }
+}
+
 impl Default for PlotRegistry {
     fn default() -> Self {
         Self {

@@ -2703,6 +2703,84 @@
       ]
     },
     {
+      "name": "ancestor",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = ancestor(h, type)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handle or array of graphics handles to inspect."
+            },
+            {
+              "name": "type",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object type name or cell/string array of type names."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching graphics ancestor handle, or an empty handle array when none exists."
+            }
+          ]
+        },
+        {
+          "label": "p = ancestor(h, type, 'toplevel')",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Graphics handle or array of graphics handles to inspect."
+            },
+            {
+              "name": "type",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object type name or cell/string array of type names."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Use 'toplevel' to return the highest matching ancestor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Matching graphics ancestor handle, or an empty handle array when none exists."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ANCESTOR.INVALID_ARGUMENT",
+          "identifier": "RunMat:ancestor:InvalidArgument",
+          "when": "Arguments are missing, the type selector is invalid, or the option is not 'toplevel'.",
+          "message": "ancestor: invalid argument"
+        }
+      ]
+    },
+    {
       "name": "and",
       "output_mode": "Fixed",
       "completion_policy": "Public",
