@@ -176,6 +176,8 @@ pub(crate) mod yticks;
 pub(crate) mod zlabel;
 #[path = "ops/zlim.rs"]
 pub(crate) mod zlim;
+#[path = "ops/zoom.rs"]
+pub(crate) mod zoom;
 
 pub use perf::{
     set_scatter_target_points, set_scene_export_budget_bytes, set_surface_vertex_budget,

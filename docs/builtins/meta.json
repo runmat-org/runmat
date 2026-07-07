@@ -105333,6 +105333,136 @@
       ]
     },
     {
+      "name": "zoom",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "z = zoom()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Zoom mode object for the current or specified figure."
+            }
+          ]
+        },
+        {
+          "label": "zoom()",
+          "inputs": [],
+          "outputs": []
+        },
+        {
+          "label": "status = zoom(option)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Zoom option: on, off, toggle, xon, yon, reset, or out."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the zoom command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "status = zoom(factor)",
+          "inputs": [
+            {
+              "name": "factor",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive numeric zoom factor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the zoom command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "status = zoom(target, option)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure or axes handle."
+            },
+            {
+              "name": "option",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Zoom option or factor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Returns \"ok\" when the zoom command succeeds."
+            }
+          ]
+        },
+        {
+          "label": "z = zoom(fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Zoom mode object for the current or specified figure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ZOOM.INVALID_ARGUMENT",
+          "identifier": "RunMat:zoom:InvalidArgument",
+          "when": "Argument count, target handle, factor, option, or zoom property is invalid.",
+          "message": "zoom: invalid argument"
+        },
+        {
+          "code": "RM.ZOOM.INTERNAL",
+          "identifier": "RunMat:zoom:Internal",
+          "when": "Internal zoom state or handle-object update fails.",
+          "message": "zoom: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "zplane",
       "output_mode": "Fixed",
       "completion_policy": "Public",

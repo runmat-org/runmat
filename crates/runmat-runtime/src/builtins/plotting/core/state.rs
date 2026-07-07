@@ -53,6 +53,96 @@ impl Default for FigureHandle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomMotion {
+    Both,
+    Horizontal,
+    Vertical,
+}
+
+impl ZoomMotion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
+    }
+}
+
+impl Default for ZoomMotion {
+    fn default() -> Self {
+        Self::Both
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomDirection {
+    In,
+    Out,
+}
+
+impl ZoomDirection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::In => "in",
+            Self::Out => "out",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomRightClickAction {
+    PostContextMenu,
+    InverseZoom,
+}
+
+impl ZoomRightClickAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PostContextMenu => "PostContextMenu",
+            Self::InverseZoom => "InverseZoom",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ZoomModeState {
+    pub enabled: bool,
+    pub motion: ZoomMotion,
+    pub direction: ZoomDirection,
+    pub right_click_action: ZoomRightClickAction,
+    pub use_legacy_exploration_modes: bool,
+}
+
+impl Default for ZoomModeState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            motion: ZoomMotion::Both,
+            direction: ZoomDirection::In,
+            right_click_action: ZoomRightClickAction::PostContextMenu,
+            use_legacy_exploration_modes: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomModeCommand {
+    On,
+    Off,
+    Toggle,
+    XOn,
+    YOn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoomStateSnapshot {
+    pub figure: FigureHandle,
+    pub axes_index: Option<usize>,
+    pub mode: ZoomModeState,
+}
+
 const DEFAULT_LINE_STYLE_ORDER: [LineStyle; 1] = [LineStyle::Solid];
 
 #[derive(Clone)]
@@ -139,6 +229,10 @@ struct FigureState {
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
     figure_color_order: Option<Vec<Vec4>>,
+    zoom_mode: ZoomModeState,
+    last_enabled_zoom_motion: ZoomMotion,
+    zoom_axes_modes: HashMap<usize, ZoomModeState>,
+    zoom_baselines: HashMap<usize, AxisLimitSnapshot>,
     revision: u64,
 }
 
@@ -153,6 +247,10 @@ impl FigureState {
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
             figure_color_order: None,
+            zoom_mode: ZoomModeState::default(),
+            last_enabled_zoom_motion: ZoomMotion::Both,
+            zoom_axes_modes: HashMap::new(),
+            zoom_baselines: HashMap::new(),
             revision: 0,
         }
     }
@@ -1379,6 +1477,375 @@ fn display_bounds_for_state_axes(
     }
 
     Some((x_min, x_max, y_min, y_max))
+}
+
+fn axes_count(state: &FigureState) -> usize {
+    state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1)
+}
+
+fn validate_axes_index(state: &FigureState, axes_index: usize) -> Result<(), FigureError> {
+    let total_axes = axes_count(state);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    Ok(())
+}
+
+fn zoom_mode_for_target(state: &FigureState, axes_index: Option<usize>) -> ZoomModeState {
+    axes_index
+        .and_then(|index| state.zoom_axes_modes.get(&index).copied())
+        .unwrap_or(state.zoom_mode)
+}
+
+fn apply_zoom_mode_command(
+    mode: &mut ZoomModeState,
+    last_enabled_motion: &mut ZoomMotion,
+    command: ZoomModeCommand,
+) {
+    match command {
+        ZoomModeCommand::On => {
+            mode.enabled = true;
+            mode.motion = ZoomMotion::Both;
+            *last_enabled_motion = ZoomMotion::Both;
+        }
+        ZoomModeCommand::Off => {
+            mode.enabled = false;
+        }
+        ZoomModeCommand::Toggle => {
+            mode.enabled = !mode.enabled;
+            if mode.enabled {
+                mode.motion = *last_enabled_motion;
+            }
+        }
+        ZoomModeCommand::XOn => {
+            mode.enabled = true;
+            mode.motion = ZoomMotion::Horizontal;
+            *last_enabled_motion = ZoomMotion::Horizontal;
+        }
+        ZoomModeCommand::YOn => {
+            mode.enabled = true;
+            mode.motion = ZoomMotion::Vertical;
+            *last_enabled_motion = ZoomMotion::Vertical;
+        }
+    }
+}
+
+fn axis_limit_basis_for_zoom(state: &mut FigureState, axes_index: usize) -> AxisLimitSnapshot {
+    let meta = state
+        .figure
+        .axes_metadata(axes_index)
+        .cloned()
+        .unwrap_or_default();
+    let bounds = display_bounds_for_state_axes(state, axes_index);
+    let x = meta
+        .x_limits
+        .or_else(|| bounds.map(|(x_min, x_max, _, _)| (x_min, x_max)))
+        .or(Some((0.0, 1.0)));
+    let y = meta
+        .y_limits
+        .or_else(|| bounds.map(|(_, _, y_min, y_max)| (y_min, y_max)))
+        .or(Some((0.0, 1.0)));
+    (x, y)
+}
+
+fn zoom_interval(limits: (f64, f64), factor: f64) -> (f64, f64) {
+    let (lo, hi) = limits;
+    let center = (lo + hi) * 0.5;
+    let span = (hi - lo).abs().max(f64::EPSILON) / factor;
+    (center - span * 0.5, center + span * 0.5)
+}
+
+fn apply_zoom_factor_to_state(state: &mut FigureState, axes_index: usize, factor: f64) {
+    let mode = zoom_mode_for_target(state, Some(axes_index));
+    let meta = state
+        .figure
+        .axes_metadata(axes_index)
+        .cloned()
+        .unwrap_or_default();
+    let (basis_x, basis_y) = axis_limit_basis_for_zoom(state, axes_index);
+    let x_limits = match (mode.motion, basis_x) {
+        (ZoomMotion::Vertical, _) => meta.x_limits,
+        (_, Some(limits)) => Some(zoom_interval(limits, factor)),
+        (_, None) => meta.x_limits,
+    };
+    let y_limits = match (mode.motion, basis_y) {
+        (ZoomMotion::Horizontal, _) => meta.y_limits,
+        (_, Some(limits)) => Some(zoom_interval(limits, factor)),
+        (_, None) => meta.y_limits,
+    };
+    state.figure.set_axes_limits(axes_index, x_limits, y_limits);
+}
+
+fn restore_zoom_baseline_for_state(state: &mut FigureState, axes_index: usize) {
+    let (x_limits, y_limits) = state
+        .zoom_baselines
+        .get(&axes_index)
+        .copied()
+        .unwrap_or((None, None));
+    state.figure.set_axes_limits(axes_index, x_limits, y_limits);
+}
+
+pub fn zoom_state_snapshot(
+    handle: FigureHandle,
+    axes_index: Option<usize>,
+) -> Result<ZoomStateSnapshot, FigureError> {
+    let reg = registry();
+    let state = reg
+        .figures
+        .get(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    if let Some(index) = axes_index {
+        validate_axes_index(state, index)?;
+    }
+    Ok(ZoomStateSnapshot {
+        figure: handle,
+        axes_index,
+        mode: zoom_mode_for_target(state, axes_index),
+    })
+}
+
+pub fn set_zoom_mode_for_figure(
+    handle: FigureHandle,
+    command: ZoomModeCommand,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        apply_zoom_mode_command(
+            &mut state.zoom_mode,
+            &mut state.last_enabled_zoom_motion,
+            command,
+        );
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_mode_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    command: ZoomModeCommand,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        let mut mode = zoom_mode_for_target(state, Some(axes_index));
+        apply_zoom_mode_command(&mut mode, &mut state.last_enabled_zoom_motion, command);
+        state.zoom_axes_modes.insert(axes_index, mode);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_motion_for_figure(
+    handle: FigureHandle,
+    motion: ZoomMotion,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        state.zoom_mode.motion = motion;
+        if state.zoom_mode.enabled {
+            state.last_enabled_zoom_motion = motion;
+        }
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        state.zoom_mode.enabled = enabled;
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_direction_for_figure(
+    handle: FigureHandle,
+    direction: ZoomDirection,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        state.zoom_mode.direction = direction;
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_right_click_action_for_figure(
+    handle: FigureHandle,
+    action: ZoomRightClickAction,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        state.zoom_mode.right_click_action = action;
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_zoom_legacy_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        state.zoom_mode.use_legacy_exploration_modes = enabled;
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn reset_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        for axes_index in 0..axes_count(state) {
+            let snapshot = axis_limit_basis_for_zoom(state, axes_index);
+            state.zoom_baselines.insert(axes_index, snapshot);
+        }
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn reset_zoom_baseline_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        let snapshot = axis_limit_basis_for_zoom(state, axes_index);
+        state.zoom_baselines.insert(axes_index, snapshot);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn restore_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        for axes_index in 0..axes_count(state) {
+            restore_zoom_baseline_for_state(state, axes_index);
+        }
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn restore_zoom_baseline_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        restore_zoom_baseline_for_state(state, axes_index);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn apply_zoom_factor_for_figure(handle: FigureHandle, factor: f64) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        apply_zoom_factor_to_state(state, state.active_axes, factor);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn apply_zoom_factor_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    factor: f64,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        apply_zoom_factor_to_state(state, axes_index, factor);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn z_limits_snapshot() -> Option<(f64, f64)> {

@@ -120,6 +120,30 @@ fn axis_image_command_form_enables_equal_aspect() {
 }
 
 #[test]
+fn zoom_object_dispatches_and_preserves_mode_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        z = zoom; \
+        set(z, 'Motion', 'horizontal', 'Enable', 'on', 'ContextMenu', 123); \
+        if ~strcmp(get(z, 'Enable'), 'on'); \
+            error('zoom Enable mismatch'); \
+        end; \
+        if ~strcmp(get(z, 'Motion'), 'horizontal'); \
+            error('zoom Motion mismatch'); \
+        end; \
+        if get(z, 'ContextMenu') ~= 123; \
+            error('zoom ContextMenu mismatch'); \
+        end; \
+        out = class(z);";
+    let vars = execute_source(input).expect("execute zoom object script");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::String(class_name)
+            if class_name == "matlab.graphics.interaction.internal.zoom"
+    )));
+}
+
+#[test]
 fn polarplot_dispatches_and_sets_equal_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

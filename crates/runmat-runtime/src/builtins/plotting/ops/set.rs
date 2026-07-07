@@ -100,6 +100,9 @@ pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
             "expected a plotting handle followed by property/value pairs",
         ));
     }
+    if let Some(()) = super::zoom::set_zoom_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
+        return Ok("ok".to_string());
+    }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
     set_properties(handle, &args[1..], BUILTIN_NAME).map_err(map_set_error)?;
     Ok("ok".to_string())

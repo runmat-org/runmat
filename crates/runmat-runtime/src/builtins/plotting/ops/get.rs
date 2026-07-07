@@ -115,10 +115,15 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "expected a plotting handle",
         ));
     }
-    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     let property = args
         .get(1)
         .and_then(|v| crate::builtins::plotting::style::value_as_string(v));
+    if let Some(value) =
+        super::zoom::get_zoom_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+    {
+        return Ok(value);
+    }
+    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
 }
 
