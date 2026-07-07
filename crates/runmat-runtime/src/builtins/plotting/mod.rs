@@ -98,6 +98,8 @@ pub(crate) mod ishandle;
 pub(crate) mod legend;
 #[path = "ops/line.rs"]
 pub(crate) mod line;
+#[path = "ops/linkaxes.rs"]
+pub(crate) mod linkaxes;
 #[path = "ops/loglog.rs"]
 pub(crate) mod loglog;
 #[path = "ops/mesh.rs"]
@@ -199,10 +201,11 @@ pub use perf::{
 pub use properties::resolve_plot_handle;
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
-    current_figure_handle, figure_handles, import_figure, install_figure_observer,
+    current_figure_handle, figure_handles, import_figure, install_figure_observer, link_axes,
     new_figure_handle, record_recent_figure, reset_hold_state_for_run, reset_plot_state,
     reset_recent_figures, select_axes_for_figure, select_figure, set_hold, take_recent_figures,
     FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    LinkAxesMode,
 };
 #[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
 use std::cell::RefCell;

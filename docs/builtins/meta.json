@@ -50739,6 +50739,60 @@
       ]
     },
     {
+      "name": "linkaxes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "linkaxes(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Axes handle or numeric array of axes handles to link."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "linkaxes(ax, option)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Axes handle or numeric array of axes handles to link."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Link option: 'x', 'y', 'xy', or 'off'."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LINKAXES.INVALID_ARGUMENT",
+          "identifier": "RunMat:linkaxes:InvalidArgument",
+          "when": "Axes handles, option, or argument count is invalid.",
+          "message": "linkaxes: invalid argument"
+        },
+        {
+          "code": "RM.LINKAXES.INTERNAL",
+          "identifier": "RunMat:linkaxes:Internal",
+          "when": "Internal plotting state update fails.",
+          "message": "linkaxes: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "linprog",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",

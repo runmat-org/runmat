@@ -29,6 +29,35 @@ type AxisTickLabelSnapshot = (Option<Vec<String>>, Option<Vec<String>>);
 type AxisTickFormatSnapshot = (Option<String>, Option<String>);
 type AxisDisplayBoundsSnapshot = Option<(f64, f64, f64, f64)>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkAxesMode {
+    X,
+    Y,
+    XY,
+}
+
+impl LinkAxesMode {
+    fn links_x(self) -> bool {
+        matches!(self, Self::X | Self::XY)
+    }
+
+    fn links_y(self) -> bool {
+        matches!(self, Self::Y | Self::XY)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinkAxesAxis {
+    X,
+    Y,
+}
+
+#[derive(Clone, Debug)]
+struct LinkAxesGroup {
+    axis: LinkAxesAxis,
+    targets: Vec<(FigureHandle, usize)>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
 
@@ -367,6 +396,7 @@ struct PlotRegistry {
     root_show_hidden_handles: bool,
     next_plot_child_handle: u64,
     plot_children: HashMap<u64, PlotChildHandleState>,
+    link_axes_groups: Vec<LinkAxesGroup>,
 }
 
 #[derive(Clone, Debug)]
@@ -516,6 +546,7 @@ impl Default for PlotRegistry {
             root_show_hidden_handles: false,
             next_plot_child_handle: 1u64 << 40,
             plot_children: HashMap::new(),
+            link_axes_groups: Vec::new(),
         }
     }
 }
@@ -1219,17 +1250,16 @@ pub fn set_axis_equal(enabled: bool) {
 }
 
 pub fn set_axis_equal_and_limits(enabled: bool, x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
-    let (handle, figure_clone) = {
+    let updates = {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
         state.figure.set_axes_axis_equal(axes, enabled);
-        state.figure.set_axes_limits(axes, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
+        set_axes_limits_with_links(&mut reg, handle, axes, x, y)
+            .expect("active axes target should be valid")
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
 }
 
 pub fn set_axis_equal_for_axes(
@@ -1244,17 +1274,130 @@ pub fn set_axis_equal_for_axes(
     Ok(())
 }
 
+fn clone_touched_figures(
+    registry: &mut PlotRegistry,
+    touched: HashSet<FigureHandle>,
+) -> Vec<(FigureHandle, Figure)> {
+    touched
+        .into_iter()
+        .filter_map(|handle| {
+            let state = registry.figures.get_mut(&handle)?;
+            state.revision = state.revision.wrapping_add(1);
+            Some((handle, state.figure.clone()))
+        })
+        .collect()
+}
+
+fn set_axes_limits_with_links(
+    registry: &mut PlotRegistry,
+    source_handle: FigureHandle,
+    source_axes: usize,
+    x: Option<(f64, f64)>,
+    y: Option<(f64, f64)>,
+) -> Result<Vec<(FigureHandle, Figure)>, FigureError> {
+    let source_state = registry
+        .figures
+        .get(&source_handle)
+        .ok_or_else(|| FigureError::InvalidHandle(source_handle.as_u32()))?;
+    if source_axes >= axes_count(source_state) {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: source_state.figure.axes_rows.max(1),
+            cols: source_state.figure.axes_cols.max(1),
+            index: source_axes,
+        });
+    }
+
+    let x_group = registry
+        .link_axes_groups
+        .iter()
+        .find(|group| {
+            group.axis == LinkAxesAxis::X && group.targets.contains(&(source_handle, source_axes))
+        })
+        .cloned();
+    let y_group = registry
+        .link_axes_groups
+        .iter()
+        .find(|group| {
+            group.axis == LinkAxesAxis::Y && group.targets.contains(&(source_handle, source_axes))
+        })
+        .cloned();
+    if x_group.is_none() && y_group.is_none() {
+        let state = registry
+            .figures
+            .get_mut(&source_handle)
+            .expect("validated source axes target should exist");
+        state.figure.set_axes_limits(source_axes, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        return Ok(vec![(source_handle, state.figure.clone())]);
+    };
+
+    let mut updates = HashMap::new();
+    updates.insert((source_handle, source_axes), (x, y));
+    if let Some(group) = x_group {
+        for &(handle, axes_index) in &group.targets {
+            let Some(state) = registry.figures.get(&handle) else {
+                continue;
+            };
+            if axes_index >= axes_count(state) {
+                continue;
+            }
+            let Some(meta) = state.figure.axes_metadata(axes_index) else {
+                continue;
+            };
+            updates
+                .entry((handle, axes_index))
+                .or_insert((meta.x_limits, meta.y_limits))
+                .0 = x;
+        }
+    }
+    if let Some(group) = y_group {
+        for &(handle, axes_index) in &group.targets {
+            let Some(state) = registry.figures.get(&handle) else {
+                continue;
+            };
+            if axes_index >= axes_count(state) {
+                continue;
+            }
+            let Some(meta) = state.figure.axes_metadata(axes_index) else {
+                continue;
+            };
+            updates
+                .entry((handle, axes_index))
+                .or_insert((meta.x_limits, meta.y_limits))
+                .1 = y;
+        }
+    }
+
+    let mut touched = HashSet::new();
+    for ((handle, axes_index), (x_limits, y_limits)) in updates {
+        let Some(state) = registry.figures.get_mut(&handle) else {
+            continue;
+        };
+        if axes_index >= axes_count(state) {
+            continue;
+        }
+        state.figure.set_axes_limits(axes_index, x_limits, y_limits);
+        touched.insert(handle);
+    }
+    Ok(clone_touched_figures(registry, touched))
+}
+
+fn notify_figure_updates(updates: Vec<(FigureHandle, Figure)>) {
+    for (handle, figure) in updates {
+        notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    }
+}
+
 pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
-    let (handle, figure_clone) = {
+    let updates = {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
-        state.figure.set_axes_limits(axes, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
+        set_axes_limits_with_links(&mut reg, handle, axes, x, y)
+            .expect("active axes target should be valid")
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
 }
 
 pub fn set_axis_limits_for_axes(
@@ -1263,10 +1406,188 @@ pub fn set_axis_limits_for_axes(
     x: Option<(f64, f64)>,
     y: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_limits(axes_index, x, y);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    let updates = {
+        let mut reg = registry();
+        let state = get_state_mut(&mut reg, handle);
+        let total_axes = axes_count(state);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
+        state.active_axes = axes_index;
+        state.figure.set_active_axes_index(axes_index);
+        set_axes_limits_with_links(&mut reg, handle, axes_index, x, y)?
+    };
+    notify_figure_updates(updates);
+    Ok(())
+}
+
+fn axis_limits_for_link_axis(
+    state: &mut FigureState,
+    axes_index: usize,
+    axis: LinkAxesAxis,
+) -> Option<(f64, f64)> {
+    if let Some(meta) = state.figure.axes_metadata(axes_index) {
+        let explicit = match axis {
+            LinkAxesAxis::X => meta.x_limits,
+            LinkAxesAxis::Y => meta.y_limits,
+        };
+        if let Some((lo, hi)) = explicit {
+            return Some((lo.min(hi), lo.max(hi)));
+        }
+    }
+    let display = display_bounds_for_state_axes(state, axes_index)?;
+    let limits = match axis {
+        LinkAxesAxis::X => (display.0, display.1),
+        LinkAxesAxis::Y => (display.2, display.3),
+    };
+    if limits.0.is_finite() && limits.1.is_finite() {
+        Some((limits.0.min(limits.1), limits.0.max(limits.1)))
+    } else {
+        None
+    }
+}
+
+fn union_link_axis_limits(
+    registry: &mut PlotRegistry,
+    targets: &[(FigureHandle, usize)],
+    axis: LinkAxesAxis,
+) -> Option<(f64, f64)> {
+    let mut union = None;
+    for &(handle, axes_index) in targets {
+        let Some(state) = registry.figures.get_mut(&handle) else {
+            continue;
+        };
+        if axes_index >= axes_count(state) {
+            continue;
+        }
+        let Some((lo, hi)) = axis_limits_for_link_axis(state, axes_index, axis) else {
+            continue;
+        };
+        union = Some(match union {
+            Some((current_lo, current_hi)) => (f64::min(current_lo, lo), f64::max(current_hi, hi)),
+            None => (lo, hi),
+        });
+    }
+    union
+}
+
+fn remove_link_axes_targets(
+    registry: &mut PlotRegistry,
+    target_set: &HashSet<(FigureHandle, usize)>,
+    axis: Option<LinkAxesAxis>,
+) {
+    for group in &mut registry.link_axes_groups {
+        if axis.is_none_or(|axis| group.axis == axis) {
+            group.targets.retain(|target| !target_set.contains(target));
+        }
+    }
+    registry
+        .link_axes_groups
+        .retain(|group| group.targets.len() >= 2);
+}
+
+fn purge_link_axes_for_figure(registry: &mut PlotRegistry, handle: FigureHandle) {
+    for group in &mut registry.link_axes_groups {
+        group
+            .targets
+            .retain(|(target_handle, _)| *target_handle != handle);
+    }
+    registry
+        .link_axes_groups
+        .retain(|group| group.targets.len() >= 2);
+}
+
+pub fn link_axes(
+    targets: Vec<(FigureHandle, usize)>,
+    mode: Option<LinkAxesMode>,
+) -> Result<(), FigureError> {
+    let updates = {
+        let mut reg = registry();
+        let mut seen = HashSet::new();
+        let targets = targets
+            .into_iter()
+            .filter(|target| seen.insert(*target))
+            .collect::<Vec<_>>();
+
+        for &(handle, axes_index) in &targets {
+            let state = reg
+                .figures
+                .get(&handle)
+                .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+            if axes_index >= axes_count(state) {
+                return Err(FigureError::InvalidSubplotIndex {
+                    rows: state.figure.axes_rows.max(1),
+                    cols: state.figure.axes_cols.max(1),
+                    index: axes_index,
+                });
+            }
+        }
+
+        let target_set = targets.iter().copied().collect::<HashSet<_>>();
+        let Some(mode) = mode else {
+            remove_link_axes_targets(&mut reg, &target_set, None);
+            return Ok(());
+        };
+        if mode.links_x() {
+            remove_link_axes_targets(&mut reg, &target_set, Some(LinkAxesAxis::X));
+        }
+        if mode.links_y() {
+            remove_link_axes_targets(&mut reg, &target_set, Some(LinkAxesAxis::Y));
+        }
+        if targets.len() < 2 {
+            return Ok(());
+        }
+
+        let (source_handle, source_axes) = targets[0];
+        let x_sync = if mode.links_x() {
+            union_link_axis_limits(&mut reg, &targets, LinkAxesAxis::X)
+        } else {
+            None
+        };
+        let y_sync = if mode.links_y() {
+            union_link_axis_limits(&mut reg, &targets, LinkAxesAxis::Y)
+        } else {
+            None
+        };
+        let source_meta = reg
+            .figures
+            .get(&source_handle)
+            .and_then(|state| state.figure.axes_metadata(source_axes))
+            .cloned()
+            .ok_or(FigureError::InvalidAxesHandle)?;
+        if mode.links_x() {
+            reg.link_axes_groups.push(LinkAxesGroup {
+                axis: LinkAxesAxis::X,
+                targets: targets.clone(),
+            });
+        }
+        if mode.links_y() {
+            reg.link_axes_groups.push(LinkAxesGroup {
+                axis: LinkAxesAxis::Y,
+                targets,
+            });
+        }
+        set_axes_limits_with_links(
+            &mut reg,
+            source_handle,
+            source_axes,
+            if mode.links_x() {
+                x_sync
+            } else {
+                source_meta.x_limits
+            },
+            if mode.links_y() {
+                y_sync
+            } else {
+                source_meta.y_limits
+            },
+        )?
+    };
+    notify_figure_updates(updates);
     Ok(())
 }
 
@@ -1669,7 +1990,11 @@ fn zoom_interval(limits: (f64, f64), factor: f64) -> (f64, f64) {
     (center - span * 0.5, center + span * 0.5)
 }
 
-fn apply_zoom_factor_to_state(state: &mut FigureState, axes_index: usize, factor: f64) {
+fn zoom_factor_limits_for_state(
+    state: &mut FigureState,
+    axes_index: usize,
+    factor: f64,
+) -> AxisLimitSnapshot {
     let mode = zoom_mode_for_target(state, Some(axes_index));
     let meta = state
         .figure
@@ -1687,16 +2012,15 @@ fn apply_zoom_factor_to_state(state: &mut FigureState, axes_index: usize, factor
         (_, Some(limits)) => Some(zoom_interval(limits, factor)),
         (_, None) => meta.y_limits,
     };
-    state.figure.set_axes_limits(axes_index, x_limits, y_limits);
+    (x_limits, y_limits)
 }
 
-fn restore_zoom_baseline_for_state(state: &mut FigureState, axes_index: usize) {
-    let (x_limits, y_limits) = state
+fn zoom_baseline_limits_for_state(state: &FigureState, axes_index: usize) -> AxisLimitSnapshot {
+    state
         .zoom_baselines
         .get(&axes_index)
         .copied()
-        .unwrap_or((None, None));
-    state.figure.set_axes_limits(axes_index, x_limits, y_limits);
+        .unwrap_or((None, None))
 }
 
 pub fn zoom_state_snapshot(
@@ -1888,19 +2212,31 @@ pub fn reset_zoom_baseline_for_axes(
 }
 
 pub fn restore_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), FigureError> {
-    let figure_clone = {
+    let updates = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        for axes_index in 0..axes_count(state) {
-            restore_zoom_baseline_for_state(state, axes_index);
+        let limits = {
+            let state = reg
+                .figures
+                .get(&handle)
+                .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+            (0..axes_count(state))
+                .map(|axes_index| {
+                    (
+                        axes_index,
+                        zoom_baseline_limits_for_state(state, axes_index),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut updates = Vec::new();
+        for (axes_index, (x_limits, y_limits)) in limits {
+            updates.extend(set_axes_limits_with_links(
+                &mut reg, handle, axes_index, x_limits, y_limits,
+            )?);
         }
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
+        updates
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
     Ok(())
 }
 
@@ -1908,33 +2244,37 @@ pub fn restore_zoom_baseline_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
+    let updates = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
-        restore_zoom_baseline_for_state(state, axes_index);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
+        let (x_limits, y_limits) = {
+            let state = reg
+                .figures
+                .get(&handle)
+                .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+            validate_axes_index(state, axes_index)?;
+            zoom_baseline_limits_for_state(state, axes_index)
+        };
+        set_axes_limits_with_links(&mut reg, handle, axes_index, x_limits, y_limits)?
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
     Ok(())
 }
 
 pub fn apply_zoom_factor_for_figure(handle: FigureHandle, factor: f64) -> Result<(), FigureError> {
-    let figure_clone = {
+    let updates = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        apply_zoom_factor_to_state(state, state.active_axes, factor);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
+        let (axes_index, x_limits, y_limits) = {
+            let state = reg
+                .figures
+                .get_mut(&handle)
+                .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+            let axes_index = state.active_axes;
+            let (x_limits, y_limits) = zoom_factor_limits_for_state(state, axes_index, factor);
+            (axes_index, x_limits, y_limits)
+        };
+        set_axes_limits_with_links(&mut reg, handle, axes_index, x_limits, y_limits)?
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
     Ok(())
 }
 
@@ -1943,18 +2283,19 @@ pub fn apply_zoom_factor_for_axes(
     axes_index: usize,
     factor: f64,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
+    let updates = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
-        apply_zoom_factor_to_state(state, axes_index, factor);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
+        let (x_limits, y_limits) = {
+            let state = reg
+                .figures
+                .get_mut(&handle)
+                .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+            validate_axes_index(state, axes_index)?;
+            zoom_factor_limits_for_state(state, axes_index, factor)
+        };
+        set_axes_limits_with_links(&mut reg, handle, axes_index, x_limits, y_limits)?
     };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    notify_figure_updates(updates);
     Ok(())
 }
 
@@ -3448,6 +3789,7 @@ pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
         *state = FigureState::new(handle);
     }
+    purge_link_axes_for_figure(&mut reg, handle);
     purge_plot_children_for_figure(&mut reg, handle);
     let figure_clone = reg
         .figures
@@ -3467,6 +3809,7 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
     if existed.is_none() {
         return Err(FigureError::InvalidHandle(handle.as_u32()));
     }
+    purge_link_axes_for_figure(&mut reg, handle);
     purge_plot_children_for_figure(&mut reg, handle);
 
     if reg.current == handle {

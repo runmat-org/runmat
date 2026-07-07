@@ -94,6 +94,32 @@ fn gobjects_preallocates_assignable_graphics_handle_arrays() {
 }
 
 #[test]
+fn linkaxes_propagates_limits_and_supports_off_mode() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax1 = subplot(2,1,1); \
+        ax2 = subplot(2,1,2); \
+        linkaxes([ax1 ax2], 'x'); \
+        set(ax1, 'XLim', [0 10]); \
+        xl2 = get(ax2, 'XLim'); \
+        if xl2(1) ~= 0 || xl2(2) ~= 10; error('linked xlim mismatch'); end; \
+        set(ax2, 'YLim', [5 9]); \
+        yl1 = get(ax1, 'YLim'); \
+        if yl1(1) == 5 && yl1(2) == 9; error('y should not be linked'); end; \
+        linkaxes([ax1 ax2], 'xy'); \
+        set(ax2, 'YLim', [2 4]); \
+        yl1 = get(ax1, 'YLim'); \
+        if yl1(1) ~= 2 || yl1(2) ~= 4; error('linked ylim mismatch'); end; \
+        xl2_before_off = get(ax2, 'XLim'); \
+        linkaxes([ax1 ax2], 'off'); \
+        set(ax1, 'XLim', [20 30]); \
+        xl2 = get(ax2, 'XLim'); \
+        if xl2(1) ~= xl2_before_off(1) || xl2(2) ~= xl2_before_off(2); error('unlink failed'); end;";
+    execute_source(input).expect("execute linkaxes script");
+}
+
+#[test]
 fn figure_position_property_pair_round_trips_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
