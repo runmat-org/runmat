@@ -75,6 +75,25 @@ fn groot_set_updates_current_figure_and_round_trips_defaults() {
 }
 
 #[test]
+fn gobjects_preallocates_assignable_graphics_handle_arrays() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = gobjects(2,1); \
+        if numel(h) ~= 2; error('gobjects size mismatch'); end; \
+        if isgraphics(h(1)); error('placeholder should not be graphics'); end; \
+        h(1) = plot(1:3, [1 4 9]); \
+        tf = isgraphics(h); \
+        if ~tf(1); error('assigned handle should be graphics'); end; \
+        if tf(2); error('unassigned placeholder should not be graphics'); end; \
+        if ~ishandle(h(1)); error('assigned handle should be a handle'); end; \
+        if ishandle(h(2)); error('placeholder should not be a handle'); end; \
+        h2 = gobjects([1 2]); \
+        if numel(h2) ~= 2; error('size-vector form mismatch'); end; \
+        out = numel(h);";
+    execute_source(input).expect("execute gobjects preallocation script");
+}
+
+#[test]
 fn figure_position_property_pair_round_trips_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

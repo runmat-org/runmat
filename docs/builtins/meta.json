@@ -36644,6 +36644,48 @@
       "errors": []
     },
     {
+      "name": "gobjects",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "h = gobjects()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array of invalid graphics-handle placeholders for preallocation."
+            }
+          ]
+        },
+        {
+          "label": "h = gobjects(sz...)",
+          "inputs": [
+            {
+              "name": "sz",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Output dimensions, either as separate scalar sizes or a size vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Array of invalid graphics-handle placeholders for preallocation."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
       "name": "gpuArray",
       "output_mode": "Fixed",
       "completion_policy": "Public",

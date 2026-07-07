@@ -66,6 +66,27 @@ async fn read_scalar_like_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    if let Value::LogicalArray(la) = base {
+        let data: Vec<f64> = la
+            .data
+            .iter()
+            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+            .collect();
+        let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+            .map_err(|e| map_slice_shape_error("slice", e))?;
+        let sliced = if dims == 1 {
+            idx_read_slice::read_tensor_slice_1d(&tensor, colon_mask, end_mask, numeric).await?
+        } else {
+            idx_read_slice::read_tensor_slice_nd(&tensor, dims, colon_mask, end_mask, numeric)
+                .await?
+        };
+        return match sliced {
+            Value::Tensor(t) => logical_value_from_tensor(t),
+            Value::Num(n) => Ok(Value::Bool(n != 0.0)),
+            other => Ok(other),
+        };
+    }
+
     if dims != 1 {
         return Err(crate::interpreter::errors::mex(
             "SliceNonTensor",
@@ -1950,6 +1971,37 @@ pub async fn dispatch_indexing(
                     )
                     .await?;
                     stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)?);
+                }
+                Value::LogicalArray(la) => {
+                    let data: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                        .map_err(|e| map_slice_shape_error("slice", e))?;
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &tensor.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    let sliced = idx_read_slice::read_tensor_slice_from_plan(&tensor, &vm_plan)?;
+                    stack.push(match sliced {
+                        Value::Tensor(t) => logical_value_from_tensor(t)?,
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        other => other,
+                    });
                 }
                 Value::SparseTensor(s) => {
                     if let Some(full_range_colon_mask) =

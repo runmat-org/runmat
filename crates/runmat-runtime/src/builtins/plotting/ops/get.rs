@@ -385,9 +385,18 @@ mod tests {
         );
         assert_eq!(text_struct.fields.get("Parent"), Some(&Value::Num(ax)));
 
-        assert!(ishandle_builtin(vec![Value::Num(fig)]).unwrap());
-        assert!(isgraphics_builtin(vec![Value::Num(ax)]).unwrap());
-        assert!(!ishandle_builtin(vec![Value::Num(-1.0)]).unwrap());
+        assert!(matches!(
+            ishandle_builtin(vec![Value::Num(fig)]).unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            isgraphics_builtin(vec![Value::Num(ax)]).unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            ishandle_builtin(vec![Value::Num(-1.0)]).unwrap(),
+            Value::Bool(false)
+        ));
     }
 
     #[test]

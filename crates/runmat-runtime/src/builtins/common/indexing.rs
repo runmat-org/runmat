@@ -272,6 +272,49 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::LogicalArray(array) => {
+            if indices.is_empty() {
+                return Err(indexing_error("At least one index is required"));
+            }
+
+            if indices.len() == 1 {
+                let idx = indices[0] as usize;
+                if idx < 1 || idx > array.data.len() {
+                    return Err(indexing_error_with_identifier(
+                        format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                Ok(Value::Bool(array.data[idx - 1] != 0))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize;
+                let col = indices[1] as usize;
+                let shape = normalize_scalar_shape(&array.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+
+                if row < 1 || row > rows {
+                    return Err(indexing_error_with_identifier(
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                if col < 1 || col > cols {
+                    return Err(indexing_error_with_identifier(
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+
+                let linear_idx = (row - 1) + (col - 1) * rows;
+                Ok(Value::Bool(array.data[linear_idx] != 0))
+            } else {
+                Err(indexing_error(format!(
+                    "Logical arrays support 1 or 2 indices, got {}",
+                    indices.len()
+                )))
+            }
+        }
         Value::ComplexTensor(tensor) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));
@@ -446,7 +489,7 @@ async fn gpu_index_scalar(
 mod tests {
     use super::perform_indexing;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, SparseTensor, Value};
+    use runmat_builtins::{CellArray, LogicalArray, SparseTensor, Value};
 
     fn sparse_scalar_value(value: Value) -> f64 {
         match value {
@@ -511,6 +554,32 @@ mod tests {
                 block_on(perform_indexing(&Value::SparseTensor(sparse), &[8.0])).unwrap()
             ),
             23.0
+        );
+    }
+
+    #[test]
+    fn logical_indexing_reads_linear_and_row_column_scalars() {
+        let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical");
+
+        assert_eq!(
+            block_on(perform_indexing(
+                &Value::LogicalArray(logical.clone()),
+                &[1.0]
+            ))
+            .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            block_on(perform_indexing(
+                &Value::LogicalArray(logical.clone()),
+                &[2.0, 1.0]
+            ))
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            block_on(perform_indexing(&Value::LogicalArray(logical), &[2.0, 2.0])).unwrap(),
+            Value::Bool(true)
         );
     }
 

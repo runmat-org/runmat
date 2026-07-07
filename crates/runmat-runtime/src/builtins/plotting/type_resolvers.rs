@@ -12,6 +12,19 @@ pub fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
+pub fn handle_logical_type(args: &[Type], _context: &ResolveContext) -> Type {
+    match args.first() {
+        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Logical {
+            shape: shape.clone(),
+        },
+        _ => Type::Bool,
+    }
+}
+
+pub fn handle_array_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
 pub fn gca_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args {
         [] => Type::Num,

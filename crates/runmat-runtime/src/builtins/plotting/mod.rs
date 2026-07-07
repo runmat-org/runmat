@@ -72,6 +72,8 @@ pub(crate) mod gca;
 pub(crate) mod gcf;
 #[path = "ops/get.rs"]
 pub(crate) mod get;
+#[path = "ops/gobjects.rs"]
+pub(crate) mod gobjects;
 #[path = "ops/groot.rs"]
 pub(crate) mod groot;
 #[path = "ops/heatmap.rs"]
