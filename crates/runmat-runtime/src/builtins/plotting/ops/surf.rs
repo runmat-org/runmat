@@ -283,7 +283,7 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &z_gpu,
                 min_z,
                 max_z,
-                style.colormap,
+                style.colormap.clone(),
                 style.alpha,
                 style.flatten_z,
             )
@@ -484,7 +484,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     );
     let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
 
-    let color_table = build_color_lut(colormap, 512, 1.0);
+    let color_table = build_color_lut(&colormap, 512, 1.0);
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
 
     let mut x_axis_f32: Vec<f32> = Vec::new();
@@ -619,7 +619,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     Ok(surface)
 }
 
-pub(crate) fn build_color_lut(colormap: ColorMap, samples: usize, alpha: f32) -> Vec<[f32; 4]> {
+pub(crate) fn build_color_lut(colormap: &ColorMap, samples: usize, alpha: f32) -> Vec<[f32; 4]> {
     let clamped = samples.max(2);
     (0..clamped)
         .map(|i| {

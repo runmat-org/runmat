@@ -932,7 +932,7 @@ impl PlotRenderer {
         self.figure_x_log = figure.x_log;
         self.figure_y_log = figure.y_log;
         self.figure_axis_equal = figure.axis_equal;
-        self.figure_colormap = figure.colormap;
+        self.figure_colormap = figure.colormap.clone();
         self.figure_colorbar_enabled = figure.colorbar_enabled;
         // Cache categorical labels for overlay
         if let Some((is_x, labels)) = figure.categorical_axis_labels() {
@@ -3845,7 +3845,7 @@ impl PlotRenderer {
             .unwrap_or(self.figure_y_log)
     }
     pub fn overlay_colormap(&self) -> ColorMap {
-        self.figure_colormap
+        self.figure_colormap.clone()
     }
     pub fn overlay_colorbar_enabled(&self) -> bool {
         self.figure_colorbar_enabled
@@ -4067,7 +4067,7 @@ impl PlotRenderer {
         fig.x_log = self.figure_x_log;
         fig.y_log = self.figure_y_log;
         fig.axis_equal = self.figure_axis_equal;
-        fig.colormap = self.figure_colormap;
+        fig.colormap = self.figure_colormap.clone();
         fig.colorbar_enabled = self.figure_colorbar_enabled;
         let (rows, cols) = self.figure_axes_grid();
         fig.set_subplot_grid(rows, cols);

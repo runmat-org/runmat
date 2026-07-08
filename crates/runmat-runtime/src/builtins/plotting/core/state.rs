@@ -29,6 +29,7 @@ type AxisTickLabelSnapshot = (Option<Vec<String>>, Option<Vec<String>>);
 type AxisTickFormatSnapshot = (Option<String>, Option<String>);
 type AxisTickAngleSnapshot = (Option<f64>, Option<f64>);
 type AxisDisplayBoundsSnapshot = Option<(f64, f64, f64, f64)>;
+const DEFAULT_COLORMAP_LENGTH: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkAxesMode {
@@ -260,6 +261,7 @@ struct FigureState {
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
     figure_color_order: Option<Vec<Vec4>>,
+    colormap_lengths: HashMap<usize, usize>,
     zoom_mode: ZoomModeState,
     last_enabled_zoom_motion: ZoomMotion,
     zoom_axes_modes: HashMap<usize, ZoomModeState>,
@@ -278,6 +280,7 @@ impl FigureState {
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
             figure_color_order: None,
+            colormap_lengths: HashMap::new(),
             zoom_mode: ZoomModeState::default(),
             last_enabled_zoom_motion: ZoomMotion::Both,
             zoom_axes_modes: HashMap::new(),
@@ -2685,12 +2688,17 @@ pub fn toggle_colorbar() -> bool {
 }
 
 pub fn set_colormap(colormap: ColorMap) {
+    set_colormap_with_length(colormap, DEFAULT_COLORMAP_LENGTH);
+}
+
+pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
         state.figure.set_axes_colormap(axes, colormap);
+        state.colormap_lengths.insert(axes, length);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
@@ -2704,9 +2712,20 @@ pub fn set_colormap_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_colormap(axes_index, colormap);
+        state
+            .colormap_lengths
+            .insert(axes_index, DEFAULT_COLORMAP_LENGTH);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
+}
+
+pub fn current_colormap_length() -> usize {
+    let reg = registry();
+    reg.figures
+        .get(&reg.current)
+        .and_then(|state| state.colormap_lengths.get(&state.active_axes).copied())
+        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
 }
 
 pub fn set_surface_shading(mode: ShadingMode) {

@@ -218,7 +218,7 @@ pub enum MarkerColor {
     Color(Vec4),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SurfaceStyleDefaults {
     pub colormap: ColorMap,
     pub shading: ShadingMode,
@@ -277,7 +277,7 @@ impl SurfaceStyle {
     }
 
     pub fn apply_to_plot(&self, plot: &mut SurfacePlot) {
-        plot.colormap = self.colormap;
+        plot.colormap = self.colormap.clone();
         plot.shading_mode = self.shading;
         plot.wireframe = self.wireframe;
         plot.alpha = self.alpha;

@@ -938,7 +938,7 @@ impl FigureMetadata {
             colorbar_enabled: figure.colorbar_enabled,
             axis_equal: figure.axis_equal,
             background_rgba: vec4_to_rgba(figure.background_color),
-            colormap: Some(format!("{:?}", figure.colormap)),
+            colormap: Some(figure.colormap.to_serialized_token()),
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
             z_limits: figure.z_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
@@ -1321,7 +1321,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
-            colormap: format!("{:?}", value.colormap),
+            colormap: value.colormap.to_serialized_token(),
             color_order: value
                 .color_order
                 .map(|colors| colors.into_iter().map(|c| [c.x, c.y, c.z]).collect()),
@@ -1961,7 +1961,7 @@ impl ScenePlot {
                     z,
                     x_grid: surface.x_grid.clone(),
                     y_grid: surface.y_grid.clone(),
-                    colormap: format!("{:?}", surface.colormap),
+                    colormap: surface.colormap.to_serialized_token(),
                     shading_mode: format!("{:?}", surface.shading_mode),
                     wireframe: surface.wireframe,
                     alpha: surface.alpha,
@@ -2386,7 +2386,7 @@ impl ScenePlot {
                 z: surface.z_data.clone().unwrap_or_default(),
                 x_grid: surface.x_grid.clone(),
                 y_grid: surface.y_grid.clone(),
-                colormap: format!("{:?}", surface.colormap),
+                colormap: surface.colormap.to_serialized_token(),
                 shading_mode: format!("{:?}", surface.shading_mode),
                 wireframe: surface.wireframe,
                 alpha: surface.alpha,
@@ -3062,7 +3062,7 @@ fn parse_marker_style(value: &str) -> MarkerStyle {
 }
 
 fn parse_colormap(value: &str) -> ColorMap {
-    ColorMap::from_name(value).unwrap_or(ColorMap::Parula)
+    ColorMap::from_serialized_token(value).unwrap_or(ColorMap::Parula)
 }
 
 fn parse_shading_mode(value: &str) -> ShadingMode {
@@ -3219,7 +3219,7 @@ fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
 }
 
 fn parse_colormap_name(name: &str) -> crate::plots::surface::ColorMap {
-    crate::plots::surface::ColorMap::from_name(name)
+    crate::plots::surface::ColorMap::from_serialized_token(name)
         .unwrap_or(crate::plots::surface::ColorMap::Parula)
 }
 
@@ -4316,6 +4316,29 @@ mod tests {
         assert_eq!(meta.x_tick_label_rotation, Some(30.0));
         assert_eq!(meta.y_tick_label_rotation, Some(-45.0));
         assert_eq!(meta.axes_style.font_size, Some(14.0));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_listed_colormap_rows() {
+        let mut figure = Figure::new();
+        let listed =
+            ColorMap::from_rgb_rows(vec![[0.0, 0.25, 1.0], [1.0, 0.5, 0.0], [0.2, 0.3, 0.4]])
+                .expect("listed colormap");
+        figure.set_axes_colormap(0, listed);
+
+        let scene = FigureScene::capture(&figure);
+        let token = scene.metadata.colormap.as_deref().expect("colormap token");
+        assert!(token.starts_with("listed:"));
+
+        let rebuilt = scene.into_figure().expect("scene restore should succeed");
+        let meta = rebuilt.axes_metadata(0).expect("axes metadata");
+        let ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(
+            colors.as_ref(),
+            &[[0.0, 0.25, 1.0], [1.0, 0.5, 0.0], [0.2, 0.3, 0.4]]
+        );
     }
 
     #[test]

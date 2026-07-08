@@ -227,6 +227,21 @@ fn figure_persistence_round_trips_through_vm() {
 }
 
 #[test]
+fn colormap_array_generators_round_trip_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        c = parula(8); \
+        if size(c, 1) ~= 8 || size(c, 2) ~= 3; error('parula size mismatch'); end; \
+        d = colorcube(6); \
+        if size(d, 1) ~= 6 || size(d, 2) ~= 3; error('colorcube size mismatch'); end; \
+        figure('Visible', 'off'); \
+        colormap(parula); \
+        colormap(colorcube(5)); \
+        colormap([0 0 0; 1 0.5 0; 1 1 1]);";
+    execute_source(input).expect("execute colormap array generator script");
+}
+
+#[test]
 fn data_tip_text_row_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

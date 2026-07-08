@@ -764,7 +764,7 @@ fn resolve_scatter3_style(
     match &args.color {
         PointColorArg::ScalarValues(value) => {
             let scalars = convert_scalar_color_values(value, point_count, context)?;
-            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
             style.color_values = Some(scalars);
             style.per_point_colors = Some(colors);
             style.color_limits = Some(limits);

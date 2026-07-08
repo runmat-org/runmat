@@ -574,7 +574,7 @@ fn build_scatter_plot(
         .map_err(|err| scatter_err(format!("scatter: {err}")))?
         .with_style(style.uniform_color, style.marker_size, style.marker_style)
         .with_label(style.label.clone());
-    scatter.colormap = style.colormap;
+    scatter.colormap = style.colormap.clone();
     scatter.set_edge_color(style.edge_color);
     scatter.set_edge_thickness(style.edge_thickness);
     scatter.set_filled(style.filled);
@@ -718,7 +718,7 @@ fn resolve_scatter_style(
     match &args.color {
         PointColorArg::ScalarValues(value) => {
             let scalars = convert_scalar_color_values(value, point_count, context)?;
-            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
             style.color_values = Some(scalars);
             style.per_point_colors = Some(colors);
             style.color_limits = Some(limits);
@@ -858,7 +858,7 @@ fn build_scatter_gpu_plot(
     let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
         .with_gpu_source_inputs(inputs)
         .with_label(style.label.clone());
-    scatter.colormap = style.colormap;
+    scatter.colormap = style.colormap.clone();
     scatter.set_edge_color_from_vertex(style.marker_edge_flat);
     if lod_stride == 1 {
         if let Some(values) = style.color_values.as_ref() {

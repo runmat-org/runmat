@@ -318,7 +318,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 &x_axis,
                 &y_axis,
                 handle,
-                color_map,
+                color_map.clone(),
                 base_z,
                 &level_spec,
             ) {
@@ -331,7 +331,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                             &x_axis,
                             &y_axis,
                             handle,
-                            color_map,
+                            color_map.clone(),
                             base_z,
                             &level_spec,
                             &line_color,
@@ -366,7 +366,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             &x_axis,
             &y_axis,
             &grid,
-            color_map,
+            color_map.clone(),
             base_z,
             &level_spec,
         )

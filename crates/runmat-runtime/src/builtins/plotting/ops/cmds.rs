@@ -9,11 +9,13 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::colormap_arrays::parse_rgb_colormap_tensor;
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
     clear_current_axes, set_axis_equal, set_axis_equal_and_limits, set_axis_limits,
-    set_box_enabled, set_colorbar_enabled, set_colormap, set_grid_and_minor_grid_enabled,
-    set_surface_shading, set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
+    set_box_enabled, set_colorbar_enabled, set_colormap, set_colormap_with_length,
+    set_grid_and_minor_grid_enabled, set_surface_shading, set_z_limits, toggle_box,
+    toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -194,15 +196,29 @@ const COLORMAP_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     default: None,
     description: "Colormap name.",
 }];
-const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ok = colormap(name)",
-    inputs: &COLORMAP_INPUTS_NAME,
-    outputs: &COLORMAP_OUTPUT_OK,
+const COLORMAP_INPUTS_RGB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "map",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "m-by-3 RGB colormap array with values in [0, 1].",
 }];
+const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "ok = colormap(name)",
+        inputs: &COLORMAP_INPUTS_NAME,
+        outputs: &COLORMAP_OUTPUT_OK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ok = colormap(map)",
+        inputs: &COLORMAP_INPUTS_RGB,
+        outputs: &COLORMAP_OUTPUT_OK,
+    },
+];
 const COLORMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COLORMAP.INVALID_ARGUMENT",
     identifier: Some("RunMat:colormap:InvalidArgument"),
-    when: "Colormap name is missing, non-string, or unknown.",
+    when: "Colormap input is missing, unknown, or not a valid m-by-3 RGB array.",
     message: "colormap: invalid argument",
 };
 const COLORMAP_ERRORS: [BuiltinErrorDescriptor; 1] = [COLORMAP_ERROR_INVALID_ARGUMENT];
@@ -528,33 +544,41 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<bool> {
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    let Some(arg) = args.first() else {
+    let [arg] = args.as_slice() else {
         return Err(cmd_error_with_message(
             "colormap",
             COLORMAP_ERROR_INVALID_ARGUMENT.message,
             &COLORMAP_ERROR_INVALID_ARGUMENT,
         ));
     };
-    let Some(name) = as_lower_str(arg) else {
-        return Err(cmd_error_with_message(
-            "colormap",
-            COLORMAP_ERROR_INVALID_ARGUMENT.message,
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
+
+    if let Some(name) = as_lower_str(arg) {
+        let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
+            let other = name.trim();
+            return Err(cmd_error_with_message(
+                "colormap",
+                format!(
+                    "{}: unknown colormap '{other}'",
+                    COLORMAP_ERROR_INVALID_ARGUMENT.message
+                ),
+                &COLORMAP_ERROR_INVALID_ARGUMENT,
+            ));
+        };
+        set_colormap(cmap);
+        return Ok(true);
+    }
+
+    if let Value::Tensor(tensor) = arg {
+        let (cmap, len) = parse_rgb_colormap_tensor(tensor, "colormap")?;
+        set_colormap_with_length(cmap, len);
+        return Ok(true);
     };
-    let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
-        let other = name.trim();
-        return Err(cmd_error_with_message(
-            "colormap",
-            format!(
-                "{}: unknown colormap '{other}'",
-                COLORMAP_ERROR_INVALID_ARGUMENT.message
-            ),
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
-    };
-    set_colormap(cmap);
-    Ok(true)
+
+    Err(cmd_error_with_message(
+        "colormap",
+        COLORMAP_ERROR_INVALID_ARGUMENT.message,
+        &COLORMAP_ERROR_INVALID_ARGUMENT,
+    ))
 }
 
 #[runtime_builtin(
@@ -639,7 +663,9 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
+    };
     use runmat_builtins::{NumericDType, Tensor};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -769,6 +795,48 @@ mod tests {
     }
 
     #[test]
+    fn colormap_accepts_rgb_matrix_lookup_tables() {
+        let _guard = setup();
+        colormap_builtin(vec![Value::Tensor(Tensor {
+            rows: 2,
+            cols: 3,
+            shape: vec![2, 3],
+            data: vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0],
+            dtype: NumericDType::F64,
+        })])
+        .unwrap();
+
+        let figure = clone_figure(current_figure_handle()).expect("current figure");
+        let meta = figure
+            .axes_metadata(figure.active_axes_index)
+            .expect("axes");
+        let runmat_plot::plots::surface::ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.as_ref(), &[[0.2, 0.4, 0.6], [0.8, 0.1, 0.0]]);
+    }
+
+    #[test]
+    fn colormap_preserves_generated_parula_rows_as_listed_matrix() {
+        let _guard = setup();
+        let generated = crate::builtins::plotting::colormap_arrays::colormap_tensor(
+            runmat_plot::plots::surface::ColorMap::Parula,
+            8,
+        );
+
+        colormap_builtin(vec![Value::Tensor(generated)]).unwrap();
+
+        let figure = clone_figure(current_figure_handle()).expect("current figure");
+        let meta = figure
+            .axes_metadata(figure.active_axes_index)
+            .expect("axes");
+        let runmat_plot::plots::surface::ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.len(), 8);
+    }
+
+    #[test]
     fn command_descriptors_cover_core_forms() {
         let grid_labels: Vec<&str> = GRID_DESCRIPTOR
             .signatures
@@ -808,6 +876,7 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(colormap_labels.contains(&"ok = colormap(name)"));
+        assert!(colormap_labels.contains(&"ok = colormap(map)"));
 
         let shading_labels: Vec<&str> = SHADING_DESCRIPTOR
             .signatures

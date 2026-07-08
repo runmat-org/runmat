@@ -275,7 +275,7 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &z_gpu,
                 min_z,
                 max_z,
-                style.colormap,
+                style.colormap.clone(),
                 style.alpha,
                 style.flatten_z,
             )

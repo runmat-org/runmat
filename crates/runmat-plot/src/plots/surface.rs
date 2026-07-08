@@ -9,6 +9,7 @@ use crate::core::{
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
+use std::fmt::Write;
 use std::sync::Arc;
 
 /// High-performance GPU-accelerated 3D surface plot
@@ -85,7 +86,7 @@ pub struct SurfaceGpuColorGridSource {
 }
 
 /// Color mapping schemes
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ColorMap {
     /// MATLAB-compatible colormaps
     Jet,
@@ -111,14 +112,65 @@ pub enum ColorMap {
     /// Perceptually uniform
     Parula,
 
+    /// MATLAB colorcube colormap
+    ColorCube,
+
     /// Custom color ranges
     Custom(Vec4, Vec4), // (min_color, max_color)
+
+    /// Explicit RGB lookup table from an m-by-3 MATLAB colormap matrix
+    Listed(Arc<[[f32; 3]]>),
+}
+
+impl std::fmt::Debug for ColorMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Jet => f.write_str("Jet"),
+            Self::Hot => f.write_str("Hot"),
+            Self::Cool => f.write_str("Cool"),
+            Self::Spring => f.write_str("Spring"),
+            Self::Summer => f.write_str("Summer"),
+            Self::Autumn => f.write_str("Autumn"),
+            Self::Winter => f.write_str("Winter"),
+            Self::Gray => f.write_str("Gray"),
+            Self::Bone => f.write_str("Bone"),
+            Self::Copper => f.write_str("Copper"),
+            Self::Pink => f.write_str("Pink"),
+            Self::Lines => f.write_str("Lines"),
+            Self::Viridis => f.write_str("Viridis"),
+            Self::Plasma => f.write_str("Plasma"),
+            Self::Inferno => f.write_str("Inferno"),
+            Self::Magma => f.write_str("Magma"),
+            Self::Turbo => f.write_str("Turbo"),
+            Self::Parula => f.write_str("Parula"),
+            Self::ColorCube => f.write_str("ColorCube"),
+            Self::Custom(min, max) => f.debug_tuple("Custom").field(min).field(max).finish(),
+            Self::Listed(colors) => f.debug_tuple("Listed").field(&colors.len()).finish(),
+        }
+    }
 }
 
 impl ColorMap {
     pub const CANONICAL_NAMES: &[&str] = &[
-        "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
-        "summer", "autumn", "winter", "gray", "bone", "copper", "pink", "lines",
+        "parula",
+        "colorcube",
+        "viridis",
+        "plasma",
+        "inferno",
+        "magma",
+        "turbo",
+        "jet",
+        "hot",
+        "cool",
+        "spring",
+        "summer",
+        "autumn",
+        "winter",
+        "gray",
+        "bone",
+        "copper",
+        "pink",
+        "lines",
     ];
 
     pub const ALIASES: &[&str] = &["grey"];
@@ -126,6 +178,7 @@ impl ColorMap {
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "parula" => Some(Self::Parula),
+            "colorcube" => Some(Self::ColorCube),
             "viridis" => Some(Self::Viridis),
             "plasma" => Some(Self::Plasma),
             "inferno" => Some(Self::Inferno),
@@ -146,6 +199,82 @@ impl ColorMap {
             _ => None,
         }
     }
+
+    pub fn from_rgb_rows(colors: Vec<[f32; 3]>) -> Option<Self> {
+        if colors.is_empty() {
+            return None;
+        }
+        Some(Self::Listed(Arc::from(colors.into_boxed_slice())))
+    }
+
+    pub fn to_serialized_token(&self) -> String {
+        match self {
+            Self::Listed(colors) => {
+                let mut token = String::from("listed:");
+                for (idx, color) in colors.iter().enumerate() {
+                    if idx > 0 {
+                        token.push(';');
+                    }
+                    let _ = write!(token, "{:?},{:?},{:?}", color[0], color[1], color[2]);
+                }
+                token
+            }
+            Self::Custom(min, max) => format!(
+                "custom:{:?},{:?},{:?},{:?};{:?},{:?},{:?},{:?}",
+                min.x, min.y, min.z, min.w, max.x, max.y, max.z, max.w
+            ),
+            _ => format!("{self:?}"),
+        }
+    }
+
+    pub fn from_serialized_token(token: &str) -> Option<Self> {
+        let trimmed = token.trim();
+        if let Some(rest) = trimmed.strip_prefix("listed:") {
+            let mut colors = Vec::new();
+            for row in rest.split(';') {
+                if row.is_empty() {
+                    return None;
+                }
+                let mut parts = row.split(',');
+                let r = parts.next()?.parse::<f32>().ok()?;
+                let g = parts.next()?.parse::<f32>().ok()?;
+                let b = parts.next()?.parse::<f32>().ok()?;
+                if parts.next().is_some() {
+                    return None;
+                }
+                if ![r, g, b]
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                {
+                    return None;
+                }
+                colors.push([r, g, b]);
+            }
+            return Self::from_rgb_rows(colors);
+        }
+        if let Some(rest) = trimmed.strip_prefix("custom:") {
+            let mut rows = rest.split(';');
+            let min = parse_vec4_token(rows.next()?)?;
+            let max = parse_vec4_token(rows.next()?)?;
+            if rows.next().is_some() {
+                return None;
+            }
+            return Some(Self::Custom(min, max));
+        }
+        Self::from_name(trimmed)
+    }
+}
+
+fn parse_vec4_token(token: &str) -> Option<Vec4> {
+    let mut parts = token.split(',');
+    let x = parts.next()?.parse::<f32>().ok()?;
+    let y = parts.next()?.parse::<f32>().ok()?;
+    let z = parts.next()?.parse::<f32>().ok()?;
+    let w = parts.next()?.parse::<f32>().ok()?;
+    if parts.next().is_some() || ![x, y, z, w].iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    Some(Vec4::new(x, y, z, w))
 }
 
 /// Surface shading modes
@@ -1065,8 +1194,19 @@ impl ColorMap {
             ColorMap::Magma => self.magma_colormap(t),
             ColorMap::Turbo => self.turbo_colormap(t),
             ColorMap::Parula => self.parula_colormap(t),
+            ColorMap::ColorCube => self.colorcube_colormap(t),
             ColorMap::Custom(min_color, max_color) => {
                 min_color.truncate().lerp(max_color.truncate(), t)
+            }
+            ColorMap::Listed(colors) => {
+                let last = colors.len().saturating_sub(1);
+                let index = if t >= 1.0 {
+                    last
+                } else {
+                    (t.clamp(0.0, 1.0) * colors.len() as f32).floor() as usize
+                };
+                let color = colors[index.min(last)];
+                Vec3::new(color[0], color[1], color[2])
             }
         }
     }
@@ -1259,6 +1399,19 @@ impl ColorMap {
         }
         .clamp(0.0, 1.0);
 
+        Vec3::new(r, g, b)
+    }
+
+    /// Colorcube colormap.
+    fn colorcube_colormap(&self, t: f32) -> Vec3 {
+        if t >= 1.0 {
+            return Vec3::ONE;
+        }
+        let levels = 6.0_f32;
+        let index = (t.clamp(0.0, 1.0) * levels.powi(3)).floor() as u32;
+        let r = (index % 6) as f32 / 5.0;
+        let g = ((index / 6) % 6) as f32 / 5.0;
+        let b = ((index / 36) % 6) as f32 / 5.0;
         Vec3::new(r, g, b)
     }
 
@@ -1479,6 +1632,7 @@ mod tests {
     fn colormap_from_name_accepts_canonical_names_and_aliases() {
         let cases = [
             ("parula", ColorMap::Parula),
+            ("colorcube", ColorMap::ColorCube),
             ("viridis", ColorMap::Viridis),
             ("plasma", ColorMap::Plasma),
             ("inferno", ColorMap::Inferno),
@@ -1522,5 +1676,19 @@ mod tests {
         assert!(!ColorMap::CANONICAL_NAMES.contains(&"hsv"));
         assert!(!ColorMap::ALIASES.contains(&"hsv"));
         assert_eq!(ColorMap::from_name("not-a-colormap"), None);
+    }
+
+    #[test]
+    fn listed_colormap_serialization_preserves_rows() {
+        let map = ColorMap::from_rgb_rows(vec![[0.0, 0.5, 1.0], [1.0, 0.25, 0.0]])
+            .expect("listed colormap");
+        let token = map.to_serialized_token();
+        assert!(token.starts_with("listed:"));
+
+        let parsed = ColorMap::from_serialized_token(&token).expect("parse listed colormap");
+        let ColorMap::Listed(colors) = parsed else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(colors.as_ref(), &[[0.0, 0.5, 1.0], [1.0, 0.25, 0.0]]);
     }
 }

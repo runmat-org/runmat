@@ -334,7 +334,7 @@ impl Figure {
             self.axis_equal = meta.axis_equal;
             self.legend_enabled = meta.legend_enabled;
             self.colorbar_enabled = meta.colorbar_enabled;
-            self.colormap = meta.colormap;
+            self.colormap = meta.colormap.clone();
             self.color_limits = meta.color_limits;
         }
     }
@@ -1098,14 +1098,14 @@ impl Figure {
     pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-            meta.colormap = cmap;
+            meta.colormap = cmap.clone();
         }
         for (idx, plot) in self.plots.iter_mut().enumerate() {
             if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
                 continue;
             }
             if let PlotElement::Surface(surface) = plot {
-                *surface = surface.clone().with_colormap(cmap);
+                *surface = surface.clone().with_colormap(cmap.clone());
             }
         }
         if axes_index == self.active_axes_index {
@@ -1585,7 +1585,7 @@ impl Figure {
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
                     s.set_color_limits(meta.color_limits);
-                    *s = s.clone().with_colormap(meta.colormap);
+                    *s = s.clone().with_colormap(meta.colormap.clone());
                 }
             }
 
